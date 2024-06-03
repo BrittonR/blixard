@@ -25,4 +25,22 @@ pub enum Commands {
     GenerateSshKeys {
         project_name: Option<String>,
     },
+    GenerateModule {
+        description: Option<String>,
+        hostname: Option<String>,
+        root_password: Option<String>,
+        hypervisor: Option<String>,
+        add_tailscale: Option<bool>,
+    },
+    GenerateTailscaleConfig {
+        auth_key: String,
+        api_key: String,
+        tailnet: String,
+        exit_node: String,
+    },
+    GenerateAwsConfig {
+        access_key_id: String,
+        secret_access_key: String,
+        region: String,
+    },
 }
