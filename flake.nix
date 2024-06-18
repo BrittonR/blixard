@@ -3,19 +3,26 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     rust-overlay.url = "github:oxalica/rust-overlay";
+    naersk.url = "github:nix-community/naersk";
   };
 
-  outputs = { nixpkgs, flake-utils, rust-overlay, ... }:
+  outputs = { nixpkgs, flake-utils, rust-overlay, naersk, ... }:
     flake-utils.lib.eachSystem [ "x86_64-linux" ] (system:
       let
         pkgs = import nixpkgs {
           inherit system;
           overlays = [ rust-overlay.overlays.default ];
         };
+      naersk' = pkgs.callPackage naersk {};
 
-      in {
+      in rec {
+        # For `nix build` & `nix run`:
+        defaultPackage = naersk'.buildPackage {
+          src = ./.;
+        };
+
+
         devShell = pkgs.mkShell {
-
           packages = with pkgs; [
             cargo-bloat
             cargo-edit
@@ -30,7 +37,7 @@
                 "rust-src"
                 "rust-analysis"
                 "rust-std"
-              ]; # Adjust extensions as needed
+              ];
               targets = [ "wasm32-unknown-unknown" "wasm32-wasi" ];
             })
             libiconv
@@ -47,7 +54,6 @@
             gccMultiStdenv
             pkgsi686Linux.glibc
             clang
-            # zstd
             dioxus-cli
             lunatic
             clang
@@ -62,9 +68,8 @@
             nodePackages.tailwindcss
             nodejs_22
             openssl
-            # Additional tools for debugging could be added here
           ];
-
         };
       });
 }
+
