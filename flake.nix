@@ -63,10 +63,6 @@
             openssl
           ];
         };
-                defaultApp = {
-          type = "app";
-          program = "${pkgs.runtimeShell} -c 'nixfmt; exec ${pkgs.runtimeShell}'";
-        };
       });
 }
 
