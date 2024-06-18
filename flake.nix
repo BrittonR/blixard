@@ -30,6 +30,7 @@
             cargo-udeps
             cargo-watch
             rust-analyzer
+            nixfmt
           ];
           nativeBuildInputs = with pkgs; [
             (rust-bin.stable.latest.default.override {
@@ -40,22 +41,17 @@
               ];
               targets = [ "wasm32-unknown-unknown" "wasm32-wasi" ];
             })
+            nixfmt
             libiconv
             pkg-config
             libevdev
-            wasmtime
-            wasm-pack
-            wasm-bindgen-cli
             rust-bindgen-unwrapped
-            cargo-wasi
             stdenv
             llvmPackages.bintools
             llvmPackages_16.lld
             gccMultiStdenv
             pkgsi686Linux.glibc
             clang
-            dioxus-cli
-            lunatic
             clang
             rustup
             cargo-bloat
@@ -64,11 +60,12 @@
             cargo-udeps
             cargo-watch
             rust-analyzer
-            tailwindcss
-            nodePackages.tailwindcss
-            nodejs_22
             openssl
           ];
+        };
+                defaultApp = {
+          type = "app";
+          program = "${pkgs.runtimeShell} -c 'nixfmt; exec ${pkgs.runtimeShell}'";
         };
       });
 }
