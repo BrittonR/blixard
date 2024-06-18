@@ -1,5 +1,5 @@
 [package]
-name = "mvm"
+name = "blixard"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,6 +8,8 @@ age = "0.10.0"
 clap = { version = "4.5.4", features = ["derive"] }
 dialoguer = "0.11.0"
 openssl = "0.10.64"
+pnet = "0.35.0"
+regex = "1.10.5"
 serde = { version = "1.0.203", features = ["derive"] }
 serde_json = "1.0.117"
 serde_yaml = "0.9.34"

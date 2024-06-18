@@ -1,24 +1,23 @@
-use aws::generate_aws_config;
-use clap::{Parser, Subcommand};
-use cloudflare::generate_cloudflare_config;
-use flake::{generate_flake, generate_module};
+use clap::{ArgAction, Parser, Subcommand};
+use flake::{generate_flake_nix, generate_host_configuration, generate_microvm};
+use nginx::generate_nginx_config;
+use sops::{aws, cloudflare, tailscale, wikijs};
 use ssh_keys::generate_ssh_keys;
-use tailscale::generate_tailscale_config;
-use utils::{get_hypervisor_input, get_input, get_input_bool};
+use utils::{get_hypervisor_input, get_input, get_input_bool, select_network_interface};
 
-mod aws;
-mod cloudflare;
+mod action;
 mod flake;
+mod nginx;
+mod sops;
 mod ssh_keys;
-mod tailscale;
 mod utils;
 
 #[derive(Parser)]
 #[command(
-    name = "MicroVM Tool",
-    version = "1.0",
-    author = "Author Name <email@example.com>",
-    about = "Tool for generating Nix flakes and SSH keys for MicroVMs"
+    name = "Blixard",
+    version = "0.1",
+    author = "Britton Robitzsch <b@robitzs.ch>",
+    about = "Opinionated Tool for generating NixOS Infrastructure using MicroVMs"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -27,94 +26,76 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(about = "Generate a Nix flake for a MicroVM")]
-    GenerateFlake {
-        description: Option<String>,
-        hostname: Option<String>,
-        root_password: Option<String>,
-        image: Option<String>,
-        image_size: Option<String>,
-        share_source: Option<String>,
-        hypervisor: Option<String>,
-        socket: Option<String>,
-    },
     #[command(about = "Generate SSH keys for a project")]
     GenerateSshKeys { project_name: Option<String> },
     #[command(about = "Generate a Nix module for a MicroVM")]
-    GenerateModule {
+    GenerateMicrovm {
         description: Option<String>,
-        hostname: Option<String>,
         root_password: Option<String>,
         hypervisor: Option<String>,
         add_tailscale: Option<bool>,
     },
+    #[command(about = "Generate the flake.nix configuration")]
+    GenerateFlakeNix,
+    #[command(about = "Generate a host configuration for the MicroVM")]
+    GenerateHostConfig,
+    #[command(about = "Generate and encrypt configuration files using sops")]
+    Sops {
+        #[command(subcommand)]
+        command: SopsCommands,
+    },
+    #[command(about = "Generate a GitHub Action")]
+    GenerateAction {
+        name: String,
+        working_directory: String,
+    },
+    #[command(about = "Generate an Nginx configuration")]
+    GenerateNginxConfig {
+        name: String,
+        port: u16,
+        ip: String,
+        #[arg(short, long, action = ArgAction::SetTrue)]
+        enabled: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum SopsCommands {
     #[command(about = "Generate a Tailscale configuration file and encrypt it with sops")]
-    GenerateTailscaleConfig {
-        auth_key: String,
-        api_key: String,
-        tailnet: String,
-        exit_node: String,
+    Tailscale {
+        auth_key: Option<String>,
+        api_key: Option<String>,
+        tailnet: Option<String>,
+        exit_node: Option<String>,
     },
     #[command(about = "Generate an AWS configuration file and encrypt it with sops")]
-    GenerateAwsConfig {
-        access_key_id: String,
-        secret_access_key: String,
-        region: String,
+    Aws {
+        access_key_id: Option<String>,
+        secret_access_key: Option<String>,
+        region: Option<String>,
     },
     #[command(about = "Generate a Cloudflare configuration file and encrypt it with sops")]
-    GenerateCloudflareConfig { dns_api_token: String },
+    Cloudflare { dns_api_token: Option<String> },
+    #[command(about = "Generate a Wiki.js configuration file and encrypt it with sops")]
+    Wikijs {
+        db_user: Option<String>,
+        db_password: Option<String>,
+    },
 }
 
 fn main() {
+    // Parse CLI arguments
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::GenerateFlake {
-            description,
-            hostname,
-            root_password,
-            image,
-            image_size,
-            share_source,
-            hypervisor,
-            socket,
-        } => {
-            let microvm_name = get_input(&None, "MicroVM name");
-            let description = get_input(
-                &Some(format!("MicroVM description for {}", microvm_name)),
-                "Description",
-            );
-            let hostname = get_input(&Some(microvm_name.clone()), "Hostname");
-            let root_password = get_input(root_password, "Root Password");
-            let image = get_input(image, "Image");
-            let image_size = get_input(image_size, "Image Size");
-            let share_source = get_input(share_source, "Share Source");
-            let hypervisor = get_hypervisor_input(hypervisor);
-            let socket = get_input(socket, "Socket");
-            let add_defaults = get_input_bool("Add base config defaults?");
-            let add_tailscale = get_input_bool("Add Tailscale configuration?");
-
-            generate_flake(
-                &microvm_name,
-                &description,
-                &hostname,
-                &root_password,
-                &image,
-                &image_size,
-                &share_source,
-                &hypervisor,
-                &socket,
-                add_defaults,
-                add_tailscale,
-            )
-        }
+        // Handle GenerateSshKeys command
         Commands::GenerateSshKeys { project_name } => {
             let project_name = get_input(project_name, "Project Name");
             generate_ssh_keys(&project_name)
         }
-        Commands::GenerateModule {
+        // Handle GenerateMicrovm command
+        Commands::GenerateMicrovm {
             description,
-            hostname,
             root_password,
             hypervisor,
             add_tailscale,
@@ -124,33 +105,72 @@ fn main() {
                 &Some(format!("MicroVM description for {}", microvm_name)),
                 "Description",
             );
-            let hostname = get_input(&Some(microvm_name.clone()), "Hostname");
             let root_password = get_input(root_password, "Root Password");
-            let hypervisor = get_hypervisor_input(hypervisor);
+            let hypervisor = get_hypervisor_input(hypervisor.as_deref());
             let add_tailscale = get_input_bool("Add Tailscale configuration?");
-
-            generate_module(
+            generate_microvm(
                 &microvm_name,
-                &description,
-                &hostname,
+                // &description,
                 &root_password,
                 &hypervisor,
                 add_tailscale,
             )
         }
-        Commands::GenerateTailscaleConfig {
-            auth_key,
-            api_key,
-            tailnet,
-            exit_node,
-        } => generate_tailscale_config(auth_key, api_key, tailnet, exit_node),
-        Commands::GenerateAwsConfig {
-            access_key_id,
-            secret_access_key,
-            region,
-        } => generate_aws_config(access_key_id, secret_access_key, region),
-        Commands::GenerateCloudflareConfig { dns_api_token } => {
-            generate_cloudflare_config(dns_api_token)
+        // Handle GenerateFlakeNix command
+        Commands::GenerateFlakeNix => {
+            generate_flake_nix();
         }
+        // Handle GenerateHostConfig command
+        Commands::GenerateHostConfig => {
+            let external_interface = select_network_interface();
+            generate_host_configuration(&external_interface);
+        }
+        // Handle Sops command
+        Commands::Sops { command } => match command {
+            // Handle Tailscale subcommand
+            SopsCommands::Tailscale {
+                auth_key,
+                api_key,
+                tailnet,
+                exit_node,
+            } => tailscale(
+                auth_key.as_deref(),
+                api_key.as_deref(),
+                tailnet.as_deref(),
+                exit_node.as_deref(),
+            ),
+            // Handle Aws subcommand
+            SopsCommands::Aws {
+                access_key_id,
+                secret_access_key,
+                region,
+            } => aws(
+                access_key_id.as_deref(),
+                secret_access_key.as_deref(),
+                region.as_deref(),
+            ),
+            // Handle Cloudflare subcommand
+            SopsCommands::Cloudflare { dns_api_token } => cloudflare(dns_api_token.as_deref()),
+            // Handle Wikijs subcommand
+            SopsCommands::Wikijs {
+                db_user,
+                db_password,
+            } => wikijs(db_user.as_deref(), db_password.as_deref()),
+        },
+        // Handle GenerateAction command
+        Commands::GenerateAction {
+            name,
+            working_directory,
+        } => match action::generate_github_action(name, working_directory) {
+            Ok(_) => println!("GitHub Action workflow generated successfully."),
+            Err(e) => eprintln!("Failed to generate GitHub Action workflow: {}", e),
+        },
+        // Handle GenerateNginxConfig command
+        Commands::GenerateNginxConfig {
+            name,
+            port,
+            ip,
+            enabled,
+        } => generate_nginx_config(name, port, &ip, enabled),
     }
 }
