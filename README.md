@@ -29,33 +29,33 @@ git clone https://github.com/brittonr/blixard.git
 cd blixard
 
 cargo build --release
-
+```
 After building, you can find the executable in the target/release directory.
 
-Usage
+### Usage
 
-Command Line Interface
+#### Command Line Interface
 
 The CLI provides several commands for different tasks. Below is an overview of the available commands and their usage.
 
-Generate SSH Keys
+#### Generate SSH Keys
 
 Generate SSH keys for a project.
 
-sh
+```sh
 
 blixard generate-ssh-keys [OPTIONS]
-
+```
 project_name (optional): The name of the project.
 
-Generate Nix Module
+#### Generate Nix Module
 
 Generate a Nix module for a MicroVM.
 
-sh
+```sh
 
 blixard generate-module [OPTIONS]
-
+```
 description (optional): Description of the MicroVM.
 
 root_password (optional): Root password for the MicroVM.
@@ -64,32 +64,32 @@ hypervisor (optional): Hypervisor to use (e.g., cloud-hypervisor, qemu, firecrac
 
 add_tailscale (optional): Whether to add Tailscale configuration (true/false).
 
-Generate Flake Nix
+#### Generate Flake Nix
 
 Generate the flake.nix configuration.
 
-sh
+```sh
 
 blixard generate-flake-nix
-
-Generate Host Config
+```
+#### Generate Host Config
 
 Generate a host configuration for the MicroVM.
 
-sh
+```sh
 
 blixard generate-host-config
-
-Generate Sops Configurations
+```
+### Generate Sops Configurations
 
 Generate and encrypt configuration files using sops.
 
-Tailscale Configuration
+#### Tailscale Configuration
 
-sh
+```sh
 
 blixard sops tailscale [OPTIONS]
-
+```
 auth_key (optional): Tailscale auth key.
 
 api_key (optional): Tailscale API key.
@@ -98,56 +98,56 @@ tailnet (optional): Tailscale tailnet.
 
 exit_node (optional): Tailscale exit node.
 
-AWS Configuration
+#### AWS Configuration
 
-sh
+```sh
 
 blixard sops aws [OPTIONS]
-
+```
 access_key_id (optional): AWS access key ID.
 
 secret_access_key (optional): AWS secret access key.
 
 region (optional): AWS region.
 
-Cloudflare Configuration
+#### Cloudflare Configuration
 
-sh
+```sh
 
 blixard sops cloudflare [OPTIONS]
-
+```
 dns_api_token (optional): Cloudflare DNS API token.
 
-Wiki.js Configuration
+#### Wiki.js Configuration
 
-sh
+```sh
 
 blixard sops wikijs [OPTIONS]
-
+```
 db_user (optional): Wiki.js database user.
 
 db_password (optional): Wiki.js database password.
 
-Generate GitHub Action
+### Generate GitHub Action
 
 Generate a GitHub Action workflow.
 
-sh
+```sh
 
 blixard generate-action --name <NAME> --working-directory <WORKING_DIRECTORY>
-
+```
 name: The name of the GitHub Action.
 
 working_directory: The working directory for the action script.
 
-Generate Nginx Config
+### Generate Nginx Config
 
 Generate an Nginx configuration and add it to your service list.
 
-sh
+```sh
 
 blixard generate-nginx-config --name <NAME> --port <PORT> --ip <IP> --enabled <ENABLED>
-
+```
 name: The name of the service.
 
 port: The port number the service listens on.
@@ -156,47 +156,47 @@ ip: The IP address of the service.
 
 enabled: A boolean indicating if the service is enabled.
 
-Examples
+### Examples
 
 Generate SSH Keys
 
-sh
+```sh
 
 blixard generate-ssh-keys --project-name "my_project"
-
+```
 Generate Nix Module
 
-sh
+```sh
 
 blixard generate-module --description "My MicroVM" --root-password "password123" --hypervisor "qemu" --add-tailscale true
-
+```
 Generate Flake Nix
 
-sh
+```sh
 
 blixard generate-flake-nix
-
+```
 Generate Host Config
 
-sh
+```sh
 
 blixard generate-host-config
-
+```
 Generate and Encrypt Tailscale Configuration
 
-sh
+```sh
 
 blixard sops tailscale --auth_key "auth_key_value" --api_key "api_key_value" --tailnet "my_tailnet" --exit_node "exit_node_value"
-
+```
 Generate GitHub Action
 
-sh
+```sh
 
 blixard generate-action --name "deploy" --working-directory "./scripts"
-
+```
 Generate Nginx Config
 
-sh
+```sh
 
 blixard generate-nginx-config --name "my_service" --port 8080 --ip "192.168.1.1" --enabled true
-
+```
