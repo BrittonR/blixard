@@ -64,15 +64,16 @@ pub fn generate_microvm(
 
       nixosConfigurations = {{
         {microvm_name}-mvm = nixpkgs.lib.nixosSystem {{
+        specialArgs = {{ inherit inputs system; }};  # Ensure inputs and system are passed here
+        inherit system;
         system = "${{system}}";
-        specialArgs = inputs;
 
           modules = [
-            ./base_microvm.nix  # Import base MicroVM configuration
+            ../base_microvm.nix  # Import base MicroVM configuration
             microvm.nixosModules.microvm  # Import MicroVM module
             home-manager.nixosModules.home-manager  # Import Home Manager module
             sops-nix.nixosModules.sops  # Import SOPS module for secret management
-            ../tailscale.nix
+            ../../modules/tailscale.nix
             {{
               networking.hostName = "{microvm_name}";  # Set the hostname for the microvm
             }}
@@ -111,6 +112,7 @@ fn generate_base_config(add_defaults: bool, hypervisor: &str, root_password: &st
             {{
             pkgs,
             config,
+            system,
             ...
             }}: 
 
