@@ -121,37 +121,37 @@ pub fn generate_ssh_key_pair_and_save_sops() -> String {
     let pub_key = std::fs::read_to_string(&pub_key_path).expect("Failed to read public key");
     let priv_key = std::fs::read_to_string(&priv_key_path).expect("Failed to read private key");
 
-    // Create SOPSAdminKey struct
+    // // Create SOPSAdminKey struct
     let admin_key = SopsAdminKey {
         ssh_public_key: pub_key.trim().to_string(),
         ssh_private_key: priv_key.trim().to_string(),
     };
 
-    // Serialize keys to YAML
-    let yaml_content = serde_yaml::to_string(&admin_key).expect("Failed to serialize keys");
+    // // Serialize keys to YAML
+    // let yaml_content = serde_yaml::to_string(&admin_key).expect("Failed to serialize keys");
 
-    // Write YAML to SOPS file
-    let sops_file_path = "admin_ssh_key.enc.yaml";
-    let mut sops_file = File::create(&sops_file_path).expect("Failed to create SOPS file");
-    sops_file
-        .write_all(yaml_content.as_bytes())
-        .expect("Failed to write to SOPS file");
+    // // Write YAML to SOPS file
+    // let sops_file_path = "admin_ssh_key.enc.yaml";
+    // let mut sops_file = File::create(&sops_file_path).expect("Failed to create SOPS file");
+    // sops_file
+    //     .write_all(yaml_content.as_bytes())
+    //     .expect("Failed to write to SOPS file");
 
-    // Encrypt SOPS file
-    let status = Command::new("sops")
-        .args(&["--encrypt", "--in-place", &sops_file_path])
-        .status()
-        .expect("Failed to run sops");
+    // // Encrypt SOPS file
+    // let status = Command::new("sops")
+    //     .args(&["--encrypt", "--in-place", &sops_file_path])
+    //     .status()
+    //     .expect("Failed to run sops");
 
-    // Check encryption status
-    if !status.success() {
-        eprintln!("Failed to encrypt the SOPS file");
-        std::process::exit(1);
-    }
+    // // Check encryption status
+    // if !status.success() {
+    //     eprintln!("Failed to encrypt the SOPS file");
+    //     std::process::exit(1);
+    // }
 
-    // Clean up generated key files
-    std::fs::remove_file(pub_key_path).expect("Failed to remove public key file");
-    std::fs::remove_file(priv_key_path).expect("Failed to remove private key file");
+    // // Clean up generated key files
+    // std::fs::remove_file(pub_key_path).expect("Failed to remove public key file");
+    // std::fs::remove_file(priv_key_path).expect("Failed to remove private key file");
 
     admin_key.ssh_public_key
 }
