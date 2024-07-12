@@ -20,3 +20,8 @@ jobs:
         run: |
           nix build
         working-directory: .
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-result
+          path: ./result
