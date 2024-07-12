@@ -19,4 +19,4 @@ jobs:
       - name: Run test commands
         run: |
           nix build
-        working-directory: /
+        working-directory: .
