@@ -1,4 +1,4 @@
-name: test
+name: Build
 
 on: [push, pull_request]
 
@@ -18,5 +18,5 @@ jobs:
 
       - name: Run test commands
         run: |
-          nix develop --command bash action.sh
-        working-directory: new
+          nix build
+        working-directory: /
