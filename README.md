@@ -13,7 +13,24 @@
 - Generate Nginx configurations and add them to your service list
 
 ## Installation
+# Usage as a flake
 
+[![FlakeHub](https://img.shields.io/endpoint?url=https://flakehub.com/f/BrittonR/blixard/badge)](https://flakehub.com/flake/BrittonR/blixard)
+
+Add blixard to your `flake.nix`:
+
+```nix
+{
+  inputs.blixard.url = "https://flakehub.com/f/BrittonR/blixard/*.tar.gz";
+
+  outputs = { self, blixard }: {
+    # Use in your outputs
+  };
+}
+
+```
+
+# Build from Source
 Clone the repository and build the CLI tool using Cargo:
 
 ```sh
