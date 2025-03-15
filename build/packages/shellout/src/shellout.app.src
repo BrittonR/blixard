@@ -1,0 +1,8 @@
+{application, shellout, [
+    {vsn, "1.6.0"},
+    {applications, [gleam_stdlib,
+                    gleeunit]},
+    {description, "A Gleam library for cross-platform shell operations"},
+    {modules, [shellout]},
+    {registered, []}
+]}.

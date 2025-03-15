@@ -1,0 +1,7 @@
+[packages]
+shellout = "1.6.0"
+gleam_json = "2.3.0"
+gleam_stdlib = "0.57.0"
+gleeunit = "1.3.0"
+gleam_erlang = "0.34.0"
+gleam_otp = "0.16.1"

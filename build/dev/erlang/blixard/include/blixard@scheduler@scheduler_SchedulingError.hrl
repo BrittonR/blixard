@@ -1,0 +1,1 @@
+-record(scheduling_error, {error :: binary()}).

@@ -1,0 +1,1 @@
+-record(no_suitable_host, {reason :: binary()}).
