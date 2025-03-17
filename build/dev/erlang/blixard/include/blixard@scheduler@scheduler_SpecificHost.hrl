@@ -1,1 +1,0 @@
--record(specific_host, {host_id :: binary()}).

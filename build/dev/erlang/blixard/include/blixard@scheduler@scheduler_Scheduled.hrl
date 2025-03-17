@@ -1,1 +1,0 @@
--record(scheduled, {vm_id :: binary(), host_id :: binary()}).

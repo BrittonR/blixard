@@ -1,1 +1,0 @@
--record(khepri, {name :: binary()}).
