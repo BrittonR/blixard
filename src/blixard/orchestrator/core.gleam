@@ -3,7 +3,10 @@
 ///
 /// Orchestrator core that coordinates all components
 import blixard/domain/types
-import blixard/host_agent/agent.{type Command as HostCommand}
+import blixard/host_agent/agent
+import blixard/host_agent/types as agent_types
+
+// Import the agent types module
 import blixard/scheduler/scheduler.{type SchedulingStrategy}
 import blixard/storage/khepri_store.{type Khepri, type KhepriError}
 import gleam/dict.{type Dict}
@@ -27,8 +30,6 @@ pub type Command {
   DeleteVM(vm_id: types.Uuid, reply_with: Subject(Result(Nil, String)))
   StartVM(vm_id: types.Uuid, reply_with: Subject(Result(Nil, String)))
   StopVM(vm_id: types.Uuid, reply_with: Subject(Result(Nil, String)))
-  PauseVM(vm_id: types.Uuid, reply_with: Subject(Result(Nil, String)))
-  ResumeVM(vm_id: types.Uuid, reply_with: Subject(Result(Nil, String)))
 
   // Host management
   RegisterHost(
@@ -42,10 +43,10 @@ pub type Command {
 }
 
 // Orchestrator state
-pub type State {
-  State(
+pub type OrchestratorState {
+  OrchestratorState(
     store: Khepri,
-    hosts: Dict(types.Uuid, Subject(HostCommand)),
+    hosts: Dict(types.Uuid, Subject(agent_types.Command)),
     scheduling_strategy: SchedulingStrategy,
   )
 }
@@ -63,11 +64,7 @@ pub type SystemStatus {
 pub fn start(store: Khepri) -> Result(Subject(Command), String) {
   // Initialize state
   let initial_state =
-    State(
-      store: store,
-      hosts: dict.new(),
-      scheduling_strategy: scheduler.MostAvailable,
-    )
+    OrchestratorState(store, dict.new(), scheduler.MostAvailable)
 
   // Start actor
   case actor.start(initial_state, handle_message) {
@@ -81,14 +78,15 @@ fn debug_actor_error(err: actor.StartError) -> String {
 }
 
 // Handle incoming messages
-fn handle_message(message: Command, state: State) -> actor.Next(Command, State) {
+fn handle_message(
+  message: Command,
+  state: OrchestratorState,
+) -> actor.Next(Command, OrchestratorState) {
   case message {
     CreateVM(vm, reply_with) -> handle_create_vm(vm, reply_with, state)
     DeleteVM(vm_id, reply_with) -> handle_delete_vm(vm_id, reply_with, state)
     StartVM(vm_id, reply_with) -> handle_start_vm(vm_id, reply_with, state)
     StopVM(vm_id, reply_with) -> handle_stop_vm(vm_id, reply_with, state)
-    PauseVM(vm_id, reply_with) -> handle_pause_vm(vm_id, reply_with, state)
-    ResumeVM(vm_id, reply_with) -> handle_resume_vm(vm_id, reply_with, state)
     RegisterHost(host, reply_with) ->
       handle_register_host(host, reply_with, state)
     DeregisterHost(host_id, reply_with) ->
@@ -101,8 +99,8 @@ fn handle_message(message: Command, state: State) -> actor.Next(Command, State) 
 fn handle_create_vm(
   vm: types.MicroVm,
   reply_with: Subject(Result(types.MicroVm, String)),
-  state: State,
-) -> actor.Next(Command, State) {
+  state: OrchestratorState,
+) -> actor.Next(Command, OrchestratorState) {
   // Validate VM
   case validate_vm(vm) {
     Ok(_) -> {
@@ -172,8 +170,8 @@ fn validate_vm(vm: types.MicroVm) -> Result(Nil, String) {
 fn handle_delete_vm(
   vm_id: types.Uuid,
   reply_with: Subject(Result(Nil, String)),
-  state: State,
-) -> actor.Next(Command, State) {
+  state: OrchestratorState,
+) -> actor.Next(Command, OrchestratorState) {
   // Check if VM exists
   case khepri_store.get_vm(state.store, vm_id) {
     Ok(vm) -> {
@@ -218,8 +216,8 @@ fn handle_delete_vm(
 fn handle_start_vm(
   vm_id: types.Uuid,
   reply_with: Subject(Result(Nil, String)),
-  state: State,
-) -> actor.Next(Command, State) {
+  state: OrchestratorState,
+) -> actor.Next(Command, OrchestratorState) {
   // Check if VM exists
   case khepri_store.get_vm(state.store, vm_id) {
     Ok(vm) -> {
@@ -231,7 +229,7 @@ fn handle_start_vm(
               // Forward command to host agent
               let host_reply = process.new_subject()
 
-              process.send(host_agent, agent.StartVM(vm_id, host_reply))
+              process.send(host_agent, agent_types.StartVM(vm_id, host_reply))
 
               // Wait for reply from host agent
               case process.receive(host_reply, 10_000) {
@@ -278,8 +276,8 @@ fn handle_start_vm(
 fn handle_stop_vm(
   vm_id: types.Uuid,
   reply_with: Subject(Result(Nil, String)),
-  state: State,
-) -> actor.Next(Command, State) {
+  state: OrchestratorState,
+) -> actor.Next(Command, OrchestratorState) {
   // Check if VM exists
   case khepri_store.get_vm(state.store, vm_id) {
     Ok(vm) -> {
@@ -291,127 +289,7 @@ fn handle_stop_vm(
               // Forward command to host agent
               let host_reply = process.new_subject()
 
-              process.send(host_agent, agent.StopVM(vm_id, host_reply))
-
-              // Wait for reply from host agent
-              case process.receive(host_reply, 10_000) {
-                Ok(result) -> {
-                  process.send(reply_with, result)
-                  actor.continue(state)
-                }
-
-                Error(_) -> {
-                  process.send(
-                    reply_with,
-                    Error("Timeout waiting for host agent"),
-                  )
-                  actor.continue(state)
-                }
-              }
-            }
-
-            Error(_) -> {
-              process.send(
-                reply_with,
-                Error("Host agent not found for host " <> id),
-              )
-              actor.continue(state)
-            }
-          }
-        }
-
-        None -> {
-          process.send(reply_with, Error("VM not assigned to a host"))
-          actor.continue(state)
-        }
-      }
-    }
-
-    Error(err) -> {
-      process.send(reply_with, Error("VM not found: " <> debug_error(err)))
-      actor.continue(state)
-    }
-  }
-}
-
-// Handle pause VM command
-fn handle_pause_vm(
-  vm_id: types.Uuid,
-  reply_with: Subject(Result(Nil, String)),
-  state: State,
-) -> actor.Next(Command, State) {
-  // Check if VM exists
-  case khepri_store.get_vm(state.store, vm_id) {
-    Ok(vm) -> {
-      case vm.host_id {
-        Some(id) -> {
-          // Find host agent
-          case dict.get(state.hosts, id) {
-            Ok(host_agent) -> {
-              // Forward command to host agent
-              let host_reply = process.new_subject()
-
-              process.send(host_agent, agent.PauseVM(vm_id, host_reply))
-
-              // Wait for reply from host agent
-              case process.receive(host_reply, 10_000) {
-                Ok(result) -> {
-                  process.send(reply_with, result)
-                  actor.continue(state)
-                }
-
-                Error(_) -> {
-                  process.send(
-                    reply_with,
-                    Error("Timeout waiting for host agent"),
-                  )
-                  actor.continue(state)
-                }
-              }
-            }
-
-            Error(_) -> {
-              process.send(
-                reply_with,
-                Error("Host agent not found for host " <> id),
-              )
-              actor.continue(state)
-            }
-          }
-        }
-
-        None -> {
-          process.send(reply_with, Error("VM not assigned to a host"))
-          actor.continue(state)
-        }
-      }
-    }
-
-    Error(err) -> {
-      process.send(reply_with, Error("VM not found: " <> debug_error(err)))
-      actor.continue(state)
-    }
-  }
-}
-
-// Handle resume VM command
-fn handle_resume_vm(
-  vm_id: types.Uuid,
-  reply_with: Subject(Result(Nil, String)),
-  state: State,
-) -> actor.Next(Command, State) {
-  // Check if VM exists
-  case khepri_store.get_vm(state.store, vm_id) {
-    Ok(vm) -> {
-      case vm.host_id {
-        Some(id) -> {
-          // Find host agent
-          case dict.get(state.hosts, id) {
-            Ok(host_agent) -> {
-              // Forward command to host agent
-              let host_reply = process.new_subject()
-
-              process.send(host_agent, agent.ResumeVM(vm_id, host_reply))
+              process.send(host_agent, agent_types.StopVM(vm_id, host_reply))
 
               // Wait for reply from host agent
               case process.receive(host_reply, 10_000) {
@@ -458,8 +336,8 @@ fn handle_resume_vm(
 fn handle_register_host(
   host: types.Host,
   reply_with: Subject(Result(types.Host, String)),
-  state: State,
-) -> actor.Next(Command, State) {
+  state: OrchestratorState,
+) -> actor.Next(Command, OrchestratorState) {
   // Validate host
   case validate_host(host) {
     Ok(_) -> {
@@ -467,16 +345,22 @@ fn handle_register_host(
       case khepri_store.put_host(state.store, host) {
         Ok(_) -> {
           // Start host agent
-          case agent.start(host.id, state.store) {
+          let start_result = agent.start(host.id, state.store)
+
+          case start_result {
             Ok(host_agent) -> {
               // Add host agent to state
               let new_hosts = dict.insert(state.hosts, host.id, host_agent)
-              let new_state = State(..state, hosts: new_hosts)
+              let new_state =
+                OrchestratorState(
+                  state.store,
+                  new_hosts,
+                  state.scheduling_strategy,
+                )
 
               process.send(reply_with, Ok(host))
               actor.continue(new_state)
             }
-
             Error(reason) -> {
               process.send(
                 reply_with,
@@ -486,7 +370,6 @@ fn handle_register_host(
             }
           }
         }
-
         Error(err) -> {
           process.send(
             reply_with,
@@ -496,7 +379,6 @@ fn handle_register_host(
         }
       }
     }
-
     Error(reason) -> {
       process.send(reply_with, Error("Invalid host configuration: " <> reason))
       actor.continue(state)
@@ -518,8 +400,8 @@ fn validate_host(host: types.Host) -> Result(Nil, String) {
 fn handle_deregister_host(
   host_id: types.Uuid,
   reply_with: Subject(Result(Nil, String)),
-  state: State,
-) -> actor.Next(Command, State) {
+  state: OrchestratorState,
+) -> actor.Next(Command, OrchestratorState) {
   // Check if host exists
   case khepri_store.get_host(state.store, host_id) {
     Ok(host) -> {
@@ -531,7 +413,12 @@ fn handle_deregister_host(
             Ok(_) -> {
               // Remove host agent from state
               let new_hosts = dict.delete(state.hosts, host_id)
-              let new_state = State(..state, hosts: new_hosts)
+              let new_state =
+                OrchestratorState(
+                  state.store,
+                  new_hosts,
+                  state.scheduling_strategy,
+                )
 
               process.send(reply_with, Ok(Nil))
               actor.continue(new_state)
@@ -567,8 +454,8 @@ fn handle_deregister_host(
 // Handle get system status command
 fn handle_get_system_status(
   reply_with: Subject(Result(SystemStatus, String)),
-  state: State,
-) -> actor.Next(Command, State) {
+  state: OrchestratorState,
+) -> actor.Next(Command, OrchestratorState) {
   // Get all VMs
   let vms_result = khepri_store.list_vms(state.store)
 
