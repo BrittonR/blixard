@@ -14,7 +14,7 @@
     {
       devShells = forEachSupportedSystem ({ pkgs }: {
         default = pkgs.mkShell {
-          packages = with pkgs; [ gleam erlang];
+          packages = with pkgs; [ gleam erlang rebar3 elixir];
         };
       });
     };

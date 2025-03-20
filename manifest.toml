@@ -2,12 +2,18 @@
 # You typically do not need to edit this file
 
 packages = [
+  { name = "aten", version = "0.6.0", build_tools = ["rebar3"], requirements = [], otp_app = "aten", source = "hex", outer_checksum = "5F39A164206AE3F211EF5880B1F7819415686436E3229D30B6A058564FBAA168" },
   { name = "envoy", version = "1.0.2", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "envoy", source = "hex", outer_checksum = "95FD059345AA982E89A0B6E2A3BF1CF43E17A7048DCD85B5B65D3B9E4E39D359" },
+  { name = "gen_batch_server", version = "0.8.8", build_tools = ["rebar3"], requirements = [], otp_app = "gen_batch_server", source = "hex", outer_checksum = "C3E6A1A2A0FB62AEE631A98CFA0FD8903E9562422CBF72043953E2FB1D203017" },
   { name = "gleam_erlang", version = "0.34.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_erlang", source = "hex", outer_checksum = "0C38F2A128BAA0CEF17C3000BD2097EB80634E239CE31A86400C4416A5D0FDCC" },
   { name = "gleam_json", version = "2.3.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_json", source = "hex", outer_checksum = "C55C5C2B318533A8072D221C5E06E5A75711C129E420DD1CE463342106012E5D" },
   { name = "gleam_otp", version = "0.16.1", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_stdlib"], otp_app = "gleam_otp", source = "hex", outer_checksum = "50DA1539FC8E8FA09924EB36A67A2BBB0AD6B27BCDED5A7EF627057CF69D035E" },
   { name = "gleam_stdlib", version = "0.57.0", build_tools = ["gleam"], requirements = [], otp_app = "gleam_stdlib", source = "hex", outer_checksum = "86EFACDF6460B8681E82752C5490F9630EC0F138F88A037DDCB241799AA8811F" },
   { name = "gleeunit", version = "1.3.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleeunit", source = "hex", outer_checksum = "0E6C83834BA65EDCAAF4FE4FB94AC697D9262D83E6F58A750D63C9F6C8A9D9FF" },
+  { name = "horus", version = "0.3.0", build_tools = ["rebar3", "mix"], requirements = [], otp_app = "horus", source = "hex", outer_checksum = "DABE0BD901159D31ADA944310302A155324FE421ADCB12BFC4BB7EABDD9625F8" },
+  { name = "khepri", version = "0.16.0", build_tools = ["rebar3", "mix"], requirements = ["horus", "ra"], otp_app = "khepri", source = "hex", outer_checksum = "FEEE8A0A1F3F78DD9F8860FEACBA63CC165C81AF1B351600903E34A20676D5F6" },
+  { name = "ra", version = "2.14.0", build_tools = ["rebar3"], requirements = ["aten", "gen_batch_server", "seshat"], otp_app = "ra", source = "hex", outer_checksum = "1D553DD971A0B398B7AF0FA8C8458DDA575715FF71C65C972E9500B24039B240" },
+  { name = "seshat", version = "0.6.0", build_tools = ["rebar3"], requirements = [], otp_app = "seshat", source = "hex", outer_checksum = "7CEF700F92831DD7CAE6A6DD223CCC55AC88ECCE0631EE9AB0F2B5FB70E79B90" },
   { name = "shellout", version = "1.6.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "shellout", source = "hex", outer_checksum = "E2FCD18957F0E9F67E1F497FC9FF57393392F8A9BAEAEA4779541DE7A68DD7E0" },
 ]
 
@@ -18,4 +24,6 @@ gleam_json = { version = ">= 2.3.0 and < 3.0.0" }
 gleam_otp = { version = ">= 0.16.1 and < 1.0.0" }
 gleam_stdlib = { version = ">= 0.57.0 and < 1.0.0" }
 gleeunit = { version = ">= 1.0.0 and < 2.0.0" }
+khepri = { version = ">= 0.8.0" }
+ra = { version = ">= 2.7.0" }
 shellout = { version = ">= 1.6.0 and < 2.0.0" }

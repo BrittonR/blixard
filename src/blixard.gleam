@@ -196,6 +196,7 @@ pub fn main() {
 
     // Check VM status manually (new command)
     // Check VM status manually (new command)
+    // Check VM status manually (new command)
     ["--check-vms"] -> {
       io.println("Checking status of all VMs...")
       let store_result =
