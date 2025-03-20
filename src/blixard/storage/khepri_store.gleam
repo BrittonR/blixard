@@ -38,7 +38,7 @@ pub type KhepriError {
 }
 
 /// Connect to Khepri and start the store
-@external(erlang, "blixard_khepri_store", "start")
+@external(erlang, "blixard_khepri_facade", "start")
 fn erlang_start(
   nodes: List(String),
   cluster_name: String,
