@@ -1,0 +1,16 @@
+{
+  "global": {
+    "default_flake_path": "./microvm_flakes",
+    "reconcile_interval_sec": 60
+  },
+  "vms": {
+    "my-microvm": {
+      "desired_state": "running",
+      "host_id": "my-host-id",
+      "cpu_cores": 2,
+      "memory_mb": 2048,
+      "disk_gb": 20,
+      "auto_restart": true
+    }
+  }
+}
