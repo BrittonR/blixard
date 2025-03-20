@@ -15,6 +15,8 @@ import gleam/option
 import gleam/result
 import gleam/string
 
+import blixard/config/json_reader
+import blixard/controller/reconciler
 import blixard/debug_test
 import blixard/domain/types
 import blixard/host_agent/agent
@@ -40,6 +42,11 @@ pub fn main() {
     // Khepri test mode
     ["--test-khepri"] -> {
       test_khepri.main()
+    }
+
+    // Run the state reconciler
+    ["--reconcile", config_path] -> {
+      run_reconciler(config_path)
     }
 
     // Combined test mode - create host agent and VM in one process
@@ -194,9 +201,7 @@ pub fn main() {
       }
     }
 
-    // Check VM status manually (new command)
-    // Check VM status manually (new command)
-    // Check VM status manually (new command)
+    // Check VM status manually
     ["--check-vms"] -> {
       io.println("Checking status of all VMs...")
       let store_result =
@@ -230,6 +235,43 @@ pub fn main() {
     // Normal mode
     _ -> {
       run_normal()
+    }
+  }
+}
+
+// Function to run the reconciler
+fn run_reconciler(config_path: String) -> Nil {
+  io.println("Starting Blixard State Reconciler")
+  io.println("Using config file: " <> config_path)
+
+  // Start Khepri store
+  io.println("Initializing Khepri store...")
+  let store_result =
+    khepri_store.start(["blixard@127.0.0.1"], "blixard_cluster")
+
+  case store_result {
+    Ok(store) -> {
+      io.println("Khepri store initialized successfully!")
+
+      // Start the reconciler
+      io.println("Starting state reconciler...")
+      let reconciler_result = reconciler.start(store, config_path)
+
+      case reconciler_result {
+        Ok(reconciler) -> {
+          io.println("State reconciler started successfully!")
+          io.println("Press Ctrl+C to stop")
+
+          // Keep the application running indefinitely
+          process.sleep_forever()
+        }
+        Error(err) -> {
+          io.println("Failed to start reconciler: " <> string.inspect(err))
+        }
+      }
+    }
+    Error(err) -> {
+      io.println("Failed to initialize Khepri store: " <> safe_debug_error(err))
     }
   }
 }
@@ -583,6 +625,7 @@ fn run_normal() -> Nil {
       io.println(
         "  --test-agent-create-vm <host_id> <vm_name>: Create VM directly without agent process",
       )
+      io.println("  --reconcile <config.json>     : Run the state reconciler")
       io.println("\nHost Agent Commands (for a running agent):")
       io.println("  --agent-list-vms              : List all VMs on the host")
       io.println(
