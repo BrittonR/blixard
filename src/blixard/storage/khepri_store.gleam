@@ -350,6 +350,15 @@ pub fn assign_vm_to_host(
   }
 }
 
+/// Atomic VM scheduling - performs state update and host assignment in one transaction
+@external(erlang, "blixard_khepri_tx", "atomic_vm_scheduling")
+pub fn atomic_vm_scheduling(
+  store: Khepri,
+  vm_id: Uuid,
+  host_id: Uuid,
+  state: ResourceState,
+) -> Result(Nil, KhepriError)
+
 /// Helper function to debug KhepriError
 pub fn debug_error(error: KhepriError) -> String {
   case error {
