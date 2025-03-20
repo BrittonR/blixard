@@ -194,6 +194,38 @@ pub fn main() {
       }
     }
 
+    // Check VM status manually (new command)
+    // Check VM status manually (new command)
+    ["--check-vms"] -> {
+      io.println("Checking status of all VMs...")
+      let store_result =
+        khepri_store.start(["blixard@127.0.0.1"], "blixard_cluster")
+
+      case store_result {
+        Ok(store) -> {
+          // Use the new watch_vms function to check all VMs
+          let check_result = vm_manager.watch_vms(store)
+
+          case check_result {
+            Ok(_) -> io.println("VM status check completed successfully")
+            Error(err) -> io.println("Error checking VM status: " <> err)
+          }
+
+          // Make sure to discard the result by using let _ assignment
+          let _ = khepri_store.stop(store)
+          // Return Nil to match other case branches
+          Nil
+        }
+        Error(err) -> {
+          io.println(
+            "Failed to initialize Khepri store: " <> safe_debug_error(err),
+          )
+          // Return Nil to match other case branches
+          Nil
+        }
+      }
+    }
+
     // Normal mode
     _ -> {
       run_normal()
@@ -273,83 +305,7 @@ fn create_vm_directly(host_id: String, vm_name: String) -> Nil {
   }
 }
 
-// Helper function to create and store a VM
-// fn create_and_store_vm(
-//   store: khepri_store.Khepri,
-//   host_id: String,
-//   vm_name: String,
-// ) -> Nil {
-//   // Create a VM record with proper flake reference
-//   let flake_path = "./microvm_flakes"
-
-//   let vm =
-//     types.MicroVm(
-//       id: generate_uuid(),
-//       name: vm_name,
-//       description: option.Some("VM created from test command"),
-//       vm_type: types.Persistent,
-//       resources: types.Resources(cpu_cores: 2, memory_mb: 2048, disk_gb: 20),
-//       state: types.Pending,
-//       host_id: option.Some(host_id),
-//       // Set the host ID directly
-//       storage_volumes: [],
-//       network_interfaces: [],
-//       tailscale_config: types.TailscaleConfig(
-//         enabled: True,
-//         auth_key: option.None,
-//         hostname: vm_name,
-//         tags: [],
-//         direct_client: True,
-//       ),
-//       nixos_config: types.NixosConfig(
-//         // Reference the flake directory directly
-//         config_path: flake_path,
-//         overrides: dict.new(),
-//         cache_url: option.None,
-//       ),
-//       labels: dict.new(),
-//       created_at: int.to_string(erlang.system_time(erlang.Second)),
-//       updated_at: int.to_string(erlang.system_time(erlang.Second)),
-//     )
-
-//   // Store VM in Khepri
-//   io.println("Storing VM in Khepri store...")
-//   case khepri_store.put_vm(store, vm) {
-//     Ok(_) -> {
-//       io.println("VM stored successfully in Khepri!")
-
-//       // Directly create the VM
-//       io.println("Creating VM using microvm.nix...")
-//       case vm_manager.create_vm(vm.name, vm.nixos_config.config_path) {
-//         Ok(_) -> {
-//           io.println("VM created successfully!")
-
-//           // Update VM state in Khepri
-//           let _ = khepri_store.update_vm_state(store, vm.id, types.Stopped)
-
-//           // Ask about starting
-//           io.println("Would you like to start the VM? [y/N]")
-//           io.println(
-//             "(Enter y to start now, any other key to just create without starting)",
-//           )
-
-//           // Since io.get_line() doesn't exist, we'll just not start automatically
-//           io.println(
-//             "Automatic starting not implemented. Run the following to start:",
-//           )
-//           io.println("gleam run -m blixard -- --agent-start-vm " <> vm.id)
-//         }
-//         Error(err) -> {
-//           io.println("Failed to create VM: " <> err)
-//         }
-//       }
-//     }
-//     Error(err) -> {
-//       io.println("Failed to store VM in Khepri: " <> safe_debug_error(err))
-//     }
-//   }
-// }
-// Helper function to create and store a VM
+// Enhanced version of create_and_store_vm with better debug output
 fn create_and_store_vm(
   store: khepri_store.Khepri,
   host_id: String,
@@ -358,9 +314,19 @@ fn create_and_store_vm(
   // Create a VM record with proper flake reference
   let flake_path = "./microvm_flakes"
 
+  io.println(
+    "[VM LIFECYCLE] Creating VM definition with ID and storing in Khepri",
+  )
+  let vm_id = generate_uuid()
+  io.println("  - Generated VM ID: " <> vm_id)
+  io.println("  - VM Name: " <> vm_name)
+  io.println("  - Host ID: " <> host_id)
+  io.println("  - Initial State: Pending")
+  io.println("  - Flake Path: " <> flake_path)
+
   let vm =
     types.MicroVm(
-      id: generate_uuid(),
+      id: vm_id,
       name: vm_name,
       description: option.Some("VM created from test command"),
       vm_type: types.Persistent,
@@ -389,52 +355,92 @@ fn create_and_store_vm(
     )
 
   // Store VM in Khepri
-  io.println("Storing VM in Khepri store...")
+  io.println("[VM LIFECYCLE] Storing VM in Khepri store...")
   case khepri_store.put_vm(store, vm) {
     Ok(_) -> {
-      io.println("VM stored successfully in Khepri!")
+      io.println("[VM LIFECYCLE] VM stored successfully in Khepri!")
 
-      // Build the VM using nix
-      io.println("Building VM using nix...")
+      // Update host object to include the VM ID
+      io.println("[VM LIFECYCLE] Updating host to include VM ID...")
+      let _ = khepri_store.assign_vm_to_host(store, vm.id, host_id)
+
+      // Build the VM using microvm
+      io.println("[VM LIFECYCLE] Building VM using microvm command...")
       case vm_manager.create_vm(vm.name, vm.nixos_config.config_path) {
         Ok(_) -> {
-          io.println("VM built successfully!")
+          io.println("[VM LIFECYCLE] VM built successfully!")
 
           // Update VM state in Khepri
-          let _ = khepri_store.update_vm_state(store, vm.id, types.Stopped)
+          io.println("[VM LIFECYCLE] Updating VM state to Stopped in Khepri...")
+          let state_result =
+            khepri_store.update_vm_state(store, vm.id, types.Stopped)
+
+          case state_result {
+            Ok(_) ->
+              io.println(
+                "[VM LIFECYCLE] VM state updated successfully to Stopped",
+              )
+            Error(err) ->
+              io.println(
+                "[VM LIFECYCLE] Failed to update VM state: "
+                <> safe_debug_error(err),
+              )
+          }
 
           // Automatically start the VM
-          io.println("Starting VM...")
+          io.println("[VM LIFECYCLE] Starting VM using systemd...")
           case vm_manager.start_vm(vm.name) {
             Ok(_) -> {
-              io.println("VM started successfully!")
-              let _ = khepri_store.update_vm_state(store, vm.id, types.Running)
+              io.println("[VM LIFECYCLE] VM started successfully!")
 
-              io.println("VM is now running. To stop it, use:")
+              // Update state in Khepri
+              io.println(
+                "[VM LIFECYCLE] Updating VM state to Running in Khepri...",
+              )
+              let run_state_result =
+                khepri_store.update_vm_state(store, vm.id, types.Running)
+
+              case run_state_result {
+                Ok(_) ->
+                  io.println(
+                    "[VM LIFECYCLE] VM state updated successfully to Running",
+                  )
+                Error(err) ->
+                  io.println(
+                    "[VM LIFECYCLE] Failed to update VM state: "
+                    <> safe_debug_error(err),
+                  )
+              }
+
+              // Start VM monitoring 
+              io.println("[VM LIFECYCLE] Setting up VM monitoring...")
+              let _ = vm_manager.monitor_vm(vm.name, vm.id, store)
+
+              io.println("[VM LIFECYCLE] VM is now running. To stop it, use:")
               io.println("gleam run -m blixard -- --agent-stop-vm " <> vm.id)
               io.println("or")
-              io.println("pkill -f \"microvm." <> vm.name <> "\"")
+              io.println(
+                "sudo systemctl stop microvm@" <> vm.name <> ".service",
+              )
             }
             Error(err) -> {
-              io.println("Failed to start VM: " <> err)
+              io.println("[VM LIFECYCLE] Failed to start VM: " <> err)
               io.println("You can try starting it manually with:")
               io.println(
-                "nix run "
-                <> vm.nixos_config.config_path
-                <> "#nixosConfigurations."
-                <> vm.name
-                <> ".config.microvm.declaredRunner",
+                "sudo systemctl start microvm@" <> vm.name <> ".service",
               )
             }
           }
         }
         Error(err) -> {
-          io.println("Failed to build VM: " <> err)
+          io.println("[VM LIFECYCLE] Failed to build VM: " <> err)
         }
       }
     }
     Error(err) -> {
-      io.println("Failed to store VM in Khepri: " <> safe_debug_error(err))
+      io.println(
+        "[VM LIFECYCLE] Failed to store VM in Khepri: " <> safe_debug_error(err),
+      )
     }
   }
 }
@@ -511,7 +517,7 @@ fn run_host_agent(host_id: String, flake_path: String) -> Nil {
   }
 }
 
-// Helper function to start the agent
+// Helper function to start the agent with VM monitoring
 fn start_agent(host_id: String, store: khepri_store.Khepri) -> Nil {
   // Start the host agent
   io.println("Starting host agent...")
@@ -524,6 +530,24 @@ fn start_agent(host_id: String, store: khepri_store.Khepri) -> Nil {
       io.println(
         "Host agent running as process ID: " <> string.inspect(agent_process),
       )
+
+      // Start the VM watcher for automatic monitoring
+      io.println("Starting VM status monitoring...")
+      let watcher_result = vm_manager.start_vm_watcher(store)
+
+      case watcher_result {
+        Ok(_) -> {
+          io.println("VM monitoring started successfully!")
+          io.println("VMs will be checked every 30 seconds")
+        }
+        Error(err) -> {
+          io.println(
+            "Warning: Failed to start VM monitoring: " <> string.inspect(err),
+          )
+          io.println("VM state changes will not be automatically detected")
+        }
+      }
+
       io.println("Agent is ready to receive commands.")
 
       // Keep the application running indefinitely
@@ -568,6 +592,26 @@ fn run_normal() -> Nil {
       io.println("  --agent-restart-vm <id>       : Restart a VM")
       io.println("  --agent-status                : Show host status")
       io.println("  --agent-metrics               : Show Prometheus metrics")
+      io.println(
+        "  --check-vms                   : Run a manual VM status check",
+      )
+
+      // Start the VM watcher for automatic monitoring
+      io.println("\nStarting VM status monitoring...")
+      let watcher_result = vm_manager.start_vm_watcher(store)
+
+      case watcher_result {
+        Ok(_) -> {
+          io.println("VM monitoring started successfully!")
+          io.println("VMs will be checked every 30 seconds")
+        }
+        Error(err) -> {
+          io.println(
+            "Warning: Failed to start VM monitoring: " <> string.inspect(err),
+          )
+          io.println("VM state changes will not be automatically detected")
+        }
+      }
 
       // Keep the application running indefinitely
       process.sleep_forever()
@@ -581,7 +625,7 @@ fn run_normal() -> Nil {
 
 /// Helper function to debug KhepriError with safer handling
 fn safe_debug_error(error: khepri_store.KhepriError) -> String {
-  case error {
+  let error_str = case error {
     khepri_store.ConnectionError(msg) ->
       "Connection error: " <> string.inspect(msg)
     khepri_store.ConsensusError(msg) ->
@@ -591,6 +635,9 @@ fn safe_debug_error(error: khepri_store.KhepriError) -> String {
     khepri_store.InvalidData(msg) -> "Invalid data: " <> string.inspect(msg)
     _ -> "Unknown error: " <> string.inspect(error)
   }
+
+  io.println("[KHEPRI ERROR] " <> error_str)
+  error_str
 }
 
 // Helper function to generate a UUID
