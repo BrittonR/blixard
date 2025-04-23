@@ -123,7 +123,7 @@ fn ensure_distribution() -> Nil {
   }
 }
 
-// Start a primary Khepri node
+// Modify the start_primary_node function in service_manager.gleam
 fn start_primary_node() -> Nil {
   io.println("Starting primary Khepri node...")
 
@@ -141,6 +141,9 @@ fn start_primary_node() -> Nil {
     Ok(_) -> {
       io.println("Primary Khepri node started successfully")
       io.println("Waiting for connections...")
+
+      // Start monitoring for new nodes
+      start_node_monitor()
 
       // Keep the process running
       process.sleep_forever()
@@ -396,4 +399,54 @@ fn print_usage() -> Nil {
   io.println(
     "  service_manager --init-secondary <node>  - Start secondary Khepri node",
   )
+}
+
+// Add this to src/service_manager.gleam
+
+// Function to monitor for new nodes joining the cluster
+fn start_node_monitor() -> Nil {
+  // Set up an actor to monitor nodes
+  let _ = process.start(fn() { monitor_loop(list.new()) }, True)
+  Nil
+}
+
+// The monitoring loop that checks for new nodes
+fn monitor_loop(known_nodes: List(String)) -> Nil {
+  // Get current connected nodes
+  let current_nodes =
+    node.visible()
+    |> list.map(fn(n) { atom.to_string(node.to_atom(n)) })
+
+  // Find new nodes that weren't in our known list
+  let new_nodes =
+    list.filter(current_nodes, fn(node_name) {
+      !list.contains(known_nodes, node_name)
+    })
+
+  // Print notification for each new node
+  case list.length(new_nodes) {
+    0 -> Nil
+    _ -> {
+      io.println("\n==== CLUSTER UPDATE ====")
+      io.println(
+        int.to_string(list.length(new_nodes))
+        <> " new node(s) joined the cluster:",
+      )
+
+      list.each(new_nodes, fn(node_name) {
+        io.println("➕ " <> node_name <> " has joined the cluster!")
+      })
+
+      io.println(
+        "Total cluster size: "
+        <> int.to_string(list.length(current_nodes) + 1)
+        <> " nodes",
+      )
+      io.println("=====================\n")
+    }
+  }
+
+  // Sleep for a bit, then check again with the updated known node list
+  process.sleep(1000)
+  monitor_loop(current_nodes)
 }
