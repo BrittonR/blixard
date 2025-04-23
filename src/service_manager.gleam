@@ -193,12 +193,12 @@ fn start_secondary_node(primary_node: String) -> Nil {
       let timestamp = int.to_string(erlang.system_time(erlang.Millisecond))
 
       // Create a join message
-      let join_key = "join_" <> timestamp
+      let join_key = "join_" <> node_name
       let join_message = "Node " <> node_name <> " joined at " <> timestamp
 
       // Store using service state
       io.println("Writing join notification to the cluster...")
-      let _ = khepri_store.store_join_notification(join_key, join_message)
+      let _ = khepri_store.store_join_notification(join_key, timestamp)
 
       io.println("Sent join notification to the cluster")
       // Keep the process running

@@ -43,11 +43,11 @@ pub fn init() -> Result(Nil, String) {
   khepri_gleam.start()
 
   // Ensure services path exists using a transaction
-  let services_path = khepri_gleam.to_khepri_path("/:services")
-  case khepri_gleam.exists("/:services") {
+  let services_path = khepri_gleam.to_khepri_path("/:services/")
+  case khepri_gleam.exists("/:services/") {
     False -> {
       // Create using transactional API for reliability
-      case khepri_gleam.tx_put_path("/:services", "service_states") {
+      case khepri_gleam.tx_put_path("/:services/", "service_states") {
         Ok(_) -> io.println("Created services storage")
         Error(err) ->
           io.println("Warning: Failed to create services path: " <> err)
@@ -73,8 +73,8 @@ pub fn init_cluster(config: ClusterConfig) -> Result(Nil, String) {
   khepri_gleam.start()
 
   // Create services path
-  let services_path = khepri_gleam.to_khepri_path("/:services")
-  case khepri_gleam.exists("/:services") {
+  let services_path = khepri_gleam.to_khepri_path("/:services/")
+  case khepri_gleam.exists("/:services/") {
     False -> {
       khepri_gleam.put(services_path, "service_states")
       io.println("Created services storage")
@@ -88,9 +88,9 @@ pub fn init_cluster(config: ClusterConfig) -> Result(Nil, String) {
       // Handle cluster based on role
       case config.node_role {
         Primary -> {
-          // Primary node - wait for leader election
-          io.println("Running as primary node")
-
+          // Wait longer for leader election (10 seconds)
+          io.println("Waiting longer for leader election...")
+          process.sleep(10_000)
           // Try the simple version first with no timeout
           // This should be safer than the version with a timeout
           case wait_for_leader_safely() {
@@ -159,22 +159,13 @@ fn join_primary_with_retry(
         Ok(_) -> {
           io.println("Successfully joined the cluster!")
 
-          // Wait for leader election to complete
-          process.sleep(3000)
-          let _ = khepri_gleam_cluster.wait_for_leader(5000)
+          // Wait much longer for the cluster to stabilize
+          io.println("Waiting for cluster to stabilize...")
+          process.sleep(10_000)
+          // Increased to 10 seconds
 
-          // Special handling for simple reliable replication
-          let timestamp = erlang.system_time(erlang.Millisecond)
-          let test_key = "test_" <> int.to_string(timestamp)
-          let test_value = "joined_at_" <> int.to_string(timestamp)
-
-          // Use direct khepri_gleam.put for more reliable writes
-          let path = khepri_gleam.to_khepri_path("/:services/" <> test_key)
-          io.println("Writing test data at: " <> string.inspect(path))
-          khepri_gleam.put(path, test_value)
-
-          // Give time for replication
-          process.sleep(3000)
+          // Skip writing test data immediately - just consider the join successful
+          // We'll verify replication in the separate test processes
 
           Ok(Nil)
         }
@@ -246,15 +237,15 @@ pub fn get_service_state(service: String) -> Result(ServiceState, String) {
 
 // List all services and their states with improved path handling
 pub fn list_services() -> Result(List(#(String, ServiceState)), String) {
-  io.println("Getting children for path: [\"services\"]")
+  io.println("Getting children for path: [\":services\"]")
 
   // Try both path formats
   let with_colon =
-    khepri_gleam.list_directory("/:services")
+    khepri_gleam.list_directory("/:services/")
     |> result.unwrap([])
 
   let without_colon =
-    khepri_gleam.list_directory("/services")
+    khepri_gleam.list_directory("/services/")
     |> result.unwrap([])
 
   // Combine results
@@ -314,7 +305,7 @@ pub fn list_services_direct() -> Result(List(#(String, ServiceState)), String) {
       // Check if this is a services path with at least 2 components
       // First component should be "services"
       case path {
-        ["services", second, ..] -> True
+        ["/:services/", second, ..] -> True
         _ -> False
       }
     })
@@ -354,3 +345,22 @@ pub fn list_services_direct() -> Result(List(#(String, ServiceState)), String) {
 // In src/khepri_store.gleam - Make the function public
 @external(erlang, "khepri_gleam_helper", "get_registered_paths")
 pub fn get_all_paths() -> List(List(String))
+
+fn test_primary_connection(primary_node: String) -> Bool {
+  // Try to ping the primary node directly
+  let node_atom = atom.create_from_string(primary_node)
+  case node.connect(node_atom) {
+    Ok(_) -> {
+      io.println("✅ Direct connection to primary successful")
+      True
+    }
+    Error(_) -> {
+      io.println("❌ Cannot connect to primary node")
+      False
+    }
+  }
+}
+
+@external(erlang, "ra", "members")
+fn ra_members(cluster_name: String) -> dynamic.Dynamic
+// Call this after joining
