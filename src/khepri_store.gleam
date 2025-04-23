@@ -11,12 +11,6 @@ import khepri_gleam
 import khepri_gleam_cluster
 
 // Type representing service state
-pub type ServiceState {
-  Running
-  Stopped
-  Failed
-  Unknown
-}
 
 // Cluster configuration
 pub type ClusterConfig {
@@ -126,8 +120,9 @@ pub fn store_service_state(
     Stopped -> "stopped"
     Failed -> "failed"
     Unknown -> "unknown"
+    Custom(message) -> message
+    // Handle the Custom variant
   }
-
   let khepri_path = khepri_gleam.to_khepri_path(path)
   khepri_gleam.put(khepri_path, state_string)
 
@@ -176,4 +171,27 @@ pub fn list_services() -> Result(List(#(String, ServiceState)), String) {
     }
     Error(e) -> Error(e)
   }
+}
+
+// Add to khepri_store.gleam
+pub fn store_join_notification(
+  key: String,
+  message: String,
+) -> Result(Nil, String) {
+  // Store in a special path for join notifications
+  // This needs to be a path that's compatible with your existing store functions
+
+  // We'll use a custom state type that can handle strings for join messages
+  // Assuming you have service states like Running, Stopped, etc.
+  store_service_state(key, Custom(message))
+}
+
+// Add this to your ServiceState type (if not already there)
+pub type ServiceState {
+  Running
+  Stopped
+  Failed
+  Unknown
+  // Add this new option:
+  Custom(String)
 }

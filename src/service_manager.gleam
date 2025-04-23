@@ -155,7 +155,6 @@ fn start_primary_node() -> Nil {
   }
 }
 
-// Start a secondary Khepri node
 fn start_secondary_node(primary_node: String) -> Nil {
   io.println("Starting secondary Khepri node...")
   io.println("Primary node: " <> primary_node)
@@ -175,7 +174,26 @@ fn start_secondary_node(primary_node: String) -> Nil {
       io.println("Secondary Khepri node started successfully")
       io.println("Connected to primary node")
 
+      // Write some test data to demonstrate replication
+      // In start_secondary_node function
+      // After connecting to the cluster:
+
+      // Write join data using the existing store_service_state function
+      let current_node = node.self()
+      let node_name = atom.to_string(node.to_atom(current_node))
+      let timestamp = int.to_string(erlang.system_time(erlang.Millisecond))
+
+      // Create a join message
+      let join_key = "join_" <> timestamp
+      let join_message = "Node " <> node_name <> " joined at " <> timestamp
+
+      // Store using service state
+      io.println("Writing join notification to the cluster...")
+      let _ = khepri_store.store_join_notification(join_key, join_message)
+
+      io.println("Sent join notification to the cluster")
       // Keep the process running
+      start_replication_test_cycle()
       process.sleep_forever()
     }
     Error(err) -> {
@@ -410,7 +428,6 @@ fn start_node_monitor() -> Nil {
   Nil
 }
 
-// The monitoring loop that checks for new nodes
 fn monitor_loop(known_nodes: List(String)) -> Nil {
   // Get current connected nodes
   let current_nodes =
@@ -437,6 +454,40 @@ fn monitor_loop(known_nodes: List(String)) -> Nil {
         io.println("➕ " <> node_name <> " has joined the cluster!")
       })
 
+      // Wait longer for replication to complete
+      io.println("Waiting for data replication...")
+      process.sleep(3000)
+
+      // Automatic replication test - first check existing join notifications
+      check_for_join_notifications()
+
+      // Wait a bit more and try reading service states directly
+      process.sleep(2000)
+
+      // Run more detailed replication verification
+      io.println("\n==== REPLICATION VERIFICATION ====")
+      io.println("Checking for all services in Khepri store:")
+
+      case khepri_store.list_services() {
+        Ok(services) -> {
+          io.println(
+            "Found " <> int.to_string(list.length(services)) <> " services",
+          )
+          list.each(services, fn(service) {
+            let #(key, state) = service
+            io.println("• " <> key <> ": " <> string.inspect(state))
+          })
+
+          // If we found services, replication is working
+          case list.length(services) > 0 {
+            True -> io.println("✅ Replication verification successful!")
+            False ->
+              io.println("⚠️ No services found - replication may not be working")
+          }
+        }
+        Error(err) -> io.println("❌ Error checking services: " <> err)
+      }
+
       io.println(
         "Total cluster size: "
         <> int.to_string(list.length(current_nodes) + 1)
@@ -449,4 +500,103 @@ fn monitor_loop(known_nodes: List(String)) -> Nil {
   // Sleep for a bit, then check again with the updated known node list
   process.sleep(1000)
   monitor_loop(current_nodes)
+}
+
+fn check_for_join_notifications() -> Nil {
+  // Wait longer for replication to complete
+  process.sleep(2000)
+
+  io.println("Checking for join notifications...")
+
+  // Use list_services with error logging
+  case khepri_store.list_services() {
+    Ok(services) -> {
+      io.println(
+        "Successfully retrieved "
+        <> int.to_string(list.length(services))
+        <> " services",
+      )
+
+      // Filter for join keys with better logging
+      let join_messages =
+        list.filter(services, fn(service) {
+          let #(key, _) = service
+          let is_join = string.contains(key, "join_")
+          // Log each key we're checking
+          io.println(
+            "Checking service key: "
+            <> key
+            <> " - is join: "
+            <> string.inspect(is_join),
+          )
+          is_join
+        })
+
+      // Print the join notifications
+      case list.length(join_messages) {
+        0 -> io.println("No join notifications found")
+        _ -> {
+          io.println(
+            "📝 Found "
+            <> int.to_string(list.length(join_messages))
+            <> " join notifications:",
+          )
+          list.each(join_messages, fn(message) {
+            let #(key, state) = message
+            io.println("  • " <> key <> ": " <> string.inspect(state))
+          })
+        }
+      }
+    }
+    Error(err) -> {
+      io.println("Error checking for join notifications: " <> err)
+    }
+  }
+}
+
+fn start_replication_test_cycle() -> Nil {
+  // Start a background process that periodically tests replication
+  let _ =
+    process.start(
+      fn() {
+        // Wait a bit for initial setup
+        process.sleep(5000)
+        replication_test_loop(0)
+      },
+      True,
+    )
+  Nil
+}
+
+fn replication_test_loop(count: Int) -> Nil {
+  // Run a replication test every 10 seconds
+  io.println(
+    "\n==== AUTO REPLICATION TEST #" <> int.to_string(count + 1) <> " ====",
+  )
+
+  // Write a test value
+  let test_key = "auto_test_" <> int.to_string(count)
+  let test_value = "Test value " <> int.to_string(count)
+
+  case
+    khepri_store.store_service_state(test_key, khepri_store.Custom(test_value))
+  {
+    Ok(_) -> io.println("✅ Test data written successfully: " <> test_key)
+    Error(err) -> io.println("❌ Failed to write test data: " <> err)
+  }
+
+  // Wait a bit for replication
+  process.sleep(1000)
+
+  // Try to read back our own data
+  case khepri_store.get_service_state(test_key) {
+    Ok(_) -> io.println("✅ Successfully read back our own data")
+    Error(err) -> io.println("❌ Failed to read our own data: " <> err)
+  }
+
+  io.println("=====================\n")
+
+  // Sleep and continue testing
+  process.sleep(10_000)
+  replication_test_loop(count + 1)
 }
