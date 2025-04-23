@@ -1,10 +1,11 @@
 // src/cluster_discovery.gleam
 import gleam/erlang/atom
 import gleam/erlang/node
+import gleam/int
 import gleam/io
 import gleam/list
-import gleam/result
 import gleam/string
+import shellout.{LetBeStderr, LetBeStdout}
 
 // Find tailscale hosts using DNS
 pub fn find_tailscale_nodes(base_name: String) -> List(String) {
@@ -12,8 +13,14 @@ pub fn find_tailscale_nodes(base_name: String) -> List(String) {
 
   // Try to execute the tailscale command
   case
-    shell_exec(
-      "tailscale status --json | jq -r '.Peer[] | select(.Active) | .HostName'",
+    shellout.command(
+      run: "sh",
+      with: [
+        "-c",
+        "tailscale status --json | jq -r '.Peer[] | select(.Active) | .HostName'",
+      ],
+      in: ".",
+      opt: [],
     )
   {
     Ok(output) -> {
@@ -28,18 +35,12 @@ pub fn find_tailscale_nodes(base_name: String) -> List(String) {
         base_name <> "@" <> hostname <> ".local"
       })
     }
-    Error(_) -> {
-      io.println("Failed to get Tailscale hosts, using local node only")
+    Error(#(_, message)) -> {
+      io.println(
+        "Failed to get Tailscale hosts, using local node only: " <> message,
+      )
       []
     }
-  }
-}
-
-// Helper for shell execution
-fn shell_exec(command: String) -> Result(String, String) {
-  case simplifile.exec(["/bin/sh", "-c", command]) {
-    Ok(output) -> Ok(output)
-    Error(e) -> Error("Command failed: " <> string.inspect(e))
   }
 }
 

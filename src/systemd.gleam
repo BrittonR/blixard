@@ -1,18 +1,19 @@
 // src/systemd.gleam
 import gleam/io
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
-import simplifile
+import shellout
 
 // Execute a shell command and return the output
 pub fn shell_exec(command: String) -> Result(String, String) {
   io.println("Executing: " <> command)
 
-  // Use simplifile to execute shell commands
-  case simplifile.exec(["/bin/sh", "-c", command]) {
+  // Use shellout to execute shell commands
+  case shellout.command(run: "sh", with: ["-c", command], in: ".", opt: []) {
     Ok(output) -> Ok(output)
-    Error(e) -> Error("Command failed: " <> string.inspect(e))
+    Error(#(_, message)) -> Error("Command failed: " <> message)
   }
 }
 
