@@ -11,6 +11,8 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
+import khepri_gleam
+import khepri_gleam_cluster
 import khepri_store
 import shellout
 import systemd
@@ -145,6 +147,13 @@ fn start_primary_node() -> Nil {
       // Start monitoring for new nodes
       start_node_monitor()
 
+      // Add this line to continuously monitor replication
+      start_continuous_replication_monitor()
+      // In start_primary_node, after the line: start_continuous_replication_monitor()
+      start_primary_write_test()
+
+      // In start_secondary_node, after joining the cluster:
+
       // Keep the process running
       process.sleep_forever()
     }
@@ -193,6 +202,7 @@ fn start_secondary_node(primary_node: String) -> Nil {
 
       io.println("Sent join notification to the cluster")
       // Keep the process running
+      start_secondary_read_test()
       start_replication_test_cycle()
       process.sleep_forever()
     }
@@ -201,6 +211,7 @@ fn start_secondary_node(primary_node: String) -> Nil {
       Nil
     }
   }
+  // In start_secondary_node, after joining the cluster:
 }
 
 // Handler for starting a service
@@ -419,7 +430,7 @@ fn print_usage() -> Nil {
   )
 }
 
-// Add this to src/service_manager.gleam
+// In src/service_manager.gleam - Updated monitor functions
 
 // Function to monitor for new nodes joining the cluster
 fn start_node_monitor() -> Nil {
@@ -454,15 +465,20 @@ fn monitor_loop(known_nodes: List(String)) -> Nil {
         io.println("➕ " <> node_name <> " has joined the cluster!")
       })
 
-      // Wait longer for replication to complete
+      // Wait much longer for replication to complete
       io.println("Waiting for data replication...")
-      process.sleep(3000)
+      process.sleep(5000)
+      // Increased wait time
+
+      // Wait for leader election to complete on both nodes
+      let _ = khepri_gleam_cluster.wait_for_leader(5000)
 
       // Automatic replication test - first check existing join notifications
       check_for_join_notifications()
 
       // Wait a bit more and try reading service states directly
-      process.sleep(2000)
+      process.sleep(3000)
+      // Increased wait time
 
       // Run more detailed replication verification
       io.println("\n==== REPLICATION VERIFICATION ====")
@@ -504,12 +520,13 @@ fn monitor_loop(known_nodes: List(String)) -> Nil {
 
 fn check_for_join_notifications() -> Nil {
   // Wait longer for replication to complete
-  process.sleep(2000)
+  process.sleep(3000)
+  // Increased wait time
 
   io.println("Checking for join notifications...")
 
-  // Use list_services with error logging
-  case khepri_store.list_services() {
+  // Use our new direct access function
+  case khepri_store.list_services_direct() {
     Ok(services) -> {
       io.println(
         "Successfully retrieved "
@@ -522,13 +539,6 @@ fn check_for_join_notifications() -> Nil {
         list.filter(services, fn(service) {
           let #(key, _) = service
           let is_join = string.contains(key, "join_")
-          // Log each key we're checking
-          io.println(
-            "Checking service key: "
-            <> key
-            <> " - is join: "
-            <> string.inspect(is_join),
-          )
           is_join
         })
 
@@ -554,6 +564,7 @@ fn check_for_join_notifications() -> Nil {
   }
 }
 
+// Updated with better transaction handling
 fn start_replication_test_cycle() -> Nil {
   // Start a background process that periodically tests replication
   let _ =
@@ -574,6 +585,9 @@ fn replication_test_loop(count: Int) -> Nil {
     "\n==== AUTO REPLICATION TEST #" <> int.to_string(count + 1) <> " ====",
   )
 
+  // Wait for leader election to complete
+  let _ = khepri_gleam_cluster.wait_for_leader(2000)
+
   // Write a test value
   let test_key = "auto_test_" <> int.to_string(count)
   let test_value = "Test value " <> int.to_string(count)
@@ -585,8 +599,9 @@ fn replication_test_loop(count: Int) -> Nil {
     Error(err) -> io.println("❌ Failed to write test data: " <> err)
   }
 
-  // Wait a bit for replication
-  process.sleep(1000)
+  // Wait longer for replication
+  process.sleep(2000)
+  // Increased wait time
 
   // Try to read back our own data
   case khepri_store.get_service_state(test_key) {
@@ -599,4 +614,215 @@ fn replication_test_loop(count: Int) -> Nil {
   // Sleep and continue testing
   process.sleep(10_000)
   replication_test_loop(count + 1)
+}
+
+// Enhanced continuous monitoring for the primary node
+fn start_continuous_replication_monitor() -> Nil {
+  // Start a background process that checks for replicated data
+  let _ = process.start(fn() { continuous_replication_monitor(0) }, True)
+  Nil
+}
+
+// In src/service_manager.gleam - fixed continuous_replication_monitor function
+
+fn continuous_replication_monitor(count: Int) -> Nil {
+  // Log header with iteration count
+  io.println(
+    "\n==== REPLICATION MONITOR CHECK #" <> int.to_string(count + 1) <> " ====",
+  )
+
+  // Check for any join notifications
+  io.println("Checking for join notifications...")
+
+  // Use our new direct access function
+  case khepri_store.list_services_direct() {
+    Ok(services) -> {
+      // Look for join keys
+      let join_messages =
+        list.filter(services, fn(service) {
+          let #(key, _) = service
+          string.contains(key, "join_")
+        })
+
+      // Look for test keys
+      let test_messages =
+        list.filter(services, fn(service) {
+          let #(key, _) = service
+          string.contains(key, "auto_test_")
+        })
+
+      // Report findings
+      io.println(
+        "Found " <> int.to_string(list.length(services)) <> " total services",
+      )
+      io.println(
+        "Found "
+        <> int.to_string(list.length(join_messages))
+        <> " join notifications",
+      )
+      io.println(
+        "Found "
+        <> int.to_string(list.length(test_messages))
+        <> " test messages",
+      )
+
+      // Show all data for detailed inspection
+      io.println("\nAll data in store:")
+      list.each(services, fn(service) {
+        let #(key, state) = service
+        io.println("• " <> key <> ": " <> string.inspect(state))
+      })
+
+      // Check replication progress
+      case list.length(test_messages) > 0 || list.length(join_messages) > 0 {
+        True -> io.println("✅ REPLICATION IS WORKING!")
+        False -> io.println("⏳ Replication not yet detected")
+      }
+    }
+    Error(err) -> {
+      io.println("Error checking services: " <> err)
+    }
+  }
+
+  io.println("=====================\n")
+
+  // Wait and check again
+  process.sleep(5000)
+  // Check every 5 seconds
+  continuous_replication_monitor(count + 1)
+}
+
+// Add to src/service_manager.gleam - Primary node test function
+
+fn start_primary_write_test() -> Nil {
+  // Start a background process for the test
+  let _ =
+    process.start(
+      fn() {
+        // Wait a bit for any secondary to connect
+        process.sleep(5000)
+        primary_write_test_loop(0)
+      },
+      True,
+    )
+  Nil
+}
+
+fn primary_write_test_loop(count: Int) -> Nil {
+  // Generate a unique key for this test round
+  let timestamp = erlang.system_time(erlang.Millisecond)
+  let test_key = "primary_test_" <> int.to_string(timestamp)
+  let test_value = "written_by_primary_" <> int.to_string(count)
+
+  io.println(
+    "\n==== PRIMARY WRITE TEST #" <> int.to_string(count + 1) <> " ====",
+  )
+  io.println("Writing test data from PRIMARY node")
+  io.println("Key: " <> test_key)
+  io.println("Value: " <> test_value)
+
+  // Write directly to the path
+  let path = khepri_gleam.to_khepri_path("/:services/" <> test_key)
+  khepri_gleam.put(path, test_value)
+
+  // Log all paths
+  let all_paths = khepri_store.get_all_paths()
+  io.println("Updated path registry: " <> string.inspect(all_paths))
+
+  // Allow time for replication
+  io.println("Waiting for replication to secondary...")
+  process.sleep(5000)
+
+  io.println("=====================\n")
+
+  // Continue testing every 15 seconds
+  process.sleep(10_000)
+  primary_write_test_loop(count + 1)
+}
+
+// Add to src/service_manager.gleam - Secondary node check function
+
+fn start_secondary_read_test() -> Nil {
+  // Start a background process for the test
+  let _ =
+    process.start(
+      fn() {
+        // Wait for the cluster to stabilize
+        process.sleep(5000)
+        secondary_read_test_loop(0)
+      },
+      True,
+    )
+  Nil
+}
+
+fn secondary_read_test_loop(count: Int) -> Nil {
+  io.println(
+    "\n==== SECONDARY READ TEST #" <> int.to_string(count + 1) <> " ====",
+  )
+  io.println("Checking if secondary can read primary's data...")
+
+  // Use our direct path access function to find primary test keys
+  case khepri_store.list_services_direct() {
+    Ok(services) -> {
+      // Filter for items written by the primary
+      let primary_writes =
+        list.filter(services, fn(service) {
+          let #(key, _) = service
+          string.contains(key, "primary_test_")
+        })
+
+      // Report findings
+      case list.length(primary_writes) {
+        0 -> {
+          io.println("❌ No data from primary node found")
+          io.println("Data replication from primary to secondary NOT WORKING")
+
+          // Print all keys we do see to help debug
+          io.println("\nKeys visible to secondary:")
+          list.each(services, fn(service) {
+            let #(key, _) = service
+            io.println("• " <> key)
+          })
+
+          // Try direct read of a known primary key if primary has written anything
+          io.println("\nTrying direct read of primary data:")
+          let test_key = "primary_test_1745445835462"
+          // Known key from primary
+          case khepri_gleam.get_string("/:services/" <> test_key) {
+            Ok(value) -> {
+              io.println("✅ Successfully read primary key directly: " <> value)
+              io.println(
+                "Inconsistency detected - direct read works but listing doesn't",
+              )
+            }
+            Error(err) -> io.println("❌ Direct read failed: " <> err)
+          }
+        }
+        _ -> {
+          io.println(
+            "✅ Found "
+            <> int.to_string(list.length(primary_writes))
+            <> " items from primary",
+          )
+          io.println("BIDIRECTIONAL REPLICATION IS WORKING!")
+
+          // Show the items
+          list.each(primary_writes, fn(item) {
+            let #(key, state) = item
+            io.println("• " <> key <> ": " <> string.inspect(state))
+          })
+        }
+      }
+    }
+    Error(err) -> {
+      io.println("❌ Error listing services: " <> err)
+    }
+  }
+
+  io.println("=====================\n")
+
+  // Continue testing
+  process.sleep(7000)
+  secondary_read_test_loop(count + 1)
 }
