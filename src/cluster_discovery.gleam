@@ -1,4 +1,12 @@
 // src/cluster_discovery.gleam
+//
+// Cluster node discovery and connection
+//
+// This module handles discovery of other nodes in the cluster using
+// Tailscale network, and establishing connections between nodes.
+// It provides functionality to find and connect to other nodes
+// in the distributed system.
+
 import gleam/erlang/atom
 import gleam/erlang/node
 import gleam/int
@@ -7,11 +15,20 @@ import gleam/list
 import gleam/string
 import shellout.{LetBeStderr, LetBeStdout}
 
-// Find tailscale hosts using DNS
+/// Find Tailscale hosts using DNS
+///
+/// Uses the Tailscale CLI to discover other hosts on the Tailscale network,
+/// which can be used as potential nodes in our cluster.
+///
+/// # Arguments
+/// - `base_name`: Base name for the node (e.g., "khepri_node")
+///
+/// # Returns
+/// - List of fully qualified node names (e.g., "khepri_node@hostname.local")
 pub fn find_tailscale_nodes(base_name: String) -> List(String) {
   io.println("Searching for Tailscale hosts...")
 
-  // Try to execute the tailscale command
+  // Try to execute the tailscale command to get active peers
   case
     shellout.command(
       run: "sh",
@@ -24,6 +41,7 @@ pub fn find_tailscale_nodes(base_name: String) -> List(String) {
     )
   {
     Ok(output) -> {
+      // Parse the output into a list of hostnames
       let hostnames =
         output
         |> string.trim
@@ -44,10 +62,21 @@ pub fn find_tailscale_nodes(base_name: String) -> List(String) {
   }
 }
 
-// Connect to a node
+/// Connect to a specific node
+///
+/// Attempts to establish a connection to another Erlang node.
+///
+/// # Arguments
+/// - `node_name`: Fully qualified name of the node to connect to
+///
+/// # Returns
+/// - `True` if connection succeeded
+/// - `False` if connection failed
 pub fn connect_to_node(node_name: String) -> Bool {
+  // Convert string to atom for Erlang node module
   let node_atom = atom.create_from_string(node_name)
 
+  // Attempt to connect
   case node.connect(node_atom) {
     Ok(_) -> {
       io.println("Connected to node: " <> node_name)
@@ -60,8 +89,17 @@ pub fn connect_to_node(node_name: String) -> Bool {
   }
 }
 
-// Connect to all discovered nodes
+/// Connect to all discovered nodes
+///
+/// Finds all Tailscale hosts and attempts to connect to each one.
+///
+/// # Arguments
+/// - `base_name`: Base name for the nodes (e.g., "khepri_node")
+///
+/// # Returns
+/// - Number of nodes successfully connected
 pub fn connect_to_all_nodes(base_name: String) -> Int {
+  // Find potential nodes
   let nodes = find_tailscale_nodes(base_name)
 
   // Try to connect to each node

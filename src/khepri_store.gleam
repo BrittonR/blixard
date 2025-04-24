@@ -1,4 +1,10 @@
-// src/khepri_store.gleam - Modified for proper clustering
+// src/khepri_store.gleam
+//
+// Distributed storage module using Khepri
+//
+// This module provides an interface to the Khepri distributed key-value store,
+// which is used for storing service states and other data across the cluster.
+// It supports both standalone and clustered operation modes.
 
 import gleam/dynamic
 import gleam/erlang
@@ -13,30 +19,48 @@ import gleam/string
 import khepri_gleam
 import khepri_gleam_cluster
 
-// Service state type definition
+/// Service state type definition
+/// Represents the possible states of a managed service
 pub type ServiceState {
+  /// Service is currently running
   Running
+  /// Service is currently stopped
   Stopped
+  /// Service failed to start or stop
   Failed
+  /// Service state is unknown
   Unknown
+  /// Custom state message (for join notifications, etc.)
   Custom(String)
 }
 
-// Cluster configuration
+/// Cluster configuration type
+/// Used to configure the Khepri cluster
 pub type ClusterConfig {
   ClusterConfig(node_role: NodeRole, cookie: String)
 }
 
-// Node role in the cluster
+/// Node role in the cluster
+/// Defines whether this node is a primary or a secondary node
 pub type NodeRole {
+  /// Primary node - responsible for leader election and initial setup
   Primary
+  /// Secondary node - connects to the primary node
   Secondary(primary_node: String)
 }
 
-// Global cluster subject to maintain throughout the app's lifecycle
+/// Default store ID for Khepri
+/// Used to identify this specific Khepri instance
 pub const default_store_id = "khepri"
 
-// Initialize a standalone Khepri instance (non-clustered)
+/// Initialize a standalone Khepri instance (non-clustered)
+/// 
+/// This sets up a local Khepri store for CLI operations
+/// that need to read/write service state information.
+///
+/// # Returns
+/// - `Ok(Nil)` if initialization succeeded
+/// - `Error(String)` with error message if initialization failed
 pub fn init() -> Result(Nil, String) {
   // Start Khepri with specific store ID for consistency
   io.println("Initializing Khepri store...")
@@ -59,14 +83,22 @@ pub fn init() -> Result(Nil, String) {
   Ok(Nil)
 }
 
-// src/khepri_store.gleam - Fix for the Badarg error
-// src/khepri_store.gleam - Fix for the Badarg error
-
-// Add these at the module level (outside any functions)
+// External function declarations
 @external(erlang, "khepri_gleam_cluster_helper", "wait_for_leader")
 fn wait_for_leader_raw() -> Result(Nil, String)
 
-// Initialize Khepri with clustering support
+/// Initialize Khepri with clustering support
+///
+/// Sets up a clustered Khepri store that replicates data across nodes.
+/// Primary nodes initialize the cluster, while secondary nodes join
+/// an existing cluster.
+///
+/// # Arguments
+/// - `config`: Cluster configuration specifying node role and cookie
+///
+/// # Returns
+/// - `Ok(Nil)` if initialization succeeded
+/// - `Error(String)` with error message if initialization failed
 pub fn init_cluster(config: ClusterConfig) -> Result(Nil, String) {
   // Start Khepri first
   io.println("Starting Khepri...")
@@ -89,8 +121,10 @@ pub fn init_cluster(config: ClusterConfig) -> Result(Nil, String) {
       case config.node_role {
         Primary -> {
           // Wait longer for leader election (10 seconds)
+          // This is important for cluster stability
           io.println("Waiting longer for leader election...")
           process.sleep(10_000)
+
           // Try the simple version first with no timeout
           // This should be safer than the version with a timeout
           case wait_for_leader_safely() {
@@ -113,7 +147,14 @@ pub fn init_cluster(config: ClusterConfig) -> Result(Nil, String) {
   }
 }
 
-// Safe wrapper for wait_for_leader that handles errors properly
+/// Safe wrapper for wait_for_leader that handles errors properly
+/// 
+/// Attempts to wait for leader election to complete, with a fallback
+/// to just sleeping if the direct call fails.
+///
+/// # Returns
+/// - `Ok(Nil)` if leader election completes or we've waited long enough
+/// - `Error(String)` with error message if something catastrophic happens
 fn wait_for_leader_safely() -> Result(Nil, String) {
   // Try with raw version first (no timeout parameter)
   case wait_for_leader_raw() {
@@ -130,9 +171,9 @@ fn wait_for_leader_safely() -> Result(Nil, String) {
   }
 }
 
-// In src/khepri_store.gleam - Fixed debug function
-
-// Debug function to print what paths exist in the store
+/// Debug function to print what paths exist in the Khepri store
+///
+/// This is useful for diagnosing issues with data storage and replication
 pub fn debug_print_paths() -> Nil {
   // Get all paths directly (no Result wrapping)
   let paths = get_all_paths()
@@ -143,10 +184,19 @@ pub fn debug_print_paths() -> Nil {
   io.println("================================\n")
 }
 
-// Join primary with explicit path testing
-// In src/khepri_store.gleam
-
-// Join the primary node with simple reliable approach
+/// Join the primary node with simple reliable approach
+///
+/// Attempts to join the primary node, with retries in case of failure.
+/// This is a crucial function for establishing the cluster.
+///
+/// # Arguments
+/// - `cluster`: Reference to the cluster actor
+/// - `primary_node`: Name of the primary node to join
+/// - `retries`: Number of remaining retry attempts
+///
+/// # Returns
+/// - `Ok(Nil)` if join succeeded
+/// - `Error(String)` with error message if join failed after all retries
 fn join_primary_with_retry(
   cluster: process.Subject(khepri_gleam_cluster.ClusterMessage),
   primary_node: String,
@@ -180,7 +230,15 @@ fn join_primary_with_retry(
   }
 }
 
-// Store a service state - simplified for reliability
+/// Store a service state in the Khepri store
+///
+/// # Arguments
+/// - `service`: Name of the service to store
+/// - `state`: The ServiceState to store
+///
+/// # Returns
+/// - `Ok(Nil)` if store succeeded
+/// - `Error(String)` with error message if store failed
 pub fn store_service_state(
   service: String,
   state: ServiceState,
@@ -205,7 +263,17 @@ pub fn store_service_state(
   Ok(Nil)
 }
 
-// Store a join notification using transactions
+/// Store a join notification using transactions
+///
+/// Used when a node joins the cluster to notify other nodes
+///
+/// # Arguments
+/// - `key`: Key for the notification (usually includes node name)
+/// - `message`: Message to store
+///
+/// # Returns
+/// - `Ok(Nil)` if store succeeded
+/// - `Error(String)` with error message if store failed
 pub fn store_join_notification(
   key: String,
   message: String,
@@ -214,7 +282,14 @@ pub fn store_join_notification(
   store_service_state(key, Custom(message))
 }
 
-// Get a service state
+/// Get a service state from the Khepri store
+///
+/// # Arguments
+/// - `service`: Name of the service to retrieve
+///
+/// # Returns
+/// - `Ok(ServiceState)` with the service state if retrieval succeeded
+/// - `Error(String)` with error message if retrieval failed
 pub fn get_service_state(service: String) -> Result(ServiceState, String) {
   let path = "/:services/" <> service
 
@@ -235,7 +310,14 @@ pub fn get_service_state(service: String) -> Result(ServiceState, String) {
   }
 }
 
-// List all services and their states with improved path handling
+/// List all services and their states
+///
+/// Retrieves all services from the Khepri store with improved path handling
+/// to handle different path formats.
+///
+/// # Returns
+/// - `Ok(List(#(String, ServiceState)))` with services and states if retrieval succeeded
+/// - `Error(String)` with error message if retrieval failed
 pub fn list_services() -> Result(List(#(String, ServiceState)), String) {
   io.println("Getting children for path: [\":services\"]")
 
@@ -290,9 +372,14 @@ pub fn list_services() -> Result(List(#(String, ServiceState)), String) {
   Ok(service_states)
 }
 
-// Add to src/khepri_store.gleam
-
-// src/khepri_store.gleam - Improved direct access function
+/// List services with a more direct approach
+///
+/// Alternative implementation that uses a more direct path access method
+/// to find services, which can be more reliable in some cluster scenarios.
+///
+/// # Returns
+/// - `Ok(List(#(String, ServiceState)))` with services and states if retrieval succeeded
+/// - `Error(String)` with error message if retrieval failed
 pub fn list_services_direct() -> Result(List(#(String, ServiceState)), String) {
   io.println("Using improved direct path access")
 
@@ -351,7 +438,13 @@ pub fn list_services_direct() -> Result(List(#(String, ServiceState)), String) {
   Ok(services)
 }
 
-// Helper to extract service key from various path formats
+/// Helper to extract service key from various path formats
+///
+/// # Arguments
+/// - `path`: List of path components
+///
+/// # Returns
+/// - String containing the extracted service key
 fn extract_service_key(path: List(String)) -> String {
   case path {
     // Handle various path formats
@@ -367,7 +460,17 @@ fn extract_service_key(path: List(String)) -> String {
   }
 }
 
-// Try multiple path formats to get service state
+/// Try multiple path formats to get service state
+///
+/// Attempts to retrieve a service state using different path formats
+/// for greater reliability.
+///
+/// # Arguments
+/// - `key`: Service key to retrieve
+///
+/// # Returns
+/// - `Ok(ServiceState)` with the service state if retrieval succeeded
+/// - `Error(String)` with error message if retrieval failed with all formats
 fn get_service_state_with_fallbacks(key: String) -> Result(ServiceState, String) {
   // Try with different path formats
   let paths = ["/:services/" <> key, "/services/" <> key, "services/" <> key]
@@ -390,11 +493,25 @@ fn get_service_state_with_fallbacks(key: String) -> Result(ServiceState, String)
   }
 }
 
-// Add this helper function to get all registered paths
-// In src/khepri_store.gleam - Make the function public
+/// Get all registered paths from Khepri
+///
+/// External function that retrieves all paths from the Khepri store.
+///
+/// # Returns
+/// - List of path component lists
 @external(erlang, "khepri_gleam_helper", "get_registered_paths")
 pub fn get_all_paths() -> List(List(String))
 
+/// Test connection to primary node
+///
+/// Attempts to connect directly to the primary node to verify connectivity.
+///
+/// # Arguments
+/// - `primary_node`: Name of the primary node
+///
+/// # Returns
+/// - `True` if connection succeeded
+/// - `False` if connection failed
 fn test_primary_connection(primary_node: String) -> Bool {
   // Try to ping the primary node directly
   let node_atom = atom.create_from_string(primary_node)
@@ -410,6 +527,14 @@ fn test_primary_connection(primary_node: String) -> Bool {
   }
 }
 
+/// Get RA cluster members
+///
+/// External function to access Erlang's RA cluster membership information.
+///
+/// # Arguments
+/// - `cluster_name`: Name of the RA cluster
+///
+/// # Returns
+/// - Dynamic containing cluster membership information
 @external(erlang, "ra", "members")
 fn ra_members(cluster_name: String) -> dynamic.Dynamic
-// Call this after joining

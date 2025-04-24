@@ -1,4 +1,12 @@
 // src/service_handlers.gleam
+//
+// Service management operation handlers
+//
+// This module contains handlers for the various service management operations,
+// such as starting, stopping, restarting, and checking status of services.
+// It interacts with both the systemd module for actual service control
+// and the khepri_store module for storing service state.
+
 import gleam/erlang/atom
 import gleam/erlang/node
 import gleam/int
@@ -9,7 +17,18 @@ import gleam/string
 import khepri_store
 import systemd
 
-// Handler for starting a service
+/// Handler for starting a service
+///
+/// # Arguments
+/// - `service`: Name of the service to start
+///
+/// # Returns
+/// - `Ok(Nil)` if the operation succeeded
+/// - `Error(String)` with error message if the operation failed
+///
+/// # Effects
+/// - Starts the systemd service
+/// - Updates the service state in Khepri
 pub fn handle_start(service: String) -> Result(Nil, String) {
   io.println("Starting service: " <> service)
 
@@ -39,7 +58,18 @@ pub fn handle_start(service: String) -> Result(Nil, String) {
   }
 }
 
-// Handler for stopping a service
+/// Handler for stopping a service
+///
+/// # Arguments
+/// - `service`: Name of the service to stop
+///
+/// # Returns
+/// - `Ok(Nil)` if the operation succeeded
+/// - `Error(String)` with error message if the operation failed
+///
+/// # Effects
+/// - Stops the systemd service
+/// - Updates the service state in Khepri
 pub fn handle_stop(service: String) -> Result(Nil, String) {
   io.println("Stopping service: " <> service)
 
@@ -63,7 +93,18 @@ pub fn handle_stop(service: String) -> Result(Nil, String) {
   }
 }
 
-// Handler for restarting a service
+/// Handler for restarting a service
+///
+/// # Arguments
+/// - `service`: Name of the service to restart
+///
+/// # Returns
+/// - `Ok(Nil)` if the operation succeeded
+/// - `Error(String)` with error message if the operation failed
+///
+/// # Effects
+/// - Restarts the systemd service
+/// - Updates the service state in Khepri
 pub fn handle_restart(service: String) -> Result(Nil, String) {
   io.println("Restarting service: " <> service)
 
@@ -93,7 +134,18 @@ pub fn handle_restart(service: String) -> Result(Nil, String) {
   }
 }
 
-// Handler for getting service status
+/// Handler for getting service status
+///
+/// # Arguments
+/// - `service`: Name of the service to check
+///
+/// # Returns
+/// - `Ok(Nil)` if the status check succeeded
+/// - `Error(String)` with error message if the status check failed
+///
+/// # Effects
+/// - Retrieves the service status from systemd
+/// - Updates the service state in Khepri based on current status
 pub fn handle_status(service: String) -> Result(Nil, String) {
   io.println("Checking status of service: " <> service)
 
@@ -138,10 +190,15 @@ pub fn handle_status(service: String) -> Result(Nil, String) {
   }
 }
 
-// Handler for listing services
+/// Handler for listing all managed services
+///
+/// # Effects
+/// - Retrieves and displays all services from Khepri
+/// - Retrieves and displays available systemd services
 pub fn handle_list() -> Nil {
   io.println("Listing all managed services:")
 
+  // List services from Khepri
   case khepri_store.list_services() {
     Ok(services) -> {
       case list.length(services) {
@@ -170,6 +227,7 @@ pub fn handle_list() -> Nil {
         io.println("- " <> service)
       })
 
+      // Show count for remaining services if there are more than 10
       case list.length(system_services) > 10 {
         True ->
           io.println(
@@ -186,7 +244,10 @@ pub fn handle_list() -> Nil {
   }
 }
 
-// Handler for listing cluster nodes
+/// Handler for listing cluster nodes
+///
+/// # Effects
+/// - Retrieves and displays all connected nodes in the cluster
 pub fn handle_list_cluster() -> Nil {
   io.println("Connected Erlang nodes:")
 
