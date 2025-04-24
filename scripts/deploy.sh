@@ -29,6 +29,6 @@ chmod +x "$DEPLOY_DIR/scripts/start_khepri_node.sh"
 
 echo "Service manager deployed successfully"
 echo "Usage:"
-echo "  - To start the Khepri primary node: start_khepri_node primary"
-echo "  - To start a secondary node: start_khepri_node secondary khepri_node@primary-host.local"
+echo "  - To start the first node: start_khepri_node"
+echo "  - To join an existing cluster: start_khepri_node khepri_node@hostname.local"
 echo "  - To use the CLI: service_manager [command] [args]"

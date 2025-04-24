@@ -1,5 +1,5 @@
 #!/bin/bash
-# scripts/start_khepri_node.sh
+# scripts/start_khepri_node.sh (unified version)
 
 # Configuration
 COOKIE="khepri_cookie"
@@ -12,24 +12,18 @@ if [ -n "$TAILSCALE_NAME" ]; then
   HOSTNAME="$TAILSCALE_NAME.local"
 fi
 
-# Determine node type from arguments
-if [ "$1" == "primary" ]; then
-  NODE_TYPE="primary"
-  NODE_NAME="khepri_node@$HOSTNAME"
-  ARGS="--init-primary"
-elif [ "$1" == "secondary" ]; then
-  NODE_TYPE="secondary"
-  NODE_NAME="khepri_node@$HOSTNAME"
-  PRIMARY_NODE="$2"
-  ARGS="--init-secondary $PRIMARY_NODE"
-else
-  echo "Usage: $0 [primary|secondary primary_node]"
-  echo "Example: $0 primary"
-  echo "Example: $0 secondary khepri_node@hostname.local"
-  exit 1
-fi
+# Node name
+NODE_NAME="khepri_node@$HOSTNAME"
 
-echo "Starting $NODE_TYPE Khepri node as $NODE_NAME..."
+# Handle connecting to existing cluster if specified
+if [ -n "$1" ]; then
+  SEED_NODE="$1"
+  ARGS="--join-cluster $SEED_NODE"
+  echo "Starting node as $NODE_NAME and joining cluster via $SEED_NODE..."
+else
+  ARGS="--join-cluster"
+  echo "Starting node as $NODE_NAME with auto-discovery..."
+fi
 
 # Start the node
 erl -pa "$APP_DIR"/build/dev/erlang/*/ebin "$APP_DIR"/build/dev/erlang/*/_gleam_artefacts \

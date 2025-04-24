@@ -114,6 +114,16 @@ pub fn init_cluster(config: ClusterConfig) -> Result(Nil, String) {
     True -> io.println("Services storage exists")
   }
 
+  // Create cluster_events path
+  let events_path = khepri_gleam.to_khepri_path("/:cluster_events/")
+  case khepri_gleam.exists("/:cluster_events/") {
+    False -> {
+      khepri_gleam.put(events_path, "cluster_events")
+      io.println("Created cluster events storage")
+    }
+    True -> io.println("Cluster events storage exists")
+  }
+
   // Start the cluster actor
   case khepri_gleam_cluster.start() {
     Ok(cluster) -> {
@@ -263,23 +273,114 @@ pub fn store_service_state(
   Ok(Nil)
 }
 
-/// Store a join notification using transactions
-///
-/// Used when a node joins the cluster to notify other nodes
+/// Broadcast a cluster event to all nodes
 ///
 /// # Arguments
-/// - `key`: Key for the notification (usually includes node name)
-/// - `message`: Message to store
+/// - `event_type`: Type of event (e.g., "node_joined")
+/// - `message`: Event message/payload
 ///
 /// # Returns
-/// - `Ok(Nil)` if store succeeded
-/// - `Error(String)` with error message if store failed
-pub fn store_join_notification(
-  key: String,
-  message: String,
+/// - `Ok(Nil)` if broadcast succeeded
+/// - `Error(String)` with error message if broadcast failed
+/// Broadcast a cluster event to all nodes - simplified version
+pub fn broadcast_cluster_event(
+  event_type: String,
+  node_name: String,
 ) -> Result(Nil, String) {
-  // Store in a special path for join notifications
-  store_service_state(key, Custom(message))
+  // Create a simpler event format
+  let timestamp = int.to_string(erlang.system_time(erlang.Millisecond))
+  let event_key = event_type <> "_" <> timestamp
+
+  // Ensure the cluster_events path exists
+  case khepri_gleam.exists("/:cluster_events/") {
+    False -> {
+      khepri_gleam.put(
+        khepri_gleam.to_khepri_path("/:cluster_events/"),
+        "cluster_events",
+      )
+    }
+    True -> Nil
+  }
+
+  // Store only the node name as the event value - much simpler
+  khepri_gleam.put(
+    khepri_gleam.to_khepri_path("/:cluster_events/" <> event_key),
+    node_name,
+  )
+
+  Ok(Nil)
+}
+
+/// Store a join notification with simplified format
+pub fn store_join_notification(node_name: String) -> Result(Nil, String) {
+  // Only broadcast to cluster_events, don't duplicate in services
+  broadcast_cluster_event("join", node_name)
+}
+
+/// Get all cluster events
+///
+/// # Returns
+/// - `Ok(List(#(String, String)))` with event keys and values
+/// - `Error(String)` with error message if retrieval failed
+/// Get all cluster events
+///
+/// # Returns
+/// - `Ok(List(#(String, String)))` with event keys and values
+/// - `Error(String)` with error message if retrieval failed
+pub fn get_cluster_events() -> Result(List(#(String, String)), String) {
+  // First check if the events path exists
+  case khepri_gleam.exists("/:cluster_events/") {
+    False -> {
+      // No events path exists yet
+      Ok([])
+    }
+    True -> {
+      // Use our new safe function instead of the regular list_directory
+      case safe_list_directory("/:cluster_events/") {
+        Ok(events) -> {
+          // Successfully retrieved events
+          let parsed_events =
+            list.map(events, fn(event) {
+              let #(key, data) = event
+              // Be defensive with data handling
+              let value = case dynamic.string(data) {
+                Ok(str) -> str
+                Error(_) -> "unknown"
+              }
+              #(key, value)
+            })
+          Ok(parsed_events)
+        }
+        Error(_) -> {
+          // If an error occurs, return an empty list instead of failing
+          Ok([])
+        }
+      }
+    }
+  }
+}
+
+// External function to safely list a directory
+@external(erlang, "khepri_gleam_helper", "safe_list_directory")
+fn safe_list_directory(
+  path: String,
+) -> Result(List(#(String, dynamic.Dynamic)), String)
+
+/// Helper to catch any errors during a function call
+///
+/// # Arguments
+/// - `fn_to_run`: Function to execute that might throw errors
+///
+/// # Returns
+/// - `Ok(T)` with the result if no errors occurred
+/// - `Error(String)` if an error occurred
+fn catch_errors(fn_to_run: fn() -> a) -> Result(a, String) {
+  // This is a simplified version that cannot be fully implemented in Gleam directly
+  // In a real system, this would be an external Erlang function with try/catch
+
+  // For now, just run the function and let any exceptions propagate
+  // This is a placeholder - it doesn't actually catch errors
+  Ok(fn_to_run())
 }
 
 /// Get a service state from the Khepri store

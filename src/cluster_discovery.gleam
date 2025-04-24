@@ -118,7 +118,8 @@ pub fn connect_to_all_nodes(base_name: String) -> Int {
 }
 
 pub fn find_nodes(base_name: String) -> List(String) {
-  io.println("Searching for nodes...")
+  // Minimal logging
+  io.println("Discovering cluster nodes...")
 
   // Try to find Tailscale hosts first (for multi-machine setups)
   let tailscale_nodes = find_tailscale_nodes(base_name)

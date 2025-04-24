@@ -78,9 +78,12 @@ pub fn print_usage() -> Nil {
   io.println("  service_manager list-cluster        - List all connected nodes")
   io.println("\nSpecial commands:")
   io.println(
-    "  service_manager --init-primary           - Start primary Khepri node",
+    "  service_manager --join-cluster           - Start node with auto-discovery",
   )
   io.println(
-    "  service_manager --init-secondary <node>  - Start secondary Khepri node",
+    "  service_manager --join-cluster <node>    - Start node and connect to specified node",
+  )
+  io.println(
+    "  service_manager --stop-cluster           - Stop all running cluster nodes",
   )
 }

@@ -3,8 +3,7 @@
 // Node management for the distributed cluster
 //
 // This module handles Erlang node distribution and cluster management,
-// including starting primary and secondary nodes and ensuring
-// distributed operation for CLI commands.
+// including starting nodes and ensuring distributed operation for CLI commands.
 
 import cluster_discovery
 import gleam/erlang
@@ -14,6 +13,9 @@ import gleam/erlang/process
 import gleam/int
 import gleam/io
 import gleam/list
+import gleam/option.{type Option, None, Some}
+import gleam/result
+import gleam/string
 import khepri_gleam
 import khepri_gleam_cluster
 import khepri_store
@@ -80,115 +82,180 @@ pub fn ensure_distribution() -> Nil {
   }
 }
 
-/// Start a primary node for the Khepri cluster
+/// Start a node and join or create a cluster
 ///
-/// The primary node is responsible for:
-/// - Initializing the Khepri cluster
-/// - Participating in leader election
-/// - Handling replication to secondary nodes
+/// If seed_node is provided, connect to that node.
+/// If no seed_node is provided, attempt to discover existing nodes.
+/// If no nodes are found, become the first node in the cluster.
 ///
-/// # Effects
-/// - Starts Erlang distribution
-/// - Initializes the Khepri cluster as primary
-/// - Starts monitoring processes
-/// - Keeps the node running indefinitely
-pub fn start_primary_node() -> Nil {
-  io.println("Starting primary Khepri node...")
+/// # Arguments
+/// - `seed_node`: Optional seed node to connect to
+/// Start a node and join or create a cluster
+pub fn start_cluster_node(seed_node: Option(String)) -> Nil {
+  io.println("Starting Khepri cluster node...")
 
   // Start distribution
   ensure_distribution()
 
-  // Initialize the Khepri cluster as primary
-  let config =
-    khepri_store.ClusterConfig(
-      node_role: khepri_store.Primary,
-      cookie: "khepri_cookie",
-    )
+  // Get our own node name
+  let current_node = node.self()
+  let current_node_name = atom.to_string(node.to_atom(current_node))
 
+  // Try to discover existing nodes if no seed node was provided
+  let discovered_nodes = case seed_node {
+    None -> {
+      // Find nodes but exclude ourselves
+      cluster_discovery.find_nodes("khepri_node")
+      |> list.filter(fn(node_name) { node_name != current_node_name })
+    }
+    Some(node) -> [node]
+  }
+
+  // Initialize based on whether we found existing nodes
+  case list.length(discovered_nodes) > 0 {
+    True -> {
+      // We found nodes, join as secondary
+      let primary_node =
+        list.first(discovered_nodes)
+        |> result.unwrap("unknown_node")
+
+      io.println("Found existing cluster node: " <> primary_node)
+
+      let config =
+        khepri_store.ClusterConfig(
+          node_role: khepri_store.Secondary(primary_node),
+          cookie: "khepri_cookie",
+        )
+
+      join_existing_cluster(config)
+    }
+    False -> {
+      // No nodes found, initialize as primary
+      io.println("No existing cluster nodes found. Initializing as first node.")
+
+      let config =
+        khepri_store.ClusterConfig(
+          node_role: khepri_store.Primary,
+          cookie: "khepri_cookie",
+        )
+
+      initialize_as_first_node(config)
+    }
+  }
+}
+
+// Initialize as the first node in the cluster
+fn initialize_as_first_node(config: khepri_store.ClusterConfig) -> Nil {
   case khepri_store.init_cluster(config) {
     Ok(_) -> {
-      io.println("Primary Khepri node started successfully")
+      io.println("First cluster node started successfully")
       io.println("Waiting for connections...")
 
-      // Start monitoring for new nodes
-      replication_monitor.start_node_monitor()
-
-      // Start continuous monitoring
-      replication_monitor.start_continuous_replication_monitor()
-
-      // Start primary write test
-      replication_monitor.start_primary_write_test()
+      // Start the cluster event monitor
+      replication_monitor.start_cluster_event_monitor()
 
       // Keep the process running
       process.sleep_forever()
     }
     Error(err) -> {
-      io.println_error("Failed to start primary node: " <> err)
+      io.println_error("Failed to start first node: " <> err)
       Nil
     }
   }
 }
 
-/// Start a secondary node for the Khepri cluster
+// Join an existing cluster
+fn join_existing_cluster(config: khepri_store.ClusterConfig) -> Nil {
+  case khepri_store.init_cluster(config) {
+    Ok(_) -> {
+      io.println("Successfully joined the cluster")
+
+      // Get current node name
+      let current_node = node.self()
+      let node_name = atom.to_string(node.to_atom(current_node))
+
+      // Broadcast join with simplified format
+      let _ = khepri_store.store_join_notification(node_name)
+
+      // Start the cluster event monitor
+      replication_monitor.start_cluster_event_monitor()
+
+      io.println("Node is ready and connected to the cluster")
+
+      // Keep the process running
+      process.sleep_forever()
+    }
+    Error(err) -> {
+      io.println_error("Failed to join cluster: " <> err)
+      Nil
+    }
+  }
+}
+
+/// Start a primary node for the Khepri cluster (DEPRECATED)
+/// Use start_cluster_node(None) instead
+///
+/// The primary node is responsible for:
+/// - Initializing the Khepri cluster
+/// - Participating in leader election
+/// - Handling replication to secondary nodes
+pub fn start_primary_node() -> Nil {
+  io.println("DEPRECATED: Please use start_cluster_node instead")
+  start_cluster_node(None)
+}
+
+/// Start a secondary node for the Khepri cluster (DEPRECATED)
+/// Use start_cluster_node(Some(primary_node)) instead
 ///
 /// The secondary node:
 /// - Connects to the primary node
 /// - Joins the Khepri cluster
 /// - Replicates data from the primary
 /// - Can serve read requests
-///
-/// # Arguments
-/// - `primary_node`: Erlang node name of the primary node
-///
-/// # Effects
-/// - Starts Erlang distribution
-/// - Initializes the Khepri cluster as secondary
-/// - Joins the cluster with the primary
-/// - Starts monitoring processes
-/// - Keeps the node running indefinitely
 pub fn start_secondary_node(primary_node: String) -> Nil {
-  io.println("Starting secondary Khepri node...")
-  io.println("Primary node: " <> primary_node)
+  io.println("DEPRECATED: Please use start_cluster_node instead")
+  start_cluster_node(Some(primary_node))
+}
 
-  // Start distribution
+/// External function to call init:stop on a remote node
+@external(erlang, "node_manager_helper", "remote_stop")
+fn remote_stop(node_name: String) -> Result(Nil, String)
+
+/// Stop any running cluster nodes
+///
+/// Discovers running cluster nodes and sends a shutdown signal
+pub fn stop_cluster() -> Nil {
+  io.println("Looking for cluster nodes to stop...")
+
+  // Start distribution so we can communicate with other nodes
   ensure_distribution()
 
-  // Initialize the Khepri cluster as secondary
-  let config =
-    khepri_store.ClusterConfig(
-      node_role: khepri_store.Secondary(primary_node),
-      cookie: "khepri_cookie",
-    )
+  // Find running nodes
+  let discovered_nodes = cluster_discovery.find_nodes("khepri_node")
 
-  case khepri_store.init_cluster(config) {
-    Ok(_) -> {
-      io.println("Secondary Khepri node started successfully")
-      io.println("Connected to primary node")
-
-      // Write join data using the existing store_service_state function
-      let current_node = node.self()
-      let node_name = atom.to_string(node.to_atom(current_node))
-      let timestamp = int.to_string(erlang.system_time(erlang.Millisecond))
-
-      // Create a join message
-      let join_key = "join_" <> node_name
-      let join_message = "Node " <> node_name <> " joined at " <> timestamp
-
-      // Store using service state
-      io.println("Writing join notification to the cluster...")
-      let _ = khepri_store.store_join_notification(join_key, timestamp)
-
-      io.println("Sent join notification to the cluster")
-
-      // Start secondary monitoring
-      replication_monitor.start_secondary_read_test()
-      replication_monitor.start_replication_test_cycle()
-
-      // Keep the process running
-      process.sleep_forever()
+  case list.length(discovered_nodes) {
+    0 -> {
+      io.println("No cluster nodes found.")
+      Nil
     }
-    Error(err) -> {
-      io.println_error("Failed to start secondary node: " <> err)
+    count -> {
+      io.println("Found " <> int.to_string(count) <> " cluster nodes.")
+
+      // Send shutdown signal to each node
+      list.each(discovered_nodes, fn(node_name) {
+        io.println("Sending shutdown signal to " <> node_name)
+
+        // Try to connect and send shutdown signal
+        case remote_stop(node_name) {
+          Ok(_) -> io.println("✅ Shutdown signal sent to " <> node_name)
+          Error(err) ->
+            io.println(
+              "❌ Failed to send shutdown signal to " <> node_name <> ": " <> err,
+            )
+        }
+      })
+
+      io.println("Shutdown process completed.")
       Nil
     }
   }

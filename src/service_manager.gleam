@@ -1,38 +1,46 @@
 // src/service_manager.gleam
-//
-// Main entry point for the service management system
-// 
-// This module handles the CLI dispatch logic, initializing the appropriate
-// mode of operation (primary node, secondary node, or client operation)
-// based on command line arguments.
-
 import cli
 import gleam/erlang
 import gleam/io
+import gleam/list
+import gleam/option.{type Option, None, Some}
+import gleam/string
 import khepri_store
 import node_manager
 import service_handlers
 
 /// Main function that parses command line arguments and dispatches
-/// to the appropriate operation mode:
-/// 
-/// - Primary node initialization (--init-primary)
-/// - Secondary node initialization (--init-secondary <primary_node>)
-/// - Normal CLI command processing
+/// to the appropriate operation mode
 pub fn main() -> Nil {
-  // Get command-line arguments
+  // Get command-line arguments and remove the program name
   let args = erlang.start_arguments()
 
-  // Process special setup commands first
+  io.println("Processing arguments: " <> string.inspect(args))
+
+  // Process args
   case args {
-    // Initialize as a primary Khepri node
-    ["--init-primary"] -> {
-      node_manager.start_primary_node()
+    // Join cluster with auto-discovery
+    ["--join-cluster"] -> {
+      node_manager.start_cluster_node(None)
       Nil
     }
-    // Initialize as a secondary Khepri node that connects to the primary
+    // Join cluster with specified seed node
+    ["--join-cluster", seed_node] -> {
+      node_manager.start_cluster_node(Some(seed_node))
+      Nil
+    }
+    // Stop any running cluster nodes
+    ["--stop-cluster"] -> {
+      node_manager.stop_cluster()
+      Nil
+    }
+    // Backward compatibility with old commands
+    ["--init-primary"] -> {
+      node_manager.start_cluster_node(None)
+      Nil
+    }
     ["--init-secondary", primary_node] -> {
-      node_manager.start_secondary_node(primary_node)
+      node_manager.start_cluster_node(Some(primary_node))
       Nil
     }
     // Regular command processing path for CLI operations
