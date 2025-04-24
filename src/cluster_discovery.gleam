@@ -99,8 +99,10 @@ pub fn connect_to_node(node_name: String) -> Bool {
 /// # Returns
 /// - Number of nodes successfully connected
 pub fn connect_to_all_nodes(base_name: String) -> Int {
-  // Find potential nodes
-  let nodes = find_tailscale_nodes(base_name)
+  // Find potential nodes using our enhanced discovery
+  let nodes = find_nodes(base_name)
+
+  io.println("Found potential nodes: " <> string.inspect(nodes))
 
   // Try to connect to each node
   let connected_count =
@@ -113,4 +115,49 @@ pub fn connect_to_all_nodes(base_name: String) -> Int {
 
   io.println("Connected to " <> int.to_string(connected_count) <> " nodes")
   connected_count
+}
+
+pub fn find_nodes(base_name: String) -> List(String) {
+  io.println("Searching for nodes...")
+
+  // Try to find Tailscale hosts first (for multi-machine setups)
+  let tailscale_nodes = find_tailscale_nodes(base_name)
+
+  // Add local discovery for development
+  let local_nodes = find_local_nodes(base_name)
+
+  // Combine both node lists
+  list.append(tailscale_nodes, local_nodes)
+}
+
+pub fn find_local_nodes(base_name: String) -> List(String) {
+  // Try to find locally running Erlang nodes
+  case shellout.command(run: "epmd", with: ["-names"], in: ".", opt: []) {
+    Ok(output) -> {
+      io.println("EPMD output: " <> output)
+
+      // Parse the epmd output to extract node names
+      // The output format is like:
+      // epmd: up and running on port 4369 with data:
+      // name khepri_node at port 52641
+
+      output
+      |> string.split("\n")
+      |> list.filter(fn(line) { string.contains(line, "name") })
+      |> list.map(fn(line) {
+        case string.split(line, " ") {
+          ["name", node_name, ..] ->
+            // Construct the full node name
+            node_name <> "@127.0.0.1"
+          _ -> ""
+        }
+      })
+      |> list.filter(fn(name) { !string.is_empty(name) })
+    }
+    Error(_) -> {
+      // If epmd command fails, try the direct approach
+      // with the most common node name format
+      [base_name <> "@127.0.0.1"]
+    }
+  }
 }

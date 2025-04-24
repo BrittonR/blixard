@@ -3,3 +3,4 @@
 /build
 /khepri*
 erl_crash.dump
+khepri#*
