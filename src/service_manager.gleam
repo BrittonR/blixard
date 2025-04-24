@@ -625,74 +625,59 @@ fn start_continuous_replication_monitor() -> Nil {
 
 // In src/service_manager.gleam - fixed continuous_replication_monitor function
 
+// In src/service_manager.gleam - Enhanced continuous replication monitor
 fn continuous_replication_monitor(count: Int) -> Nil {
   // Log header with iteration count
   io.println(
     "\n==== REPLICATION MONITOR CHECK #" <> int.to_string(count + 1) <> " ====",
   )
 
-  // Check for any join notifications
-  io.println("Checking for join notifications...")
+  // First debug - print all paths from registry
+  let all_paths = khepri_store.get_all_paths()
+  io.println("All registered paths in Khepri: " <> string.inspect(all_paths))
 
-  // Use our new direct access function
+  // Try direct reads of known services first
+  io.println("\nTrying direct reads of specific paths:")
+  let test_paths = [
+    "/:services/primary_test_1745448820789", "/:services/auto_test_0",
+    "/:services/join_service_cli_1745448819914@127.0.0.1",
+  ]
+
+  // Check each path directly
+  list.each(test_paths, fn(path) {
+    case khepri_gleam.get_string(path) {
+      Ok(value) -> io.println("✅ Found: " <> path <> " = " <> value)
+      Error(_) -> io.println("❌ Not found: " <> path)
+    }
+  })
+
+  // Now try listing with our improved function
+  io.println("\nListing all services with improved function:")
   case khepri_store.list_services_direct() {
     Ok(services) -> {
-      // Look for join keys
-      let join_messages =
-        list.filter(services, fn(service) {
-          let #(key, _) = service
-          string.contains(key, "join_")
-        })
-
-      // Look for test keys
-      let test_messages =
-        list.filter(services, fn(service) {
-          let #(key, _) = service
-          string.contains(key, "auto_test_")
-        })
-
-      // Report findings
       io.println(
-        "Found " <> int.to_string(list.length(services)) <> " total services",
+        "Found " <> int.to_string(list.length(services)) <> " services",
       )
-      io.println(
-        "Found "
-        <> int.to_string(list.length(join_messages))
-        <> " join notifications",
-      )
-      io.println(
-        "Found "
-        <> int.to_string(list.length(test_messages))
-        <> " test messages",
-      )
-
-      // Show all data for detailed inspection
-      io.println("\nAll data in store:")
       list.each(services, fn(service) {
         let #(key, state) = service
         io.println("• " <> key <> ": " <> string.inspect(state))
       })
 
-      // Check replication progress
-      case list.length(test_messages) > 0 || list.length(join_messages) > 0 {
+      // Check replication status
+      case list.length(services) > 0 {
         True -> io.println("✅ REPLICATION IS WORKING!")
         False -> io.println("⏳ Replication not yet detected")
       }
     }
-    Error(err) -> {
-      io.println("Error checking services: " <> err)
-    }
+    Error(err) -> io.println("Error listing services: " <> err)
   }
 
   io.println("=====================\n")
 
   // Wait and check again
   process.sleep(5000)
-  // Check every 5 seconds
   continuous_replication_monitor(count + 1)
 }
-
-// Add to src/service_manager.gleam - Primary node test function
 
 fn start_primary_write_test() -> Nil {
   // Start a background process for the test

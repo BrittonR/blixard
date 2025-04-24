@@ -292,53 +292,102 @@ pub fn list_services() -> Result(List(#(String, ServiceState)), String) {
 
 // Add to src/khepri_store.gleam
 
-// Direct access list services function that doesn't rely on list_directory
+// src/khepri_store.gleam - Improved direct access function
 pub fn list_services_direct() -> Result(List(#(String, ServiceState)), String) {
-  io.println("Using direct path access instead of list_directory")
+  io.println("Using improved direct path access")
 
   // Get all registered paths
   let all_paths = get_all_paths()
 
-  // Filter for service paths
+  // Debug all paths
+  io.println("All registered paths: " <> string.inspect(all_paths))
+
+  // Filter for service paths with more flexible matching
   let service_paths =
     list.filter(all_paths, fn(path) {
-      // Check if this is a services path with at least 2 components
-      // First component should be "services"
+      // Check for paths that contain "services" as the first component
       case path {
-        ["/:services/", second, ..] -> True
+        // Match for paths with "services" as the first component
+        ["services", second, ..] -> True
+
+        // Match for paths with binary "services" equivalents
+        [first, second, ..] -> {
+          case first {
+            "services" -> True
+            "/:services" -> True
+            "/services" -> True
+            _ -> string.contains(first, "services")
+          }
+        }
+
+        // Other cases (empty path or single component)
         _ -> False
       }
     })
 
   io.println(
-    "Found " <> int.to_string(list.length(service_paths)) <> " service paths",
+    "Found "
+    <> int.to_string(list.length(service_paths))
+    <> " service paths: "
+    <> string.inspect(service_paths),
   )
 
-  // Convert paths to service entries
+  // Gather services with more robust error handling
   let services =
-    list.map(service_paths, fn(path) {
-      // The key is the last part of the path
-      let key = case list.last(path) {
-        Ok(k) -> k
-        Error(_) -> "unknown"
-      }
+    list.fold(service_paths, [], fn(acc, path) {
+      // Extract service name from path with better fallbacks
+      let key = extract_service_key(path)
 
-      // Get the value directly
-      case khepri_gleam.get_string("/:services/" <> key) {
-        Ok(value) -> {
-          let state = case value {
-            "running" -> Running
-            "stopped" -> Stopped
-            "failed" -> Failed
-            other -> Custom(other)
-          }
-          #(key, state)
-        }
-        Error(_) -> #(key, Unknown)
+      // Try multiple path formats to handle different representations
+      case get_service_state_with_fallbacks(key) {
+        Ok(state) -> [#(key, state), ..acc]
+        Error(_) -> acc
       }
     })
 
+  io.println(
+    "Processed " <> int.to_string(list.length(services)) <> " services",
+  )
   Ok(services)
+}
+
+// Helper to extract service key from various path formats
+fn extract_service_key(path: List(String)) -> String {
+  case path {
+    // Handle various path formats
+    ["/:services", key, ..] -> key
+    ["/services", key, ..] -> key
+    ["services", key, ..] -> key
+    // Default case - just use last path component
+    _ ->
+      case list.last(path) {
+        Ok(key) -> key
+        Error(_) -> "unknown"
+      }
+  }
+}
+
+// Try multiple path formats to get service state
+fn get_service_state_with_fallbacks(key: String) -> Result(ServiceState, String) {
+  // Try with different path formats
+  let paths = ["/:services/" <> key, "/services/" <> key, "services/" <> key]
+
+  // Try each path format in sequence
+  let results = list.map(paths, fn(path) { khepri_gleam.get_string(path) })
+
+  // Return first successful result
+  case list.find(results, fn(r) { result.is_ok(r) }) {
+    Ok(Ok(value)) -> {
+      let state = case value {
+        "running" -> Running
+        "stopped" -> Stopped
+        "failed" -> Failed
+        other -> Custom(other)
+      }
+      Ok(state)
+    }
+    _ -> Error("Service not found")
+  }
 }
 
 // Add this helper function to get all registered paths
