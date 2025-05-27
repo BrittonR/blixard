@@ -17,10 +17,11 @@ import gleam/string
 import khepri_store
 import systemd
 
-/// Handler for starting a service
+/// Handler for starting a service with mode
 ///
 /// # Arguments
 /// - `service`: Name of the service to start
+/// - `mode`: SystemdMode (System or User)
 ///
 /// # Returns
 /// - `Ok(Nil)` if the operation succeeded
@@ -29,10 +30,13 @@ import systemd
 /// # Effects
 /// - Starts the systemd service
 /// - Updates the service state in Khepri
-pub fn handle_start(service: String) -> Result(Nil, String) {
+pub fn handle_start_with_mode(
+  service: String,
+  mode: systemd.SystemdMode,
+) -> Result(Nil, String) {
   io.println("Starting service: " <> service)
 
-  case systemd.start_service(service) {
+  case systemd.start_service_with_mode(service, mode) {
     Ok(_) -> {
       io.println("Service started successfully")
 
@@ -40,7 +44,7 @@ pub fn handle_start(service: String) -> Result(Nil, String) {
       let _ = khepri_store.store_service_state(service, khepri_store.Running)
 
       // Verify service is running
-      case systemd.is_active(service) {
+      case systemd.is_active_with_mode(service, mode) {
         Ok(True) -> io.println("Verified: Service is running")
         _ -> io.println("Warning: Service may not be running properly")
       }
@@ -58,10 +62,11 @@ pub fn handle_start(service: String) -> Result(Nil, String) {
   }
 }
 
-/// Handler for stopping a service
+/// Handler for stopping a service with mode
 ///
 /// # Arguments
 /// - `service`: Name of the service to stop
+/// - `mode`: SystemdMode (System or User)
 ///
 /// # Returns
 /// - `Ok(Nil)` if the operation succeeded
@@ -70,10 +75,13 @@ pub fn handle_start(service: String) -> Result(Nil, String) {
 /// # Effects
 /// - Stops the systemd service
 /// - Updates the service state in Khepri
-pub fn handle_stop(service: String) -> Result(Nil, String) {
+pub fn handle_stop_with_mode(
+  service: String,
+  mode: systemd.SystemdMode,
+) -> Result(Nil, String) {
   io.println("Stopping service: " <> service)
 
-  case systemd.stop_service(service) {
+  case systemd.stop_service_with_mode(service, mode) {
     Ok(_) -> {
       io.println("Service stopped successfully")
 
@@ -93,10 +101,11 @@ pub fn handle_stop(service: String) -> Result(Nil, String) {
   }
 }
 
-/// Handler for restarting a service
+/// Handler for restarting a service with mode
 ///
 /// # Arguments
 /// - `service`: Name of the service to restart
+/// - `mode`: SystemdMode (System or User)
 ///
 /// # Returns
 /// - `Ok(Nil)` if the operation succeeded
@@ -105,10 +114,13 @@ pub fn handle_stop(service: String) -> Result(Nil, String) {
 /// # Effects
 /// - Restarts the systemd service
 /// - Updates the service state in Khepri
-pub fn handle_restart(service: String) -> Result(Nil, String) {
+pub fn handle_restart_with_mode(
+  service: String,
+  mode: systemd.SystemdMode,
+) -> Result(Nil, String) {
   io.println("Restarting service: " <> service)
 
-  case systemd.restart_service(service) {
+  case systemd.restart_service_with_mode(service, mode) {
     Ok(_) -> {
       io.println("Service restarted successfully")
 
@@ -116,7 +128,7 @@ pub fn handle_restart(service: String) -> Result(Nil, String) {
       let _ = khepri_store.store_service_state(service, khepri_store.Running)
 
       // Verify service is running
-      case systemd.is_active(service) {
+      case systemd.is_active_with_mode(service, mode) {
         Ok(True) -> io.println("Verified: Service is running")
         _ -> io.println("Warning: Service may not be running properly")
       }
@@ -134,10 +146,11 @@ pub fn handle_restart(service: String) -> Result(Nil, String) {
   }
 }
 
-/// Handler for getting service status
+/// Handler for getting service status with mode
 ///
 /// # Arguments
 /// - `service`: Name of the service to check
+/// - `mode`: SystemdMode (System or User)
 ///
 /// # Returns
 /// - `Ok(Nil)` if the status check succeeded
@@ -146,7 +159,10 @@ pub fn handle_restart(service: String) -> Result(Nil, String) {
 /// # Effects
 /// - Retrieves the service status from systemd
 /// - Updates the service state in Khepri based on current status
-pub fn handle_status(service: String) -> Result(Nil, String) {
+pub fn handle_status_with_mode(
+  service: String,
+  mode: systemd.SystemdMode,
+) -> Result(Nil, String) {
   io.println("Checking status of service: " <> service)
 
   // Get current state from Khepri
@@ -160,13 +176,13 @@ pub fn handle_status(service: String) -> Result(Nil, String) {
   }
 
   // Get actual systemd status
-  case systemd.service_status(service) {
+  case systemd.service_status_with_mode(service, mode) {
     Ok(status) -> {
       io.println("Systemd status:")
       io.println(status)
 
       // Update state in Khepri based on actual status
-      case systemd.is_active(service) {
+      case systemd.is_active_with_mode(service, mode) {
         Ok(True) -> {
           let _ =
             khepri_store.store_service_state(service, khepri_store.Running)
@@ -188,6 +204,71 @@ pub fn handle_status(service: String) -> Result(Nil, String) {
       Error(err)
     }
   }
+}
+
+// Keep original functions for backward compatibility (system mode)
+/// Handler for starting a service
+///
+/// # Arguments
+/// - `service`: Name of the service to start
+///
+/// # Returns
+/// - `Ok(Nil)` if the operation succeeded
+/// - `Error(String)` with error message if the operation failed
+///
+/// # Effects
+/// - Starts the systemd service
+/// - Updates the service state in Khepri
+pub fn handle_start(service: String) -> Result(Nil, String) {
+  handle_start_with_mode(service, systemd.System)
+}
+
+/// Handler for stopping a service
+///
+/// # Arguments
+/// - `service`: Name of the service to stop
+///
+/// # Returns
+/// - `Ok(Nil)` if the operation succeeded
+/// - `Error(String)` with error message if the operation failed
+///
+/// # Effects
+/// - Stops the systemd service
+/// - Updates the service state in Khepri
+pub fn handle_stop(service: String) -> Result(Nil, String) {
+  handle_stop_with_mode(service, systemd.System)
+}
+
+/// Handler for restarting a service
+///
+/// # Arguments
+/// - `service`: Name of the service to restart
+///
+/// # Returns
+/// - `Ok(Nil)` if the operation succeeded
+/// - `Error(String)` with error message if the operation failed
+///
+/// # Effects
+/// - Restarts the systemd service
+/// - Updates the service state in Khepri
+pub fn handle_restart(service: String) -> Result(Nil, String) {
+  handle_restart_with_mode(service, systemd.System)
+}
+
+/// Handler for getting service status
+///
+/// # Arguments
+/// - `service`: Name of the service to check
+///
+/// # Returns
+/// - `Ok(Nil)` if the status check succeeded
+/// - `Error(String)` with error message if the status check failed
+///
+/// # Effects
+/// - Retrieves the service status from systemd
+/// - Updates the service state in Khepri based on current status
+pub fn handle_status(service: String) -> Result(Nil, String) {
+  handle_status_with_mode(service, systemd.System)
 }
 
 /// Handler for listing all managed services
