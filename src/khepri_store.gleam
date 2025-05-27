@@ -49,6 +49,16 @@ pub type NodeRole {
   Secondary(primary_node: String)
 }
 
+/// Service information with metadata
+pub type ServiceInfo {
+  ServiceInfo(
+    name: String,
+    state: ServiceState,
+    node: String,
+    last_updated: String,
+  )
+}
+
 /// Default store ID for Khepri
 /// Used to identify this specific Khepri instance
 pub const default_store_id = "khepri"
@@ -66,12 +76,12 @@ pub fn init() -> Result(Nil, String) {
   io.println("Initializing Khepri store...")
   khepri_gleam.start()
 
-  // Ensure services path exists using a transaction
-  let services_path = khepri_gleam.to_khepri_path("/:services/")
-  case khepri_gleam.exists("/:services/") {
+  // Ensure services path exists - use consistent format
+  let services_path = khepri_gleam.to_khepri_path("/services/")
+  case khepri_gleam.exists("/services/") {
     False -> {
       // Create using transactional API for reliability
-      case khepri_gleam.tx_put_path("/:services/", "service_states") {
+      case khepri_gleam.tx_put_path("/services/", "service_states") {
         Ok(_) -> io.println("Created services storage")
         Error(err) ->
           io.println("Warning: Failed to create services path: " <> err)
@@ -104,9 +114,9 @@ pub fn init_cluster(config: ClusterConfig) -> Result(Nil, String) {
   io.println("Starting Khepri...")
   khepri_gleam.start()
 
-  // Create services path
-  let services_path = khepri_gleam.to_khepri_path("/:services/")
-  case khepri_gleam.exists("/:services/") {
+  // Create services path - use consistent format
+  let services_path = khepri_gleam.to_khepri_path("/services/")
+  case khepri_gleam.exists("/services/") {
     False -> {
       khepri_gleam.put(services_path, "service_states")
       io.println("Created services storage")
@@ -240,7 +250,7 @@ fn join_primary_with_retry(
   }
 }
 
-/// Store a service state in the Khepri store
+/// Store a service state in the Khepri store with metadata
 ///
 /// # Arguments
 /// - `service`: Name of the service to store
@@ -253,8 +263,12 @@ pub fn store_service_state(
   service: String,
   state: ServiceState,
 ) -> Result(Nil, String) {
-  // Use the proven path format
-  let path = "/:services/" <> service
+  // Use consistent path format
+  let path = "/services/" <> service
+
+  // Get current node name for metadata
+  let current_node = atom.to_string(node.to_atom(node.self()))
+  let timestamp = int.to_string(erlang.system_time(erlang.Millisecond))
 
   // Convert state to string
   let state_string = case state {
@@ -265,10 +279,13 @@ pub fn store_service_state(
     Custom(message) -> message
   }
 
-  // Use direct put for more reliability
+  // Store as a tuple with metadata
   let khepri_path = khepri_gleam.to_khepri_path(path)
   io.println("Writing to path: " <> string.inspect(khepri_path))
-  khepri_gleam.put(khepri_path, state_string)
+
+  // Store as a tuple with metadata: #(state_string, node, timestamp)
+  let service_data = #(state_string, current_node, timestamp)
+  khepri_gleam.put(khepri_path, service_data)
 
   Ok(Nil)
 }
@@ -392,206 +409,325 @@ fn catch_errors(fn_to_run: fn() -> a) -> Result(a, String) {
 /// - `Ok(ServiceState)` with the service state if retrieval succeeded
 /// - `Error(String)` with error message if retrieval failed
 pub fn get_service_state(service: String) -> Result(ServiceState, String) {
-  let path = "/:services/" <> service
+  let path = "/services/" <> service
 
   // Use transaction for consistency
   case khepri_gleam.tx_get_path(path) {
     Ok(result) -> {
-      // Try to convert result to string
-      case dynamic.string(result) {
-        Ok("running") -> Ok(Running)
-        Ok("stopped") -> Ok(Stopped)
-        Ok("failed") -> Ok(Failed)
-        Ok(other) -> Ok(Custom(other))
-        // For join notifications and custom states
-        Error(_) -> Ok(Unknown)
+      // Try to decode as tuple with metadata first
+      case decode_service_data(result) {
+        Ok(state) -> Ok(state)
+        Error(_) -> {
+          // Fallback to simple string decoding for backward compatibility
+          case dynamic.string(result) {
+            Ok("running") -> Ok(Running)
+            Ok("stopped") -> Ok(Stopped)
+            Ok("failed") -> Ok(Failed)
+            Ok(other) -> Ok(Custom(other))
+            Error(_) -> Ok(Unknown)
+          }
+        }
       }
     }
     Error(e) -> Error(e)
   }
 }
 
-/// List all services and their states
+/// Decode service data from various formats
+fn decode_service_data(data: dynamic.Dynamic) -> Result(ServiceState, String) {
+  // Try to decode as tuple: #(state_string, node, timestamp)
+  case dynamic.tuple3(dynamic.string, dynamic.string, dynamic.string)(data) {
+    Ok(#(state_str, _node, _timestamp)) -> {
+      case state_str {
+        "running" -> Ok(Running)
+        "stopped" -> Ok(Stopped)
+        "failed" -> Ok(Failed)
+        other -> Ok(Custom(other))
+      }
+    }
+    Error(_) -> Error("Could not decode service data")
+  }
+}
+
+/// Get service info with metadata - FIXED VERSION
 ///
-/// Retrieves all services from the Khepri store with improved path handling
-/// to handle different path formats.
+/// # Arguments
+/// - `service`: Name of the service to retrieve
+///
+/// # Returns
+/// - `Ok(ServiceInfo)` with the service info if retrieval succeeded
+/// - `Error(String)` with error message if retrieval failed
+pub fn get_service_info(service: String) -> Result(ServiceInfo, String) {
+  io.println("Getting service info for: " <> service)
+
+  // Use the same path construction as storage
+  let khepri_path = khepri_gleam.to_khepri_path("/services/" <> service)
+  io.println("Using khepri path: " <> string.inspect(khepri_path))
+
+  // Try to get the raw data directly
+  case khepri_gleam.get(khepri_path) {
+    Ok(result) -> {
+      io.println("Got raw result: " <> string.inspect(result))
+
+      // Try to decode as tuple with metadata
+      case
+        dynamic.tuple3(dynamic.string, dynamic.string, dynamic.string)(result)
+      {
+        Ok(#(state_str, node, timestamp)) -> {
+          io.println(
+            "Successfully decoded tuple: state="
+            <> state_str
+            <> ", node="
+            <> node
+            <> ", time="
+            <> timestamp,
+          )
+          let state = case state_str {
+            "running" -> Running
+            "stopped" -> Stopped
+            "failed" -> Failed
+            other -> Custom(other)
+          }
+          Ok(ServiceInfo(
+            name: service,
+            state: state,
+            node: node,
+            last_updated: timestamp,
+          ))
+        }
+        Error(decode_err) -> {
+          io.println("Tuple decode failed: " <> string.inspect(decode_err))
+
+          // Try as simple string fallback
+          case dynamic.string(result) {
+            Ok(state_str) -> {
+              io.println("Decoded as simple string: " <> state_str)
+              let state = case state_str {
+                "running" -> Running
+                "stopped" -> Stopped
+                "failed" -> Failed
+                other -> Custom(other)
+              }
+              Ok(ServiceInfo(
+                name: service,
+                state: state,
+                node: "unknown",
+                last_updated: "unknown",
+              ))
+            }
+            Error(str_err) -> {
+              io.println(
+                "String decode also failed: " <> string.inspect(str_err),
+              )
+              Error("Could not decode service data as tuple or string")
+            }
+          }
+        }
+      }
+    }
+    Error(e) -> {
+      io.println("Failed to get data from Khepri: " <> string.inspect(e))
+      Error("Service not found: " <> string.inspect(e))
+    }
+  }
+}
+
+/// Discover service names directly from Khepri using path scanning
+///
+/// This function queries all registered paths and filters for service paths,
+/// providing a reliable way to find services without depending on local registry.
+///
+/// # Returns
+/// - `Ok(List(String))` with service names if discovery succeeded
+/// - `Error(String)` with error message if discovery failed
+fn discover_services_from_paths() -> Result(List(String), String) {
+  io.println("Discovering services directly from Khepri paths...")
+
+  // Get all registered paths from Khepri
+  let all_paths = get_all_paths()
+  io.println("All paths: " <> string.inspect(all_paths))
+
+  // Filter for service paths and extract service names
+  let service_names =
+    list.filter_map(all_paths, fn(path) {
+      case path {
+        ["services", service_name] -> Ok(service_name)
+        _ -> Error(Nil)
+      }
+    })
+
+  io.println("Service names: " <> string.inspect(service_names))
+  Ok(service_names)
+}
+
+/// List all CLI-managed services with enhanced information
+///
+/// Uses direct path discovery instead of relying on local registry,
+/// making it work across different CLI invocations and nodes.
+///
+/// # Returns
+/// - `Ok(List(ServiceInfo))` with services and their info if retrieval succeeded
+/// - `Error(String)` with error message if retrieval failed
+pub fn list_cli_services() -> Result(List(ServiceInfo), String) {
+  io.println(
+    "Getting CLI-managed services from Khepri using direct discovery...",
+  )
+
+  // Use direct path discovery instead of list_directory
+  case discover_services_from_paths() {
+    Ok(service_names) -> {
+      io.println(
+        "Found "
+        <> int.to_string(list.length(service_names))
+        <> " services via path discovery",
+      )
+
+      // Get detailed info for each service
+      let services =
+        list.filter_map(service_names, fn(service_name) {
+          io.println("Trying to get info for service: " <> service_name)
+          case get_service_info(service_name) {
+            Ok(info) -> {
+              io.println("Successfully got info for: " <> service_name)
+              Ok(info)
+            }
+            Error(err) -> {
+              io.println(
+                "Failed to get info for " <> service_name <> ": " <> err,
+              )
+              Error(Nil)
+            }
+          }
+        })
+
+      io.println(
+        "Successfully retrieved info for "
+        <> int.to_string(list.length(services))
+        <> " services",
+      )
+      Ok(services)
+    }
+    Error(err) -> {
+      io.println("Direct discovery failed: " <> err)
+      // Fallback to the old method
+      fallback_list_services()
+    }
+  }
+}
+
+/// Fallback method using list_directory
+fn fallback_list_services() -> Result(List(ServiceInfo), String) {
+  io.println("Using fallback list_directory method...")
+
+  case khepri_gleam.list_directory("/services/") {
+    Ok(items) -> {
+      io.println(
+        "Found " <> int.to_string(list.length(items)) <> " items in /services/",
+      )
+
+      // Convert items to ServiceInfo, filtering out metadata entries
+      let services =
+        list.filter_map(items, fn(item) {
+          let #(name, data) = item
+
+          // Skip metadata entries
+          case name {
+            "services" -> Error(Nil)
+            "service_states" -> Error(Nil)
+            _ -> {
+              // Try to decode as tuple with metadata
+              case
+                dynamic.tuple3(dynamic.string, dynamic.string, dynamic.string)(
+                  data,
+                )
+              {
+                Ok(#(state_str, node, timestamp)) -> {
+                  let state = case state_str {
+                    "running" -> Running
+                    "stopped" -> Stopped
+                    "failed" -> Failed
+                    other -> Custom(other)
+                  }
+                  Ok(ServiceInfo(
+                    name: name,
+                    state: state,
+                    node: node,
+                    last_updated: timestamp,
+                  ))
+                }
+                Error(_) -> {
+                  // Fallback for services without metadata
+                  let state = case dynamic.string(data) {
+                    Ok("running") -> Running
+                    Ok("stopped") -> Stopped
+                    Ok("failed") -> Failed
+                    Ok(other) -> Custom(other)
+                    Error(_) -> Unknown
+                  }
+                  Ok(ServiceInfo(
+                    name: name,
+                    state: state,
+                    node: "unknown",
+                    last_updated: "unknown",
+                  ))
+                }
+              }
+            }
+          }
+        })
+
+      io.println(
+        "Processed " <> int.to_string(list.length(services)) <> " services",
+      )
+      Ok(services)
+    }
+    Error(err) -> Error("Fallback also failed: " <> err)
+  }
+}
+
+/// Remove a service from the Khepri store
+///
+/// # Arguments
+/// - `service`: Name of the service to remove
+///
+/// # Returns
+/// - `Ok(Nil)` if removal succeeded
+/// - `Error(String)` with error message if removal failed
+pub fn remove_service_state(service: String) -> Result(Nil, String) {
+  let khepri_path = khepri_gleam.to_khepri_path("/services/" <> service)
+  io.println("Removing service from path: " <> string.inspect(khepri_path))
+
+  khepri_gleam.delete(khepri_path)
+  io.println("Service " <> service <> " removed from Khepri")
+
+  Ok(Nil)
+}
+
+/// List all services and their states (backward compatibility)
 ///
 /// # Returns
 /// - `Ok(List(#(String, ServiceState)))` with services and states if retrieval succeeded
 /// - `Error(String)` with error message if retrieval failed
 pub fn list_services() -> Result(List(#(String, ServiceState)), String) {
-  io.println("Getting children for path: [\":services\"]")
-
-  // Try both path formats
-  let with_colon =
-    khepri_gleam.list_directory("/:services/")
-    |> result.unwrap([])
-
-  let without_colon =
-    khepri_gleam.list_directory("/services/")
-    |> result.unwrap([])
-
-  // Combine results
-  let all_items = list.append(with_colon, without_colon)
-
-  // Remove duplicates by key
-  let unique_keys = list.new()
-  let unique_items =
-    list.fold(all_items, [], fn(acc, item) {
-      let #(key, _) = item
-      case list.contains(unique_keys, key) {
-        True -> acc
-        False -> [item, ..acc]
-      }
-    })
-
-  io.println(
-    "Found " <> int.to_string(list.length(unique_items)) <> " unique items",
-  )
-
-  // Process them as before
-  let service_states =
-    unique_items
-    |> list.map(fn(item) {
-      let #(name, data) = item
-
-      let state_str = case dynamic.string(data) {
-        Ok(str) -> str
-        Error(_) -> "unknown"
-      }
-
-      let state = case state_str {
-        "running" -> Running
-        "stopped" -> Stopped
-        "failed" -> Failed
-        _ -> Custom(state_str)
-      }
-
-      #(name, state)
-    })
-
-  Ok(service_states)
+  case list_cli_services() {
+    Ok(services) -> {
+      let simple_services =
+        list.map(services, fn(service_info) {
+          #(service_info.name, service_info.state)
+        })
+      Ok(simple_services)
+    }
+    Error(err) -> Error(err)
+  }
 }
 
-/// List services with a more direct approach
-///
-/// Alternative implementation that uses a more direct path access method
-/// to find services, which can be more reliable in some cluster scenarios.
+/// List services with a more direct approach (kept for compatibility)
 ///
 /// # Returns
 /// - `Ok(List(#(String, ServiceState)))` with services and states if retrieval succeeded
 /// - `Error(String)` with error message if retrieval failed
 pub fn list_services_direct() -> Result(List(#(String, ServiceState)), String) {
-  io.println("Using improved direct path access")
-
-  // Get all registered paths
-  let all_paths = get_all_paths()
-
-  // Debug all paths
-  io.println("All registered paths: " <> string.inspect(all_paths))
-
-  // Filter for service paths with more flexible matching
-  let service_paths =
-    list.filter(all_paths, fn(path) {
-      // Check for paths that contain "services" as the first component
-      case path {
-        // Match for paths with "services" as the first component
-        ["services", second, ..] -> True
-
-        // Match for paths with binary "services" equivalents
-        [first, second, ..] -> {
-          case first {
-            "services" -> True
-            "/:services" -> True
-            "/services" -> True
-            _ -> string.contains(first, "services")
-          }
-        }
-
-        // Other cases (empty path or single component)
-        _ -> False
-      }
-    })
-
-  io.println(
-    "Found "
-    <> int.to_string(list.length(service_paths))
-    <> " service paths: "
-    <> string.inspect(service_paths),
-  )
-
-  // Gather services with more robust error handling
-  let services =
-    list.fold(service_paths, [], fn(acc, path) {
-      // Extract service name from path with better fallbacks
-      let key = extract_service_key(path)
-
-      // Try multiple path formats to handle different representations
-      case get_service_state_with_fallbacks(key) {
-        Ok(state) -> [#(key, state), ..acc]
-        Error(_) -> acc
-      }
-    })
-
-  io.println(
-    "Processed " <> int.to_string(list.length(services)) <> " services",
-  )
-  Ok(services)
-}
-
-/// Helper to extract service key from various path formats
-///
-/// # Arguments
-/// - `path`: List of path components
-///
-/// # Returns
-/// - String containing the extracted service key
-fn extract_service_key(path: List(String)) -> String {
-  case path {
-    // Handle various path formats
-    ["/:services", key, ..] -> key
-    ["/services", key, ..] -> key
-    ["services", key, ..] -> key
-    // Default case - just use last path component
-    _ ->
-      case list.last(path) {
-        Ok(key) -> key
-        Error(_) -> "unknown"
-      }
-  }
-}
-
-/// Try multiple path formats to get service state
-///
-/// Attempts to retrieve a service state using different path formats
-/// for greater reliability.
-///
-/// # Arguments
-/// - `key`: Service key to retrieve
-///
-/// # Returns
-/// - `Ok(ServiceState)` with the service state if retrieval succeeded
-/// - `Error(String)` with error message if retrieval failed with all formats
-fn get_service_state_with_fallbacks(key: String) -> Result(ServiceState, String) {
-  // Try with different path formats
-  let paths = ["/:services/" <> key, "/services/" <> key, "services/" <> key]
-
-  // Try each path format in sequence
-  let results = list.map(paths, fn(path) { khepri_gleam.get_string(path) })
-
-  // Return first successful result
-  case list.find(results, fn(r) { result.is_ok(r) }) {
-    Ok(Ok(value)) -> {
-      let state = case value {
-        "running" -> Running
-        "stopped" -> Stopped
-        "failed" -> Failed
-        other -> Custom(other)
-      }
-      Ok(state)
-    }
-    _ -> Error("Service not found")
-  }
+  list_services()
 }
 
 /// Get all registered paths from Khepri

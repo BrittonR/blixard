@@ -20,6 +20,7 @@ import systemd
 /// - `stop [--user] <service>`: Stop a service
 /// - `restart [--user] <service>`: Restart a service
 /// - `status [--user] <service>`: Check service status
+/// - `remove <service>`: Remove service from Blixard management
 /// - `list`: List all managed services
 /// - `list-cluster`: List all connected nodes
 pub fn handle_command(args: List(String)) -> Nil {
@@ -51,6 +52,11 @@ pub fn handle_command(args: List(String)) -> Nil {
     // Get service status
     ["status", service] -> {
       let _ = service_handlers.handle_status_with_mode(service, mode)
+      Nil
+    }
+    // Remove service from management
+    ["remove", service] -> {
+      let _ = service_handlers.handle_remove_from_management(service)
       Nil
     }
     // List all services in the cluster
@@ -87,6 +93,9 @@ pub fn print_usage() -> Nil {
   )
   io.println(
     "  service_manager status [--user] <service>    - Check service status",
+  )
+  io.println(
+    "  service_manager remove <service>             - Remove from Blixard management",
   )
   io.println(
     "  service_manager list                         - List all managed services",

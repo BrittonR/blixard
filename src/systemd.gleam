@@ -183,7 +183,7 @@ pub fn list_services_with_mode(
 ) -> Result(List(String), String) {
   // The command extracts service names without the .service suffix
   let cmd =
-    "systemctl list-units --type=service --no-legend | awk '{print $1}' | sed 's/.service$//'"
+    "systemctl list-units --type=service --no-legend --user | awk '{print $1}' | sed 's/.service$//'"
   case shell_exec_with_mode(cmd, mode) {
     Ok(output) -> {
       // Split the output by newlines and filter out empty lines
