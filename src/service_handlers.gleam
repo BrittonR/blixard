@@ -119,7 +119,7 @@ pub fn handle_stop_with_mode(
         Ok(_) -> {
           let _ = khepri_store.store_service_state(service, khepri_store.Failed)
         }
-        Error(_) -> Nil
+        Error(_) -> Error("Service " <> service <> " is not managed by Blixard")
       }
 
       Error(err)
