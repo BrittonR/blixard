@@ -287,3 +287,73 @@ pub fn stop_cluster() -> Nil {
     }
   }
 }
+
+/// External function to kill processes by name pattern
+@external(erlang, "node_manager_helper", "kill_processes")
+fn kill_processes(pattern: String) -> Result(Nil, String)
+
+/// External function to remove directory
+@external(erlang, "node_manager_helper", "remove_directory")
+fn remove_directory(path: String) -> Result(Nil, String)
+
+/// Clean up all Khepri and Blixard instances and data
+///
+/// This function performs a comprehensive cleanup:
+/// 1. Kills any remaining Blixard processes
+/// 2. Removes Khepri data directories
+///
+/// # Returns
+/// - `Ok(Nil)` if cleanup succeeded
+/// - `Error(String)` with error message if cleanup failed
+pub fn cleanup_all_instances() -> Result(Nil, String) {
+  io.println("💀 Step 1: Killing all Blixard processes...")
+  case kill_processes("blixard") {
+    Ok(_) -> io.println("✅ Killed all Blixard processes")
+    Error(err) -> io.println("⚠️  Warning: Failed to kill processes: " <> err)
+  }
+
+  // Give processes time to die
+  process.sleep(1000)
+
+  io.println("🗑️  Step 2: Removing Khepri data directories...")
+
+  // Get list of khepri directories
+  case get_khepri_directories() {
+    Ok(directories) -> {
+      case list.length(directories) {
+        0 -> io.println("No Khepri directories found to clean")
+        count -> {
+          io.println("Found " <> int.to_string(count) <> " Khepri directories to remove")
+
+          let removal_results = list.map(directories, fn(dir) {
+            io.println("Removing: " <> dir)
+            remove_directory(dir)
+          })
+
+          let failures = list.filter(removal_results, fn(r) {
+            case r {
+              Ok(_) -> False
+              Error(_) -> True
+            }
+          })
+
+          case list.length(failures) {
+            0 -> io.println("✅ All Khepri directories removed successfully")
+            failure_count -> {
+              io.println("⚠️  " <> int.to_string(failure_count) <> " directories failed to remove")
+            }
+          }
+        }
+      }
+      Ok(Nil)
+    }
+    Error(err) -> {
+      io.println("❌ Failed to list Khepri directories: " <> err)
+      Error(err)
+    }
+  }
+}
+
+/// Get list of Khepri data directories
+@external(erlang, "node_manager_helper", "get_khepri_directories")
+fn get_khepri_directories() -> Result(List(String), String)

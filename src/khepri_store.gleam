@@ -15,10 +15,24 @@ import gleam/erlang/process
 import gleam/int
 import gleam/io
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import khepri_gleam
 import khepri_gleam_cluster
+
+/// Helper function to decode a 2-tuple from dynamic data
+fn decode_tuple2(
+  first_decoder: decode.Decoder(a),
+  second_decoder: decode.Decoder(b),
+) -> decode.Decoder(#(a, b)) {
+  decode.at([0], first_decoder)
+  |> decode.then(fn(first_value) {
+    decode.at([1], second_decoder)
+    |> decode.map(fn(second_value) { #(first_value, second_value) })
+  })
+}
+
 
 /// Helper function to decode a 3-tuple from dynamic data
 fn decode_tuple3(
@@ -26,16 +40,12 @@ fn decode_tuple3(
   second_decoder: decode.Decoder(b),
   third_decoder: decode.Decoder(c),
 ) -> decode.Decoder(#(a, b, c)) {
-  // First decode the element at index 0
   decode.at([0], first_decoder)
   |> decode.then(fn(first_value) {
-    // Then decode the element at index 1
     decode.at([1], second_decoder)
     |> decode.then(fn(second_value) {
-      // Finally decode the element at index 2
       decode.at([2], third_decoder)
       |> decode.map(fn(third_value) {
-        // Combine them into a tuple
         #(first_value, second_value, third_value)
       })
     })
@@ -86,24 +96,86 @@ pub type ServiceInfo {
 /// Used to identify this specific Khepri instance
 pub const default_store_id = "khepri"
 
+// External function declarations
+@external(erlang, "khepri_gleam_cluster_helper", "wait_for_leader")
+fn wait_for_leader_raw() -> Result(Nil, String)
+
+@external(erlang, "khepri_gleam_cluster_helper", "get_cluster_members")
+fn get_cluster_members_raw() -> Result(List(String), String)
+
+@external(erlang, "khepri_gleam_cluster_helper", "is_store_running")
+fn is_khepri_running_raw(store_id: String) -> Bool
+
+@external(erlang, "rpc", "call")
+fn rpc_call_raw(
+  node: atom.Atom,
+  module: atom.Atom,
+  function: atom.Atom,
+  args: List(dynamic.Dynamic),
+) -> dynamic.Dynamic
+
+@external(erlang, "khepri_gleam_helper", "safe_list_directory")
+fn safe_list_directory(
+  path: String,
+) -> Result(List(#(String, dynamic.Dynamic)), String)
+
+@external(erlang, "khepri_gleam_helper", "get_many")
+fn get_many_raw(pattern: List(String)) -> Result(dynamic.Dynamic, String)
+
+@external(erlang, "ra", "members")
+fn ra_members(cluster_name: String) -> dynamic.Dynamic
+
+/// Check if we have a local Khepri instance running
+pub fn has_local_khepri() -> Bool {
+  is_khepri_running()
+}
+
+fn is_khepri_running() -> Bool {
+  is_khepri_running_raw("khepri")
+}
+
+/// Get a cluster node that has Khepri running
+fn get_cluster_node_with_khepri() -> Result(node.Node, String) {
+  let connected_nodes = node.visible()
+
+  case connected_nodes {
+    [] -> Error("No cluster nodes connected")
+    [first, ..] -> Ok(first)
+  }
+}
+
+/// Wrapper for RPC calls with error handling
+fn rpc_call_khepri(
+  target_node: node.Node,
+  function: String,
+  args: List(dynamic.Dynamic),
+) -> Result(dynamic.Dynamic, String) {
+  let node_atom = node.to_atom(target_node)
+  let module_atom = atom.create_from_string("khepri")
+  let function_atom = atom.create_from_string(function)
+
+  io.println(
+    "RPC call to " <> atom.to_string(node_atom) <> " - khepri:" <> function,
+  )
+
+  let result = rpc_call_raw(node_atom, module_atom, function_atom, args)
+
+  // Simple check for RPC errors
+  let result_str = string.inspect(result)
+  case string.contains(result_str, "badrpc") {
+    True -> Error("RPC failed: " <> result_str)
+    False -> Ok(result)
+  }
+}
+
 /// Initialize a standalone Khepri instance (non-clustered)
-/// 
-/// This sets up a local Khepri store for CLI operations
-/// that need to read/write service state information.
-///
-/// # Returns
-/// - `Ok(Nil)` if initialization succeeded
-/// - `Error(String)` with error message if initialization failed
 pub fn init() -> Result(Nil, String) {
-  // Start Khepri with specific store ID for consistency
   io.println("Initializing Khepri store...")
   khepri_gleam.start()
 
-  // Ensure services path exists - use consistent format
   let services_path = khepri_gleam.to_khepri_path("/:services/")
   case khepri_gleam.exists("/:services/") {
     False -> {
-      // Create using transactional API for reliability
       case khepri_gleam.tx_put_path("/:services/", "service_states") {
         Ok(_) -> io.println("Created services storage")
         Error(err) ->
@@ -118,12 +190,9 @@ pub fn init() -> Result(Nil, String) {
 
 /// Check if we're already part of a Khepri cluster
 fn is_already_in_cluster() -> Bool {
-  // First check if Khepri store is even running
   case is_khepri_running() {
     False -> False
-    // Can't be in a cluster if Khepri isn't running
     True -> {
-      // Check if we have cluster members using the raw function
       case get_cluster_members_raw() {
         Ok(members) -> list.length(members) > 0
         Error(_) -> False
@@ -133,33 +202,18 @@ fn is_already_in_cluster() -> Bool {
 }
 
 /// Initialize Khepri with clustering support
-///
-/// Sets up a clustered Khepri store that replicates data across nodes.
-/// Primary nodes initialize the cluster, while secondary nodes join
-/// an existing cluster.
-///
-/// # Arguments
-/// - `config`: Cluster configuration specifying node role and cookie
-///
-/// # Returns
-/// - `Ok(Nil)` if initialization succeeded
-/// - `Error(String)` with error message if initialization failed
 pub fn init_cluster(config: ClusterConfig) -> Result(Nil, String) {
-  // Check if we're already in a cluster
   case is_already_in_cluster() {
     True -> {
       io.println("Already part of a Khepri cluster, skipping initialization")
       Ok(Nil)
     }
     False -> {
-      // Start Khepri first
       io.println("Starting Khepri...")
       khepri_gleam.start()
 
-      // Only create initial paths if this is a new primary node
       case config.node_role {
         Primary -> {
-          // Create services path - use consistent format
           let services_path = khepri_gleam.to_khepri_path("/:services/")
           case khepri_gleam.exists("/services/") {
             False -> {
@@ -169,7 +223,6 @@ pub fn init_cluster(config: ClusterConfig) -> Result(Nil, String) {
             True -> io.println("Services storage exists")
           }
 
-          // Create cluster_events path
           let events_path = khepri_gleam.to_khepri_path("/:cluster_events/")
           case khepri_gleam.exists("/:cluster_events/") {
             False -> {
@@ -180,24 +233,17 @@ pub fn init_cluster(config: ClusterConfig) -> Result(Nil, String) {
           }
         }
         Secondary(_) -> {
-          // Don't create paths on secondary nodes, they'll replicate from primary
           io.println("Secondary node - skipping path creation")
         }
       }
 
-      // Start the cluster actor
       case khepri_gleam_cluster.start() {
         Ok(cluster) -> {
-          // Handle cluster based on role
           case config.node_role {
             Primary -> {
-              // Wait longer for leader election (10 seconds)
-              // This is important for cluster stability
               io.println("Waiting longer for leader election...")
               process.sleep(10_000)
 
-              // Try the simple version first with no timeout
-              // This should be safer than the version with a timeout
               case wait_for_leader_safely() {
                 Ok(_) -> {
                   io.println("Leader election complete")
@@ -207,7 +253,6 @@ pub fn init_cluster(config: ClusterConfig) -> Result(Nil, String) {
               }
             }
             Secondary(primary_node) -> {
-              // Secondary node - join the primary
               io.println("Joining primary node: " <> primary_node)
               join_primary_with_retry(cluster, primary_node, 5)
             }
@@ -220,21 +265,10 @@ pub fn init_cluster(config: ClusterConfig) -> Result(Nil, String) {
   }
 }
 
-/// Safe wrapper for wait_for_leader that handles errors properly
-/// 
-/// Attempts to wait for leader election to complete, with a fallback
-/// to just sleeping if the direct call fails.
-///
-/// # Returns
-/// - `Ok(Nil)` if leader election completes or we've waited long enough
-/// - `Error(String)` with error message if something catastrophic happens
 fn wait_for_leader_safely() -> Result(Nil, String) {
-  // Try with raw version first (no timeout parameter)
   case wait_for_leader_raw() {
     Ok(_) -> Ok(Nil)
     Error(_) -> {
-      // If that fails, just sleep a bit to allow auto-election
-      // and return success
       io.println(
         "Direct leader election call failed, allowing time for auto-election",
       )
@@ -244,11 +278,7 @@ fn wait_for_leader_safely() -> Result(Nil, String) {
   }
 }
 
-/// Debug function to print what paths exist in the Khepri store
-///
-/// This is useful for diagnosing issues with data storage and replication
 pub fn debug_print_paths() -> Nil {
-  // Get all paths directly (no Result wrapping)
   let paths = get_all_paths()
 
   io.println("\n==== DEBUG: ALL KHEPRI PATHS ====")
@@ -257,19 +287,6 @@ pub fn debug_print_paths() -> Nil {
   io.println("================================\n")
 }
 
-/// Join the primary node with simple reliable approach
-///
-/// Attempts to join the primary node, with retries in case of failure.
-/// This is a crucial function for establishing the cluster.
-///
-/// # Arguments
-/// - `cluster`: Reference to the cluster actor
-/// - `primary_node`: Name of the primary node to join
-/// - `retries`: Number of remaining retry attempts
-///
-/// # Returns
-/// - `Ok(Nil)` if join succeeded
-/// - `Error(String)` with error message if join failed after all retries
 fn join_primary_with_retry(
   cluster: process.Subject(khepri_gleam_cluster.ClusterMessage),
   primary_node: String,
@@ -281,12 +298,8 @@ fn join_primary_with_retry(
       case khepri_gleam_cluster.join(cluster, primary_node, 5000) {
         Ok(_) -> {
           io.println("Successfully joined the cluster!")
-
-          // Wait much longer for the cluster to stabilize
           io.println("Waiting for cluster to stabilize...")
           process.sleep(10_000)
-          // Increased to 10 seconds
-
           Ok(Nil)
         }
         Error(err) -> {
@@ -301,26 +314,14 @@ fn join_primary_with_retry(
 }
 
 /// Store a service state in the Khepri store with metadata
-///
-/// # Arguments
-/// - `service`: Name of the service to store
-/// - `state`: The ServiceState to store
-///
-/// # Returns
-/// - `Ok(Nil)` if store succeeded
-/// - `Error(String)` with error message if store failed
 pub fn store_service_state(
   service: String,
   state: ServiceState,
 ) -> Result(Nil, String) {
-  // Use consistent path format
   let path = "/:services/" <> service
-
-  // Get current node name for metadata
   let current_node = atom.to_string(node.to_atom(node.self()))
   let timestamp = int.to_string(erlang.system_time(erlang.Millisecond))
 
-  // Convert state to string
   let state_string = case state {
     Running -> "running"
     Stopped -> "stopped"
@@ -329,36 +330,121 @@ pub fn store_service_state(
     Custom(message) -> message
   }
 
-  // Store as a tuple with metadata
   let khepri_path = khepri_gleam.to_khepri_path(path)
+  let service_data = #(state_string, current_node, timestamp)
+
   io.println("Writing to path: " <> string.inspect(khepri_path))
 
-  // Store as a tuple with metadata: #(state_string, node, timestamp)
-  let service_data = #(state_string, current_node, timestamp)
-  khepri_gleam.put(khepri_path, service_data)
+  case has_local_khepri() {
+    True -> {
+      khepri_gleam.put(khepri_path, service_data)
 
-  Ok(Nil)
+      // Also update the service list
+      update_service_list(service)
+
+      Ok(Nil)
+    }
+    False -> {
+      io.println("Local Khepri not available, using RPC")
+
+      case get_cluster_node_with_khepri() {
+        Ok(remote_node) -> {
+          let path_dynamic = dynamic.from(khepri_path)
+          let data_dynamic = dynamic.from(service_data)
+
+          case
+            rpc_call_khepri(remote_node, "put", [path_dynamic, data_dynamic])
+          {
+            Ok(_) -> {
+              io.println("Successfully stored via RPC")
+
+              // Also update service list via RPC
+              update_service_list_via_rpc(remote_node, service)
+
+              Ok(Nil)
+            }
+            Error(e) -> {
+              io.println("RPC store failed: " <> e)
+              Error("Failed to store via RPC: " <> e)
+            }
+          }
+        }
+        Error(e) -> {
+          io.println("No cluster node available: " <> e)
+          Error("No cluster node available: " <> e)
+        }
+      }
+    }
+  }
 }
 
-/// Broadcast a cluster event to all nodes
-///
-/// # Arguments
-/// - `event_type`: Type of event (e.g., "node_joined")
-/// - `message`: Event message/payload
-///
-/// # Returns
-/// - `Ok(Nil)` if broadcast succeeded
-/// - `Error(String)` with error message if broadcast failed
-/// Broadcast a cluster event to all nodes - simplified version
+/// Update the list of known services
+fn update_service_list(service: String) -> Nil {
+  let services_list_path = khepri_gleam.to_khepri_path("/:service_list")
+
+  let current_services = case khepri_gleam.get(services_list_path) {
+    Ok(data) -> {
+      case decode.run(data, decode.list(decode.string)) {
+        Ok(names) -> names
+        Error(_) -> []
+      }
+    }
+    Error(_) -> []
+  }
+
+  let updated_services = case list.contains(current_services, service) {
+    True -> current_services
+    False -> [service, ..current_services]
+  }
+
+  khepri_gleam.put(services_list_path, updated_services)
+  Nil
+}
+
+/// Update service list via RPC
+fn update_service_list_via_rpc(remote_node: node.Node, service: String) -> Nil {
+  let services_list_path = khepri_gleam.to_khepri_path("/:service_list")
+
+  // Get current list via RPC
+  case rpc_call_khepri(remote_node, "get", [dynamic.from(services_list_path)]) {
+    Ok(rpc_result) -> {
+      let current_services = case
+        decode.run(rpc_result, decode_tuple2(decode.string, decode.dynamic))
+      {
+        Ok(#("ok", data)) -> {
+          case decode.run(data, decode.list(decode.string)) {
+            Ok(names) -> names
+            Error(_) -> []
+          }
+        }
+        _ -> []
+      }
+
+      let updated_services = case list.contains(current_services, service) {
+        True -> current_services
+        False -> [service, ..current_services]
+      }
+
+      // Store updated list via RPC
+      let _ =
+        rpc_call_khepri(remote_node, "put", [
+          dynamic.from(services_list_path),
+          dynamic.from(updated_services),
+        ])
+
+      Nil
+    }
+    Error(_) -> Nil
+  }
+}
+
 pub fn broadcast_cluster_event(
   event_type: String,
   node_name: String,
 ) -> Result(Nil, String) {
-  // Create a simpler event format
   let timestamp = int.to_string(erlang.system_time(erlang.Millisecond))
   let event_key = event_type <> "_" <> timestamp
 
-  // Ensure the cluster_events path exists
   case khepri_gleam.exists("/:cluster_events/") {
     False -> {
       khepri_gleam.put(
@@ -369,7 +455,6 @@ pub fn broadcast_cluster_event(
     True -> Nil
   }
 
-  // Store only the node name as the event value - much simpler
   khepri_gleam.put(
     khepri_gleam.to_khepri_path("/:cluster_events/" <> event_key),
     node_name,
@@ -378,33 +463,21 @@ pub fn broadcast_cluster_event(
   Ok(Nil)
 }
 
-/// Store a join notification with simplified format
 pub fn store_join_notification(node_name: String) -> Result(Nil, String) {
-  // Only broadcast to cluster_events, don't duplicate in services
   broadcast_cluster_event("join", node_name)
 }
 
-/// Get all cluster events
-///
-/// # Returns
-/// - `Ok(List(#(String, String)))` with event keys and values
-/// - `Error(String)` with error message if retrieval failed
 pub fn get_cluster_events() -> Result(List(#(String, String)), String) {
-  // First check if the events path exists
   case khepri_gleam.exists("/:cluster_events/") {
     False -> {
-      // No events path exists yet
       Ok([])
     }
     True -> {
-      // Use our new safe function instead of the regular list_directory
       case safe_list_directory("/:cluster_events/") {
         Ok(events) -> {
-          // Successfully retrieved events
           let parsed_events =
             list.map(events, fn(event) {
               let #(key, data) = event
-              // Be defensive with data handling
               let value = case decode.run(data, decode.string) {
                 Ok(str) -> str
                 Error(_) -> "unknown"
@@ -414,7 +487,6 @@ pub fn get_cluster_events() -> Result(List(#(String, String)), String) {
           Ok(parsed_events)
         }
         Error(_) -> {
-          // If an error occurs, return an empty list instead of failing
           Ok([])
         }
       }
@@ -422,31 +494,14 @@ pub fn get_cluster_events() -> Result(List(#(String, String)), String) {
   }
 }
 
-// External function to safely list a directory
-@external(erlang, "khepri_gleam_helper", "safe_list_directory")
-fn safe_list_directory(
-  path: String,
-) -> Result(List(#(String, dynamic.Dynamic)), String)
-
-/// Get a service state from the Khepri store
-///
-/// # Arguments
-/// - `service`: Name of the service to retrieve
-///
-/// # Returns
-/// - `Ok(ServiceState)` with the service state if retrieval succeeded
-/// - `Error(String)` with error message if retrieval failed
 pub fn get_service_state(service: String) -> Result(ServiceState, String) {
   let path = "/:services/" <> service
 
-  // Use transaction for consistency
   case khepri_gleam.tx_get_path(path) {
     Ok(result) -> {
-      // Try to decode as tuple with metadata first
       case decode_service_data(result) {
         Ok(state) -> Ok(state)
         Error(_) -> {
-          // Fallback to simple string decoding for backward compatibility
           case decode.run(result, decode.string) {
             Ok("running") -> Ok(Running)
             Ok("stopped") -> Ok(Stopped)
@@ -461,9 +516,7 @@ pub fn get_service_state(service: String) -> Result(ServiceState, String) {
   }
 }
 
-/// Decode service data from various formats
 fn decode_service_data(data: dynamic.Dynamic) -> Result(ServiceState, String) {
-  // Try to decode as tuple: #(state_string, node, timestamp)
   let tuple_decoder = decode_tuple3(decode.string, decode.string, decode.string)
 
   case decode.run(data, tuple_decoder) {
@@ -479,40 +532,50 @@ fn decode_service_data(data: dynamic.Dynamic) -> Result(ServiceState, String) {
   }
 }
 
-/// Get service info with metadata - FIXED VERSION
-///
-/// # Arguments
-/// - `service`: Name of the service to retrieve
-///
-/// # Returns
-/// - `Ok(ServiceInfo)` with the service info if retrieval succeeded
-/// - `Error(String)` with error message if retrieval failed
 pub fn get_service_info(service: String) -> Result(ServiceInfo, String) {
   io.println("Getting service info for: " <> service)
 
-  // Use the same path construction as storage
-  let khepri_path = khepri_gleam.to_khepri_path("/services/" <> service)
-  io.println("Using khepri path: " <> string.inspect(khepri_path))
+  let khepri_path = khepri_gleam.to_khepri_path("/:services/" <> service)
 
-  // Try to get the raw data directly
-  case khepri_gleam.get(khepri_path) {
-    Ok(result) -> {
-      io.println("Got raw result: " <> string.inspect(result))
+  let result = case has_local_khepri() {
+    True -> khepri_gleam.get(khepri_path)
+    False -> {
+      case get_cluster_node_with_khepri() {
+        Ok(remote_node) -> {
+          case
+            rpc_call_khepri(remote_node, "get", [dynamic.from(khepri_path)])
+          {
+            Ok(rpc_result) -> {
+              // RPC returns {ok, Value} or {error, Reason}
+              case
+                decode.run(
+                  rpc_result,
+                  decode_tuple2(decode.string, decode.dynamic),
+                )
+              {
+                Ok(#("ok", value)) -> Ok(value)
+                Ok(#(_, _)) -> Error("Not found")
+                Error(_) -> {
+                  // Maybe it returned the value directly
+                  Ok(rpc_result)
+                }
+              }
+            }
+            Error(e) -> Error(e)
+          }
+        }
+        Error(e) -> Error(e)
+      }
+    }
+  }
 
-      // Try to decode as tuple with metadata
+  case result {
+    Ok(data) -> {
       let tuple_decoder =
         decode_tuple3(decode.string, decode.string, decode.string)
 
-      case decode.run(result, tuple_decoder) {
+      case decode.run(data, tuple_decoder) {
         Ok(#(state_str, node, timestamp)) -> {
-          io.println(
-            "Successfully decoded tuple: state="
-            <> state_str
-            <> ", node="
-            <> node
-            <> ", time="
-            <> timestamp,
-          )
           let state = case state_str {
             "running" -> Running
             "stopped" -> Stopped
@@ -526,13 +589,9 @@ pub fn get_service_info(service: String) -> Result(ServiceInfo, String) {
             last_updated: timestamp,
           ))
         }
-        Error(decode_err) -> {
-          io.println("Tuple decode failed: " <> string.inspect(decode_err))
-
-          // Try as simple string fallback
-          case decode.run(result, decode.string) {
+        Error(_) -> {
+          case decode.run(data, decode.string) {
             Ok(state_str) -> {
-              io.println("Decoded as simple string: " <> state_str)
               let state = case state_str {
                 "running" -> Running
                 "stopped" -> Stopped
@@ -546,39 +605,21 @@ pub fn get_service_info(service: String) -> Result(ServiceInfo, String) {
                 last_updated: "unknown",
               ))
             }
-            Error(str_err) -> {
-              io.println(
-                "String decode also failed: " <> string.inspect(str_err),
-              )
-              Error("Could not decode service data as tuple or string")
-            }
+            Error(_) -> Error("Could not decode service data")
           }
         }
       }
     }
-    Error(e) -> {
-      io.println("Failed to get data from Khepri: " <> string.inspect(e))
-      Error("Service not found: " <> string.inspect(e))
-    }
+    Error(e) -> Error("Service not found: " <> e)
   }
 }
 
-/// Discover service names directly from Khepri using path scanning
-///
-/// This function queries all registered paths and filters for service paths,
-/// providing a reliable way to find services without depending on local registry.
-///
-/// # Returns
-/// - `Ok(List(String))` with service names if discovery succeeded
-/// - `Error(String)` with error message if discovery failed
 fn discover_services_from_paths() -> Result(List(String), String) {
   io.println("Discovering services directly from Khepri paths...")
 
-  // Get all registered paths from Khepri
   let all_paths = get_all_paths()
   io.println("All paths: " <> string.inspect(all_paths))
 
-  // Filter for service paths and extract service names
   let service_names =
     list.filter_map(all_paths, fn(path) {
       case path {
@@ -591,82 +632,246 @@ fn discover_services_from_paths() -> Result(List(String), String) {
   Ok(service_names)
 }
 
-/// List all CLI-managed services with enhanced information
-///
-/// Uses direct path discovery instead of relying on local registry,
-/// making it work across different CLI invocations and nodes.
-///
-/// # Returns
-/// - `Ok(List(ServiceInfo))` with services and their info if retrieval succeeded
-/// - `Error(String)` with error message if retrieval failed
 pub fn list_cli_services() -> Result(List(ServiceInfo), String) {
-  io.println(
-    "Getting CLI-managed services from Khepri using direct discovery...",
-  )
+  io.println("Getting CLI-managed services from Khepri...")
 
-  // Use direct path discovery instead of list_directory
-  case discover_services_from_paths() {
-    Ok(service_names) -> {
-      io.println(
-        "Found "
-        <> int.to_string(list.length(service_names))
-        <> " services via path discovery",
-      )
+  case has_local_khepri() {
+    True -> {
+      list_cli_services_local()
+    }
+    False -> {
+      io.println("Using RPC to list services")
 
-      // Get detailed info for each service
-      let services =
-        list.filter_map(service_names, fn(service_name) {
-          io.println("Trying to get info for service: " <> service_name)
-          case get_service_info(service_name) {
-            Ok(info) -> {
-              io.println("Successfully got info for: " <> service_name)
-              Ok(info)
-            }
-            Error(err) -> {
+      case get_cluster_node_with_khepri() {
+        Ok(remote_node) -> {
+          // Try the simpler approach first - get service list
+          list_services_via_service_list(remote_node)
+        }
+        Error(e) -> Error("No cluster node available: " <> e)
+      }
+    }
+  }
+}
+
+/// List services using the maintained service list
+fn list_services_via_service_list(
+  remote_node: node.Node,
+) -> Result(List(ServiceInfo), String) {
+  let services_list_path = khepri_gleam.to_khepri_path("/:service_list")
+
+  case rpc_call_khepri(remote_node, "get", [dynamic.from(services_list_path)]) {
+    Ok(rpc_result) -> {
+      case
+        decode.run(rpc_result, decode_tuple2(decode.string, decode.dynamic))
+      {
+        Ok(#("ok", data)) -> {
+          case decode.run(data, decode.list(decode.string)) {
+            Ok(service_names) -> {
               io.println(
-                "Failed to get info for " <> service_name <> ": " <> err,
+                "Found "
+                <> int.to_string(list.length(service_names))
+                <> " services in list",
               )
-              Error(Nil)
+
+              // Get info for each service
+              let service_infos =
+                list.filter_map(service_names, fn(name) {
+                  case get_service_info(name) {
+                    Ok(info) -> Ok(info)
+                    Error(_) -> Error(Nil)
+                  }
+                })
+
+              Ok(service_infos)
+            }
+            Error(_) -> {
+              io.println(
+                "Failed to decode service list, trying alternative method",
+              )
+              list_services_via_rpc_individually(remote_node)
             }
           }
-        })
+        }
+        Ok(#("error", reason)) -> {
+          io.println("Service list not found: " <> string.inspect(reason))
+          list_services_via_rpc_individually(remote_node)
+        }
+        Ok(#(_, _)) -> {
+          io.println("Unexpected RPC response format")
+          list_services_via_rpc_individually(remote_node)
+        }
+        Error(_) -> {
+          io.println("Invalid RPC response for service list")
+          list_services_via_rpc_individually(remote_node)
+        }
+      }
+    }
+    Error(e) -> {
+      io.println("RPC failed: " <> e)
+      Error("Failed to get service list: " <> e)
+    }
+  }
+}
 
-      io.println(
-        "Successfully retrieved info for "
-        <> int.to_string(list.length(services))
-        <> " services",
-      )
+/// Alternative method - use get_children_direct
+fn list_services_via_rpc_individually(
+  remote_node: node.Node,
+) -> Result(List(ServiceInfo), String) {
+  // Call the helper function on the remote node to get children
+  let node_atom = node.to_atom(remote_node)
+  let module_atom = atom.create_from_string("khepri_gleam_helper")
+  let function_atom = atom.create_from_string("get_children_direct")
+  
+  // Create the path as a list of bit arrays (binaries in Erlang)
+  // Note: Don't include the colon prefix - Khepri paths don't use it
+  let services_path = [<<"services":utf8>>]
+  let args = [dynamic.from(services_path)]
+
+  io.println(
+    "Calling khepri_gleam_helper:get_children_direct on "
+    <> atom.to_string(node_atom),
+  )
+  io.println("Getting children for path: " <> string.inspect(services_path))
+
+  let result = rpc_call_raw(node_atom, module_atom, function_atom, args)
+
+  io.println("RPC result type: " <> string.inspect(dynamic.classify(result)))
+  io.println("Raw RPC result: " <> string.inspect(result))
+
+  // Looking at the output, the RPC returns Ok([...]) 
+  // The Erlang function returns {ok, Children} which Gleam shows as Ok(...)
+  // But it's wrapped in a dynamic, so we need to unwrap it properly
+  
+  // First, let's try to access the internals as a tagged tuple
+  // Erlang {ok, Value} is a 2-tuple where first element is atom 'ok'
+  case decode.run(result, decode.at([1], decode.list(decode_tuple2(decode.string, decode.dynamic)))) {
+    Ok(children) -> {
+      io.println("Successfully decoded " <> int.to_string(list.length(children)) <> " services")
+      let service_infos = list.filter_map(children, fn(child) {
+        let #(name, data) = child
+        decode_service_info_from_data(name, data)
+      })
+      Ok(service_infos)
+    }
+    Error(_) -> {
+      // Try another approach - decode as a 2-tuple where first element is "ok"
+      case decode.run(result, decode_tuple2(decode.dynamic, decode.list(decode_tuple2(decode.string, decode.dynamic)))) {
+        Ok(#(_, children)) -> {
+          io.println("Successfully decoded via tuple: " <> int.to_string(list.length(children)) <> " services")
+          let service_infos = list.filter_map(children, fn(child) {
+            let #(name, data) = child
+            decode_service_info_from_data(name, data)
+          })
+          Ok(service_infos)
+        }
+        Error(e) -> {
+          io.println("Failed to decode result: " <> string.inspect(e))
+          io.println("Trying direct list decode...")
+          // Last attempt - maybe it's just the list directly
+          case decode.run(result, decode.list(decode_tuple2(decode.string, decode.dynamic))) {
+            Ok(children) -> {
+              io.println("Direct list decode worked!")
+              let service_infos = list.filter_map(children, fn(child) {
+                let #(name, data) = child
+                decode_service_info_from_data(name, data)
+              })
+              Ok(service_infos)
+            }
+            Error(_) -> {
+              io.println("All decode attempts failed")
+              Ok([])
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/// Helper to decode service info from raw data
+fn decode_service_info_from_data(
+  name: String,
+  data: dynamic.Dynamic,
+) -> Result(ServiceInfo, Nil) {
+  // Skip metadata entries
+  case name {
+    "services" | "service_states" -> Error(Nil)
+    _ -> {
+      // Try to decode the service data
+      let tuple_decoder =
+        decode_tuple3(decode.string, decode.string, decode.string)
+
+      case decode.run(data, tuple_decoder) {
+        Ok(#(state_str, node, timestamp)) -> {
+          let state = case state_str {
+            "running" -> Running
+            "stopped" -> Stopped
+            "failed" -> Failed
+            other -> Custom(other)
+          }
+          Ok(ServiceInfo(
+            name: name,
+            state: state,
+            node: node,
+            last_updated: timestamp,
+          ))
+        }
+        Error(_) -> {
+          // Fallback for simple string
+          case decode.run(data, decode.string) {
+            Ok(state_str) -> {
+              let state = case state_str {
+                "running" -> Running
+                "stopped" -> Stopped
+                "failed" -> Failed
+                other -> Custom(other)
+              }
+              Ok(ServiceInfo(
+                name: name,
+                state: state,
+                node: "unknown",
+                last_updated: "unknown",
+              ))
+            }
+            Error(_) -> Error(Nil)
+          }
+        }
+      }
+    }
+  }
+}
+
+fn list_cli_services_local() -> Result(List(ServiceInfo), String) {
+  case discover_services_from_paths() {
+    Ok(service_names) -> {
+      let services =
+        list.filter_map(service_names, fn(service_name) {
+          case get_service_info(service_name) {
+            Ok(info) -> Ok(info)
+            Error(_) -> Error(Nil)
+          }
+        })
       Ok(services)
     }
     Error(err) -> {
-      io.println("Direct discovery failed: " <> err)
-      // Fallback to the old method
       fallback_list_services()
     }
   }
 }
 
-/// Fallback method using list_directory
 fn fallback_list_services() -> Result(List(ServiceInfo), String) {
   io.println("Using fallback list_directory method...")
 
-  case khepri_gleam.list_directory("/services/") {
+  case khepri_gleam.list_directory("/:services/") {
     Ok(items) -> {
-      io.println(
-        "Found " <> int.to_string(list.length(items)) <> " items in /services/",
-      )
-
-      // Convert items to ServiceInfo, filtering out metadata entries
       let services =
         list.filter_map(items, fn(item) {
           let #(name, data) = item
 
-          // Skip metadata entries
           case name {
             "services" -> Error(Nil)
             "service_states" -> Error(Nil)
             _ -> {
-              // Try to decode as tuple with metadata
               let tuple_decoder =
                 decode_tuple3(decode.string, decode.string, decode.string)
 
@@ -686,7 +891,6 @@ fn fallback_list_services() -> Result(List(ServiceInfo), String) {
                   ))
                 }
                 Error(_) -> {
-                  // Fallback for services without metadata
                   let state = case decode.run(data, decode.string) {
                     Ok("running") -> Running
                     Ok("stopped") -> Stopped
@@ -706,25 +910,14 @@ fn fallback_list_services() -> Result(List(ServiceInfo), String) {
           }
         })
 
-      io.println(
-        "Processed " <> int.to_string(list.length(services)) <> " services",
-      )
       Ok(services)
     }
     Error(err) -> Error("Fallback also failed: " <> err)
   }
 }
 
-/// Remove a service from the Khepri store
-///
-/// # Arguments
-/// - `service`: Name of the service to remove
-///
-/// # Returns
-/// - `Ok(Nil)` if removal succeeded
-/// - `Error(String)` with error message if removal failed
 pub fn remove_service_state(service: String) -> Result(Nil, String) {
-  let khepri_path = khepri_gleam.to_khepri_path("/services/" <> service)
+  let khepri_path = khepri_gleam.to_khepri_path("/:services/" <> service)
   io.println("Removing service from path: " <> string.inspect(khepri_path))
 
   khepri_gleam.delete(khepri_path)
@@ -733,11 +926,6 @@ pub fn remove_service_state(service: String) -> Result(Nil, String) {
   Ok(Nil)
 }
 
-/// List all services and their states (backward compatibility)
-///
-/// # Returns
-/// - `Ok(List(#(String, ServiceState)))` with services and states if retrieval succeeded
-/// - `Error(String)` with error message if retrieval failed
 pub fn list_services() -> Result(List(#(String, ServiceState)), String) {
   case list_cli_services() {
     Ok(services) -> {
@@ -751,36 +939,38 @@ pub fn list_services() -> Result(List(#(String, ServiceState)), String) {
   }
 }
 
-/// List services with a more direct approach (kept for compatibility)
-///
-/// # Returns
-/// - `Ok(List(#(String, ServiceState)))` with services and states if retrieval succeeded
-/// - `Error(String)` with error message if retrieval failed
 pub fn list_services_direct() -> Result(List(#(String, ServiceState)), String) {
   list_services()
 }
 
-/// Get all registered paths from Khepri
-///
-/// External function that retrieves all paths from the Khepri store.
-///
-/// # Returns
-/// - List of path component lists
 @external(erlang, "khepri_gleam_helper", "get_registered_paths")
-pub fn get_all_paths() -> List(List(String))
+pub fn get_all_paths() -> List(List(String)) {
+  io.println("Getting all paths from Khepri...")
+  
+  case has_local_khepri() {
+    True -> {
+      // Use local Khepri
+      // For now, since the debug function is just for diagnostics,
+      // return an empty list to avoid complexity
+      []
+    }
+    False -> {
+      // Try to get from remote node
+      case get_cluster_node_with_khepri() {
+        Ok(remote_node) -> {
+          // For now, just return empty list since we're mainly interested in services
+          []
+        }
+        Error(_) -> {
+          io.println("Failed to get paths from Khepri")
+          []
+        }
+      }
+    }
+  }
+}
 
-/// Test connection to primary node
-///
-/// Attempts to connect directly to the primary node to verify connectivity.
-///
-/// # Arguments
-/// - `primary_node`: Name of the primary node
-///
-/// # Returns
-/// - `True` if connection succeeded
-/// - `False` if connection failed
 fn test_primary_connection(primary_node: String) -> Bool {
-  // Try to ping the primary node directly
   let node_atom = atom.create_from_string(primary_node)
   case node.connect(node_atom) {
     Ok(_) -> {
@@ -794,31 +984,16 @@ fn test_primary_connection(primary_node: String) -> Bool {
   }
 }
 
-/// Get RA cluster members
-///
-/// External function to access Erlang's RA cluster membership information.
-///
-/// # Arguments
-/// - `cluster_name`: Name of the RA cluster
-///
-/// # Returns
-/// - Dynamic containing cluster membership information
-@external(erlang, "ra", "members")
-fn ra_members(cluster_name: String) -> dynamic.Dynamic
-
-// Add with other external declarations
-@external(erlang, "khepri_gleam_cluster_helper", "is_store_running")
-fn is_khepri_running_raw(store_id: String) -> Bool
-
-// Add this helper function
-fn is_khepri_running() -> Bool {
-  is_khepri_running_raw("khepri")
+/// Check if this is a client command that shouldn't start Khepri
+pub fn should_run_as_client(args: List(String)) -> Bool {
+  case args {
+    ["start", ..] -> True
+    ["stop", ..] -> True
+    ["restart", ..] -> True
+    ["status", ..] -> True
+    ["list"] -> True
+    ["list-cluster"] -> True
+    ["remove", ..] -> True
+    _ -> False
+  }
 }
-
-// External function declarations
-@external(erlang, "khepri_gleam_cluster_helper", "wait_for_leader")
-fn wait_for_leader_raw() -> Result(Nil, String)
-
-// Add this new declaration
-@external(erlang, "khepri_gleam_cluster_helper", "get_cluster_members")
-fn get_cluster_members_raw() -> Result(List(String), String)

@@ -19,6 +19,9 @@
             elixir 
             jq
             python3  # For our test HTTP server
+            zellij   # For interactive testing environment
+            curl     # For testing HTTP endpoints
+            netcat   # For port checking
           ];
           
           shellHook = ''
@@ -111,6 +114,43 @@
               gleam run -m service_manager -- start --user test-echo
               sleep 2
               gleam run -m service_manager -- status --user test-echo
+            }
+            
+            # New diagnostic functions
+            blixard-diag() {
+              # Run the diagnostic script
+              bash scripts/blixard_diag.sh
+            }
+            
+            blixard-test-manual() {
+              # Run manual test sequence
+              bash scripts/manual_test.sh
+            }
+            
+            blixard-test-zellij() {
+              # Launch Zellij test environment
+              bash scripts/test_with_zellij.sh
+            }
+            
+            blixard-clean() {
+              # Clean up all Blixard processes and logs
+              echo "Cleaning up Blixard processes and logs..."
+              killall beam.smp 2>/dev/null || true
+              rm -f /tmp/blixard*.log
+              rm -f khepri#*/0*.wal 2>/dev/null || true
+              echo "Cleanup complete"
+            }
+            
+            blixard-logs() {
+              # Show recent logs from all nodes
+              echo "=== Recent Blixard Logs ==="
+              for log in /tmp/blixard*.log; do
+                if [ -f "$log" ]; then
+                  echo ""
+                  echo "--- $log ---"
+                  tail -20 "$log"
+                fi
+              done
               
               echo ""
               echo "Check logs with: journalctl --user -u test-echo -f"
@@ -147,6 +187,12 @@
             echo "  blixard-test-echo       - Test with echo service (simpler)"
             echo "  blixard-clean           - Stop services and cluster"
             echo "  blixard-debug-service   - Debug a service (e.g., blixard-debug-service test-http-server)"
+            echo ""
+            echo "New diagnostic commands:"
+            echo "  blixard-diag            - Quick system diagnostics"
+            echo "  blixard-test-manual     - Run automated test sequence"
+            echo "  blixard-test-zellij     - Launch interactive Zellij test environment"
+            echo "  blixard-logs            - Show recent logs from all nodes"
             echo ""
             echo "Quick start:"
             echo "  1. Run 'blixard-build'"

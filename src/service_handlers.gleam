@@ -16,6 +16,7 @@ import gleam/list
 import gleam/result
 import gleam/string
 import khepri_store
+import node_manager
 import systemd
 
 // Only showing the updated function - rest of the file remains the same
@@ -519,6 +520,30 @@ pub fn handle_list_cluster() -> Nil {
       list.each(connected_nodes, fn(node_name) {
         io.println("- " <> atom.to_string(node.to_atom(node_name)))
       })
+    }
+  }
+}
+
+/// Handler for cleaning up Khepri data and stopping all instances
+///
+/// # Effects
+/// - Stops all running cluster nodes
+/// - Removes Khepri data directories
+/// - Kills any remaining Blixard processes
+pub fn handle_cleanup() -> Result(Nil, String) {
+  io.println("🧹 Starting cleanup of Khepri and Blixard instances...")
+
+  // Import node_manager for cleanup functions
+  let cleanup_result = node_manager.cleanup_all_instances()
+
+  case cleanup_result {
+    Ok(_) -> {
+      io.println("✅ Cleanup completed successfully")
+      Ok(Nil)
+    }
+    Error(err) -> {
+      io.println("❌ Cleanup failed: " <> err)
+      Error(err)
     }
   }
 }

@@ -1,0 +1,29 @@
+layout {
+    tab name="Blixard Test" focus=true {
+        pane split_direction="vertical" {
+            // Left side - Cluster nodes
+            pane split_direction="horizontal" size="50%" {
+                pane name="Node 1" {
+                    command "bash"
+                    args "-c" "cd /home/brittonr/git/blixard && nix develop -c bash -c 'echo \"=== Starting Node 1 ===\" && gleam run -m service_manager -- --join-cluster'"
+                }
+                pane name="Node 2" {
+                    command "bash"
+                    args "-c" "cd /home/brittonr/git/blixard && sleep 3 && nix develop -c bash -c 'echo \"=== Starting Node 2 ===\" && gleam run -m service_manager -- --join-cluster'"
+                }
+            }
+            
+            // Right side - Commands and monitoring
+            pane split_direction="horizontal" size="50%" {
+                pane name="Commands" size="60%" {
+                    command "nix"
+                    args "develop" "/home/brittonr/git/blixard" "-c" "bash"
+                }
+                pane name="Monitor" size="40%" {
+                    command "bash"
+                    args "-c" "cd /home/brittonr/git/blixard && sleep 10 && watch -n 3 'bash scripts/blixard_diag.sh'"
+                }
+            }
+        }
+    }
+}
