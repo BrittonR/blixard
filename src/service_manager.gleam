@@ -71,14 +71,16 @@ fn run_cli_command_with_cluster(args: List(String)) -> Nil {
 
       // Process the CLI command
       cli.handle_command(args)
+
+      process.sleep_forever()
     }
     Error(err) -> {
       io.println("Could not connect to cluster: " <> err)
-      io.println("Running in standalone mode...")
+      // io.println("Running in standalone mode...")
 
-      // Initialize standalone Khepri and run command
-      let _ = khepri_store.init()
-      cli.handle_command(args)
+      // // Initialize standalone Khepri and run command
+      // let _ = khepri_store.init()
+      // cli.handle_command(args)
     }
   }
 }
@@ -122,7 +124,7 @@ fn connect_to_existing_cluster() -> Result(Nil, String) {
 /// Discover existing cluster nodes
 fn discover_cluster_nodes() -> List(String) {
   // Look for nodes with the "khepri_node" prefix
-  cluster_discovery.find_nodes("khepri_node")
+  cluster_discovery.find_nodes()
 }
 
 // Import the cluster discovery module

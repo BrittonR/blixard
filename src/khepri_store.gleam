@@ -77,11 +77,11 @@ pub fn init() -> Result(Nil, String) {
   khepri_gleam.start()
 
   // Ensure services path exists - use consistent format
-  let services_path = khepri_gleam.to_khepri_path("/services/")
-  case khepri_gleam.exists("/services/") {
+  let services_path = khepri_gleam.to_khepri_path("/:services/")
+  case khepri_gleam.exists("/:services/") {
     False -> {
       // Create using transactional API for reliability
-      case khepri_gleam.tx_put_path("/services/", "service_states") {
+      case khepri_gleam.tx_put_path("/:services/", "service_states") {
         Ok(_) -> io.println("Created services storage")
         Error(err) ->
           io.println("Warning: Failed to create services path: " <> err)
@@ -115,7 +115,7 @@ pub fn init_cluster(config: ClusterConfig) -> Result(Nil, String) {
   khepri_gleam.start()
 
   // Create services path - use consistent format
-  let services_path = khepri_gleam.to_khepri_path("/services/")
+  let services_path = khepri_gleam.to_khepri_path("/:services/")
   case khepri_gleam.exists("/services/") {
     False -> {
       khepri_gleam.put(services_path, "service_states")
@@ -264,7 +264,7 @@ pub fn store_service_state(
   state: ServiceState,
 ) -> Result(Nil, String) {
   // Use consistent path format
-  let path = "/services/" <> service
+  let path = "/:services/" <> service
 
   // Get current node name for metadata
   let current_node = atom.to_string(node.to_atom(node.self()))
@@ -409,7 +409,7 @@ fn catch_errors(fn_to_run: fn() -> a) -> Result(a, String) {
 /// - `Ok(ServiceState)` with the service state if retrieval succeeded
 /// - `Error(String)` with error message if retrieval failed
 pub fn get_service_state(service: String) -> Result(ServiceState, String) {
-  let path = "/services/" <> service
+  let path = "/:services/" <> service
 
   // Use transaction for consistency
   case khepri_gleam.tx_get_path(path) {

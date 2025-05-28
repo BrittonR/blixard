@@ -9,6 +9,7 @@
 
 import gleam/erlang/atom
 import gleam/erlang/node
+import gleam/erlang/process
 import gleam/int
 import gleam/io
 import gleam/list
@@ -48,6 +49,7 @@ pub fn handle_start_with_mode(
         Ok(True) -> io.println("Verified: Service is running")
         _ -> io.println("Warning: Service may not be running properly")
       }
+      process.sleep_forever()
 
       Ok(Nil)
     }

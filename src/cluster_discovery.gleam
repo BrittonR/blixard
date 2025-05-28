@@ -98,13 +98,21 @@ pub fn connect_to_node(node_name: String) -> Bool {
 ///
 /// # Returns
 /// - Number of nodes successfully connected
-pub fn connect_to_all_nodes(base_name: String) -> Int {
-  // Find potential nodes using our enhanced discovery
-  let nodes = find_nodes(base_name)
+pub fn find_nodes() -> List(String) {
+  io.println("Discovering cluster nodes with prefix: service_cli")
+
+  let local_nodes = find_local_nodes("service_cli")
+  let tailscale_nodes = find_tailscale_nodes("service_cli")
+
+  list.append(local_nodes, tailscale_nodes)
+  |> list.unique
+}
+
+pub fn connect_to_all_nodes() -> Int {
+  let nodes = find_nodes()
 
   io.println("Found potential nodes: " <> string.inspect(nodes))
 
-  // Try to connect to each node
   let connected_count =
     list.fold(nodes, 0, fn(count, node_name) {
       case connect_to_node(node_name) {
@@ -117,38 +125,51 @@ pub fn connect_to_all_nodes(base_name: String) -> Int {
   connected_count
 }
 
-pub fn find_nodes(node_prefix: String) -> List(String) {
-  io.println("Discovering cluster nodes...")
-
-  // Try to find nodes with either pattern
-  let service_nodes = find_local_nodes("service_cli")
-  let khepri_nodes = find_local_nodes("khepri_node")
-
-  // Combine and deduplicate
-  list.append(service_nodes, khepri_nodes)
-  |> list.unique
-}
-
-// Update find_local_nodes function:
 pub fn find_local_nodes(prefix: String) -> List(String) {
+  io.println("Running EPMD to find local nodes...")
+
   case shellout.command(run: "epmd", with: ["-names"], in: ".", opt: []) {
     Ok(output) -> {
+      io.println("Raw epmd output:\n" <> output)
+
       output
+      |> string.trim
       |> string.split("\n")
-      |> list.filter(fn(line) { string.contains(line, "name") })
+      |> list.filter(fn(line) {
+        case string.contains(line, "name") {
+          True -> True
+          False -> False
+        }
+      })
       |> list.filter_map(fn(line) {
         case string.split(line, " ") {
-          ["name", node_name, ..] -> {
-            // Check prefix inside the case branch
+          ["name", node_name, "at", ..] -> {
+            io.println("Parsed node: " <> node_name)
+
             case string.starts_with(node_name, prefix) {
-              True -> Ok(node_name <> "@127.0.0.1")
-              False -> Error(Nil)
+              True -> {
+                let fqdn = node_name <> "@127.0.0.1"
+                io.println(
+                  "Matched node with prefix '" <> prefix <> "': " <> fqdn,
+                )
+                Ok(fqdn)
+              }
+              False -> {
+                io.println("Skipping node (prefix mismatch): " <> node_name)
+                Error(Nil)
+              }
             }
           }
-          _ -> Error(Nil)
+          _ -> {
+            io.println("Skipping line (unexpected format): " <> line)
+            Error(Nil)
+          }
         }
       })
     }
-    Error(_) -> []
+    Error(#(_, msg)) -> {
+      io.println("Error running epmd -names: " <> msg)
+      []
+    }
   }
 }

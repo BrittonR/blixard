@@ -70,7 +70,7 @@ pub fn ensure_distribution() -> Nil {
           io.println("Running as distributed node: " <> new_name)
 
           // Try to discover and connect to other nodes
-          let _ = cluster_discovery.connect_to_all_nodes("khepri_node")
+          let _ = cluster_discovery.connect_to_all_nodes()
           Nil
         }
       }
@@ -105,7 +105,7 @@ pub fn start_cluster_node(seed_node: Option(String)) -> Nil {
   let discovered_nodes = case seed_node {
     None -> {
       // Find nodes but exclude ourselves
-      cluster_discovery.find_nodes("khepri_node")
+      cluster_discovery.find_nodes()
       |> list.filter(fn(node_name) { node_name != current_node_name })
     }
     Some(node) -> [node]
@@ -231,7 +231,7 @@ pub fn stop_cluster() -> Nil {
   ensure_distribution()
 
   // Find running nodes
-  let discovered_nodes = cluster_discovery.find_nodes("khepri_node")
+  let discovered_nodes = cluster_discovery.find_nodes()
 
   case list.length(discovered_nodes) {
     0 -> {
