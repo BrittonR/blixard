@@ -21,6 +21,9 @@ import khepri_gleam_cluster
 import khepri_store
 import replication_monitor
 
+/// Standard prefix for all Blixard nodes
+const node_prefix = "blixard"
+
 /// External function to start Erlang distribution
 /// Defined in src/distribution_helper.erl
 @external(erlang, "distribution_helper", "start_distribution")
@@ -45,12 +48,10 @@ pub fn ensure_distribution() -> Nil {
   // Check if already distributed
   case node_name == "nonode@nohost" {
     True -> {
-      // Start distribution using our helper
-      // Generate a unique CLI name with timestamp
-      let name =
-        "service_cli_" <> int.to_string(erlang.system_time(erlang.Millisecond))
+      // Start distribution using consistent naming
+      let timestamp = int.to_string(erlang.system_time(erlang.Millisecond))
+      let name = node_prefix <> "_cli_" <> timestamp
       let hostname = "127.0.0.1"
-      // Use IP address instead of "localhost"
       let cookie = "khepri_cookie"
 
       start_distribution(name, hostname, cookie)
@@ -64,21 +65,40 @@ pub fn ensure_distribution() -> Nil {
           io.println(
             "WARNING: Failed to start distribution, functionality will be limited",
           )
-          Nil
         }
         False -> {
           io.println("Running as distributed node: " <> new_name)
 
           // Try to discover and connect to other nodes
-          let _ = cluster_discovery.connect_to_all_nodes()
-          Nil
+          connect_to_cluster_nodes()
         }
       }
     }
     False -> {
       io.println("Already running in distributed mode: " <> node_name)
-      Nil
+      // Still try to connect to cluster nodes
+      connect_to_cluster_nodes()
     }
+  }
+}
+
+/// Try to connect to other cluster nodes
+fn connect_to_cluster_nodes() -> Nil {
+  let discovered = cluster_discovery.find_khepri_nodes()
+  let connected_count =
+    list.fold(discovered, 0, fn(count, node_name) {
+      case cluster_discovery.connect_to_node(node_name) {
+        True -> count + 1
+        False -> count
+      }
+    })
+
+  case connected_count > 0 {
+    True ->
+      io.println(
+        "Connected to " <> int.to_string(connected_count) <> " cluster nodes",
+      )
+    False -> io.println("No cluster nodes found to connect to")
   }
 }
 
@@ -90,22 +110,29 @@ pub fn ensure_distribution() -> Nil {
 ///
 /// # Arguments
 /// - `seed_node`: Optional seed node to connect to
-/// Start a node and join or create a cluster
 pub fn start_cluster_node(seed_node: Option(String)) -> Nil {
   io.println("Starting Khepri cluster node...")
 
-  // Start distribution
-  ensure_distribution()
+  // Use consistent naming for cluster nodes
+  let timestamp = int.to_string(erlang.system_time(erlang.Millisecond))
+  let name = node_prefix <> "_node_" <> timestamp
+  let hostname = "127.0.0.1"
+  let cookie = "khepri_cookie"
+
+  // Start distribution with consistent name
+  start_distribution(name, hostname, cookie)
 
   // Get our own node name
   let current_node = node.self()
   let current_node_name = atom.to_string(node.to_atom(current_node))
 
+  io.println("Started as node: " <> current_node_name)
+
   // Try to discover existing nodes if no seed node was provided
   let discovered_nodes = case seed_node {
     None -> {
       // Find nodes but exclude ourselves
-      cluster_discovery.find_nodes()
+      cluster_discovery.find_khepri_nodes()
       |> list.filter(fn(node_name) { node_name != current_node_name })
     }
     Some(node) -> [node]
@@ -231,7 +258,7 @@ pub fn stop_cluster() -> Nil {
   ensure_distribution()
 
   // Find running nodes
-  let discovered_nodes = cluster_discovery.find_nodes()
+  let discovered_nodes = cluster_discovery.find_khepri_nodes()
 
   case list.length(discovered_nodes) {
     0 -> {

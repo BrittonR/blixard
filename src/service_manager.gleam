@@ -1,7 +1,11 @@
 // src/service_manager.gleam
 import cli
+import cluster_discovery
 import gleam/erlang
+import gleam/erlang/atom
+import gleam/erlang/node
 import gleam/erlang/process
+import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -71,61 +75,98 @@ fn run_cli_command_with_cluster(args: List(String)) -> Nil {
 
       // Process the CLI command
       cli.handle_command(args)
-
-      process.sleep_forever()
     }
     Error(err) -> {
       io.println("Could not connect to cluster: " <> err)
-      // io.println("Running in standalone mode...")
+      io.println("Running in standalone mode...")
 
-      // // Initialize standalone Khepri and run command
-      // let _ = khepri_store.init()
-      // cli.handle_command(args)
+      // Initialize standalone Khepri and run command
+      case khepri_store.init() {
+        Ok(_) -> {
+          io.println("Initialized standalone Khepri store")
+          cli.handle_command(args)
+        }
+        Error(init_err) -> {
+          io.println("Failed to initialize standalone store: " <> init_err)
+        }
+      }
     }
   }
 }
 
-/// Try to connect to an existing cluster
+/// Try to connect to an existing cluster with better discovery
 fn connect_to_existing_cluster() -> Result(Nil, String) {
-  // Try to discover existing cluster nodes
-  let discovered_nodes = discover_cluster_nodes()
+  // Try multiple discovery methods
+  let discovered_nodes = discover_all_cluster_nodes()
 
   case list.length(discovered_nodes) > 0 {
     True -> {
-      // Found cluster nodes, try to join
-      let primary_node = case list.first(discovered_nodes) {
-        Ok(node) -> node
-        Error(_) -> "unknown"
-      }
-
       io.println(
-        "Found cluster node: " <> primary_node <> ", attempting to join...",
+        "Found "
+        <> int.to_string(list.length(discovered_nodes))
+        <> " potential cluster nodes",
       )
 
-      // Initialize cluster connection
+      // Try to connect to each node until one succeeds
+      try_connect_to_nodes(discovered_nodes)
+    }
+    False -> {
+      // No nodes found, but check if we're already connected
+      let connected = node.visible()
+      case list.length(connected) > 0 {
+        True -> {
+          io.println("Already connected to cluster nodes")
+          Ok(Nil)
+        }
+        False -> Error("No cluster nodes found")
+      }
+    }
+  }
+}
+
+/// Try to connect to a list of nodes
+fn try_connect_to_nodes(nodes: List(String)) -> Result(Nil, String) {
+  case nodes {
+    [] -> Error("Failed to connect to any nodes")
+    [node_name, ..rest] -> {
+      io.println("Attempting to connect to: " <> node_name)
+
+      // Try to join this node's Khepri cluster
       let config =
         khepri_store.ClusterConfig(
-          node_role: khepri_store.Secondary(primary_node),
+          node_role: khepri_store.Secondary(node_name),
           cookie: "khepri_cookie",
         )
 
       case khepri_store.init_cluster(config) {
         Ok(_) -> {
-          io.println("Successfully joined cluster")
+          io.println("Successfully joined cluster via " <> node_name)
           Ok(Nil)
         }
-        Error(err) -> Error("Failed to join cluster: " <> err)
+        Error(err) -> {
+          io.println("Failed to join via " <> node_name <> ": " <> err)
+          // Try the next node
+          try_connect_to_nodes(rest)
+        }
       }
     }
-    False -> Error("No cluster nodes found")
   }
 }
 
-/// Discover existing cluster nodes
-fn discover_cluster_nodes() -> List(String) {
-  // Look for nodes with the "khepri_node" prefix
-  cluster_discovery.find_nodes()
-}
+/// Discover all possible cluster nodes
+fn discover_all_cluster_nodes() -> List(String) {
+  // Get all nodes from various sources
+  let discovered = cluster_discovery.find_khepri_nodes()
+  let visible =
+    node.visible()
+    |> list.map(fn(n) { atom.to_string(node.to_atom(n)) })
 
-// Import the cluster discovery module
-import cluster_discovery
+  // Combine and deduplicate
+  list.append(discovered, visible)
+  |> list.unique
+  |> list.filter(fn(node_name) {
+    // Filter out our own node
+    let self_name = atom.to_string(node.to_atom(node.self()))
+    node_name != self_name
+  })
+}

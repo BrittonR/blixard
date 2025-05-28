@@ -7,6 +7,7 @@
 // It supports both standalone and clustered operation modes.
 
 import gleam/dynamic
+import gleam/dynamic/decode
 import gleam/erlang
 import gleam/erlang/atom
 import gleam/erlang/node
@@ -18,6 +19,28 @@ import gleam/result
 import gleam/string
 import khepri_gleam
 import khepri_gleam_cluster
+
+/// Helper function to decode a 3-tuple from dynamic data
+fn decode_tuple3(
+  first_decoder: decode.Decoder(a),
+  second_decoder: decode.Decoder(b),
+  third_decoder: decode.Decoder(c),
+) -> decode.Decoder(#(a, b, c)) {
+  // First decode the element at index 0
+  decode.at([0], first_decoder)
+  |> decode.then(fn(first_value) {
+    // Then decode the element at index 1
+    decode.at([1], second_decoder)
+    |> decode.then(fn(second_value) {
+      // Finally decode the element at index 2
+      decode.at([2], third_decoder)
+      |> decode.map(fn(third_value) {
+        // Combine them into a tuple
+        #(first_value, second_value, third_value)
+      })
+    })
+  })
+}
 
 /// Service state type definition
 /// Represents the possible states of a managed service
@@ -97,6 +120,21 @@ pub fn init() -> Result(Nil, String) {
 @external(erlang, "khepri_gleam_cluster_helper", "wait_for_leader")
 fn wait_for_leader_raw() -> Result(Nil, String)
 
+/// Check if we're already part of a Khepri cluster
+fn is_already_in_cluster() -> Bool {
+  // Check if Khepri is already running and has data
+  case khepri_gleam.exists("/") {
+    True -> {
+      // Check if we have cluster members
+      case khepri_gleam_cluster.get_cluster_members() {
+        Ok(members) -> list.length(members) > 0
+        Error(_) -> False
+      }
+    }
+    False -> False
+  }
+}
+
 /// Initialize Khepri with clustering support
 ///
 /// Sets up a clustered Khepri store that replicates data across nodes.
@@ -110,60 +148,78 @@ fn wait_for_leader_raw() -> Result(Nil, String)
 /// - `Ok(Nil)` if initialization succeeded
 /// - `Error(String)` with error message if initialization failed
 pub fn init_cluster(config: ClusterConfig) -> Result(Nil, String) {
-  // Start Khepri first
-  io.println("Starting Khepri...")
-  khepri_gleam.start()
-
-  // Create services path - use consistent format
-  let services_path = khepri_gleam.to_khepri_path("/:services/")
-  case khepri_gleam.exists("/services/") {
-    False -> {
-      khepri_gleam.put(services_path, "service_states")
-      io.println("Created services storage")
+  // Check if we're already in a cluster
+  case is_already_in_cluster() {
+    True -> {
+      io.println("Already part of a Khepri cluster, skipping initialization")
+      Ok(Nil)
     }
-    True -> io.println("Services storage exists")
-  }
-
-  // Create cluster_events path
-  let events_path = khepri_gleam.to_khepri_path("/:cluster_events/")
-  case khepri_gleam.exists("/:cluster_events/") {
     False -> {
-      khepri_gleam.put(events_path, "cluster_events")
-      io.println("Created cluster events storage")
-    }
-    True -> io.println("Cluster events storage exists")
-  }
+      // Start Khepri first
+      io.println("Starting Khepri...")
+      khepri_gleam.start()
 
-  // Start the cluster actor
-  case khepri_gleam_cluster.start() {
-    Ok(cluster) -> {
-      // Handle cluster based on role
+      // Only create initial paths if this is a new primary node
       case config.node_role {
         Primary -> {
-          // Wait longer for leader election (10 seconds)
-          // This is important for cluster stability
-          io.println("Waiting longer for leader election...")
-          process.sleep(10_000)
-
-          // Try the simple version first with no timeout
-          // This should be safer than the version with a timeout
-          case wait_for_leader_safely() {
-            Ok(_) -> {
-              io.println("Leader election complete")
-              Ok(Nil)
+          // Create services path - use consistent format
+          let services_path = khepri_gleam.to_khepri_path("/:services/")
+          case khepri_gleam.exists("/services/") {
+            False -> {
+              khepri_gleam.put(services_path, "service_states")
+              io.println("Created services storage")
             }
-            Error(err) -> Error("Leader election failed: " <> err)
+            True -> io.println("Services storage exists")
+          }
+
+          // Create cluster_events path
+          let events_path = khepri_gleam.to_khepri_path("/:cluster_events/")
+          case khepri_gleam.exists("/:cluster_events/") {
+            False -> {
+              khepri_gleam.put(events_path, "cluster_events")
+              io.println("Created cluster events storage")
+            }
+            True -> io.println("Cluster events storage exists")
           }
         }
-        Secondary(primary_node) -> {
-          // Secondary node - join the primary
-          io.println("Joining primary node: " <> primary_node)
-          join_primary_with_retry(cluster, primary_node, 5)
+        Secondary(_) -> {
+          // Don't create paths on secondary nodes, they'll replicate from primary
+          io.println("Secondary node - skipping path creation")
         }
       }
+
+      // Start the cluster actor
+      case khepri_gleam_cluster.start() {
+        Ok(cluster) -> {
+          // Handle cluster based on role
+          case config.node_role {
+            Primary -> {
+              // Wait longer for leader election (10 seconds)
+              // This is important for cluster stability
+              io.println("Waiting longer for leader election...")
+              process.sleep(10_000)
+
+              // Try the simple version first with no timeout
+              // This should be safer than the version with a timeout
+              case wait_for_leader_safely() {
+                Ok(_) -> {
+                  io.println("Leader election complete")
+                  Ok(Nil)
+                }
+                Error(err) -> Error("Leader election failed: " <> err)
+              }
+            }
+            Secondary(primary_node) -> {
+              // Secondary node - join the primary
+              io.println("Joining primary node: " <> primary_node)
+              join_primary_with_retry(cluster, primary_node, 5)
+            }
+          }
+        }
+        Error(err) ->
+          Error("Failed to start cluster actor: " <> string.inspect(err))
+      }
     }
-    Error(err) ->
-      Error("Failed to start cluster actor: " <> string.inspect(err))
   }
 }
 
@@ -233,9 +289,6 @@ fn join_primary_with_retry(
           io.println("Waiting for cluster to stabilize...")
           process.sleep(10_000)
           // Increased to 10 seconds
-
-          // Skip writing test data immediately - just consider the join successful
-          // We'll verify replication in the separate test processes
 
           Ok(Nil)
         }
@@ -339,11 +392,6 @@ pub fn store_join_notification(node_name: String) -> Result(Nil, String) {
 /// # Returns
 /// - `Ok(List(#(String, String)))` with event keys and values
 /// - `Error(String)` with error message if retrieval failed
-/// Get all cluster events
-///
-/// # Returns
-/// - `Ok(List(#(String, String)))` with event keys and values
-/// - `Error(String)` with error message if retrieval failed
 pub fn get_cluster_events() -> Result(List(#(String, String)), String) {
   // First check if the events path exists
   case khepri_gleam.exists("/:cluster_events/") {
@@ -360,7 +408,7 @@ pub fn get_cluster_events() -> Result(List(#(String, String)), String) {
             list.map(events, fn(event) {
               let #(key, data) = event
               // Be defensive with data handling
-              let value = case dynamic.string(data) {
+              let value = case decode.run(data, decode.string) {
                 Ok(str) -> str
                 Error(_) -> "unknown"
               }
@@ -383,23 +431,6 @@ fn safe_list_directory(
   path: String,
 ) -> Result(List(#(String, dynamic.Dynamic)), String)
 
-/// Helper to catch any errors during a function call
-///
-/// # Arguments
-/// - `fn_to_run`: Function to execute that might throw errors
-///
-/// # Returns
-/// - `Ok(T)` with the result if no errors occurred
-/// - `Error(String)` if an error occurred
-fn catch_errors(fn_to_run: fn() -> a) -> Result(a, String) {
-  // This is a simplified version that cannot be fully implemented in Gleam directly
-  // In a real system, this would be an external Erlang function with try/catch
-
-  // For now, just run the function and let any exceptions propagate
-  // This is a placeholder - it doesn't actually catch errors
-  Ok(fn_to_run())
-}
-
 /// Get a service state from the Khepri store
 ///
 /// # Arguments
@@ -419,7 +450,7 @@ pub fn get_service_state(service: String) -> Result(ServiceState, String) {
         Ok(state) -> Ok(state)
         Error(_) -> {
           // Fallback to simple string decoding for backward compatibility
-          case dynamic.string(result) {
+          case decode.run(result, decode.string) {
             Ok("running") -> Ok(Running)
             Ok("stopped") -> Ok(Stopped)
             Ok("failed") -> Ok(Failed)
@@ -436,7 +467,9 @@ pub fn get_service_state(service: String) -> Result(ServiceState, String) {
 /// Decode service data from various formats
 fn decode_service_data(data: dynamic.Dynamic) -> Result(ServiceState, String) {
   // Try to decode as tuple: #(state_string, node, timestamp)
-  case dynamic.tuple3(dynamic.string, dynamic.string, dynamic.string)(data) {
+  let tuple_decoder = decode_tuple3(decode.string, decode.string, decode.string)
+
+  case decode.run(data, tuple_decoder) {
     Ok(#(state_str, _node, _timestamp)) -> {
       case state_str {
         "running" -> Ok(Running)
@@ -470,9 +503,10 @@ pub fn get_service_info(service: String) -> Result(ServiceInfo, String) {
       io.println("Got raw result: " <> string.inspect(result))
 
       // Try to decode as tuple with metadata
-      case
-        dynamic.tuple3(dynamic.string, dynamic.string, dynamic.string)(result)
-      {
+      let tuple_decoder =
+        decode_tuple3(decode.string, decode.string, decode.string)
+
+      case decode.run(result, tuple_decoder) {
         Ok(#(state_str, node, timestamp)) -> {
           io.println(
             "Successfully decoded tuple: state="
@@ -499,7 +533,7 @@ pub fn get_service_info(service: String) -> Result(ServiceInfo, String) {
           io.println("Tuple decode failed: " <> string.inspect(decode_err))
 
           // Try as simple string fallback
-          case dynamic.string(result) {
+          case decode.run(result, decode.string) {
             Ok(state_str) -> {
               io.println("Decoded as simple string: " <> state_str)
               let state = case state_str {
@@ -636,11 +670,10 @@ fn fallback_list_services() -> Result(List(ServiceInfo), String) {
             "service_states" -> Error(Nil)
             _ -> {
               // Try to decode as tuple with metadata
-              case
-                dynamic.tuple3(dynamic.string, dynamic.string, dynamic.string)(
-                  data,
-                )
-              {
+              let tuple_decoder =
+                decode_tuple3(decode.string, decode.string, decode.string)
+
+              case decode.run(data, tuple_decoder) {
                 Ok(#(state_str, node, timestamp)) -> {
                   let state = case state_str {
                     "running" -> Running
@@ -657,7 +690,7 @@ fn fallback_list_services() -> Result(List(ServiceInfo), String) {
                 }
                 Error(_) -> {
                   // Fallback for services without metadata
-                  let state = case dynamic.string(data) {
+                  let state = case decode.run(data, decode.string) {
                     Ok("running") -> Running
                     Ok("stopped") -> Stopped
                     Ok("failed") -> Failed

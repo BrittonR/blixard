@@ -7,6 +7,7 @@
 // for managing systemd services across the cluster.
 
 import gleam/io
+import khepri_store
 import service_handlers
 import systemd
 
@@ -23,6 +24,7 @@ import systemd
 /// - `remove <service>`: Remove service from Blixard management
 /// - `list`: List all managed services
 /// - `list-cluster`: List all connected nodes
+/// - `debug`: Debug Khepri storage
 pub fn handle_command(args: List(String)) -> Nil {
   // Check for --user flag and extract mode
   let #(filtered_args, mode) = case args {
@@ -69,6 +71,11 @@ pub fn handle_command(args: List(String)) -> Nil {
       service_handlers.handle_list_cluster()
       Nil
     }
+    // // Debug Khepri data
+    // ["debug"] -> {
+    //   khepri_store.debug_dump_all()
+    //   Nil
+    // }
     // Default case - print usage information
     _ -> {
       print_usage()
@@ -102,6 +109,9 @@ pub fn print_usage() -> Nil {
   )
   io.println(
     "  service_manager list-cluster                 - List all connected nodes",
+  )
+  io.println(
+    "  service_manager debug                        - Debug Khepri storage",
   )
   io.println("\nThe --user flag uses systemd user services (no root required)")
   io.println("\nSpecial commands:")

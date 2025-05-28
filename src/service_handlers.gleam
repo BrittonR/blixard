@@ -18,6 +18,8 @@ import gleam/string
 import khepri_store
 import systemd
 
+// Only showing the updated function - rest of the file remains the same
+
 /// Handler for starting a service with mode
 ///
 /// # Arguments
@@ -41,15 +43,19 @@ pub fn handle_start_with_mode(
     Ok(_) -> {
       io.println("Service started successfully")
 
-      // Update state in Khepri
-      let _ = khepri_store.store_service_state(service, khepri_store.Running)
+      // Update state in Khepri FIRST
+      case khepri_store.store_service_state(service, khepri_store.Running) {
+        Ok(_) -> io.println("✅ Service state stored in Khepri")
+        Error(e) -> io.println("❌ Failed to store in Khepri: " <> e)
+      }
 
       // Verify service is running
       case systemd.is_active_with_mode(service, mode) {
-        Ok(True) -> io.println("Verified: Service is running")
-        _ -> io.println("Warning: Service may not be running properly")
+        Ok(True) -> io.println("✅ Verified: Service is running")
+        _ -> io.println("⚠️  Warning: Service may not be running properly")
       }
-      process.sleep_forever()
+
+      // Remove process.sleep_forever() - let the command complete!
 
       Ok(Nil)
     }
