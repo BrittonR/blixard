@@ -116,22 +116,19 @@ pub fn init() -> Result(Nil, String) {
   Ok(Nil)
 }
 
-// External function declarations
-@external(erlang, "khepri_gleam_cluster_helper", "wait_for_leader")
-fn wait_for_leader_raw() -> Result(Nil, String)
-
 /// Check if we're already part of a Khepri cluster
 fn is_already_in_cluster() -> Bool {
-  // Check if Khepri is already running and has data
-  case khepri_gleam.exists("/") {
+  // First check if Khepri store is even running
+  case is_khepri_running() {
+    False -> False
+    // Can't be in a cluster if Khepri isn't running
     True -> {
-      // Check if we have cluster members
-      case khepri_gleam_cluster.get_cluster_members() {
+      // Check if we have cluster members using the raw function
+      case get_cluster_members_raw() {
         Ok(members) -> list.length(members) > 0
         Error(_) -> False
       }
     }
-    False -> False
   }
 }
 
@@ -808,3 +805,20 @@ fn test_primary_connection(primary_node: String) -> Bool {
 /// - Dynamic containing cluster membership information
 @external(erlang, "ra", "members")
 fn ra_members(cluster_name: String) -> dynamic.Dynamic
+
+// Add with other external declarations
+@external(erlang, "khepri_gleam_cluster_helper", "is_store_running")
+fn is_khepri_running_raw(store_id: String) -> Bool
+
+// Add this helper function
+fn is_khepri_running() -> Bool {
+  is_khepri_running_raw("khepri")
+}
+
+// External function declarations
+@external(erlang, "khepri_gleam_cluster_helper", "wait_for_leader")
+fn wait_for_leader_raw() -> Result(Nil, String)
+
+// Add this new declaration
+@external(erlang, "khepri_gleam_cluster_helper", "get_cluster_members")
+fn get_cluster_members_raw() -> Result(List(String), String)
