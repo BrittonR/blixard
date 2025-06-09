@@ -96,21 +96,25 @@ pub fn handle_stop_with_mode(
 
       // Check if this service is managed by our CLI
       case khepri_store.get_service_info(service) {
-        Ok(_) -> {
-          // Service is managed by CLI, ask if user wants to remove it from management
-          io.println("This service is managed by Blixard.")
+        Ok(info) -> {
+          // Service is managed by CLI
+          io.println("This service is managed by Blixard (current state: " <> string.inspect(info.state) <> ")")
           io.println(
             "Choose: (1) Mark as stopped in Blixard, or (2) Remove from Blixard management",
           )
           io.println("Defaulting to option 1 (mark as stopped)...")
 
           // For now, just mark as stopped. Later we can add interactive choice.
-          let _ =
-            khepri_store.store_service_state(service, khepri_store.Stopped)
-
-          io.println(
-            "Service marked as stopped in Blixard. Use 'list' to see all managed services.",
-          )
+          case khepri_store.store_service_state(service, khepri_store.Stopped) {
+            Ok(_) -> {
+              io.println(
+                "✅ Service marked as stopped in Blixard. Use 'list' to see all managed services.",
+              )
+            }
+            Error(e) -> {
+              io.println("⚠️  Failed to update service state: " <> e)
+            }
+          }
         }
         Error(_) -> {
           // Service not managed by CLI, just stop it

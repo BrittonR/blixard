@@ -1,5 +1,5 @@
 {
-  description = "A Nix-flake-based Gleam development environment";
+  description = "A Nix-flake-based Rust and Gleam development environment for Blixard";
   inputs.nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.1";
   
   outputs = { self, nixpkgs }:
@@ -13,22 +13,49 @@
       devShells = forEachSupportedSystem ({ pkgs }: {
         default = pkgs.mkShell {
           packages = with pkgs; [ 
+            # Rust development
+            rustc
+            cargo
+            rust-analyzer
+            rustfmt
+            clippy
+            
+            # Build tools
+            pkg-config
+            openssl
+            protobuf
+            
+            # Debugging and profiling
+            gdb
+            valgrind
+            perf-tools
+            
+            # Gleam development (keeping for reference/comparison)
             gleam 
             erlang 
             rebar3 
             elixir 
+            
+            # Testing and utilities
             jq
-            python3  # For our test HTTP server
+            python3  # For test HTTP server
             zellij   # For interactive testing environment
             curl     # For testing HTTP endpoints
             netcat   # For port checking
+            systemd  # For systemctl commands
           ];
           
           shellHook = ''
-            export BLIXARD_STORAGE_MODE="khepri"
-            export BLIXARD_KHEPRI_OPS="start,stop,put_vm,get_vm,list_vms,delete_vm,put_host,get_host,list_hosts,delete_host,update_vm_state,assign_vm_to_host"
+            # Environment variables for Rust project
+            export RUST_BACKTRACE=1
+            export RUST_LOG=blixard=debug,tikv_raft=info
+            
+            # Keep existing BLIXARD settings for compatibility
+            export BLIXARD_STORAGE_MODE="redb"
+            export BLIXARD_CONFIG_PATH="$HOME/.config/blixard/config.toml"
 
-            echo "BLIXARD_STORAGE_MODE set to: $BLIXARD_STORAGE_MODE"
+            echo "Blixard Rust Development Environment"
+            echo "===================================="
             
             # Create systemd user service for testing with proper python path
             mkdir -p ~/.config/systemd/user/
@@ -73,23 +100,56 @@
             # Reload systemd user daemon
             systemctl --user daemon-reload
             
-            # Helper functions
+            # Rust-specific helper functions
             blixard-build() {
-              echo "Building blixard..."
-              gleam build
+              echo "Building Blixard (Rust)..."
+              cargo build --release
             }
             
-            blixard-start-cluster() {
-              echo "Starting blixard cluster nodes..."
-              
-              # Terminal 1: Primary node
-              echo "Start primary node in a new terminal with:"
-              echo "  gleam run -m service_manager -- --join-cluster"
-              
-              # Terminal 2: Secondary node  
-              echo ""
-              echo "Then start secondary node in another terminal with:"
-              echo "  gleam run -m service_manager -- --join-cluster khepri_node@127.0.0.1"
+            blixard-dev() {
+              echo "Building Blixard in debug mode..."
+              cargo build
+            }
+            
+            blixard-test() {
+              echo "Running tests..."
+              cargo test
+            }
+            
+            blixard-run() {
+              echo "Running Blixard..."
+              cargo run -- "$@"
+            }
+            
+            blixard-clippy() {
+              echo "Running Clippy lints..."
+              cargo clippy -- -D warnings
+            }
+            
+            blixard-fmt() {
+              echo "Formatting code..."
+              cargo fmt
+            }
+            
+            blixard-bench() {
+              echo "Running benchmarks..."
+              cargo bench
+            }
+            
+            blixard-install() {
+              echo "Installing Blixard to ~/.cargo/bin..."
+              cargo install --path .
+            }
+            
+            # Service testing functions
+            blixard-start-primary() {
+              echo "Starting primary cluster node..."
+              cargo run -- init-primary
+            }
+            
+            blixard-start-secondary() {
+              echo "Starting secondary cluster node..."
+              cargo run -- init-secondary --primary-addr 127.0.0.1:9090
             }
             
             blixard-test-service() {
@@ -99,9 +159,9 @@
               systemctl --user stop test-http-server 2>/dev/null || true
               
               # Start fresh
-              gleam run -m service_manager -- start --user test-http-server
+              cargo run -- start test-http-server --user
               sleep 2
-              gleam run -m service_manager -- status --user test-http-server
+              cargo run -- status test-http-server --user
               
               echo ""
               echo "HTTP server should be running at http://localhost:8888"
@@ -111,56 +171,38 @@
             blixard-test-echo() {
               echo "Testing with echo service..."
               
-              gleam run -m service_manager -- start --user test-echo
+              cargo run -- start test-echo --user
               sleep 2
-              gleam run -m service_manager -- status --user test-echo
+              cargo run -- status test-echo --user
             }
             
-            # New diagnostic functions
-            blixard-diag() {
-              # Run the diagnostic script
-              bash scripts/blixard_diag.sh
+            blixard-list() {
+              echo "Listing services..."
+              cargo run -- list
             }
             
-            blixard-test-manual() {
-              # Run manual test sequence
-              bash scripts/manual_test.sh
-            }
-            
-            blixard-test-zellij() {
-              # Launch Zellij test environment
-              bash scripts/test_with_zellij.sh
-            }
-            
-            blixard-clean() {
-              # Clean up all Blixard processes and logs
-              echo "Cleaning up Blixard processes and logs..."
-              killall beam.smp 2>/dev/null || true
-              rm -f /tmp/blixard*.log
-              rm -f khepri#*/0*.wal 2>/dev/null || true
-              echo "Cleanup complete"
-            }
-            
-            blixard-logs() {
-              # Show recent logs from all nodes
-              echo "=== Recent Blixard Logs ==="
-              for log in /tmp/blixard*.log; do
-                if [ -f "$log" ]; then
-                  echo ""
-                  echo "--- $log ---"
-                  tail -20 "$log"
-                fi
-              done
-              
-              echo ""
-              echo "Check logs with: journalctl --user -u test-echo -f"
+            blixard-cluster-status() {
+              echo "Checking cluster status..."
+              cargo run -- cluster-status
             }
             
             blixard-clean() {
               echo "Cleaning up..."
               systemctl --user stop test-http-server 2>/dev/null || true
               systemctl --user stop test-echo 2>/dev/null || true
-              gleam run -m service_manager -- --stop-cluster
+              rm -rf ~/.local/share/blixard
+              rm -rf ~/.config/blixard
+              echo "Cleanup complete"
+            }
+            
+            blixard-logs() {
+              echo "=== Recent Service Logs ==="
+              echo ""
+              echo "Test HTTP Server:"
+              journalctl --user -u test-http-server -n 10 --no-pager
+              echo ""
+              echo "Test Echo Service:"
+              journalctl --user -u test-echo -n 10 --no-pager
             }
             
             blixard-debug-service() {
@@ -177,28 +219,46 @@
               journalctl --user -u $SERVICE -n 20 --no-pager
             }
             
+            # Gleam compatibility functions (for reference)
+            blixard-gleam-build() {
+              echo "Building Gleam version..."
+              gleam build
+            }
+            
+            blixard-gleam-run() {
+              echo "Running Gleam version..."
+              gleam run -m service_manager -- "$@"
+            }
+            
             echo ""
-            echo "Blixard Development Environment Ready!"
+            echo "Blixard Rust Development Environment Ready!"
             echo ""
-            echo "Available commands:"
-            echo "  blixard-build           - Build the project"
-            echo "  blixard-start-cluster   - Instructions to start cluster"
+            echo "Build & Development:"
+            echo "  blixard-build           - Build release version"
+            echo "  blixard-dev             - Build debug version"
+            echo "  blixard-test            - Run tests"
+            echo "  blixard-run [args]      - Run with cargo"
+            echo "  blixard-clippy          - Run linter"
+            echo "  blixard-fmt             - Format code"
+            echo "  blixard-bench           - Run benchmarks"
+            echo "  blixard-install         - Install to ~/.cargo/bin"
+            echo ""
+            echo "Cluster Operations:"
+            echo "  blixard-start-primary   - Start primary node"
+            echo "  blixard-start-secondary - Start secondary node"
+            echo "  blixard-cluster-status  - Check cluster status"
+            echo ""
+            echo "Service Management:"
             echo "  blixard-test-service    - Test with HTTP server"
-            echo "  blixard-test-echo       - Test with echo service (simpler)"
-            echo "  blixard-clean           - Stop services and cluster"
-            echo "  blixard-debug-service   - Debug a service (e.g., blixard-debug-service test-http-server)"
+            echo "  blixard-test-echo       - Test with echo service"
+            echo "  blixard-list            - List all services"
+            echo "  blixard-clean           - Clean up everything"
+            echo "  blixard-logs            - Show service logs"
+            echo "  blixard-debug-service   - Debug a specific service"
             echo ""
-            echo "New diagnostic commands:"
-            echo "  blixard-diag            - Quick system diagnostics"
-            echo "  blixard-test-manual     - Run automated test sequence"
-            echo "  blixard-test-zellij     - Launch interactive Zellij test environment"
-            echo "  blixard-logs            - Show recent logs from all nodes"
-            echo ""
-            echo "Quick start:"
-            echo "  1. Run 'blixard-build'"
-            echo "  2. Run 'blixard-start-cluster' and follow instructions"
-            echo "  3. Run 'blixard-test-echo' for a simple test"
-            echo "  4. Run 'blixard-test-service' for HTTP server test"
+            echo "Gleam Reference (old):"
+            echo "  blixard-gleam-build     - Build Gleam version"
+            echo "  blixard-gleam-run       - Run Gleam version"
           '';
         };
       });

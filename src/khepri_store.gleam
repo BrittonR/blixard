@@ -12,6 +12,7 @@ import gleam/erlang
 import gleam/erlang/atom
 import gleam/erlang/node
 import gleam/erlang/process
+import gleam/function
 import gleam/int
 import gleam/io
 import gleam/list
@@ -114,6 +115,15 @@ fn rpc_call_raw(
   args: List(dynamic.Dynamic),
 ) -> dynamic.Dynamic
 
+@external(erlang, "rpc_helper", "call_with_timeout")
+fn rpc_call_with_timeout(
+  node: atom.Atom,
+  module: atom.Atom,
+  function: atom.Atom,
+  args: List(dynamic.Dynamic),
+  timeout: Int,
+) -> Result(dynamic.Dynamic, String)
+
 @external(erlang, "khepri_gleam_helper", "safe_list_directory")
 fn safe_list_directory(
   path: String,
@@ -158,13 +168,13 @@ fn rpc_call_khepri(
     "RPC call to " <> atom.to_string(node_atom) <> " - khepri:" <> function,
   )
 
-  let result = rpc_call_raw(node_atom, module_atom, function_atom, args)
-
-  // Simple check for RPC errors
-  let result_str = string.inspect(result)
-  case string.contains(result_str, "badrpc") {
-    True -> Error("RPC failed: " <> result_str)
-    False -> Ok(result)
+  // Use 5 second timeout for RPC calls
+  case rpc_call_with_timeout(node_atom, module_atom, function_atom, args, 5000) {
+    Ok(result) -> Ok(result)
+    Error(e) -> {
+      io.println("RPC timeout or error: " <> e)
+      Error(e)
+    }
   }
 }
 
@@ -319,7 +329,6 @@ pub fn store_service_state(
   state: ServiceState,
 ) -> Result(Nil, String) {
   let path = "/:services/" <> service
-  let current_node = atom.to_string(node.to_atom(node.self()))
   let timestamp = int.to_string(erlang.system_time(erlang.Millisecond))
 
   let state_string = case state {
@@ -331,7 +340,21 @@ pub fn store_service_state(
   }
 
   let khepri_path = khepri_gleam.to_khepri_path(path)
-  let service_data = #(state_string, current_node, timestamp)
+  
+  // Determine which node to record - if we're a CLI node connecting to a cluster,
+  // record the cluster node's name, not our ephemeral CLI node name
+  let node_to_record = case has_local_khepri() {
+    True -> atom.to_string(node.to_atom(node.self()))
+    False -> {
+      // We're a CLI node - record the cluster node we're connected to
+      case get_cluster_node_with_khepri() {
+        Ok(cluster_node) -> atom.to_string(node.to_atom(cluster_node))
+        Error(_) -> atom.to_string(node.to_atom(node.self()))
+      }
+    }
+  }
+  
+  let service_data = #(state_string, node_to_record, timestamp)
 
   io.println("Writing to path: " <> string.inspect(khepri_path))
 
@@ -533,8 +556,6 @@ fn decode_service_data(data: dynamic.Dynamic) -> Result(ServiceState, String) {
 }
 
 pub fn get_service_info(service: String) -> Result(ServiceInfo, String) {
-  io.println("Getting service info for: " <> service)
-
   let khepri_path = khepri_gleam.to_khepri_path("/:services/" <> service)
 
   let result = case has_local_khepri() {
@@ -546,7 +567,9 @@ pub fn get_service_info(service: String) -> Result(ServiceInfo, String) {
             rpc_call_khepri(remote_node, "get", [dynamic.from(khepri_path)])
           {
             Ok(rpc_result) -> {
-              // RPC returns {ok, Value} or {error, Reason}
+              
+              // The RPC helper wraps the result, so we get {ok, {ok, Value}}
+              // We need to unwrap the inner {ok, Value} tuple
               case
                 decode.run(
                   rpc_result,
@@ -554,9 +577,11 @@ pub fn get_service_info(service: String) -> Result(ServiceInfo, String) {
                 )
               {
                 Ok(#("ok", value)) -> Ok(value)
-                Ok(#(_, _)) -> Error("Not found")
-                Error(_) -> {
-                  // Maybe it returned the value directly
+                Ok(#("error", _)) -> Error("Service not found")
+                _ -> {
+                  // Fallback - the RPC might have returned the value directly
+                  // This happens when we call khepri:get and it returns {ok, Value}
+                  // but our RPC wrapper already unwrapped it
                   Ok(rpc_result)
                 }
               }
@@ -571,10 +596,40 @@ pub fn get_service_info(service: String) -> Result(ServiceInfo, String) {
 
   case result {
     Ok(data) -> {
-      let tuple_decoder =
-        decode_tuple3(decode.string, decode.string, decode.string)
+      // The RPC result sometimes comes wrapped in Ok() due to how Erlang/Gleam interop works
+      // Extract the actual tuple from Ok variant (which stores its value at index 1)
+      let tuple_data = case decode.run(data, decode.at([1], decode.dynamic)) {
+        Ok(inner) -> inner
+        Error(_) -> data
+      }
+      
+      // First try with the state as a string
+      let string_tuple_decoder = decode_tuple3(decode.string, decode.string, decode.string)
+      
+      let decoded_tuple = case decode.run(tuple_data, string_tuple_decoder) {
+        Ok(tuple_result) -> Ok(tuple_result)
+        Error(_) -> {
+          // The state might be an atom, let's decode it manually
+          case decode.run(tuple_data, decode_tuple3(decode.dynamic, decode.string, decode.string)) {
+            Ok(#(state_dyn, node, timestamp)) -> {
+              // Convert the state (might be atom) to string
+              let state_str = case atom.from_dynamic(state_dyn) {
+                Ok(a) -> atom.to_string(a)
+                Error(_) -> {
+                  case decode.run(state_dyn, decode.string) {
+                    Ok(s) -> s
+                    Error(_) -> "unknown"
+                  }
+                }
+              }
+              Ok(#(state_str, node, timestamp))
+            }
+            Error(_) -> Error("Could not decode tuple")
+          }
+        }
+      }
 
-      case decode.run(data, tuple_decoder) {
+      case decoded_tuple {
         Ok(#(state_str, node, timestamp)) -> {
           let state = case state_str {
             "running" -> Running
@@ -589,24 +644,9 @@ pub fn get_service_info(service: String) -> Result(ServiceInfo, String) {
             last_updated: timestamp,
           ))
         }
-        Error(_) -> {
-          case decode.run(data, decode.string) {
-            Ok(state_str) -> {
-              let state = case state_str {
-                "running" -> Running
-                "stopped" -> Stopped
-                "failed" -> Failed
-                other -> Custom(other)
-              }
-              Ok(ServiceInfo(
-                name: service,
-                state: state,
-                node: "unknown",
-                last_updated: "unknown",
-              ))
-            }
-            Error(_) -> Error("Could not decode service data")
-          }
+        Error(e) -> {
+          io.println("Failed to decode service info: " <> string.inspect(e))
+          Error("Could not decode service data")
         }
       }
     }
@@ -920,10 +960,31 @@ pub fn remove_service_state(service: String) -> Result(Nil, String) {
   let khepri_path = khepri_gleam.to_khepri_path("/:services/" <> service)
   io.println("Removing service from path: " <> string.inspect(khepri_path))
 
-  khepri_gleam.delete(khepri_path)
-  io.println("Service " <> service <> " removed from Khepri")
-
-  Ok(Nil)
+  case has_local_khepri() {
+    True -> {
+      khepri_gleam.delete(khepri_path)
+      io.println("Service " <> service <> " removed from local Khepri")
+      Ok(Nil)
+    }
+    False -> {
+      // Need to delete via RPC on cluster node
+      case get_cluster_node_with_khepri() {
+        Ok(remote_node) -> {
+          io.println("Deleting on remote node: " <> atom.to_string(node.to_atom(remote_node)))
+          case
+            rpc_call_khepri(remote_node, "delete", [dynamic.from(khepri_path)])
+          {
+            Ok(_) -> {
+              io.println("Service " <> service <> " removed from remote Khepri")
+              Ok(Nil)
+            }
+            Error(e) -> Error("Failed to remove from remote node: " <> e)
+          }
+        }
+        Error(e) -> Error("No cluster node available: " <> e)
+      }
+    }
+  }
 }
 
 pub fn list_services() -> Result(List(#(String, ServiceState)), String) {

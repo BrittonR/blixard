@@ -1,6 +1,32 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test outputs
+*.log
+*.tmp
+
+# Blixard specific
+/data/
+/raft-log/
+
+# Gleam/Erlang (keeping existing)
 *.beam
 *.ez
 /build
+/_build
 /khepri*
 erl_crash.dump
 khepri#*
