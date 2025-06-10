@@ -7,87 +7,92 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Development
 ```bash
 # Build and test
-gleam build                 # Build the project
-gleam test                  # Run tests
+cargo build                # Build the project
+cargo test                 # Run tests
+cargo test --features simulation  # Run deterministic simulation tests
 
-# Development helpers (from flake.nix)
-blixard-build              # Build wrapper
-blixard-test               # Test wrapper
+# Testing scripts
+./test_bootstrap.sh        # Bootstrap test (3 nodes)
+./quick_test.sh           # Quick integration test
+./test_cluster.sh         # Full cluster test
 
-# Scripts for testing and deployment
-sh scripts/manual_test.sh          # Manual testing
-sh scripts/test_cluster_with_service.sh  # Cluster testing
-sh scripts/deploy.sh              # Deployment
+# Verification
+cargo test --test proof_of_determinism  # Verify deterministic execution
 ```
 
 ### CLI Usage
 ```bash
-# Service management
-blixard start <service>     # Start a service
-blixard stop <service>      # Stop a service
-blixard list               # List all services
-blixard status <service>   # Check service status
+# Cluster node management
+cargo run -- node --id 1 --bind 127.0.0.1:7001  # Start node 1
+cargo run -- node --id 2 --bind 127.0.0.1:7002 --peer 1:127.0.0.1:7001  # Join cluster
 
-# Cluster operations
-blixard --init-primary     # Initialize primary cluster node
-blixard --init-secondary   # Initialize secondary cluster node
-blixard --join-cluster     # Join existing cluster
-
-# Key options: --user (user-level services), --verbose
+# VM management
+cargo run -- vm create --name my-vm --config /path/to/microvm.nix
+cargo run -- vm start my-vm
+cargo run -- vm stop my-vm
+cargo run -- vm list
+cargo run -- vm status my-vm
 ```
 
 ## Commands and Usage
 
-This repo is in active development with evolving commands. For current commands:
-- Check `src/service_manager.gleam` main() function for CLI argument parsing
-- Check `flake.nix` shellHook for development helper functions (blixard-*)
-- Check `README.md` for usage examples
-- Check `scripts/` directory for deployment and operational scripts
+For current commands and usage:
+- Check `src/main.rs` for CLI argument parsing
+- Check `README.md` for usage examples and quickstart guide
+- Check test scripts (`./test_*.sh`) for integration testing examples
 
 ## Core Architecture
 
-Blixard is a distributed service management system built on Gleam/Erlang with Khepri distributed storage.
+Blixard is a distributed microVM orchestration platform built in Rust with Raft consensus and deterministic testing.
 
-### Migration Planning
+### Migration Complete ✅
 
-The project is planning a migration from Gleam to Rust with **critical emphasis on retaining Raft consensus safety**. See:
-- `docs/GLEAM_TO_RUST_MIGRATION.md` - Comprehensive migration plan with testing-first approach
+**The migration from Gleam to Rust is complete!** The project now features:
+- **Raft Consensus**: Production-grade distributed consensus using tikv/raft-rs
+- **Deterministic Testing**: TigerBeetle/FoundationDB-style simulation testing fully operational
+- **Runtime Abstraction**: Complete separation between real and simulated runtime for testing
+- **Consensus Safety**: Zero tolerance for Raft consensus violations maintained
+
+**Migration Documentation**:
+- `docs/GLEAM_TO_RUST_MIGRATION.md` - Migration history and approach
 - `docs/RUST_GUIDELINES.md` - Rust coding standards and patterns
-- `docs/advanced_testing_methodologies.md` - TigerBeetle/FoundationDB-style testing approaches
-- `docs/advanced_testing_implementation.md` - Deterministic simulation testing implementation
-- `docs/DIOXUS_PATTERNS.md` - UI framework patterns (for future web interface)
-- `docs/STATE_MANAGEMENT.md` - State management approaches for Rust
+- `docs/advanced_testing_methodologies.md` - Testing methodologies implemented
+- `FINAL_SIMULATION_STATUS.md` - Complete migration verification
+- `HOW_TO_VERIFY_SIMULATION.md` - Instructions for verifying deterministic testing
 
-**Key Migration Principles**:
-- **Consensus Safety First**: Zero tolerance for Raft consensus violations
-- **Deterministic Testing**: All features developed with simulation testing from day 1
-- **Testing-Driven Development**: Implement testing infrastructure before any business logic
+**Key Achievements**:
+- **✅ Consensus Safety**: All Raft consensus operations maintain safety guarantees
+- **✅ Deterministic Testing**: 100% reproducible test execution with controlled time
+- **✅ Runtime Abstraction**: All code uses RaftNode<R: Runtime> for testability
 
 ### Key Components
 
-1. **service_manager.gleam** - Main CLI entry point, parses args and dispatches commands
-2. **node_manager.gleam** - Manages Erlang distribution and cluster formation
-3. **khepri_store.gleam** - Interface to Khepri distributed key-value store  
-4. **service_handlers.gleam** - Business logic for service management operations
-5. **systemd.gleam** - Low-level systemd interaction via shell commands
-6. **cluster_discovery.gleam** - Node discovery using Tailscale networking
-7. **replication_monitor.gleam** - Monitors cluster health and replication
+1. **src/main.rs** - CLI entry point and argument parsing
+2. **src/node.rs** - Node management and lifecycle with RealRuntime
+3. **src/raft_node_v2.rs** - Raft consensus implementation with runtime abstraction
+4. **src/state_machine.rs** - Replicated state machine for VM orchestration
+5. **src/storage.rs** - Persistent storage layer using redb
+6. **src/microvm.rs** - MicroVM lifecycle management via microvm.nix
+7. **src/network_v2.rs** - Network communication with runtime abstraction
+8. **src/runtime/simulation.rs** - Deterministic simulation testing framework
+9. **src/runtime_traits.rs** - Runtime abstraction layer (Real vs Simulated)
 
 ### Distributed System Design
 
-- **Consensus**: Uses Khepri (Raft-based) for distributed state consensus
+- **Consensus**: Uses tikv/raft-rs for production-grade distributed consensus
 - **Node Discovery**: Tailscale provides secure networking between cluster nodes
-- **Service Control**: Manages systemd services (both user and system level)
-- **CLI Architecture**: Ephemeral CLI nodes connect to persistent cluster nodes
+- **VM Management**: Direct microvm.nix integration for lightweight virtualization
+- **Storage**: Persistent state using redb with Raft log replication
+- **Testing**: Deterministic simulation with controlled time and network conditions
 
 ### Data Flow
 
-1. CLI command → service_manager.gleam argument parsing
-2. Ensure Erlang distribution active (node_manager.gleam)  
-3. Dispatch to service handler (service_handlers.gleam)
-4. Execute systemd operation (systemd.gleam)
-5. Store/update state in Khepri (khepri_store.gleam)
-6. State automatically replicates across cluster
+1. CLI command → main.rs argument parsing
+2. VM operation → state_machine.rs command processing
+3. Raft consensus → raft_node_v2.rs proposal and replication
+4. State persistence → storage.rs with redb backend
+5. VM lifecycle → microvm.rs integration with microvm.nix
+6. State replication → automatic Raft log distribution across cluster
 
 ### Configuration
 

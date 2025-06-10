@@ -9,6 +9,7 @@ A distributed microVM orchestration platform built in Rust, providing enterprise
 - **Tailscale Discovery**: Automatic node discovery via Tailscale networking
 - **Persistent Storage**: Durable state management with redb
 - **Fault Tolerant**: Designed for high availability with automatic failover
+- **Deterministic Testing**: TigerBeetle/FoundationDB-style simulation testing for reproducible verification
 
 ## Architecture
 
@@ -77,11 +78,17 @@ cargo run -- vm status my-vm
 
 ## Testing
 
-Blixard includes comprehensive testing:
+Blixard includes comprehensive testing with deterministic simulation capabilities:
 
 ```bash
 # Unit tests
 cargo test
+
+# Deterministic simulation tests (TigerBeetle/FoundationDB-style)
+cargo test --features simulation
+
+# Proof of determinism verification
+cargo test --features simulation --test proof_of_determinism
 
 # Quick integration test (2 nodes)
 ./quick_test.sh
@@ -92,6 +99,17 @@ cargo test
 # Full cluster test
 ./test_cluster.sh
 ```
+
+### Deterministic Testing
+
+Blixard features a sophisticated deterministic testing framework inspired by TigerBeetle and FoundationDB:
+
+- **Controlled Time**: Tests use simulated time that can be advanced precisely
+- **Reproducible Results**: Same seed always produces identical test execution
+- **Chaos Testing**: Network partitions, node failures, and timing edge cases
+- **Raft Safety**: Comprehensive consensus safety verification
+
+See [HOW_TO_VERIFY_SIMULATION.md](HOW_TO_VERIFY_SIMULATION.md) for verification instructions.
 
 ## Configuration
 
@@ -107,12 +125,14 @@ Nodes can be configured with:
 The codebase is organized as:
 - `src/main.rs`: CLI entry point
 - `src/node.rs`: Node management and lifecycle
-- `src/raft_node.rs`: Raft consensus implementation
+- `src/raft_node_v2.rs`: Raft consensus implementation with runtime abstraction
 - `src/state_machine.rs`: Replicated state machine
 - `src/storage.rs`: Persistent storage layer
 - `src/microvm.rs`: MicroVM integration
 - `src/network.rs`: Network communication
 - `src/tailscale.rs`: Tailscale discovery
+- `src/runtime/`: Deterministic simulation testing framework
+- `src/runtime_traits.rs`: Runtime abstraction layer for testing
 
 ## License
 
