@@ -3,6 +3,8 @@ name = "blixard"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
+description = "Distributed microVM orchestration platform"
+authors = ["Blixard Contributors"]
 
 [dependencies]
 # Consensus
@@ -86,6 +88,8 @@ pretty_assertions = "1.4"
 insta = "1.34"
 tracing-test = "0.2"
 serial_test = "3.0"
+assert_cmd = "2.0"
+predicates = "3.0"
 
 # Network simulation
 pnet = "0.34"

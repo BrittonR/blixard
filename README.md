@@ -38,6 +38,10 @@ cargo build
 
 # Run tests
 cargo test
+
+# Run CLI integration tests
+cargo test --test cli_integration_test
+cargo test --test vm_cli_test
 ```
 
 ### Running a Cluster
@@ -83,6 +87,10 @@ Blixard includes comprehensive testing with deterministic simulation capabilitie
 ```bash
 # Unit tests
 cargo test
+
+# CLI integration tests
+cargo test --test cli_integration_test
+cargo test --test vm_cli_test
 
 # Run all tests with cargo nextest (recommended for better isolation)
 cargo nextest run --all-features
