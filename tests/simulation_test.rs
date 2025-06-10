@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use blixard::runtime::simulation::SimulatedRuntime;
+use blixard::runtime_abstraction as rt;
 use blixard::raft_node_v2::RaftNode;
 use blixard::storage::Storage;
 use blixard::state_machine::StateMachineCommand;
@@ -81,7 +82,7 @@ async fn test_simulated_cluster_formation() -> Result<()> {
     }
     
     // Give cluster time to start
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    rt::sleep(Duration::from_millis(500)).await;
     
     // Try to send a proposal (this will fail if no leader elected)
     let proposal = StateMachineCommand::CreateVm {
@@ -94,7 +95,7 @@ async fn test_simulated_cluster_formation() -> Result<()> {
     }
     
     // Give some time for processing
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    rt::sleep(Duration::from_millis(200)).await;
     
     println!("Test completed");
     

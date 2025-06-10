@@ -84,6 +84,9 @@ Blixard includes comprehensive testing with deterministic simulation capabilitie
 # Unit tests
 cargo test
 
+# Run all tests with cargo nextest (recommended for better isolation)
+cargo nextest run --all-features
+
 # Deterministic simulation tests (TigerBeetle/FoundationDB-style)
 cargo test --features simulation
 

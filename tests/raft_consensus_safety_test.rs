@@ -191,7 +191,7 @@ impl RaftConsensusHarness {
         
         // Give async tasks time to process
         for _ in 0..10 {
-            tokio::time::sleep(Duration::from_millis(5)).await;
+            rt::sleep(Duration::from_millis(5)).await;
             tokio::task::yield_now().await;
         }
     }

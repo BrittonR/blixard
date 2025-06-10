@@ -2,6 +2,30 @@
 
 This document describes the various testing and diagnostic tools available for Blixard.
 
+## Rust Testing
+
+### Unit and Integration Tests
+
+```bash
+# Run all tests with all features
+cargo test --all-features
+
+# Run tests with cargo nextest (recommended - better isolation and output)
+cargo nextest run --all-features
+
+# Run only deterministic simulation tests
+cargo test --features simulation
+
+# Run specific test categories with nextest
+cargo nextest run --all-features -E 'test(deterministic) or test(proof) or test(simulation)'
+```
+
+### Important Notes
+
+- Tests use runtime abstraction (`rt::sleep` instead of `tokio::time::sleep`) for deterministic simulation
+- Tests that use simulated runtime must use `#[test]` instead of `#[tokio::test]` to avoid runtime conflicts
+- The `--all-features` flag enables the simulation feature for deterministic testing
+
 ## Quick Start
 
 After entering the Nix shell (`nix develop`), you have several testing commands available:

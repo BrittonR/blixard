@@ -36,7 +36,7 @@ async fn test_deterministic_failpoint_chaos() {
     }
 
     // Let tasks run
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    rt::sleep(Duration::from_millis(50)).await;
 
     // Test 2: Storage failures
     println!("\n💾 Testing storage failures...");
@@ -49,7 +49,7 @@ async fn test_deterministic_failpoint_chaos() {
         println!("  Storage operation completed (or failed)");
     });
 
-    tokio::time::sleep(Duration::from_millis(10)).await;
+    rt::sleep(Duration::from_millis(10)).await;
 
     // Clean up failpoints
     fail::cfg("network::before_send", "off").unwrap();

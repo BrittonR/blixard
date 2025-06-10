@@ -97,7 +97,7 @@ async fn async_integration_problems() {
     
     // But we can still use tokio directly (BAD!)
     let before = tokio::time::Instant::now();
-    tokio::time::sleep(Duration::from_millis(10)).await;
+    rt::sleep(Duration::from_millis(10)).await;
     let elapsed = before.elapsed();
     
     println!("❌ Can still use tokio directly: {:?} elapsed", elapsed);

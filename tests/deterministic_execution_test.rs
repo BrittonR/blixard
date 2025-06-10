@@ -64,7 +64,7 @@ async fn test_deterministic_task_ordering() {
             sim_rt.runtime().advance_time(Duration::from_millis(600));
             
             // Give tasks a chance to run
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            rt::sleep(Duration::from_millis(10)).await;
             
             results_clone.lock().await.clone()
         }).await
@@ -138,7 +138,7 @@ async fn test_simulated_raft_cluster() {
         sim_rt.runtime().advance_time(Duration::from_secs(2));
         
         // Let tasks process
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        rt::sleep(Duration::from_millis(50)).await;
         
         // Try to propose a command
         println!("\n📝 Proposing command to cluster");
@@ -163,7 +163,7 @@ async fn test_simulated_raft_cluster() {
         println!("\n⏩ Advancing time for consensus (500ms)");
         sim_rt.runtime().advance_time(Duration::from_millis(500));
         
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        rt::sleep(Duration::from_millis(20)).await;
         
         println!("\n✅ Simulation test completed!");
     }).await;
@@ -216,7 +216,7 @@ async fn test_deterministic_network_partition() {
         // Let cluster form
         println!("\n⏩ Forming cluster (3 seconds)");
         sim_rt.runtime().advance_time(Duration::from_secs(3));
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        rt::sleep(Duration::from_millis(50)).await;
         
         // Create network partition
         println!("\n🔪 Creating network partition: nodes [1,2] | [3,4,5]");
@@ -250,7 +250,7 @@ async fn test_deterministic_network_partition() {
         // Advance time during partition
         println!("\n⏩ Operating with partition (2 seconds)");
         sim_rt.runtime().advance_time(Duration::from_secs(2));
-        tokio::time::sleep(Duration::from_millis(30)).await;
+        rt::sleep(Duration::from_millis(30)).await;
         
         // Heal partition
         println!("\n🔧 Healing network partition");
@@ -262,7 +262,7 @@ async fn test_deterministic_network_partition() {
         // Let cluster reconcile
         println!("\n⏩ Reconciling cluster (2 seconds)");
         sim_rt.runtime().advance_time(Duration::from_secs(2));
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        rt::sleep(Duration::from_millis(50)).await;
         
         println!("\n✅ Network partition test completed!");
     }).await;
@@ -294,7 +294,7 @@ async fn test_reproducible_execution() {
             
             // Advance time
             sim_rt.runtime().advance_time(Duration::from_millis(400));
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            rt::sleep(Duration::from_millis(10)).await;
             
             events
         }).await;

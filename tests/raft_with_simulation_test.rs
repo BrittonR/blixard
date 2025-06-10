@@ -77,7 +77,7 @@ async fn test_single_node_with_simulation() {
     
     // Let the node start up
     runtime.advance_time(Duration::from_millis(500));
-    tokio::time::sleep(Duration::from_millis(10)).await;
+    rt::sleep(Duration::from_millis(10)).await;
     
     // Propose a command
     let cmd = StateMachineCommand::CreateVm {
@@ -89,7 +89,7 @@ async fn test_single_node_with_simulation() {
     
     // Advance time to let proposal process
     runtime.advance_time(Duration::from_millis(200));
-    tokio::time::sleep(Duration::from_millis(10)).await;
+    rt::sleep(Duration::from_millis(10)).await;
     
     println!("✅ Test completed - RaftNode works with simulated runtime!");
 }
@@ -155,7 +155,7 @@ async fn test_three_node_cluster_deterministic() {
         
         // Advance time for leader election
         runtime.advance_time(Duration::from_secs(2));
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        rt::sleep(Duration::from_millis(20)).await;
         
         events.push(format!("After election at {:?}", runtime.clock().now() - start_time));
         
@@ -173,7 +173,7 @@ async fn test_three_node_cluster_deterministic() {
         
         // Advance time for consensus
         runtime.advance_time(Duration::from_millis(500));
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        rt::sleep(Duration::from_millis(20)).await;
         
         events.push(format!("Final time: {:?}", runtime.clock().now() - start_time));
         
@@ -237,7 +237,7 @@ async fn test_network_partition_simulation() {
     // Let cluster form
     println!("⏳ Forming cluster...");
     runtime.advance_time(Duration::from_secs(3));
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    rt::sleep(Duration::from_millis(50)).await;
     
     // Create network partition: [1,2] | [3,4,5]
     println!("\n🔪 Creating network partition");
@@ -264,7 +264,7 @@ async fn test_network_partition_simulation() {
     
     // Let operations process
     runtime.advance_time(Duration::from_secs(2));
-    tokio::time::sleep(Duration::from_millis(30)).await;
+    rt::sleep(Duration::from_millis(30)).await;
     
     // Heal partition
     println!("\n🔧 Healing partition");
@@ -276,7 +276,7 @@ async fn test_network_partition_simulation() {
     
     // Let cluster reconcile
     runtime.advance_time(Duration::from_secs(2));
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    rt::sleep(Duration::from_millis(50)).await;
     
     println!("\n✅ Network partition test completed!");
 }
