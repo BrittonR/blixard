@@ -3,3 +3,4 @@
 *.db
 /tmp
 .DS_Store
+.direnv/
