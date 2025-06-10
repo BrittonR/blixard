@@ -107,11 +107,9 @@ impl Clock for SimulatedClock {
     }
     
     fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        let target_time = self.now() + duration;
-        Box::pin(SimulatedSleep {
-            target_time,
-            clock: self,
-        })
+        // In simulation, sleep immediately advances time
+        self.advance(duration);
+        Box::pin(futures::future::ready(()))
     }
     
     fn timer(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
