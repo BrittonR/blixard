@@ -1,0 +1,178 @@
+[2m2025-06-10T16:37:37.304815Z[0m [32m INFO[0m [2mblixard[0m[2m:[0m Starting Blixard node 3 at 127.0.0.1:7003
+[2m2025-06-10T16:37:37.304910Z[0m [32m INFO[0m [2mblixard::node[0m[2m:[0m Initializing node 3 at 127.0.0.1:7003
+[2m2025-06-10T16:37:37.361916Z[0m [32m INFO[0m [2mblixard::node[0m[2m:[0m Starting Blixard node 3
+[2m2025-06-10T16:37:37.363620Z[0m [34mDEBUG[0m [2mblixard::raft_storage[0m[2m:[0m Saved conf state: voters=[1, 2, 3]
+[2m2025-06-10T16:37:37.363688Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 bootstrapped with voters: [1, 2, 3]
+[2m2025-06-10T16:37:37.363991Z[0m [32m INFO[0m [2mblixard::node[0m[2m:[0m Registering peer 2 at 127.0.0.1:7002
+[2m2025-06-10T16:37:37.364011Z[0m [32m INFO[0m [2mblixard::network[0m[2m:[0m Added peer 2 at 127.0.0.1:7002
+[2m2025-06-10T16:37:37.364018Z[0m [32m INFO[0m [2mblixard::node[0m[2m:[0m Registering peer 1 at 127.0.0.1:7001
+[2m2025-06-10T16:37:37.364022Z[0m [32m INFO[0m [2mblixard::network[0m[2m:[0m Added peer 1 at 127.0.0.1:7001
+[2m2025-06-10T16:37:37.364169Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Starting Raft node 3
+[2m2025-06-10T16:37:37.364194Z[0m [32m INFO[0m [2mblixard::node[0m[2m:[0m Starting gRPC server on 127.0.0.1:7003
+[2m2025-06-10T16:37:37.364263Z[0m [32m INFO[0m [2mblixard::network[0m[2m:[0m Node 3 listening on 127.0.0.1:7003
+[2m2025-06-10T16:37:37.564858Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Accepted connection from 127.0.0.1:45440
+[2m2025-06-10T16:37:37.565005Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Received message from node 1: 8
+[2m2025-06-10T16:37:37.565034Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Connection closed
+[2m2025-06-10T16:37:37.565200Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Received message from node 1
+[2m2025-06-10T16:37:37.565403Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 state changed to Follower
+[2m2025-06-10T16:37:37.568550Z[0m [34mDEBUG[0m [2mblixard::raft_storage[0m[2m:[0m Saved hard state: term=3, vote=0
+[2m2025-06-10T16:37:37.568620Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Node 3 ready has 0 messages
+[2m2025-06-10T16:37:37.568633Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 has 1 persisted messages to send
+[2m2025-06-10T16:37:37.568644Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 sending persisted message to node 1: 9
+[2m2025-06-10T16:37:37.568686Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Sending message to node 1 at 127.0.0.1:7001: 9
+[2m2025-06-10T16:37:37.569103Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Message sent successfully
+[2m2025-06-10T16:37:37.569758Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Accepted connection from 127.0.0.1:45452
+[2m2025-06-10T16:37:37.569831Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Received message from node 1: 3
+[2m2025-06-10T16:37:37.569845Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Received message from node 1
+[2m2025-06-10T16:37:37.571647Z[0m [34mDEBUG[0m [2mblixard::raft_storage[0m[2m:[0m Saved hard state: term=3, vote=0
+[2m2025-06-10T16:37:37.574845Z[0m [34mDEBUG[0m [2mblixard::raft_storage[0m[2m:[0m Appended 1 entries to Raft log
+[2m2025-06-10T16:37:37.574906Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Node 3 ready has 0 messages
+[2m2025-06-10T16:37:37.574918Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 has 1 persisted messages to send
+[2m2025-06-10T16:37:37.574928Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 sending persisted message to node 1: 4
+[2m2025-06-10T16:37:37.574966Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Sending message to node 1 at 127.0.0.1:7001: 4
+[2m2025-06-10T16:37:37.575369Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Message sent successfully
+[2m2025-06-10T16:37:37.575405Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Connection closed
+[2m2025-06-10T16:37:37.576022Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Accepted connection from 127.0.0.1:45454
+[2m2025-06-10T16:37:37.576179Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Received message from node 1: 3
+[2m2025-06-10T16:37:37.576200Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Connection closed
+[2m2025-06-10T16:37:37.576280Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Received message from node 1
+[2m2025-06-10T16:37:37.576381Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Node 3 ready has 0 messages
+[2m2025-06-10T16:37:37.576408Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 has 1 persisted messages to send
+[2m2025-06-10T16:37:37.576416Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 sending persisted message to node 1: 4
+[2m2025-06-10T16:37:37.576435Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Sending message to node 1 at 127.0.0.1:7001: 4
+[2m2025-06-10T16:37:37.576635Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Message sent successfully
+[2m2025-06-10T16:37:37.863697Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Accepted connection from 127.0.0.1:45470
+[2m2025-06-10T16:37:37.863816Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Received message from node 1: 8
+[2m2025-06-10T16:37:37.863837Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Connection closed
+[2m2025-06-10T16:37:37.863927Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Received message from node 1
+[2m2025-06-10T16:37:37.863954Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Node 3 ready has 0 messages
+[2m2025-06-10T16:37:37.863963Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 has 1 persisted messages to send
+[2m2025-06-10T16:37:37.863973Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 sending persisted message to node 1: 9
+[2m2025-06-10T16:37:37.864001Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Sending message to node 1 at 127.0.0.1:7001: 9
+[2m2025-06-10T16:37:37.864218Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Message sent successfully
+[2m2025-06-10T16:37:38.164298Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Accepted connection from 127.0.0.1:45472
+[2m2025-06-10T16:37:38.164523Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Received message from node 1: 8
+[2m2025-06-10T16:37:38.164545Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Connection closed
+[2m2025-06-10T16:37:38.164640Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Received message from node 1
+[2m2025-06-10T16:37:38.164664Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Node 3 ready has 0 messages
+[2m2025-06-10T16:37:38.164673Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 has 1 persisted messages to send
+[2m2025-06-10T16:37:38.164681Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 sending persisted message to node 1: 9
+[2m2025-06-10T16:37:38.164696Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Sending message to node 1 at 127.0.0.1:7001: 9
+[2m2025-06-10T16:37:38.164959Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Message sent successfully
+[2m2025-06-10T16:37:38.464684Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Accepted connection from 127.0.0.1:45478
+[2m2025-06-10T16:37:38.464842Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Received message from node 1: 8
+[2m2025-06-10T16:37:38.464870Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Connection closed
+[2m2025-06-10T16:37:38.464998Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Received message from node 1
+[2m2025-06-10T16:37:38.465033Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Node 3 ready has 0 messages
+[2m2025-06-10T16:37:38.465046Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 has 1 persisted messages to send
+[2m2025-06-10T16:37:38.465058Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 sending persisted message to node 1: 9
+[2m2025-06-10T16:37:38.465106Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Sending message to node 1 at 127.0.0.1:7001: 9
+[2m2025-06-10T16:37:38.465433Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Message sent successfully
+[2m2025-06-10T16:37:38.763770Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Accepted connection from 127.0.0.1:45494
+[2m2025-06-10T16:37:38.763887Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Received message from node 1: 8
+[2m2025-06-10T16:37:38.763907Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Connection closed
+[2m2025-06-10T16:37:38.764046Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Received message from node 1
+[2m2025-06-10T16:37:38.764073Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Node 3 ready has 0 messages
+[2m2025-06-10T16:37:38.764097Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 has 1 persisted messages to send
+[2m2025-06-10T16:37:38.764105Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 sending persisted message to node 1: 9
+[2m2025-06-10T16:37:38.764125Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Sending message to node 1 at 127.0.0.1:7001: 9
+[2m2025-06-10T16:37:38.764321Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Message sent successfully
+[2m2025-06-10T16:37:39.064015Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Accepted connection from 127.0.0.1:45504
+[2m2025-06-10T16:37:39.064144Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Received message from node 1: 8
+[2m2025-06-10T16:37:39.064251Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Connection closed
+[2m2025-06-10T16:37:39.064365Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Received message from node 1
+[2m2025-06-10T16:37:39.064393Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Node 3 ready has 0 messages
+[2m2025-06-10T16:37:39.064403Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 has 1 persisted messages to send
+[2m2025-06-10T16:37:39.064411Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 sending persisted message to node 1: 9
+[2m2025-06-10T16:37:39.064427Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Sending message to node 1 at 127.0.0.1:7001: 9
+[2m2025-06-10T16:37:39.064624Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Message sent successfully
+[2m2025-06-10T16:37:39.363595Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Accepted connection from 127.0.0.1:59104
+[2m2025-06-10T16:37:39.363721Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Received message from node 1: 8
+[2m2025-06-10T16:37:39.363752Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Connection closed
+[2m2025-06-10T16:37:39.363860Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Received message from node 1
+[2m2025-06-10T16:37:39.363894Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Node 3 ready has 0 messages
+[2m2025-06-10T16:37:39.363909Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 has 1 persisted messages to send
+[2m2025-06-10T16:37:39.363917Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 sending persisted message to node 1: 9
+[2m2025-06-10T16:37:39.363936Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Sending message to node 1 at 127.0.0.1:7001: 9
+[2m2025-06-10T16:37:39.364146Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Message sent successfully
+[2m2025-06-10T16:37:39.663699Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Accepted connection from 127.0.0.1:59112
+[2m2025-06-10T16:37:39.663820Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Received message from node 1: 8
+[2m2025-06-10T16:37:39.663835Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Connection closed
+[2m2025-06-10T16:37:39.663889Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Received message from node 1
+[2m2025-06-10T16:37:39.663907Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Node 3 ready has 0 messages
+[2m2025-06-10T16:37:39.663912Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 has 1 persisted messages to send
+[2m2025-06-10T16:37:39.663950Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 sending persisted message to node 1: 9
+[2m2025-06-10T16:37:39.663960Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Sending message to node 1 at 127.0.0.1:7001: 9
+[2m2025-06-10T16:37:39.664057Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Message sent successfully
+[2m2025-06-10T16:37:39.965008Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Accepted connection from 127.0.0.1:59122
+[2m2025-06-10T16:37:39.965069Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Received message from node 1: 8
+[2m2025-06-10T16:37:39.965089Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Connection closed
+[2m2025-06-10T16:37:39.965157Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Received message from node 1
+[2m2025-06-10T16:37:39.965173Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Node 3 ready has 0 messages
+[2m2025-06-10T16:37:39.965178Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 has 1 persisted messages to send
+[2m2025-06-10T16:37:39.965182Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 sending persisted message to node 1: 9
+[2m2025-06-10T16:37:39.965190Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Sending message to node 1 at 127.0.0.1:7001: 9
+[2m2025-06-10T16:37:39.965376Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Message sent successfully
+[2m2025-06-10T16:37:40.264402Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Accepted connection from 127.0.0.1:59138
+[2m2025-06-10T16:37:40.264686Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Received message from node 1: 8
+[2m2025-06-10T16:37:40.264765Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Connection closed
+[2m2025-06-10T16:37:40.264933Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Received message from node 1
+[2m2025-06-10T16:37:40.264983Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Node 3 ready has 0 messages
+[2m2025-06-10T16:37:40.265004Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 has 1 persisted messages to send
+[2m2025-06-10T16:37:40.265023Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 sending persisted message to node 1: 9
+[2m2025-06-10T16:37:40.265062Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Sending message to node 1 at 127.0.0.1:7001: 9
+[2m2025-06-10T16:37:40.265431Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Message sent successfully
+[2m2025-06-10T16:37:40.564464Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Accepted connection from 127.0.0.1:59154
+[2m2025-06-10T16:37:40.564633Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Received message from node 1: 8
+[2m2025-06-10T16:37:40.564654Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Connection closed
+[2m2025-06-10T16:37:40.564742Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Received message from node 1
+[2m2025-06-10T16:37:40.564765Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Node 3 ready has 0 messages
+[2m2025-06-10T16:37:40.564774Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 has 1 persisted messages to send
+[2m2025-06-10T16:37:40.564782Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 sending persisted message to node 1: 9
+[2m2025-06-10T16:37:40.564797Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Sending message to node 1 at 127.0.0.1:7001: 9
+[2m2025-06-10T16:37:40.564998Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Message sent successfully
+[2m2025-06-10T16:37:40.864439Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Accepted connection from 127.0.0.1:59156
+[2m2025-06-10T16:37:40.864732Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Received message from node 1: 8
+[2m2025-06-10T16:37:40.864776Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Connection closed
+[2m2025-06-10T16:37:40.864931Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Received message from node 1
+[2m2025-06-10T16:37:40.864994Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Node 3 ready has 0 messages
+[2m2025-06-10T16:37:40.865003Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 has 1 persisted messages to send
+[2m2025-06-10T16:37:40.865007Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 sending persisted message to node 1: 9
+[2m2025-06-10T16:37:40.865017Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Sending message to node 1 at 127.0.0.1:7001: 9
+[2m2025-06-10T16:37:40.865195Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Message sent successfully
+[2m2025-06-10T16:37:41.164035Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Accepted connection from 127.0.0.1:59172
+[2m2025-06-10T16:37:41.164196Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Received message from node 1: 8
+[2m2025-06-10T16:37:41.164218Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Connection closed
+[2m2025-06-10T16:37:41.164306Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Received message from node 1
+[2m2025-06-10T16:37:41.164333Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Node 3 ready has 0 messages
+[2m2025-06-10T16:37:41.164342Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 has 1 persisted messages to send
+[2m2025-06-10T16:37:41.164351Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 sending persisted message to node 1: 9
+[2m2025-06-10T16:37:41.164365Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Sending message to node 1 at 127.0.0.1:7001: 9
+[2m2025-06-10T16:37:41.164574Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Message sent successfully
+[2m2025-06-10T16:37:41.464106Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Accepted connection from 127.0.0.1:59184
+[2m2025-06-10T16:37:41.464360Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Received message from node 1: 8
+[2m2025-06-10T16:37:41.464397Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Connection closed
+[2m2025-06-10T16:37:41.464542Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Received message from node 1
+[2m2025-06-10T16:37:41.464585Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Node 3 ready has 0 messages
+[2m2025-06-10T16:37:41.464602Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 has 1 persisted messages to send
+[2m2025-06-10T16:37:41.464617Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 sending persisted message to node 1: 9
+[2m2025-06-10T16:37:41.464643Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Sending message to node 1 at 127.0.0.1:7001: 9
+[2m2025-06-10T16:37:41.464873Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Message sent successfully
+[2m2025-06-10T16:37:41.763961Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Accepted connection from 127.0.0.1:59188
+[2m2025-06-10T16:37:41.764108Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Received message from node 1: 8
+[2m2025-06-10T16:37:41.764132Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Connection closed
+[2m2025-06-10T16:37:41.764228Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Received message from node 1
+[2m2025-06-10T16:37:41.764261Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Node 3 ready has 0 messages
+[2m2025-06-10T16:37:41.764270Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 has 1 persisted messages to send
+[2m2025-06-10T16:37:41.764278Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 sending persisted message to node 1: 9
+[2m2025-06-10T16:37:41.764293Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Sending message to node 1 at 127.0.0.1:7001: 9
+[2m2025-06-10T16:37:41.764474Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Message sent successfully
+[2m2025-06-10T16:37:42.063913Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Accepted connection from 127.0.0.1:59198
+[2m2025-06-10T16:37:42.063987Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Received message from node 1: 8
+[2m2025-06-10T16:37:42.064032Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Connection closed
+[2m2025-06-10T16:37:42.064101Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Received message from node 1
+[2m2025-06-10T16:37:42.064118Z[0m [34mDEBUG[0m [2mblixard::raft_node[0m[2m:[0m Node 3 ready has 0 messages
+[2m2025-06-10T16:37:42.064122Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 has 1 persisted messages to send
+[2m2025-06-10T16:37:42.064126Z[0m [32m INFO[0m [2mblixard::raft_node[0m[2m:[0m Node 3 sending persisted message to node 1: 9
+[2m2025-06-10T16:37:42.064134Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Sending message to node 1 at 127.0.0.1:7001: 9
+[2m2025-06-10T16:37:42.064238Z[0m [34mDEBUG[0m [2mblixard::network[0m[2m:[0m Message sent successfully

@@ -14,6 +14,15 @@ pub enum BlixardError {
     #[error("Storage error: {0}")]
     StorageError(#[from] redb::Error),
     
+    #[error("Storage transaction error: {0}")]
+    StorageTransactionError(String),
+    
+    #[error("Storage table error: {0}")]
+    StorageTableError(String),
+    
+    #[error("Raft error: {0}")]
+    RaftError(#[from] raft::Error),
+    
     #[error("Cluster error: {0}")]
     ClusterError(String),
     
@@ -37,3 +46,33 @@ pub enum BlixardError {
 }
 
 pub type Result<T> = std::result::Result<T, BlixardError>;
+
+impl From<redb::TransactionError> for BlixardError {
+    fn from(err: redb::TransactionError) -> Self {
+        BlixardError::StorageTransactionError(err.to_string())
+    }
+}
+
+impl From<redb::TableError> for BlixardError {
+    fn from(err: redb::TableError) -> Self {
+        BlixardError::StorageTableError(err.to_string())
+    }
+}
+
+impl From<redb::StorageError> for BlixardError {
+    fn from(err: redb::StorageError) -> Self {
+        BlixardError::StorageError(err.into())
+    }
+}
+
+impl From<redb::DatabaseError> for BlixardError {
+    fn from(err: redb::DatabaseError) -> Self {
+        BlixardError::StorageError(err.into())
+    }
+}
+
+impl From<redb::CommitError> for BlixardError {
+    fn from(err: redb::CommitError) -> Self {
+        BlixardError::StorageError(err.into())
+    }
+}

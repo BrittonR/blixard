@@ -1,150 +1,119 @@
-# Blixard - Distributed Service Management System
+# Blixard - Distributed MicroVM Orchestration Platform
 
-![Package Version](https://img.shields.io/hexpm/v/blixard)
-![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)
-
-Blixard is a distributed service management system built with Gleam and Khepri. It allows for managing systemd services across a cluster of nodes with distributed state management.
+A distributed microVM orchestration platform built in Rust, providing enterprise-grade virtual machine management with Raft consensus.
 
 ## Features
 
-- **Distributed Service Management**: Control systemd services across multiple nodes
-- **Reliable State Storage**: Uses Khepri distributed store for service state persistence
-- **Automatic Cluster Discovery**: Uses Tailscale for secure node discovery
-- **High Availability**: Supports primary and secondary nodes with automatic replication
-- **CLI Interface**: Simple command-line interface for service management
-- **Reliable Replication**: Continuous monitoring of replication status
+- **Raft Consensus**: Production-grade distributed consensus using tikv/raft-rs
+- **MicroVM Integration**: Seamless integration with microvm.nix for lightweight virtualization
+- **Tailscale Discovery**: Automatic node discovery via Tailscale networking
+- **Persistent Storage**: Durable state management with redb
+- **Fault Tolerant**: Designed for high availability with automatic failover
 
 ## Architecture
 
-Blixard consists of the following core components:
+Blixard uses a distributed architecture with:
+- Raft consensus for state replication
+- Direct microvm.nix integration for VM lifecycle management
+- Tailscale for secure node communication
+- Event-driven state machine for consistency
 
-1. **Khepri Store**: Distributed key-value store for service states
-2. **Node Manager**: Manages primary and secondary nodes
-3. **Service Handlers**: Processes service management operations
-4. **Systemd Interface**: Interacts with the systemd service manager
-5. **Cluster Discovery**: Discovers and connects to nodes via Tailscale
-6. **Replication Monitor**: Monitors replication status between nodes
+## Quick Start
 
-## Installation
+### Prerequisites
 
-```sh
-# Clone the repository
-git clone https://github.com/username/blixard.git
-cd blixard
+- Nix with flakes enabled
+- Tailscale (optional, for node discovery)
+- microvm.nix
+
+### Development Environment
+
+```bash
+# Enter development shell
+nix develop
 
 # Build the project
-gleam build
+cargo build
 
-# Deploy the service manager
-sudo ./scripts/deploy.sh
+# Run tests
+cargo test
 ```
 
-## Usage
+### Running a Cluster
 
-### Starting the Cluster
+```bash
+# Start a 3-node test cluster
+./test_bootstrap.sh
 
-Start a primary node:
+# Or start nodes manually:
+# Node 1 (bootstrap)
+cargo run -- node --id 1 --bind 127.0.0.1:7001
 
-```sh
-start_khepri_node primary
+# Node 2
+cargo run -- node --id 2 --bind 127.0.0.1:7002 --peer 1:127.0.0.1:7001
+
+# Node 3
+cargo run -- node --id 3 --bind 127.0.0.1:7003 --peer 1:127.0.0.1:7001 --peer 2:127.0.0.1:7002
 ```
 
-Start a secondary node (on another machine):
+### VM Management
 
-```sh
-start_khepri_node secondary khepri_node@primary-host.local
+```bash
+# Create a VM
+cargo run -- vm create --name my-vm --config /path/to/microvm.nix
+
+# Start a VM
+cargo run -- vm start my-vm
+
+# Stop a VM
+cargo run -- vm stop my-vm
+
+# List VMs
+cargo run -- vm list
+
+# Check VM status
+cargo run -- vm status my-vm
 ```
 
-### Managing Services
+## Testing
 
-Start a service:
+Blixard includes comprehensive testing:
 
-```sh
-service_manager start nginx
-```
+```bash
+# Unit tests
+cargo test
 
-Stop a service:
+# Quick integration test (2 nodes)
+./quick_test.sh
 
-```sh
-service_manager stop nginx
-```
+# Bootstrap test (3 nodes with leader election)
+./test_bootstrap.sh
 
-Restart a service:
-
-```sh
-service_manager restart nginx
-```
-
-Check service status:
-
-```sh
-service_manager status nginx
-```
-
-List all managed services:
-
-```sh
-service_manager list
-```
-
-List all connected nodes in the cluster:
-
-```sh
-service_manager list-cluster
+# Full cluster test
+./test_cluster.sh
 ```
 
 ## Configuration
 
-Configuration is managed through environment variables in the `flake.nix` file:
-
-- `BLIXARD_STORAGE_MODE`: Storage mode to use (`khepri` or `ets_dets`)
-- `BLIXARD_KHEPRI_OPS`: Comma-separated list of operations to use Khepri for
+Nodes can be configured with:
+- `--id`: Unique node identifier
+- `--bind`: Address to bind to (e.g., 127.0.0.1:7001)
+- `--peer`: Peer addresses for cluster formation
+- `--data-dir`: Directory for persistent storage
+- `--tailscale`: Enable Tailscale discovery
 
 ## Development
 
-```sh
-# Run the project
-gleam run
+The codebase is organized as:
+- `src/main.rs`: CLI entry point
+- `src/node.rs`: Node management and lifecycle
+- `src/raft_node.rs`: Raft consensus implementation
+- `src/state_machine.rs`: Replicated state machine
+- `src/storage.rs`: Persistent storage layer
+- `src/microvm.rs`: MicroVM integration
+- `src/network.rs`: Network communication
+- `src/tailscale.rs`: Tailscale discovery
 
-# Run the tests
-gleam test
+## License
 
-# Format the code
-gleam format
-```
-
-## Project Structure
-
-- `src/`: Source code for the project
-  - `blixard.gleam`: Main entry point
-  - `service_manager.gleam`: CLI dispatch logic
-  - `cli.gleam`: Command-line interface
-  - `service_handlers.gleam`: Service management handlers
-  - `systemd.gleam`: Systemd service management
-  - `khepri_store.gleam`: Khepri distributed store interface
-  - `node_manager.gleam`: Node management
-  - `cluster_discovery.gleam`: Cluster node discovery
-  - `replication_monitor.gleam`: Replication monitoring
-- `scripts/`: Deployment and operation scripts
-- `test/`: Unit tests
-
-## How It Works
-
-### Cluster Formation
-
-1. A primary node is started with `--init-primary`
-2. Secondary nodes are started with `--init-secondary primary_node`
-3. Nodes discover each other using Tailscale networking
-4. Khepri handles leader election and replication
-
-### Service Management
-
-1. CLI commands are received by `service_manager.gleam`
-2. Commands are dispatched to the appropriate handler in `service_handlers.gleam`
-3. The handler interacts with systemd via `systemd.gleam`
-4. Service state is stored in Khepri via `khepri_store.gleam`
-5. State is replicated to all nodes in the cluster
-
-## Further Documentation
-
-For more details, see the module-level and function-level documentation in the source code.
+[License information here]

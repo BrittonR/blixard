@@ -1,8 +1,8 @@
 use crate::config::Config;
 use crate::error::{BlixardError, Result};
 use crate::storage::Storage;
-use tikv_raft::prelude::*;
-use tikv_raft::{Config as RaftConfig, RawNode};
+use raft::prelude::*;
+use raft::{Config as RaftConfig, RawNode, StateRole, GetEntriesContext};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -31,7 +31,9 @@ impl RaftNode {
         let mut conf_state = ConfState::default();
         conf_state.set_voters(vec![1]);
         
-        let raw_node = RawNode::new(&raft_config, storage, vec![])?;
+        // Create a logger for raft
+        let logger = slog::Logger::root(slog::Discard, slog::o!());
+        let raw_node = RawNode::new(&raft_config, storage, &logger)?;
         
         let mut peer_map = HashMap::new();
         peer_map.insert(1, node_id.clone());
@@ -113,9 +115,9 @@ impl RaftNode {
     }
 }
 
-// Implement the Storage trait for tikv_raft
-impl tikv_raft::Storage for Storage {
-    fn initial_state(&self) -> tikv_raft::Result<RaftState> {
+// Implement the Storage trait for raft
+impl raft::Storage for Storage {
+    fn initial_state(&self) -> raft::Result<RaftState> {
         // TODO: Implement proper initial state loading
         Ok(RaftState {
             hard_state: HardState::default(),
@@ -123,27 +125,27 @@ impl tikv_raft::Storage for Storage {
         })
     }
     
-    fn entries(&self, low: u64, high: u64, max_size: impl Into<Option<u64>>) -> tikv_raft::Result<Vec<Entry>> {
+    fn entries(&self, low: u64, high: u64, max_size: impl Into<Option<u64>>, context: GetEntriesContext) -> raft::Result<Vec<Entry>> {
         // TODO: Implement entry retrieval
         Ok(vec![])
     }
     
-    fn term(&self, idx: u64) -> tikv_raft::Result<u64> {
+    fn term(&self, idx: u64) -> raft::Result<u64> {
         // TODO: Implement term lookup
         Ok(0)
     }
     
-    fn first_index(&self) -> tikv_raft::Result<u64> {
+    fn first_index(&self) -> raft::Result<u64> {
         // TODO: Implement first index lookup
         Ok(1)
     }
     
-    fn last_index(&self) -> tikv_raft::Result<u64> {
+    fn last_index(&self) -> raft::Result<u64> {
         // TODO: Implement last index lookup
         Ok(0)
     }
     
-    fn snapshot(&self, request_index: u64) -> tikv_raft::Result<Snapshot> {
+    fn snapshot(&self, request_index: u64, to: u64) -> raft::Result<Snapshot> {
         // TODO: Implement snapshot creation
         Ok(Snapshot::default())
     }
