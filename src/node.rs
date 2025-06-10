@@ -3,7 +3,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, debug, error};
 
-use crate::raft_node::RaftNode;
+use crate::raft_node_v2::RaftNode;
+use crate::runtime_traits::{RealRuntime, Runtime, Clock};
 use crate::storage::Storage;
 use crate::tailscale::TailscaleDiscovery;
 use crate::types::*;
@@ -52,6 +53,7 @@ impl Node {
             self.config.bind_addr,
             self.storage.clone(),
             peer_ids, // Pass peer IDs for initial configuration
+            Arc::new(RealRuntime::new()),
         ).await?;
         
         println!("Raft node created successfully");
@@ -86,10 +88,11 @@ impl Node {
         // Get proposal handle
         self.raft_proposal_tx = Some(raft_node.get_proposal_handle());
         
-        // Start background tasks
-        let monitor_handle = tokio::spawn(self.clone().monitor_vms());
-        let raft_handle = tokio::spawn(raft_node.run());
-        let grpc_handle = tokio::spawn(self.clone().run_grpc_server());
+        // Start background tasks  
+        let runtime = Arc::new(RealRuntime::new());
+        let monitor_handle = runtime.spawn(Box::pin(self.clone().monitor_vms()));
+        let raft_handle = runtime.spawn(Box::pin(raft_node.run()));
+        let grpc_handle = runtime.spawn(Box::pin(self.clone().run_grpc_server()));
         
         // Wait for any task to complete (they shouldn't unless there's an error)
         tokio::select! {

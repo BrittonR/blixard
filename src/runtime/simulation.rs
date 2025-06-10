@@ -77,14 +77,20 @@ pub struct SimulatedClock {
 
 impl SimulatedClock {
     fn new(seed: u64) -> Self {
-        // Create a deterministic base instant
-        // We'll use a fixed point in the past based on the seed
-        // This isn't perfect (Instant still varies between runs) but at least
-        // the relative times will be deterministic
-        let base_instant = Instant::now() - Duration::from_secs(1_000_000);
+        // Create a deterministic base instant by using a fixed offset from the Unix epoch
+        // We simulate the base as if it's Jan 1, 2020 + some offset based on seed
+        // This gives us reproducible start times
+        let base_nanos = 1_577_836_800_000_000_000u64; // Jan 1, 2020 in nanoseconds since epoch
+        let seed_offset_nanos = (seed % 1_000_000) * 1_000_000; // Small offset based on seed
+        
+        // Create base instant that appears to be in the past but deterministic
+        // Note: We can't make Instant truly deterministic across different process runs,
+        // but we can make the relative times deterministic
+        let now = Instant::now();
+        let base_instant = now - Duration::from_secs(1_000_000); // Fixed offset
         
         // Start time based on seed - this gives us deterministic elapsed times
-        let initial_nanos = seed * 1_000_000_000;
+        let initial_nanos = base_nanos + seed_offset_nanos;
         
         Self {
             current_time: Arc::new(AtomicU64::new(initial_nanos)),

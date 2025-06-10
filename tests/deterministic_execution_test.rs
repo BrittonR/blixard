@@ -1,7 +1,7 @@
 #![cfg(feature = "simulation")]
 
 use blixard::runtime_abstraction::{self as rt, with_simulated_runtime};
-use blixard::raft_node::RaftNode;
+use blixard::raft_node_v2::RaftNode;
 use blixard::storage::Storage;
 use blixard::state_machine::StateMachineCommand;
 use blixard::types::{VmState, VmStatus, VmConfig};
@@ -67,7 +67,7 @@ async fn test_deterministic_task_ordering() {
             tokio::time::sleep(Duration::from_millis(10)).await;
             
             results_clone.lock().await.clone()
-        })
+        }).await
     };
     
     // Verify execution order (should be reverse of spawn order due to sleep durations)
@@ -99,7 +99,7 @@ async fn test_simulated_raft_cluster() {
             );
             
             let storage = Arc::new(Storage::new_test().unwrap());
-            let node = RaftNode::new(node_id, addr, storage, vec![1, 2, 3]).await.unwrap();
+            let node = RaftNode::new(node_id, addr, storage, vec![1, 2, 3], sim_rt.runtime().clone()).await.unwrap();
             
             // Save proposal handle
             proposal_handles.push(node.get_proposal_handle());
@@ -166,7 +166,7 @@ async fn test_simulated_raft_cluster() {
         tokio::time::sleep(Duration::from_millis(20)).await;
         
         println!("\n✅ Simulation test completed!");
-    });
+    }).await;
 }
 
 #[tokio::test]
@@ -187,7 +187,7 @@ async fn test_deterministic_network_partition() {
             );
             
             let storage = Arc::new(Storage::new_test().unwrap());
-            let node = RaftNode::new(node_id, addr, storage, vec![1, 2, 3, 4, 5]).await.unwrap();
+            let node = RaftNode::new(node_id, addr, storage, vec![1, 2, 3, 4, 5], sim_rt.runtime().clone()).await.unwrap();
             proposal_handles.push(node.get_proposal_handle());
             nodes.push(node);
         }
@@ -265,7 +265,7 @@ async fn test_deterministic_network_partition() {
         tokio::time::sleep(Duration::from_millis(50)).await;
         
         println!("\n✅ Network partition test completed!");
-    });
+    }).await;
 }
 
 #[tokio::test]
@@ -297,7 +297,7 @@ async fn test_reproducible_execution() {
             tokio::time::sleep(Duration::from_millis(10)).await;
             
             events
-        });
+        }).await;
         
         results.push(run_result);
     }

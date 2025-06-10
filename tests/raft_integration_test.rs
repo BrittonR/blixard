@@ -1,11 +1,13 @@
 use anyhow::Result;
 use blixard::storage::Storage;
-use blixard::raft_node::RaftNode;
+use blixard::raft_node_v2::RaftNode;
+use blixard::runtime::simulation::SimulatedRuntime;
+use blixard::runtime_traits::{Runtime, Clock};
 use blixard::state_machine::{StateMachineCommand, ServiceInfo, ServiceState};
 use std::sync::Arc;
 use std::net::SocketAddr;
+use std::time::Duration;
 use tempfile::TempDir;
-use tokio::time::{sleep, Duration};
 use serial_test::serial;
 
 mod common;
@@ -14,6 +16,9 @@ use common::get_available_port;
 #[tokio::test]
 #[serial]
 async fn test_single_node_raft_cluster() -> Result<()> {
+    // Use simulated runtime for deterministic testing
+    let runtime = Arc::new(SimulatedRuntime::new(42));
+    
     // Create temporary storage
     let temp_dir = TempDir::new()?;
     let storage = Arc::new(Storage::new(temp_dir.path().join("node1.db"))?);
@@ -21,16 +26,16 @@ async fn test_single_node_raft_cluster() -> Result<()> {
     // Create a single-node Raft cluster with dynamic port
     let port = get_available_port();
     let bind_addr: SocketAddr = format!("127.0.0.1:{}", port).parse()?;
-    let raft_node = RaftNode::new(1, bind_addr, storage.clone(), vec![]).await?;
+    let raft_node = RaftNode::new(1, bind_addr, storage.clone(), vec![], runtime.clone()).await?;
     let proposal_handle = raft_node.get_proposal_handle();
     
     // Start Raft node in background
-    let raft_handle = tokio::spawn(async move {
+    let raft_handle = runtime.spawn(Box::pin(async move {
         raft_node.run().await
-    });
+    }));
     
     // Give it time to elect itself as leader
-    sleep(Duration::from_secs(2)).await;
+    runtime.clock().sleep(Duration::from_secs(2)).await;
     
     // Propose a command to create a service
     let create_service = StateMachineCommand::CreateService {
@@ -45,7 +50,7 @@ async fn test_single_node_raft_cluster() -> Result<()> {
     proposal_handle.send(create_service).await?;
     
     // Give it time to process
-    sleep(Duration::from_secs(1)).await;
+    runtime.clock().sleep(Duration::from_secs(1)).await;
     
     // Check if service was created in storage
     let service = storage.get_service("test-service")?;
@@ -61,6 +66,9 @@ async fn test_single_node_raft_cluster() -> Result<()> {
 #[tokio::test]
 #[serial]
 async fn test_three_node_raft_cluster() -> Result<()> {
+    // Use simulated runtime for deterministic testing
+    let runtime = Arc::new(SimulatedRuntime::new(42));
+    
     // Create three nodes with separate storage
     let temp_dir = TempDir::new()?;
     let mut nodes = Vec::new();
@@ -76,7 +84,7 @@ async fn test_three_node_raft_cluster() -> Result<()> {
         let bind_addr: SocketAddr = format!("127.0.0.1:{}", ports[i]).parse()?;
         let peers = vec![1, 2, 3]; // All nodes know about each other
         
-        let mut node = RaftNode::new(node_id, bind_addr, storage.clone(), peers).await?;
+        let mut node = RaftNode::new(node_id, bind_addr, storage.clone(), peers, runtime.clone()).await?;
         
         // Register all peer addresses
         for j in 0..3 {
@@ -96,15 +104,15 @@ async fn test_three_node_raft_cluster() -> Result<()> {
         proposal_handles.push(node.get_proposal_handle());
         
         // Start each node in background
-        let handle = tokio::spawn(async move {
+        let handle = runtime.spawn(Box::pin(async move {
             node.run().await
-        });
+        }));
         
         nodes.push((storage, handle));
     }
     
     // Give time for cluster formation
-    sleep(Duration::from_secs(3)).await;
+    runtime.clock().sleep(Duration::from_secs(3)).await;
     
     // Propose a command through node 1 (should be leader)
     let create_service = StateMachineCommand::CreateService {
@@ -119,7 +127,7 @@ async fn test_three_node_raft_cluster() -> Result<()> {
     proposal_handles[0].send(create_service).await?;
     
     // Give time for replication
-    sleep(Duration::from_secs(2)).await;
+    runtime.clock().sleep(Duration::from_secs(2)).await;
     
     // Check that all nodes have the service
     for (i, (storage, _)) in nodes.iter().enumerate() {

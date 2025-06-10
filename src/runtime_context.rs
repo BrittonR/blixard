@@ -76,11 +76,10 @@ impl RuntimeHandle for SimulatedRuntimeHandle {
     }
     
     fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
-        // For simulation, we need to return immediately and let the test control time
-        // This is a simplified version - proper implementation would coordinate with executor
+        // Use the SimulatedRuntime's clock for proper simulation
+        let runtime = self.runtime.clone();
         Box::pin(async move {
-            // Just yield to let other tasks run
-            tokio::task::yield_now().await;
+            runtime.clock().sleep(duration).await;
         })
     }
     
@@ -167,16 +166,13 @@ impl Drop for RuntimeGuard {
     }
 }
 
-/// Use a simulated runtime for the duration of a test
-pub fn with_simulated_runtime<F, Fut>(seed: u64, f: F) -> Fut::Output
+/// Use a simulated runtime for the duration of a test (async version)
+pub async fn with_simulated_runtime<F, Fut>(seed: u64, f: F) -> Fut::Output
 where
     F: FnOnce(Arc<SimulatedRuntimeHandle>) -> Fut,
     Fut: Future,
 {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let sim_handle = Arc::new(SimulatedRuntimeHandle::new(seed));
-        let _guard = RuntimeGuard::new(sim_handle.clone() as Arc<dyn RuntimeHandle>);
-        f(sim_handle).await
-    })
+    let sim_handle = Arc::new(SimulatedRuntimeHandle::new(seed));
+    let _guard = RuntimeGuard::new(sim_handle.clone() as Arc<dyn RuntimeHandle>);
+    f(sim_handle).await
 }

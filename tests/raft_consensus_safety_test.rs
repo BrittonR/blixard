@@ -4,7 +4,7 @@ use blixard::runtime_abstraction as rt;
 use blixard::runtime::simulation::SimulatedRuntime;
 use blixard::runtime_traits::{Runtime, Clock};
 use blixard::runtime_context::{RuntimeHandle, SimulatedRuntimeHandle};
-use blixard::raft_node::RaftNode;
+use blixard::raft_node_v2::RaftNode;
 use blixard::storage::Storage;
 use blixard::state_machine::StateMachineCommand;
 use blixard::types::{VmState, VmStatus, VmConfig};
@@ -57,7 +57,7 @@ struct ConsensusResult {
 
 /// Test harness for Raft consensus testing
 struct RaftConsensusHarness {
-    nodes: Vec<RaftNode>,
+    nodes: Vec<RaftNode<SimulatedRuntime>>,
     proposal_handles: Vec<mpsc::Sender<StateMachineCommand>>,
     message_handles: Vec<mpsc::Sender<raft::prelude::Message>>,
     committed_values: Arc<Mutex<HashMap<u64, HashSet<String>>>>,
@@ -80,6 +80,7 @@ impl RaftConsensusHarness {
                 addr,
                 storage,
                 (1..=CLUSTER_SIZE as u64).collect(),
+                sim_runtime.clone(),
             )
             .await
             .unwrap();

@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use blixard::runtime::simulation::SimulatedRuntime;
-use blixard::raft_node::RaftNode;
+use blixard::raft_node_v2::RaftNode;
 use blixard::storage::Storage;
 use blixard::state_machine::StateMachineCommand;
 use blixard::types::{VmState, VmStatus, VmConfig};
@@ -34,6 +34,8 @@ fn create_vm_state(name: String, config_path: String, node_id: u64) -> VmState {
 async fn test_simulated_cluster_formation() -> Result<()> {
     println!("Starting cluster formation test");
     
+    let runtime = Arc::new(SimulatedRuntime::new(42));
+    
     // For now, just test that nodes can be created
     let mut nodes = Vec::new();
     let mut proposal_senders = Vec::new();
@@ -45,7 +47,7 @@ async fn test_simulated_cluster_formation() -> Result<()> {
         );
         
         let storage = Arc::new(Storage::new_test()?);
-        let node = RaftNode::new(node_id, addr, storage, vec![1, 2, 3]).await?;
+        let node = RaftNode::new(node_id, addr, storage, vec![1, 2, 3], runtime.clone()).await?;
         proposal_senders.push(node.get_proposal_handle());
         nodes.push(node);
     }
@@ -121,7 +123,7 @@ async fn test_network_partition_recovery() -> Result<()> {
         );
         
         let storage = Arc::new(Storage::new_test()?);
-        let node = RaftNode::new(node_id, addr, storage, vec![1, 2, 3, 4, 5]).await?;
+        let node = RaftNode::new(node_id, addr, storage, vec![1, 2, 3, 4, 5], runtime.clone()).await?;
         
         // Save proposal handle before moving node
         proposal_handles.push(node.get_proposal_handle());
@@ -231,7 +233,7 @@ async fn test_failpoint_injection() -> Result<()> {
         );
         
         let storage = Arc::new(Storage::new_test()?);
-        let node = RaftNode::new(node_id, addr, storage, vec![1, 2, 3]).await?;
+        let node = RaftNode::new(node_id, addr, storage, vec![1, 2, 3], runtime.clone()).await?;
         proposal_handles.push(node.get_proposal_handle());
         nodes.push(node);
     }
@@ -331,7 +333,7 @@ async fn test_deterministic_message_ordering() -> Result<()> {
             );
             
             let storage = Arc::new(Storage::new_test()?);
-            let node = RaftNode::new(node_id, addr, storage, vec![1, 2, 3]).await?;
+            let node = RaftNode::new(node_id, addr, storage, vec![1, 2, 3], runtime.clone()).await?;
             message_handles.push(node.get_message_handle());
             nodes.push(node);
         }
@@ -391,7 +393,7 @@ async fn test_crash_recovery_simulation() -> Result<()> {
             );
             
             let storage = Arc::new(Storage::new_test()?);
-            let node = RaftNode::new(node_id, addr, storage, vec![1, 2, 3]).await?;
+            let node = RaftNode::new(node_id, addr, storage, vec![1, 2, 3], runtime.clone()).await?;
             proposal_handles.push(node.get_proposal_handle());
             nodes.push(node);
         }
@@ -437,7 +439,7 @@ async fn test_crash_recovery_simulation() -> Result<()> {
             
             // In real implementation, storage would load from simulated filesystem
             let storage = Arc::new(Storage::new_test()?);
-            let node = RaftNode::new(node_id, addr, storage, vec![1, 2, 3]).await?;
+            let node = RaftNode::new(node_id, addr, storage, vec![1, 2, 3], runtime.clone()).await?;
             nodes.push(node);
         }
         
