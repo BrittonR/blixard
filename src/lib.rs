@@ -2,6 +2,7 @@ pub mod node;
 pub mod storage;
 pub mod raft_node;
 pub mod raft_node_v2;  // New runtime-aware version
+pub mod raft_node_madsim;  // MadSim-compatible version
 pub mod raft_storage;
 pub mod raft_message_wrapper;  // Serde support for Raft messages
 pub mod state_machine;

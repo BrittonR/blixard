@@ -2,7 +2,8 @@ use crate::runtime_traits::*;
 use std::collections::{HashMap, VecDeque, BTreeMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::task::{Context, Poll, Waker};
+use std::task::{Context, Poll, Waker, Wake};
+use std::sync::Weak;
 use std::time::{Duration, Instant};
 use std::net::SocketAddr;
 use std::io;
@@ -24,27 +25,63 @@ struct SimulatedRuntimeInner {
     random: Mutex<SimulatedRandom>,
     file_system: SimulatedFileSystem,
     network: SimulatedNetwork,
-    executor: Mutex<DeterministicExecutor>,
+    executor: Arc<Mutex<DeterministicExecutor>>,
+    sleep_wakers: Arc<Mutex<BTreeMap<Instant, Vec<Waker>>>>,
 }
 
 impl SimulatedRuntime {
     /// Create a new simulated runtime with a seed for reproducibility
     pub fn new(seed: u64) -> Self {
+        let sleep_wakers = Arc::new(Mutex::new(BTreeMap::new()));
+        let executor = Arc::new(Mutex::new(DeterministicExecutor::new()));
+        
+        // Set the self reference in the executor
+        executor.lock().unwrap().set_self_ref(executor.clone());
+        
         let inner = Arc::new(SimulatedRuntimeInner {
-            clock: SimulatedClock::new(seed),
+            clock: SimulatedClock::new(seed, sleep_wakers.clone()),
             random: Mutex::new(SimulatedRandom::new(seed)),
             file_system: SimulatedFileSystem::new(),
             network: SimulatedNetwork::new(),
-            executor: Mutex::new(DeterministicExecutor::new()),
+            executor,
+            sleep_wakers,
         });
         
         Self { inner }
     }
     
+    /// Spawn a future on the deterministic executor
+    pub fn spawn_on_executor(&self, future: BoxFuture<'static, ()>) {
+        self.inner.executor.lock().unwrap().spawn(future);
+    }
+    
     /// Advance virtual time by the given duration
     pub fn advance_time(&self, duration: Duration) {
         self.inner.clock.advance(duration);
-        self.inner.executor.lock().unwrap().process_timers(self.inner.clock.now());
+        
+        // Wake up any sleep futures that have expired
+        let now = self.inner.clock.now();
+        let mut wakers_to_wake = Vec::new();
+        {
+            let mut sleep_wakers = self.inner.sleep_wakers.lock().unwrap();
+            let expired: Vec<_> = sleep_wakers
+                .range(..=now)
+                .map(|(k, _)| *k)
+                .collect();
+            
+            for instant in expired {
+                if let Some(wakers) = sleep_wakers.remove(&instant) {
+                    wakers_to_wake.extend(wakers);
+                }
+            }
+        }
+        
+        // Wake all expired timers
+        for waker in wakers_to_wake {
+            waker.wake();
+        }
+        
+        self.inner.executor.lock().unwrap().process_timers(now);
     }
     
     /// Run the simulation until all tasks are complete or blocked
@@ -73,10 +110,11 @@ impl SimulatedRuntime {
 pub struct SimulatedClock {
     current_time: Arc<AtomicU64>,
     base_instant: Instant,
+    sleep_wakers: Arc<Mutex<BTreeMap<Instant, Vec<Waker>>>>,
 }
 
 impl SimulatedClock {
-    fn new(seed: u64) -> Self {
+    fn new(seed: u64, sleep_wakers: Arc<Mutex<BTreeMap<Instant, Vec<Waker>>>>) -> Self {
         // Create a deterministic base instant by using a fixed offset from the Unix epoch
         // We simulate the base as if it's Jan 1, 2020 + some offset based on seed
         // This gives us reproducible start times
@@ -95,6 +133,7 @@ impl SimulatedClock {
         Self {
             current_time: Arc::new(AtomicU64::new(initial_nanos)),
             base_instant,
+            sleep_wakers,
         }
     }
     
@@ -113,13 +152,19 @@ impl Clock for SimulatedClock {
     }
     
     fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        // In simulation, sleep immediately advances time
-        self.advance(duration);
-        Box::pin(futures::future::ready(()))
+        let target_time = self.now() + duration;
+        Box::pin(SimulatedSleep {
+            target_time,
+            clock: self,
+        })
     }
     
     fn timer(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        self.sleep(duration)
+        let target_time = self.now() + duration;
+        Box::pin(SimulatedSleep {
+            target_time,
+            clock: self,
+        })
     }
     
     fn interval(&self, duration: Duration) -> Pin<Box<dyn Stream<Item = ()> + Send + '_>> {
@@ -146,7 +191,12 @@ impl<'a> Future for SimulatedSleep<'a> {
         if self.clock.now() >= self.target_time {
             Poll::Ready(())
         } else {
-            cx.waker().wake_by_ref();
+            // Register waker to be called when time advances past target
+            let mut sleep_wakers = self.clock.sleep_wakers.lock().unwrap();
+            sleep_wakers
+                .entry(self.target_time)
+                .or_insert_with(Vec::new)
+                .push(cx.waker().clone());
             Poll::Pending
         }
     }
@@ -350,39 +400,72 @@ impl Network for SimulatedNetwork {
     }
 }
 
+/// Task handle for the deterministic executor
+struct TaskHandle {
+    executor: Weak<Mutex<DeterministicExecutor>>,
+    task: Mutex<Option<BoxFuture<'static, ()>>>,
+}
+
+impl Wake for TaskHandle {
+    fn wake(self: Arc<Self>) {
+        self.wake_by_ref()
+    }
+    
+    fn wake_by_ref(self: &Arc<Self>) {
+        if let Some(executor) = self.executor.upgrade() {
+            if let Some(task) = self.task.lock().unwrap().take() {
+                executor.lock().unwrap().tasks.push_back(task);
+            }
+        }
+    }
+}
+
 /// Deterministic executor for running futures
-struct DeterministicExecutor {
+pub struct DeterministicExecutor {
     tasks: VecDeque<BoxFuture<'static, ()>>,
     timers: BTreeMap<Instant, Vec<Waker>>,
+    self_ref: Option<Arc<Mutex<DeterministicExecutor>>>,
 }
 
 impl DeterministicExecutor {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             tasks: VecDeque::new(),
             timers: BTreeMap::new(),
+            self_ref: None,
         }
     }
     
-    fn spawn(&mut self, future: BoxFuture<'static, ()>) {
+    pub fn set_self_ref(&mut self, self_ref: Arc<Mutex<DeterministicExecutor>>) {
+        self.self_ref = Some(self_ref);
+    }
+    
+    pub fn spawn(&mut self, future: BoxFuture<'static, ()>) {
         self.tasks.push_back(future);
     }
     
-    fn run_until_idle(&mut self) {
+    pub fn run_until_idle(&mut self) {
+        let self_ref = self.self_ref.as_ref().expect("Executor self reference not set").clone();
+        
         while let Some(mut task) = self.tasks.pop_front() {
-            let waker = futures::task::noop_waker();
+            let task_handle = Arc::new(TaskHandle {
+                executor: Arc::downgrade(&self_ref),
+                task: Mutex::new(None),
+            });
+            let waker = Waker::from(task_handle.clone());
             let mut cx = Context::from_waker(&waker);
             
             match task.as_mut().poll(&mut cx) {
                 Poll::Ready(()) => {}
                 Poll::Pending => {
-                    self.tasks.push_back(task);
+                    // Store the task in the handle so it can be re-queued when woken
+                    *task_handle.task.lock().unwrap() = Some(task);
                 }
             }
         }
     }
     
-    fn process_timers(&mut self, now: Instant) {
+    pub fn process_timers(&mut self, now: Instant) {
         let expired_timers: Vec<_> = self.timers
             .range(..=now)
             .map(|(instant, _)| *instant)

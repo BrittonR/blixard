@@ -2,6 +2,134 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Complete Implementation Guide: Madsim + Proptest for Deterministic Distributed System Testing
+
+### Overview
+
+**Madsim** is a deterministic simulator for distributed systems in Rust that replaces async runtime and system APIs with simulated versions, allowing you to control time, network behavior, and randomness.
+
+**Proptest** is a property-based testing framework that automatically generates test inputs and shrinks failing cases to minimal examples.
+
+Together, they enable comprehensive testing where proptest explores the test space while madsim ensures each test is deterministic and reproducible.
+
+### Setup
+
+#### Cargo.toml Configuration
+
+```toml
+[dependencies]
+madsim = "0.2"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+bytes = "1"
+tracing = "0.1"
+async-trait = "0.1"
+
+[dev-dependencies]
+madsim = { version = "0.2", features = ["macros"] }
+proptest = "1.0"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[patch.crates-io]
+# Critical: Replace tokio with madsim's implementation
+tokio = { package = "madsim-tokio", version = "0.2" }
+
+# Optional: Other madsim replacements
+tonic = { package = "madsim-tonic", version = "0.2" }
+etcd-client = { package = "madsim-etcd-client", version = "0.2" }
+```
+
+### Testing Patterns
+
+#### Running Madsim Tests
+
+Tests using madsim MUST be run with the `--cfg madsim` flag:
+
+```bash
+# Run madsim simulation tests
+RUSTFLAGS="--cfg madsim" cargo test --features simulation
+
+# Run specific test
+RUSTFLAGS="--cfg madsim" cargo test test_name --features simulation
+
+# Run with specific seed for deterministic reproduction
+MADSIM_TEST_SEED=1234567890 RUSTFLAGS="--cfg madsim" cargo test
+```
+
+#### Best Practices
+
+1. **Use madsim runtime for tests**
+```rust
+// ❌ WRONG: Don't use tokio runtime directly
+#[test]
+fn incorrect_test() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        // This uses real time, not simulated!
+    });
+}
+
+// ✅ CORRECT: Use madsim runtime
+#[test]
+fn correct_test() {
+    let rt = madsim::runtime::Runtime::new();
+    rt.block_on(async {
+        // Time is simulated
+    });
+}
+
+// ✅ ALSO CORRECT: Use madsim::test attribute
+#[madsim::test]
+async fn also_correct_test() {
+    // Automatically runs in madsim runtime
+}
+```
+
+2. **Avoid Non-Deterministic Operations**
+```rust
+// ❌ WRONG: Real system time
+let now = std::time::Instant::now();
+
+// ✅ CORRECT: Simulated time (std types work in madsim context)
+let now = std::time::Instant::now(); // This is intercepted by madsim when --cfg madsim
+
+// ❌ WRONG: Real randomness
+let value: u32 = rand::random();
+
+// ✅ CORRECT: Use deterministic random in tests
+let mut rng = madsim::rand::thread_rng();
+let value: u32 = rng.gen();
+```
+
+3. **Network Testing**
+```rust
+#[madsim::test]
+async fn test_network_simulation() {
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    
+    // Bind to port 0 for automatic assignment
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    
+    tokio::task::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut buf = [0; 1024];
+        let n = stream.read(&mut buf).await.unwrap();
+        stream.write_all(&buf[..n]).await.unwrap();
+    });
+    
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    stream.write_all(b"Hello").await.unwrap();
+    
+    let mut buf = [0; 5];
+    stream.read_exact(&mut buf).await.unwrap();
+    assert_eq!(&buf, b"Hello");
+}
+```
+
 ## Quick Start Commands
 
 ### Development

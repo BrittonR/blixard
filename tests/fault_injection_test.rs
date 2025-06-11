@@ -4,6 +4,7 @@ use fail::{fail_point, FailScenario};
 use blixard::microvm::MicroVm;
 use blixard::types::*;
 
+// This test doesn't need simulation - it's testing real failpoint injection
 #[tokio::test]
 async fn test_vm_start_with_failures() {
     let _scenario = FailScenario::setup();
@@ -37,6 +38,7 @@ async fn start_vm_with_fault_injection(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+// This test doesn't need simulation either - it's testing storage corruption handling
 #[tokio::test]
 async fn test_storage_corruption_handling() {
     let _scenario = FailScenario::setup();

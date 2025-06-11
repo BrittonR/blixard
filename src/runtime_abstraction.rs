@@ -5,7 +5,6 @@
 pub use crate::runtime_context::{
     spawn,
     sleep,
-    interval,
     now,
     set_global_runtime,
     set_thread_runtime,

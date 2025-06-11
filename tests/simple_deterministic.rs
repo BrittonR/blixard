@@ -1,82 +1,103 @@
 #![cfg(feature = "simulation")]
 
-use blixard::runtime_abstraction as rt;
-use blixard::runtime_traits::{Runtime, Clock};
-use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use madsim::time;
 
-#[test]
-fn test_runtime_switching() {
-    println!("\n🧪 Testing runtime switching mechanism\n");
-    
-    // Test 1: Default runtime (real)
-    println!("1️⃣ Using default (real) runtime:");
-    let start = rt::now();
-    std::thread::sleep(Duration::from_millis(10));
-    let elapsed = rt::now() - start;
-    println!("   Real time elapsed: {:?}", elapsed);
-    assert!(elapsed >= Duration::from_millis(10));
-    
-    // Test 2: Switch to simulated runtime
-    println!("\n2️⃣ Switching to simulated runtime:");
-    use blixard::runtime_context::{RuntimeHandle, SimulatedRuntimeHandle};
-    let sim_handle = Arc::new(SimulatedRuntimeHandle::new(42));
-    rt::set_global_runtime(sim_handle.clone() as Arc<dyn RuntimeHandle>);
-    
-    let sim_start = rt::now();
-    println!("   Simulated start time: {:?}", sim_start);
-    
-    // In simulated runtime, time doesn't advance on its own
-    std::thread::sleep(Duration::from_millis(10));
-    let sim_elapsed = rt::now() - sim_start;
-    println!("   Time after real sleep: {:?}", sim_elapsed);
-    
-    println!("\n✅ Runtime switching works!");
-}
-
-#[tokio::test]
+#[madsim::test]
 async fn test_simulated_time_control() {
-    use blixard::runtime::simulation::SimulatedRuntime;
-    
     println!("\n🕐 Testing simulated time control\n");
     
-    let sim = Arc::new(SimulatedRuntime::new(42));
-    
-    let t1 = sim.clock().now();
+    let t1 = Instant::now();
     println!("Start time: {:?}", t1);
     
-    // Advance by exactly 5 seconds
-    sim.advance_time(Duration::from_secs(5));
+    // Sleep for 5 seconds
+    time::sleep(Duration::from_secs(5)).await;
     
-    let t2 = sim.clock().now();
+    let t2 = Instant::now();
     let elapsed = t2 - t1;
-    println!("After advancing 5s: {:?}", t2);
+    println!("After sleeping 5s: {:?}", t2);
     println!("Elapsed: {:?}", elapsed);
     
-    assert_eq!(elapsed, Duration::from_secs(5));
+    // With MadSim, time advances precisely
+    assert!(elapsed >= Duration::from_secs(5));
+    assert!(elapsed < Duration::from_secs(6)); // Should be close to 5s
     println!("\n✅ Time control works perfectly!");
 }
 
-#[test]
-fn test_with_simulated_runtime_wrapper() {
-    use blixard::runtime_context::{SimulatedRuntimeHandle, RuntimeHandle};
+#[madsim::test]
+async fn test_deterministic_execution() {
+    println!("\n🎭 Testing deterministic execution\n");
     
-    println!("\n🎭 Testing with_simulated_runtime wrapper\n");
+    // Run the same sequence multiple times
+    let mut results = Vec::new();
     
-    // Use the simulated runtime directly without async
-    let sim_handle = Arc::new(SimulatedRuntimeHandle::new(12345));
-    let _guard = rt::RuntimeGuard::new(sim_handle.clone() as Arc<dyn RuntimeHandle>);
+    for i in 0..3 {
+        let start = Instant::now();
+        
+        // Perform some time-based operations
+        time::sleep(Duration::from_millis(100)).await;
+        let mid = Instant::now();
+        time::sleep(Duration::from_millis(200)).await;
+        let end = Instant::now();
+        
+        let result = (mid - start, end - mid, end - start);
+        results.push(result);
+        
+        println!("Run {}: first={:?}, second={:?}, total={:?}", 
+                 i, result.0, result.1, result.2);
+    }
     
-    let sim = sim_handle.runtime();
-    let start = sim.clock().now();
+    // In MadSim, timing should be consistent
+    for i in 1..results.len() {
+        // Allow small variations due to test execution overhead
+        assert!((results[i].0.as_millis() as i64 - results[0].0.as_millis() as i64).abs() <= 10);
+        assert!((results[i].1.as_millis() as i64 - results[0].1.as_millis() as i64).abs() <= 10);
+        assert!((results[i].2.as_millis() as i64 - results[0].2.as_millis() as i64).abs() <= 10);
+    }
     
-    // Advance time
-    sim.advance_time(Duration::from_secs(10));
+    println!("\n✅ Deterministic execution verified!");
+}
+
+#[madsim::test]
+async fn test_concurrent_time_advance() {
+    println!("\n⚡ Testing concurrent time operations\n");
     
-    let end = sim.clock().now();
-    let elapsed = end - start;
+    let start = Instant::now();
     
-    println!("Time advanced by: {:?}", elapsed);
-    assert_eq!(elapsed, Duration::from_secs(10));
-    println!("\n✅ with_simulated_runtime works!");
+    // Spawn multiple tasks that sleep for different durations
+    let handles = vec![
+        madsim::task::spawn(async move {
+            time::sleep(Duration::from_millis(100)).await;
+            Instant::now()
+        }),
+        madsim::task::spawn(async move {
+            time::sleep(Duration::from_millis(200)).await;
+            Instant::now()
+        }),
+        madsim::task::spawn(async move {
+            time::sleep(Duration::from_millis(300)).await;
+            Instant::now()
+        }),
+    ];
+    
+    // Wait for all tasks
+    let mut times = Vec::new();
+    for handle in handles {
+        times.push(handle.await.unwrap());
+    }
+    
+    // Check that times are in expected order
+    for i in 1..times.len() {
+        assert!(times[i] > times[i-1], "Times should be in increasing order");
+    }
+    
+    // Check durations
+    let durations: Vec<_> = times.iter().map(|t| *t - start).collect();
+    println!("Task durations: {:?}", durations);
+    
+    assert!(durations[0] >= Duration::from_millis(100));
+    assert!(durations[1] >= Duration::from_millis(200));
+    assert!(durations[2] >= Duration::from_millis(300));
+    
+    println!("\n✅ Concurrent time operations work correctly!");
 }

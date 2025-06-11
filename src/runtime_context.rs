@@ -8,7 +8,7 @@ use std::future::Future;
 use std::pin::Pin;
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
-use tokio::task::JoinHandle;
+use std::task::Waker;
 
 use crate::runtime_traits::{Clock, Runtime};
 use crate::runtime::simulation::SimulatedRuntime;
@@ -23,11 +23,16 @@ static GLOBAL_RUNTIME: Lazy<RwLock<Arc<dyn RuntimeHandle>>> = Lazy::new(|| {
     RwLock::new(Arc::new(RealRuntimeHandle))
 });
 
+/// Abstract task handle that works for both real and simulated runtime
+pub struct TaskHandle {
+    // In simulation, we don't need actual handles
+    _private: (),
+}
+
 /// Handle to interact with the current runtime
 pub trait RuntimeHandle: Send + Sync {
-    fn spawn(&self, future: Pin<Box<dyn Future<Output = ()> + Send + 'static>>) -> JoinHandle<()>;
+    fn spawn(&self, future: Pin<Box<dyn Future<Output = ()> + Send + 'static>>);
     fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
-    fn interval(&self, duration: Duration) -> tokio::time::Interval;
     fn now(&self) -> Instant;
 }
 
@@ -35,16 +40,12 @@ pub trait RuntimeHandle: Send + Sync {
 struct RealRuntimeHandle;
 
 impl RuntimeHandle for RealRuntimeHandle {
-    fn spawn(&self, future: Pin<Box<dyn Future<Output = ()> + Send + 'static>>) -> JoinHandle<()> {
-        tokio::spawn(future)
+    fn spawn(&self, future: Pin<Box<dyn Future<Output = ()> + Send + 'static>>) {
+        tokio::spawn(future);
     }
     
     fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
         Box::pin(tokio::time::sleep(duration))
-    }
-    
-    fn interval(&self, duration: Duration) -> tokio::time::Interval {
-        tokio::time::interval(duration)
     }
     
     fn now(&self) -> Instant {
@@ -64,28 +65,46 @@ impl SimulatedRuntimeHandle {
         }
     }
     
+    pub fn new_with_runtime(runtime: Arc<SimulatedRuntime>) -> Self {
+        Self { runtime }
+    }
+    
     pub fn runtime(&self) -> &Arc<SimulatedRuntime> {
         &self.runtime
+    }
+    
+    /// Run the deterministic executor until all tasks are idle
+    pub fn run_until_idle(&self) {
+        self.runtime.run_until_idle();
     }
 }
 
 impl RuntimeHandle for SimulatedRuntimeHandle {
-    fn spawn(&self, future: Pin<Box<dyn Future<Output = ()> + Send + 'static>>) -> JoinHandle<()> {
-        // Still use tokio for now, but this is where we'd integrate deterministic executor
-        tokio::spawn(future)
+    fn spawn(&self, future: Pin<Box<dyn Future<Output = ()> + Send + 'static>>) {
+        // Use tokio spawn but wrap the future to ensure it uses simulated time
+        let runtime = self.runtime.clone();
+        tokio::spawn(async move {
+            // Set thread-local runtime for this task
+            let _guard = RuntimeGuard::new(Arc::new(SimulatedRuntimeHandle { runtime }) as Arc<dyn RuntimeHandle>);
+            future.await
+        });
     }
     
     fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
-        // Use the SimulatedRuntime's clock for proper simulation
+        // For simulation, we need to make sleep instant when time is advanced
         let runtime = self.runtime.clone();
+        let target_time = runtime.clock().now() + duration;
+        
         Box::pin(async move {
-            runtime.clock().sleep(duration).await;
+            loop {
+                let now = runtime.clock().now();
+                if now >= target_time {
+                    break;
+                }
+                // Yield to allow time advancement
+                tokio::task::yield_now().await;
+            }
         })
-    }
-    
-    fn interval(&self, duration: Duration) -> tokio::time::Interval {
-        // Create a very fast interval that we control via time advancement
-        tokio::time::interval(Duration::from_millis(1))
     }
     
     fn now(&self) -> Instant {
@@ -123,7 +142,7 @@ fn current_runtime() -> Arc<dyn RuntimeHandle> {
 }
 
 /// Spawn a future on the current runtime
-pub fn spawn<F>(future: F) -> JoinHandle<()>
+pub fn spawn<F>(future: F)
 where
     F: Future<Output = ()> + Send + 'static,
 {
@@ -135,10 +154,6 @@ pub async fn sleep(duration: Duration) {
     current_runtime().sleep(duration).await
 }
 
-/// Create an interval using the current runtime
-pub fn interval(duration: Duration) -> tokio::time::Interval {
-    current_runtime().interval(duration)
-}
 
 /// Get current time from the runtime
 pub fn now() -> Instant {
@@ -174,5 +189,8 @@ where
 {
     let sim_handle = Arc::new(SimulatedRuntimeHandle::new(seed));
     let _guard = RuntimeGuard::new(sim_handle.clone() as Arc<dyn RuntimeHandle>);
-    f(sim_handle).await
+    let result = f(sim_handle.clone()).await;
+    // Run any remaining tasks
+    sim_handle.run_until_idle();
+    result
 }
