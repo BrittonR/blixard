@@ -40,6 +40,21 @@ impl Node {
         })
     }
 
+    pub async fn new_with_storage(
+        config: NodeConfig,
+        initial_peers: HashMap<u64, SocketAddr>,
+        storage: Arc<Storage>,
+    ) -> Result<Self> {
+        info!("Initializing node {} at {}", config.id, config.bind_addr);
+
+        Ok(Self {
+            config,
+            storage,
+            raft_proposal_tx: None,
+            initial_peers,
+        })
+    }
+
     pub async fn run(mut self) -> Result<()> {
         info!("Starting Blixard node {}", self.config.id);
         println!("Node {} starting Raft consensus engine...", self.config.id);

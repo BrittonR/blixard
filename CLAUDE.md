@@ -30,14 +30,10 @@ madsim = { version = "0.2", features = ["macros"] }
 proptest = "1.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-[patch.crates-io]
-# Critical: Replace tokio with madsim's implementation
-tokio = { package = "madsim-tokio", version = "0.2" }
-
-# Optional: Other madsim replacements
-tonic = { package = "madsim-tonic", version = "0.2" }
-etcd-client = { package = "madsim-etcd-client", version = "0.2" }
+tonic = "0.11"  # For gRPC support
 ```
+
+Note: For MadSim integration with tonic, see `docs/grpc_with_madsim.md` for the recommended approach using separate test crates.
 
 ### Testing Patterns
 
@@ -168,6 +164,34 @@ For current commands and usage:
 - Check `src/main.rs` for CLI argument parsing
 - Check `README.md` for usage examples and quickstart guide
 - Check test scripts (`./test_*.sh`) for integration testing examples
+
+## gRPC Integration
+
+Blixard uses Tonic for gRPC communication between nodes and clients. The implementation follows these principles:
+
+### Architecture
+- **Runtime Abstraction**: Both `GrpcServer<R>` and `GrpcClient<R>` are generic over the runtime
+- **Protocol Buffers**: Defined in `proto/blixard.proto` with cluster and VM management services
+- **Deterministic Testing**: Can be tested with MadSim for reproducible network behavior
+
+### Key Files
+- `proto/blixard.proto` - Service definitions
+- `src/grpc_server.rs` - Server implementation with runtime abstraction
+- `src/grpc_client.rs` - Client implementation with runtime abstraction
+- `tests/grpc_basic_test.rs` - Basic functionality tests
+- `tests/grpc_madsim_test.rs` - Deterministic simulation tests
+- `docs/grpc_with_madsim.md` - Detailed integration guide
+
+### Usage
+```rust
+// Server
+let server = GrpcServer::new(node, runtime);
+server.serve(addr).await?;
+
+// Client
+let mut client = GrpcClient::connect(addr, runtime).await?;
+let healthy = client.health_check().await?;
+```
 
 ## Core Architecture
 

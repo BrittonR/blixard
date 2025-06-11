@@ -1,4 +1,6 @@
 pub mod deterministic_executor;
+pub mod grpc_client;
+pub mod grpc_server;
 pub mod microvm;
 pub mod network;
 pub mod network_v2; // New runtime-aware version
