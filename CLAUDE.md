@@ -12,6 +12,8 @@ Blixard is a distributed microVM orchestration platform being built in Rust. The
 - **Rust** - Core implementation language
 - **Tonic + gRPC** - Communication protocol (proto definitions ready)
 - **Clap** - CLI argument parsing
+- **Raft** - Distributed consensus using [raft crate](https://crates.io/crates/raft)
+- **microvm.nix** - VM management via [microvm.nix](https://github.com/astro/microvm.nix)
 - **Comprehensive Dependencies** - Ready for distributed systems development
 
 ### Current Architecture
@@ -121,7 +123,7 @@ cargo run -- vm list
 ### Dependencies Available
 The project includes dependencies for:
 - **Distributed Systems**: tokio, async-trait, futures
-- **Consensus**: tikv-raft-rs, raft-proto
+- **Consensus**: raft, raft-proto
 - **Storage**: redb, serde
 - **Testing**: proptest, stateright, fail (fault injection), madsim (deterministic simulation)
 - **Networking**: tonic, prost, hyper, madsim-tonic
@@ -138,8 +140,8 @@ The project includes dependencies for:
 
 Based on the current foundation, the following areas need implementation:
 1. **Node Management** - Cluster membership and lifecycle
-2. **Raft Consensus** - Distributed consensus using tikv-raft-rs
-3. **VM Orchestration** - MicroVM lifecycle management
+2. **Raft Consensus** - Distributed consensus using raft crate
+3. **VM Orchestration** - MicroVM lifecycle management via microvm.nix
 4. **Storage Layer** - Persistent state with redb
 5. **Testing Framework** - Deterministic testing setup
 6. **gRPC Services** - Server and client implementations

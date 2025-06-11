@@ -43,9 +43,25 @@ pub enum BlixardError {
     
     #[error("System error: {0}")]
     SystemError(String),
+
+    #[error("Storage operation '{operation}' failed")]
+    Storage { operation: String, #[source] source: Box<dyn std::error::Error + Send + Sync> },
+
+    #[error("Raft operation '{operation}' failed")]
+    Raft { operation: String, #[source] source: Box<dyn std::error::Error + Send + Sync> },
+
+    #[error("Serialization operation '{operation}' failed")]
+    Serialization { operation: String, #[source] source: Box<dyn std::error::Error + Send + Sync> },
+
+    #[error("Internal error: {message}")]
+    Internal { message: String },
+
+    #[error("Feature not implemented: {feature}")]
+    NotImplemented { feature: String },
 }
 
 pub type Result<T> = std::result::Result<T, BlixardError>;
+pub type BlixardResult<T> = std::result::Result<T, BlixardError>;
 
 impl From<redb::TransactionError> for BlixardError {
     fn from(err: redb::TransactionError) -> Self {

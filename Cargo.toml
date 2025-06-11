@@ -38,6 +38,8 @@ color-eyre = "0.6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 slog = "2.7"
+slog-term = "2.9"
+slog-async = "2.8"
 
 # Networking (tonic configured conditionally below)
 prost = "0.12"
@@ -108,6 +110,7 @@ tonic-build = "0.11"
 [features]
 default = []
 failpoints = ["fail/failpoints"]
+simulation = []
 
 [[bin]]
 name = "blixard"
