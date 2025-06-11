@@ -1,24 +1,117 @@
-use std::net::{SocketAddr, TcpListener};
+// Common test utilities and helpers for integration tests
 
-/// Get an available port by binding to port 0
-pub fn get_available_port() -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind to port 0");
-    let port = listener
-        .local_addr()
-        .expect("Failed to get local address")
-        .port();
-    drop(listener); // Release the port
-    port
+use std::time::Duration;
+use blixard::{
+    error::{BlixardError, Result as BlixardResult},
+    types::{NodeConfig, VmConfig, VmStatus}
+};
+use std::net::SocketAddr;
+
+/// Test configuration constants
+pub const TEST_TIMEOUT: Duration = Duration::from_secs(30);
+pub const TEST_PORT_BASE: u16 = 7000;
+
+/// Helper to create a test node configuration
+pub fn test_node_config(id: u64, port: u16) -> NodeConfig {
+    NodeConfig {
+        id,
+        bind_addr: format!("127.0.0.1:{}", port).parse().unwrap(),
+        join_addr: None,
+        data_dir: format!("/tmp/blixard-test-{}", id),
+        use_tailscale: false,
+    }
 }
 
-/// Get multiple available ports
-pub fn get_available_ports(count: usize) -> Vec<u16> {
-    (0..count).map(|_| get_available_port()).collect()
+/// Helper to create a test VM configuration
+pub fn test_vm_config(name: &str) -> VmConfig {
+    VmConfig {
+        name: name.to_string(),
+        config_path: "/tmp/test.nix".to_string(),
+        memory: 512,
+        vcpus: 1,
+    }
 }
 
-/// Create a SocketAddr with an available port
-pub fn get_test_addr() -> SocketAddr {
-    format!("127.0.0.1:{}", get_available_port())
-        .parse()
-        .expect("Failed to parse address")
+/// Wait for a condition with timeout
+pub async fn wait_for_condition<F, Fut>(mut condition: F, timeout: Duration) -> BlixardResult<()>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let start = std::time::Instant::now();
+    
+    while start.elapsed() < timeout {
+        if condition().await {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    
+    Err(BlixardError::SystemError(
+        format!("Timeout waiting for condition after {:?}", timeout)
+    ))
+}
+
+/// Simulation test utilities
+pub mod simulation {
+    use super::*;
+    
+    /// Setup a simulated test environment
+    pub fn setup_simulation() -> BlixardResult<()> {
+        // Initialize simulation environment
+        Ok(())
+    }
+    
+    /// Create a test cluster configuration for simulation
+    pub fn test_cluster_config(node_count: usize) -> Vec<NodeConfig> {
+        (0..node_count)
+            .map(|i| test_node_config(i as u64 + 1, TEST_PORT_BASE + i as u16))
+            .collect()
+    }
+}
+
+/// Property testing utilities
+pub mod proptest_utils {
+    use proptest::prelude::*;
+    use super::*;
+    
+    /// Strategy for generating valid node IDs
+    pub fn node_id_strategy() -> impl Strategy<Value = u64> {
+        1u64..=1000u64
+    }
+    
+    /// Strategy for generating valid port numbers
+    pub fn port_strategy() -> impl Strategy<Value = u16> {
+        7000u16..=8000u16
+    }
+    
+    /// Strategy for generating VM names
+    pub fn vm_name_strategy() -> impl Strategy<Value = String> {
+        "[a-z][a-z0-9-]*".prop_filter("Must be valid VM name", |s| {
+            s.len() >= 2 && s.len() <= 32
+        })
+    }
+}
+
+/// Failpoint testing utilities
+pub mod failpoints {
+    use super::*;
+    
+    /// Configure failpoints for testing
+    pub fn setup_failpoints() {
+        #[cfg(feature = "failpoints")]
+        {
+            // Setup common failpoints for testing
+            fail::cfg("network_partition", "return").unwrap();
+            fail::cfg("storage_corruption", "return").unwrap();
+        }
+    }
+    
+    /// Cleanup failpoints after testing
+    pub fn cleanup_failpoints() {
+        #[cfg(feature = "failpoints")]
+        {
+            fail::teardown();
+        }
+    }
 }

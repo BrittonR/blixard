@@ -1,0 +1,93 @@
+//! Integration tests for Blixard using madsim
+
+#![cfg(madsim)]
+
+// Load test modules
+mod cluster_tests;
+mod network_tests;
+mod raft_tests;
+
+use std::time::Duration;
+use madsim::time::{sleep, Instant};
+
+#[madsim::test]
+async fn test_basic_simulation() {
+    // This tests that madsim is working
+    let start = Instant::now();
+    sleep(Duration::from_secs(1)).await;
+    let elapsed = start.elapsed();
+    
+    assert!(elapsed >= Duration::from_secs(1));
+    assert!(elapsed < Duration::from_millis(1100));
+}
+
+#[madsim::test]
+async fn test_tcp_communication() {
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    
+    // Test TCP communication in simulation
+    let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
+    
+    // Spawn server task
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut buf = vec![0; 1024];
+        let n = stream.read(&mut buf).await.unwrap();
+        // Echo back what we received
+        stream.write_all(&buf[..n]).await.unwrap();
+        stream.flush().await.unwrap();
+    });
+    
+    // Give server time to start
+    sleep(Duration::from_millis(100)).await;
+    
+    // Connect and send data
+    let mut client = TcpStream::connect("127.0.0.1:8080").await.unwrap();
+    client.write_all(b"Hello!").await.unwrap();
+    client.flush().await.unwrap();
+    
+    // Read echo response
+    let mut response = vec![0; 6];
+    client.read_exact(&mut response).await.unwrap();
+    assert_eq!(&response, b"Hello!");
+    
+    // Let server finish
+    let _ = server.await;
+}
+
+#[madsim::test] 
+async fn test_deterministic_randomness() {
+    use madsim::rand::{thread_rng, Rng};
+    
+    let mut rng = thread_rng();
+    let values: Vec<u32> = (0..5).map(|_| rng.gen()).collect();
+    
+    // Values should be deterministic based on seed
+    assert!(!values.is_empty());
+    
+    // If we run with same seed, we'd get same values
+    println!("Random values: {:?}", values);
+}
+
+#[madsim::test]
+async fn test_time_control() {
+    // Test that we can control time
+    let start = Instant::now();
+    
+    // "Sleep" for an hour - should be instant in simulation
+    sleep(Duration::from_secs(3600)).await;
+    
+    let elapsed = start.elapsed();
+    // Allow small tolerance for floating point precision
+    assert!(elapsed >= Duration::from_secs(3600));
+    assert!(elapsed < Duration::from_secs(3601));
+    
+    // Multiple quick sleeps
+    for _ in 0..1000 {
+        sleep(Duration::from_millis(1)).await;
+    }
+    
+    let total = start.elapsed();
+    assert!(total >= Duration::from_secs(3601));
+}

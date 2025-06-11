@@ -1,265 +1,108 @@
-use anyhow::{Context, Result};
-use std::sync::Arc;
-use tokio::sync::mpsc;
-use tracing::{debug, error, info};
+use tokio::net::TcpListener;
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
-use crate::microvm::MicroVm;
-use crate::raft_node_v2::RaftNode;
-use crate::runtime_traits::{RealRuntime, Runtime};
-use crate::storage::Storage;
-use crate::tailscale::TailscaleDiscovery;
-use crate::types::*;
-use std::collections::HashMap;
-use std::net::SocketAddr;
+use crate::error::Result;
+use crate::types::NodeConfig;
 
+/// A Blixard cluster node
 pub struct Node {
     config: NodeConfig,
-    storage: Arc<Storage>,
-    raft_proposal_tx: Option<mpsc::Sender<crate::state_machine::StateMachineCommand>>,
-    initial_peers: HashMap<u64, SocketAddr>,
+    shutdown_tx: Option<oneshot::Sender<()>>,
+    handle: Option<JoinHandle<Result<()>>>,
 }
 
 impl Node {
-    pub async fn new(config: NodeConfig, initial_peers: HashMap<u64, SocketAddr>) -> Result<Self> {
-        info!("Initializing node {} at {}", config.id, config.bind_addr);
-
-        // Create storage directory if it doesn't exist
-        tokio::fs::create_dir_all(&config.data_dir)
-            .await
-            .context("Failed to create data directory")?;
-
-        // Initialize storage
-        let storage_path = format!("{}/blixard.db", config.data_dir);
-        let storage = Arc::new(Storage::new(storage_path)?);
-
-        Ok(Self {
+    /// Create a new node
+    pub fn new(config: NodeConfig) -> Self {
+        Self {
             config,
-            storage,
-            raft_proposal_tx: None,
-            initial_peers,
-        })
-    }
-
-    pub async fn new_with_storage(
-        config: NodeConfig,
-        initial_peers: HashMap<u64, SocketAddr>,
-        storage: Arc<Storage>,
-    ) -> Result<Self> {
-        info!("Initializing node {} at {}", config.id, config.bind_addr);
-
-        Ok(Self {
-            config,
-            storage,
-            raft_proposal_tx: None,
-            initial_peers,
-        })
-    }
-
-    pub async fn run(mut self) -> Result<()> {
-        info!("Starting Blixard node {}", self.config.id);
-        println!("Node {} starting Raft consensus engine...", self.config.id);
-
-        // Initialize Raft with initial peers
-        let peer_ids: Vec<u64> = self.initial_peers.keys().copied().collect();
-        println!(
-            "Initializing Raft with {} peers: {:?}",
-            peer_ids.len(),
-            peer_ids
-        );
-
-        let mut raft_node = RaftNode::new(
-            self.config.id,
-            self.config.bind_addr,
-            self.storage.clone(),
-            peer_ids, // Pass peer IDs for initial configuration
-            Arc::new(RealRuntime::new()),
-        )
-        .await?;
-
-        println!("Raft node created successfully");
-
-        // Register peer addresses with network layer (no Raft proposals yet)
-        for (peer_id, peer_addr) in &self.initial_peers {
-            info!("Registering peer {} at {}", peer_id, peer_addr);
-            raft_node.register_peer_address(*peer_id, *peer_addr).await;
+            shutdown_tx: None,
+            handle: None,
         }
+    }
 
-        // Discover additional peers if using Tailscale
-        if self.config.use_tailscale {
-            if TailscaleDiscovery::is_available().await {
-                info!("Using Tailscale for node discovery");
-                let nodes = TailscaleDiscovery::discover_nodes().await?;
-                for node in nodes {
-                    if let Some(id) = node.node_id {
-                        if id != self.config.id && !self.initial_peers.contains_key(&id) {
-                            // Parse tailscale IP to SocketAddr (assuming default port)
-                            if let Ok(addr) =
-                                format!("{}:7000", node.tailscale_ip).parse::<SocketAddr>()
-                            {
-                                info!("Discovered peer node {} at {}", id, addr);
-                                raft_node.add_peer(id, addr).await?;
+    /// Start the node
+    pub async fn start(&mut self) -> Result<()> {
+        let config = self.config.clone();
+        let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+        self.shutdown_tx = Some(shutdown_tx);
+
+        let handle = tokio::spawn(async move {
+            let listener = TcpListener::bind(&config.bind_addr).await?;
+            tracing::info!("Node {} listening on {}", config.id, config.bind_addr);
+
+            loop {
+                tokio::select! {
+                    result = listener.accept() => {
+                        match result {
+                            Ok((stream, addr)) => {
+                                tracing::debug!("New connection from {}", addr);
+                                // Handle connection
+                            }
+                            Err(e) => {
+                                tracing::error!("Accept error: {}", e);
                             }
                         }
                     }
-                }
-            } else {
-                error!("Tailscale requested but not available");
-            }
-        }
-
-        // Get proposal handle
-        self.raft_proposal_tx = Some(raft_node.get_proposal_handle());
-
-        // Start background tasks
-        let runtime = Arc::new(RealRuntime::new());
-        let monitor_handle = runtime.spawn(Box::pin(self.clone().monitor_vms()));
-        let raft_handle = runtime.spawn(Box::pin(raft_node.run()));
-        let grpc_handle = runtime.spawn(Box::pin(self.clone().run_grpc_server()));
-
-        // Wait for any task to complete (they shouldn't unless there's an error)
-        tokio::select! {
-            result = monitor_handle => {
-                error!("VM monitor task ended: {:?}", result);
-            }
-            result = raft_handle => {
-                error!("Raft task ended: {:?}", result);
-            }
-            result = grpc_handle => {
-                error!("gRPC server task ended: {:?}", result);
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Monitor local VMs and update their status
-    async fn monitor_vms(self) -> Result<()> {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
-
-        loop {
-            interval.tick().await;
-
-            // Get all VMs assigned to this node
-            let vms = self.storage.list_vms()?;
-            let local_vms: Vec<_> = vms
-                .into_iter()
-                .filter(|vm| vm.node_id == self.config.id)
-                .collect();
-
-            for vm in local_vms {
-                // Check actual status from microvm.nix
-                match MicroVm::get_status(&vm.name).await {
-                    Ok(actual_status) => {
-                        if actual_status != vm.status {
-                            debug!(
-                                "VM {} status changed: {:?} -> {:?}",
-                                vm.name, vm.status, actual_status
-                            );
-
-                            // Propose status update through Raft
-                            if let Some(ref tx) = self.raft_proposal_tx {
-                                let command =
-                                    crate::state_machine::StateMachineCommand::UpdateVmStatus {
-                                        name: vm.name.clone(),
-                                        status: actual_status,
-                                    };
-                                let _ = tx.send(command).await;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to get status for VM {}: {}", vm.name, e);
+                    _ = &mut shutdown_rx => {
+                        tracing::info!("Node {} shutting down", config.id);
+                        break;
                     }
                 }
             }
-        }
-    }
 
-    /// Run the gRPC server for client connections
-    async fn run_grpc_server(self) -> Result<()> {
-        info!("Starting gRPC server on {}", self.config.bind_addr);
+            Ok(())
+        });
 
-        // TODO: Implement actual gRPC server
-        // For now, just keep the task alive
-        loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
-        }
-    }
-
-    /// Handle VM creation
-    pub async fn create_vm(&self, config: VmConfig) -> Result<()> {
-        // Choose a node for the VM (for now, use this node)
-        let node_id = self.config.id;
-
-        // Propose through Raft
-        if let Some(ref tx) = self.raft_proposal_tx {
-            let vm = VmState {
-                name: config.name.clone(),
-                config,
-                status: VmStatus::Creating,
-                node_id,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-            };
-            let command = crate::state_machine::StateMachineCommand::CreateVm { vm };
-            tx.send(command).await?;
-        }
-
+        self.handle = Some(handle);
         Ok(())
     }
 
-    /// Handle VM start
-    pub async fn start_vm(&self, name: String) -> Result<()> {
-        // Check if VM exists and is assigned to this node
-        if let Some(vm) = self.storage.get_vm(&name)? {
-            if vm.node_id == self.config.id {
-                // Start the VM locally
-                MicroVm::start(&name, &vm.config.config_path).await?;
-            }
-
-            // Update status through Raft
-            if let Some(ref tx) = self.raft_proposal_tx {
-                let command = crate::state_machine::StateMachineCommand::UpdateVmStatus {
-                    name,
-                    status: VmStatus::Running,
-                };
-                tx.send(command).await?;
-            }
+    /// Stop the node
+    pub async fn stop(&mut self) -> Result<()> {
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.send(());
         }
-
-        Ok(())
+        
+        if let Some(handle) = self.handle.take() {
+            match handle.await {
+                Ok(result) => result,
+                Err(_) => Ok(()), // Task was cancelled
+            }
+        } else {
+            Ok(())
+        }
     }
 
-    /// Handle VM stop
-    pub async fn stop_vm(&self, name: String) -> Result<()> {
-        // Check if VM exists and is assigned to this node
-        if let Some(vm) = self.storage.get_vm(&name)? {
-            if vm.node_id == self.config.id {
-                // Stop the VM locally
-                MicroVm::stop(&name).await?;
-            }
-
-            // Update status through Raft
-            if let Some(ref tx) = self.raft_proposal_tx {
-                let command = crate::state_machine::StateMachineCommand::UpdateVmStatus {
-                    name,
-                    status: VmStatus::Stopped,
-                };
-                tx.send(command).await?;
-            }
-        }
-
-        Ok(())
+    /// Check if the node is running
+    pub fn is_running(&self) -> bool {
+        self.handle.as_ref().map_or(false, |h| !h.is_finished())
     }
 }
 
-impl Clone for Node {
-    fn clone(&self) -> Self {
-        Self {
-            config: self.config.clone(),
-            storage: self.storage.clone(),
-            raft_proposal_tx: self.raft_proposal_tx.clone(),
-            initial_peers: self.initial_peers.clone(),
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_node_lifecycle() {
+        let config = NodeConfig {
+            id: 1,
+            data_dir: "/tmp/test".to_string(),
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            join_addr: None,
+            use_tailscale: false,
+        };
+
+        let mut node = Node::new(config);
+        
+        // Start node
+        node.start().await.unwrap();
+        assert!(node.is_running());
+
+        // Stop node
+        node.stop().await.unwrap();
+        assert!(!node.is_running());
     }
 }

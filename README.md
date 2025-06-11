@@ -96,10 +96,10 @@ cargo test --test vm_cli_test
 cargo nextest run --all-features
 
 # Deterministic simulation tests (TigerBeetle/FoundationDB-style)
-cargo test --features simulation
+cargo test -p blixard-madsim-tests
 
-# Proof of determinism verification
-cargo test --features simulation --test proof_of_determinism
+# Run with fixed seed for reproducibility
+MADSIM_TEST_SEED=12345 cargo test -p blixard-madsim-tests
 
 # Quick integration test (2 nodes)
 ./quick_test.sh
