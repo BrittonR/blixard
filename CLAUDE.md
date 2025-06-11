@@ -44,8 +44,22 @@ cargo run -- --help       # Show CLI help
 
 ### Testing Frameworks
 ```bash
-# Property-based testing with proptest (WORKING - 7 tests)
-cargo test --test proptest_example
+# Comprehensive test suite - run all tests
+cargo test                          # All unit and integration tests
+cargo test --all-targets           # Include all test types
+
+# Specific test categories
+cargo test --test cli_tests         # CLI command parsing tests
+cargo test --test error_tests       # Error handling tests  
+cargo test --test node_tests        # Node functionality tests
+cargo test --test types_tests       # Type serialization tests
+cargo test --test storage_tests     # Database persistence tests
+
+# Property-based testing with PropTest
+cargo test --test error_proptest    # Error property validation
+cargo test --test types_proptest    # Type constraint properties
+cargo test --test node_proptest     # Node behavior properties
+cargo test --test proptest_example  # Original domain properties (7 tests)
 
 # Model checking with stateright (WORKING - 2 tests)  
 cargo test --test stateright_simple_test
@@ -69,7 +83,17 @@ MADSIM_TEST_SEED=12345 ./scripts/sim-test.sh  # Reproduce specific run
 ```
 
 ### Test Infrastructure Status
-- **✅ Proptest**: Fully working with 7 property-based tests
+- **✅ Comprehensive Unit Tests**: 51 traditional unit tests covering core functionality
+  - CLI command parsing and validation (`tests/cli_tests.rs`)
+  - Error handling and type conversions (`tests/error_tests.rs`)
+  - Node lifecycle and VM management (`tests/node_tests.rs`)
+  - Type serialization and validation (`tests/types_tests.rs`)
+  - Database persistence and transactions (`tests/storage_tests.rs`)
+- **✅ Property-Based Testing**: 30+ property tests using PropTest
+  - Error property validation (`tests/error_proptest.rs`)
+  - Type constraint and serialization properties (`tests/types_proptest.rs`)
+  - Node behavior properties across configurations (`tests/node_proptest.rs`)
+  - Original domain property tests (`tests/proptest_example.rs`)
 - **✅ Stateright**: Fully working with 2 model checking tests
 - **✅ MadSim**: Fully deterministic simulation framework
   - Workspace member `simulation/` for deterministic tests

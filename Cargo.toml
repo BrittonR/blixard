@@ -99,6 +99,7 @@ tracing-test = "0.2"
 serial_test = "3.0"
 assert_cmd = "2.0"
 predicates = "3.0"
+tokio-test = "0.4"
 
 # Network simulation
 pnet = "0.34"
