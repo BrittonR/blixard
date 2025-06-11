@@ -1,10 +1,10 @@
 use raft::prelude::*;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// Wrapper for raft Message to add serde support
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RaftMessageWrapper {
-    pub msg_type: i32,  // raft uses i32 for MessageType
+    pub msg_type: i32, // raft uses i32 for MessageType
     pub to: u64,
     pub from: u64,
     pub term: u64,
@@ -20,7 +20,7 @@ pub struct RaftMessageWrapper {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntryWrapper {
-    pub entry_type: i32,  // raft uses i32 for EntryType
+    pub entry_type: i32, // raft uses i32 for EntryType
     pub term: u64,
     pub index: u64,
     pub data: Vec<u8>,
@@ -109,11 +109,14 @@ impl From<Snapshot> for SnapshotWrapper {
     fn from(snapshot: Snapshot) -> Self {
         SnapshotWrapper {
             data: snapshot.data,
-            metadata: snapshot.metadata.map(SnapshotMetadataWrapper::from).unwrap_or_else(|| SnapshotMetadataWrapper {
-                conf_state: None,
-                index: 0,
-                term: 0,
-            }),
+            metadata: snapshot
+                .metadata
+                .map(SnapshotMetadataWrapper::from)
+                .unwrap_or_else(|| SnapshotMetadataWrapper {
+                    conf_state: None,
+                    index: 0,
+                    term: 0,
+                }),
         }
     }
 }

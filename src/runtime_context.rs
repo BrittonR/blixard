@@ -1,17 +1,15 @@
-/// Global runtime context that allows switching between real and simulated runtime
-/// This is the KEY to making deterministic testing work!
-
-use std::sync::Arc;
-use std::cell::RefCell;
-use std::time::{Duration, Instant};
-use std::future::Future;
-use std::pin::Pin;
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
-use std::task::Waker;
+use std::cell::RefCell;
+use std::future::Future;
+use std::pin::Pin;
+/// Global runtime context that allows switching between real and simulated runtime
+/// This is the KEY to making deterministic testing work!
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use crate::runtime_traits::{Clock, Runtime};
 use crate::runtime::simulation::SimulatedRuntime;
+use crate::runtime_traits::{Clock, Runtime};
 
 // Thread-local storage for current runtime
 thread_local! {
@@ -19,9 +17,8 @@ thread_local! {
 }
 
 // Global default runtime (real by default)
-static GLOBAL_RUNTIME: Lazy<RwLock<Arc<dyn RuntimeHandle>>> = Lazy::new(|| {
-    RwLock::new(Arc::new(RealRuntimeHandle))
-});
+static GLOBAL_RUNTIME: Lazy<RwLock<Arc<dyn RuntimeHandle>>> =
+    Lazy::new(|| RwLock::new(Arc::new(RealRuntimeHandle)));
 
 /// Abstract task handle that works for both real and simulated runtime
 pub struct TaskHandle {
@@ -43,11 +40,11 @@ impl RuntimeHandle for RealRuntimeHandle {
     fn spawn(&self, future: Pin<Box<dyn Future<Output = ()> + Send + 'static>>) {
         tokio::spawn(future);
     }
-    
+
     fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
         Box::pin(tokio::time::sleep(duration))
     }
-    
+
     fn now(&self) -> Instant {
         Instant::now()
     }
@@ -64,15 +61,15 @@ impl SimulatedRuntimeHandle {
             runtime: Arc::new(SimulatedRuntime::new(seed)),
         }
     }
-    
+
     pub fn new_with_runtime(runtime: Arc<SimulatedRuntime>) -> Self {
         Self { runtime }
     }
-    
+
     pub fn runtime(&self) -> &Arc<SimulatedRuntime> {
         &self.runtime
     }
-    
+
     /// Run the deterministic executor until all tasks are idle
     pub fn run_until_idle(&self) {
         self.runtime.run_until_idle();
@@ -85,16 +82,18 @@ impl RuntimeHandle for SimulatedRuntimeHandle {
         let runtime = self.runtime.clone();
         tokio::spawn(async move {
             // Set thread-local runtime for this task
-            let _guard = RuntimeGuard::new(Arc::new(SimulatedRuntimeHandle { runtime }) as Arc<dyn RuntimeHandle>);
+            let _guard = RuntimeGuard::new(
+                Arc::new(SimulatedRuntimeHandle { runtime }) as Arc<dyn RuntimeHandle>
+            );
             future.await
         });
     }
-    
+
     fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
         // For simulation, we need to make sleep instant when time is advanced
         let runtime = self.runtime.clone();
         let target_time = runtime.clock().now() + duration;
-        
+
         Box::pin(async move {
             loop {
                 let now = runtime.clock().now();
@@ -106,7 +105,7 @@ impl RuntimeHandle for SimulatedRuntimeHandle {
             }
         })
     }
-    
+
     fn now(&self) -> Instant {
         self.runtime.clock().now()
     }
@@ -153,7 +152,6 @@ where
 pub async fn sleep(duration: Duration) {
     current_runtime().sleep(duration).await
 }
-
 
 /// Get current time from the runtime
 pub fn now() -> Instant {

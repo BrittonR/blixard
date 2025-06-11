@@ -19,6 +19,6 @@ impl FailScenario {
     pub fn setup() -> Self {
         Self
     }
-    
+
     pub fn teardown(self) {}
 }

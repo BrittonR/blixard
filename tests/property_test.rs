@@ -1,5 +1,5 @@
-use proptest::prelude::*;
 use blixard::types::*;
+use proptest::prelude::*;
 
 #[derive(Debug, Clone)]
 enum VmOperation {
@@ -33,7 +33,7 @@ proptest! {
         operations in prop::collection::vec(any::<VmOperation>(), 0..10)
     ) {
         let mut status = initial_status;
-        
+
         for op in operations {
             let new_status = apply_operation(status, op);
             // Verify state transition is valid
@@ -64,7 +64,7 @@ fn is_valid_transition(from: VmStatus, to: VmStatus) -> bool {
         (Running, Failed) => true,
         (Stopping, Stopped) => true,
         (Stopping, Failed) => true,
-        (_, Failed) => true, // Can always fail
+        (_, Failed) => true,          // Can always fail
         (s1, s2) if s1 == s2 => true, // No change is valid
         _ => false,
     }

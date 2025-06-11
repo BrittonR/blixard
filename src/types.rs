@@ -15,7 +15,7 @@ pub struct VmConfig {
     pub name: String,
     pub config_path: String,
     pub vcpus: u32,
-    pub memory: u32,  // MB
+    pub memory: u32, // MB
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

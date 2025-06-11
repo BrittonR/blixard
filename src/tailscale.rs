@@ -1,4 +1,4 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use serde::Deserialize;
 use tokio::process::Command;
 use tracing::{debug, info};
@@ -31,39 +31,40 @@ impl TailscaleDiscovery {
             .output()
             .await
             .context("Failed to run tailscale status")?;
-        
+
         if !output.status.success() {
             anyhow::bail!("tailscale status failed");
         }
-        
-        let status: TailscaleStatus = serde_json::from_slice(&output.stdout)
-            .context("Failed to parse tailscale status")?;
-        
-        let self_node = status.self_node
+
+        let status: TailscaleStatus =
+            serde_json::from_slice(&output.stdout).context("Failed to parse tailscale status")?;
+
+        let self_node = status
+            .self_node
             .ok_or_else(|| anyhow::anyhow!("No self node in tailscale status"))?;
-        
+
         Ok(self_node.hostname)
     }
-    
+
     /// Discover all Blixard nodes in the Tailscale network
     pub async fn discover_nodes() -> Result<Vec<NodeEndpoint>> {
         info!("Discovering Blixard nodes via Tailscale");
-        
+
         let output = Command::new("tailscale")
             .args(&["status", "--json"])
             .output()
             .await
             .context("Failed to run tailscale status")?;
-        
+
         if !output.status.success() {
             anyhow::bail!("tailscale status failed");
         }
-        
-        let status: serde_json::Value = serde_json::from_slice(&output.stdout)
-            .context("Failed to parse tailscale status")?;
-        
+
+        let status: serde_json::Value =
+            serde_json::from_slice(&output.stdout).context("Failed to parse tailscale status")?;
+
         let mut nodes = Vec::new();
-        
+
         // Check self node
         if let Some(self_node) = status.get("Self") {
             if is_blixard_node(self_node) {
@@ -72,7 +73,7 @@ impl TailscaleDiscovery {
                 }
             }
         }
-        
+
         // Check peer nodes
         if let Some(peers) = status.get("Peer").and_then(|p| p.as_object()) {
             for (_id, peer) in peers {
@@ -83,11 +84,11 @@ impl TailscaleDiscovery {
                 }
             }
         }
-        
+
         debug!("Discovered {} Blixard nodes", nodes.len());
         Ok(nodes)
     }
-    
+
     /// Check if Tailscale is available and authenticated
     pub async fn is_available() -> bool {
         Command::new("tailscale")
@@ -118,7 +119,7 @@ fn is_blixard_node(node: &serde_json::Value) -> bool {
 
 fn parse_node_endpoint(node: &serde_json::Value) -> Option<NodeEndpoint> {
     let hostname = node.get("HostName")?.as_str()?.to_string();
-    
+
     let tailscale_ips: Vec<String> = node
         .get("TailscaleIPs")
         .and_then(|ips| ips.as_array())
@@ -128,16 +129,16 @@ fn parse_node_endpoint(node: &serde_json::Value) -> Option<NodeEndpoint> {
                 .collect()
         })
         .unwrap_or_default();
-    
+
     if tailscale_ips.is_empty() {
         return None;
     }
-    
+
     // Extract node ID from hostname (e.g., "blixard-1" -> 1)
     let node_id = hostname
         .strip_prefix("blixard-")
         .and_then(|s| s.parse::<u64>().ok());
-    
+
     Some(NodeEndpoint {
         hostname,
         tailscale_ip: tailscale_ips[0].clone(),
@@ -155,7 +156,7 @@ pub struct NodeEndpoint {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_tailscale_available() {
         // This will only pass if tailscale is installed

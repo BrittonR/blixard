@@ -32,12 +32,12 @@ fn vm_create_validates_arguments() {
 #[test]
 fn vm_create_accepts_valid_arguments() {
     let mut cmd = Command::cargo_bin("blixard").unwrap();
-    
+
     // Create a temporary config file
     let temp_dir = TempDir::new().unwrap();
     let config_path = temp_dir.path().join("microvm.nix");
     std::fs::write(&config_path, "{ }").unwrap();
-    
+
     // This will fail to connect to cluster, but arguments should be valid
     cmd.arg("vm")
         .arg("create")
@@ -123,7 +123,7 @@ fn default_vcpu_and_memory_values() {
     let temp_dir = TempDir::new().unwrap();
     let config_path = temp_dir.path().join("microvm.nix");
     std::fs::write(&config_path, "{ }").unwrap();
-    
+
     // Should use defaults: 2 vcpus, 512 MB memory
     cmd.arg("vm")
         .arg("create")
@@ -133,14 +133,14 @@ fn default_vcpu_and_memory_values() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("connect").or(predicate::str::contains("cluster")));
-    
+
     // Test succeeded in parsing args, failed only on cluster connection
 }
 
 #[test]
 fn memory_value_validation() {
     let mut cmd = Command::cargo_bin("blixard").unwrap();
-    
+
     // Memory should be a positive number
     cmd.arg("vm")
         .arg("create")
@@ -157,7 +157,7 @@ fn memory_value_validation() {
 #[test]
 fn vcpu_value_validation() {
     let mut cmd = Command::cargo_bin("blixard").unwrap();
-    
+
     // VCPUs should be a positive number
     cmd.arg("vm")
         .arg("create")
@@ -168,7 +168,9 @@ fn vcpu_value_validation() {
         .arg("-1")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("unexpected argument").or(predicate::str::contains("tip:")));
+        .stderr(
+            predicate::str::contains("unexpected argument").or(predicate::str::contains("tip:")),
+        );
 }
 
 #[test]
@@ -177,7 +179,7 @@ fn vm_name_with_special_characters() {
     let temp_dir = TempDir::new().unwrap();
     let config_path = temp_dir.path().join("microvm.nix");
     std::fs::write(&config_path, "{ }").unwrap();
-    
+
     // Should accept VM names with hyphens and underscores
     cmd.arg("vm")
         .arg("create")

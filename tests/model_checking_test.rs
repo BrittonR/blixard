@@ -36,7 +36,7 @@ struct ClusterModel {
 impl Model for ClusterModel {
     type State = ClusterState;
     type Action = ClusterAction;
-    
+
     fn init_states(&self) -> Vec<Self::State> {
         vec![ClusterState {
             nodes: (0..self.node_count)
@@ -49,7 +49,7 @@ impl Model for ClusterModel {
             vms: BTreeMap::new(),
         }]
     }
-    
+
     fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
         // Can create VMs on active nodes
         for node in &state.nodes {
@@ -60,7 +60,7 @@ impl Model for ClusterModel {
                 ));
             }
         }
-        
+
         // Can fail active nodes
         for node in &state.nodes {
             if node.is_active {
@@ -69,7 +69,7 @@ impl Model for ClusterModel {
                 actions.push(ClusterAction::NodeRecover(node.id));
             }
         }
-        
+
         // Can elect new leader if current leader failed
         let has_active_leader = state.nodes.iter().any(|n| n.is_leader && n.is_active);
         if !has_active_leader {
@@ -80,19 +80,22 @@ impl Model for ClusterModel {
             }
         }
     }
-    
+
     fn next_state(&self, state: &Self::State, action: Self::Action) -> Option<Self::State> {
         let mut next_state = state.clone();
-        
+
         match action {
             ClusterAction::CreateVm(name, node_id) => {
-                next_state.vms.insert(name.clone(), VmPlacement {
-                    vm_name: name,
-                    node_id,
-                    is_running: true,
-                });
+                next_state.vms.insert(
+                    name.clone(),
+                    VmPlacement {
+                        vm_name: name,
+                        node_id,
+                        is_running: true,
+                    },
+                );
             }
-            
+
             ClusterAction::NodeFailure(id) => {
                 for node in &mut next_state.nodes {
                     if node.id == id {
@@ -107,7 +110,7 @@ impl Model for ClusterModel {
                     }
                 }
             }
-            
+
             ClusterAction::NodeRecover(id) => {
                 for node in &mut next_state.nodes {
                     if node.id == id {
@@ -115,7 +118,7 @@ impl Model for ClusterModel {
                     }
                 }
             }
-            
+
             ClusterAction::ElectLeader(id) => {
                 // Remove old leader
                 for node in &mut next_state.nodes {
@@ -129,7 +132,7 @@ impl Model for ClusterModel {
                 }
             }
         }
-        
+
         Some(next_state)
     }
 }
@@ -137,17 +140,17 @@ impl Model for ClusterModel {
 #[test]
 #[ignore = "stateright API needs updating"]
 fn model_check_cluster_safety() {
-    let model = ClusterModel { node_count: 3 };
-    
+    let _model = ClusterModel { node_count: 3 };
+
     // TODO: Update to use correct stateright API
     println!("Model checking test temporarily disabled");
 }
 
 #[test]
-#[ignore = "stateright API needs updating"] 
+#[ignore = "stateright API needs updating"]
 fn model_check_vm_availability() {
-    let model = ClusterModel { node_count: 3 };
-    
+    let _model = ClusterModel { node_count: 3 };
+
     // TODO: Update to use correct stateright API
     println!("Model checking test temporarily disabled");
 }

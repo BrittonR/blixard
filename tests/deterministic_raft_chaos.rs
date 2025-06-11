@@ -1,9 +1,9 @@
 #![cfg(feature = "simulation")]
 
 use fail::FailScenario;
+use madsim::time;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use madsim::time;
 use tokio::sync::Mutex;
 
 #[madsim::test]
@@ -68,7 +68,7 @@ async fn test_reproducible_chaos_with_seed() {
 
     let mut results = Vec::new();
 
-    // Run same chaos scenario 3 times 
+    // Run same chaos scenario 3 times
     for run in 0..3 {
         println!("--- Run {} ---", run + 1);
 
@@ -94,14 +94,13 @@ async fn test_reproducible_chaos_with_seed() {
 
     // Verify all runs produced similar results
     println!("\n📊 Comparing runs:");
-    
+
     // Check that timing is consistent (within bounds)
     let all_similar = results.windows(2).all(|w| {
-        w[0].len() == w[1].len() &&
-        w[0].iter().zip(w[1].iter()).all(|((i1, t1), (i2, t2))| {
-            i1 == i2 && 
-            (t1.as_millis() as i64 - t2.as_millis() as i64).abs() <= 10
-        })
+        w[0].len() == w[1].len()
+            && w[0].iter().zip(w[1].iter()).all(|((i1, t1), (i2, t2))| {
+                i1 == i2 && (t1.as_millis() as i64 - t2.as_millis() as i64).abs() <= 10
+            })
     });
 
     if all_similar {
@@ -208,7 +207,10 @@ async fn test_deterministic_chaos_proof() {
 
             // Record event
             let elapsed = start.elapsed();
-            events.lock().await.push(format!("Event {} at {:?}", i, elapsed));
+            events
+                .lock()
+                .await
+                .push(format!("Event {} at {:?}", i, elapsed));
 
             // Simulate operations
             if i == 5 {
@@ -233,12 +235,12 @@ async fn test_deterministic_chaos_proof() {
 
     // Verify all runs are consistent
     println!("\n🔍 Verifying determinism...");
-    
+
     // With MadSim, we check for consistent event ordering rather than exact timing
     let all_consistent = fingerprints.windows(2).all(|w| {
         let events1: Vec<_> = w[0].split('|').collect();
         let events2: Vec<_> = w[1].split('|').collect();
-        
+
         // Same number of events
         events1.len() == events2.len() &&
         // Same event types in same order
@@ -273,45 +275,48 @@ async fn test_deterministic_chaos_proof() {
 #[madsim::test]
 async fn test_concurrent_chaos_operations() {
     println!("\n🌀 CONCURRENT CHAOS OPERATIONS 🌀\n");
-    
+
     let _scenario = FailScenario::setup();
-    
+
     // Set up multiple failure types
     fail::cfg("operation::type1", "20%return").unwrap();
     fail::cfg("operation::type2", "30%return").unwrap();
-    
+
     let results = Arc::new(Mutex::new(Vec::new()));
-    
+
     // Spawn multiple concurrent tasks
     let mut handles = Vec::new();
     for i in 0..10 {
         let results = results.clone();
         let handle = madsim::task::spawn(async move {
             let start = Instant::now();
-            
+
             // Simulate work with potential failures
             time::sleep(Duration::from_millis(50 + (i * 10) as u64)).await;
-            
+
             let elapsed = start.elapsed();
             results.lock().await.push((i, elapsed));
-            
+
             println!("Task {} completed after {:?}", i, elapsed);
         });
         handles.push(handle);
     }
-    
+
     // Wait for all tasks
     for handle in handles {
         let _ = handle.await;
     }
-    
+
     // Check results
     let final_results = results.lock().await;
-    println!("\n📊 Final results: {} tasks completed", final_results.len());
-    
+    println!(
+        "\n📊 Final results: {} tasks completed",
+        final_results.len()
+    );
+
     // Clean up
     fail::cfg("operation::type1", "off").unwrap();
     fail::cfg("operation::type2", "off").unwrap();
-    
+
     println!("\n✅ Concurrent chaos test completed!");
 }
