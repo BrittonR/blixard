@@ -62,7 +62,7 @@ impl Model for CounterModel {
     fn properties(&self) -> Vec<Property<Self>> {
         vec![
             // Safety: Value never underflows
-            Property::<Self>::always("no underflow", |_, state| {
+            Property::<Self>::always("no underflow", |_, _state| {
                 // This is always true for u32, but demonstrates the pattern
                 true
             }),

@@ -36,7 +36,7 @@ impl Node {
                 tokio::select! {
                     result = listener.accept() => {
                         match result {
-                            Ok((stream, addr)) => {
+                            Ok((_stream, addr)) => {
                                 tracing::debug!("New connection from {}", addr);
                                 // Handle connection
                             }

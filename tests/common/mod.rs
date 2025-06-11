@@ -3,9 +3,8 @@
 use std::time::Duration;
 use blixard::{
     error::{BlixardError, Result as BlixardResult},
-    types::{NodeConfig, VmConfig, VmStatus}
+    types::{NodeConfig, VmConfig}
 };
-use std::net::SocketAddr;
 
 /// Test configuration constants
 pub const TEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -38,13 +37,21 @@ where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = bool>,
 {
-    let start = std::time::Instant::now();
+    // Use consistent time abstractions for deterministic testing
+    #[cfg(madsim)]
+    use madsim::time::{Instant, sleep};
+    #[cfg(not(madsim))]
+    use std::time::Instant;
+    #[cfg(not(madsim))]
+    use tokio::time::sleep;
+    
+    let start = Instant::now();
     
     while start.elapsed() < timeout {
         if condition().await {
             return Ok(());
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        sleep(Duration::from_millis(100)).await;
     }
     
     Err(BlixardError::SystemError(

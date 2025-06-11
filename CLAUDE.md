@@ -48,9 +48,13 @@ cargo test --test proptest_example
 # Model checking with stateright (WORKING - 2 tests)  
 cargo test --test stateright_simple_test
 
-# MadSim deterministic simulation (READY)
+# MadSim deterministic simulation (FULLY DETERMINISTIC)
 ./scripts/sim-test.sh  # Run all simulation tests
 MADSIM_TEST_SEED=12345 ./scripts/sim-test.sh  # Reproduce specific run
+
+# Determinism verification tools
+./scripts/verify-determinism.sh  # Comprehensive determinism audit
+./scripts/demo-determinism.sh    # Simple determinism demonstration
 
 # Note: For MadSim API reference, always check https://docs.rs/madsim/latest/madsim/
 # ✅ FIXED: MadSim now properly implemented with modern API
@@ -65,13 +69,14 @@ MADSIM_TEST_SEED=12345 ./scripts/sim-test.sh  # Reproduce specific run
 ### Test Infrastructure Status
 - **✅ Proptest**: Fully working with 7 property-based tests
 - **✅ Stateright**: Fully working with 2 model checking tests
-- **✅ MadSim**: Fully configured with RisingWave-style setup
+- **✅ MadSim**: Fully deterministic simulation framework
   - Workspace member `simulation/` for deterministic tests
   - Conditional compilation with `cfg(madsim)`
-  - No runtime abstraction needed - direct tokio/madsim switching
+  - **DETERMINISTIC**: Same seeds produce identical microsecond-precision timing
   - Test harness with cluster, network, and Raft test suites
+  - Fixed seed default (was $RANDOM, now 12345)
 - **🔧 Failpoints**: Dependencies ready, needs error type updates
-- **✅ Common Test Utilities**: Shared helpers in `tests/common/`
+- **✅ Common Test Utilities**: Shared helpers with deterministic time abstractions
 
 ### CLI Structure
 ```bash

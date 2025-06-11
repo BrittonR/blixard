@@ -5,10 +5,9 @@
 use blixard::node::Node;
 use blixard::types::NodeConfig;
 use madsim::time::{sleep, Duration, Instant};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, debug};
+use tracing::info;
 
 type SharedNode = Arc<RwLock<Node>>;
 

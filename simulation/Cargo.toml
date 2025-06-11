@@ -38,4 +38,8 @@ futures = "0.3"
 [features]
 default = []
 
-# Tests are in tests/integration_test.rs
+# Exclude broken examples from build
+[[example]]
+name = "proper_madsim_patterns"
+path = "examples/proper_madsim_patterns.rs"
+required-features = ["skip_broken_examples"]

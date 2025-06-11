@@ -6,7 +6,7 @@
 #![cfg(madsim)]
 
 use madsim::time::{sleep, Duration, Instant};
-use tracing::{info, debug};
+use tracing::info;
 
 /// Helper to run tests with consistent output format
 async fn run_test<F, Fut>(name: &str, test_fn: F) 

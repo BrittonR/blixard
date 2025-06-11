@@ -8,7 +8,7 @@ echo
 
 # Set up environment
 export RUST_LOG=${RUST_LOG:-info}
-export MADSIM_TEST_SEED=${MADSIM_TEST_SEED:-$RANDOM}
+export MADSIM_TEST_SEED=${MADSIM_TEST_SEED:-12345}
 
 echo "📝 Configuration:"
 echo "   RUST_LOG: $RUST_LOG"

@@ -1,8 +1,7 @@
 // Comprehensive madsim integration tests for distributed scenarios
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
-use std::net::SocketAddr;
 
 #[cfg(feature = "simulation")]
 use madsim::{
@@ -22,7 +21,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 struct KVNode {
     id: usize,
     addr: String,
-    store: Arc<Mutex<HashMap<String, String>>>,
+    store: Arc<Mutex<BTreeMap<String, String>>>,
     peers: Arc<Mutex<Vec<String>>>,
     is_leader: Arc<Mutex<bool>>,
 }
@@ -32,7 +31,7 @@ impl KVNode {
         Self {
             id,
             addr: addr.clone(),
-            store: Arc::new(Mutex::new(HashMap::new())),
+            store: Arc::new(Mutex::new(BTreeMap::new())),
             peers: Arc::new(Mutex::new(Vec::new())),
             is_leader: Arc::new(Mutex::new(false)),
         }

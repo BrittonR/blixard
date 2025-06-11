@@ -1,10 +1,7 @@
 // Property-based testing examples using proptest
 
 use proptest::prelude::*;
-use blixard::{
-    error::{BlixardError, Result as BlixardResult},
-    types::{NodeConfig, VmConfig, VmStatus},
-};
+use blixard::types::{NodeConfig, VmConfig};
 
 mod common;
 use common::proptest_utils::*;
