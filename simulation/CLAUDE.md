@@ -368,13 +368,14 @@ loop {
    - No `tokio::select!` - use manual polling or futures::select
    - No `tokio::sync::mpsc` - use std::sync::mpsc
    - No `tokio::time::interval` - use sleep loops
+   - Use `madsim::task::spawn` instead of `tokio::spawn`
 
 2. **Client/Server separation**: Always run on different nodes
    ```rust
    // Server on one node
    let server_node = handle.create_node().ip("10.0.0.1".parse().unwrap()).build();
    
-   // Client on different node
+   // Client on different node  
    let client_node = handle.create_node().ip("10.0.0.2".parse().unwrap()).build();
    ```
 
@@ -384,10 +385,19 @@ loop {
    // Good: "10.0.0.1:8080"
    ```
 
-4. **Send trait issues**: Use Arc wrappers for non-Send types
+4. **Send trait issues**: 
+   - Use Arc wrappers for non-Send types
+   - Avoid holding mutex guards across await points
+   - Consider restructuring async code to release guards before awaiting
    ```rust
    // If TestNode doesn't implement Clone/Send
    struct TestNodeService(Arc<TestNode>);
+   ```
+
+5. **Import paths in tests**: Use crate name, not `crate::`
+   ```rust
+   // Bad: use crate::generated::proto::*;
+   // Good: use blixard_simulation::*;
    ```
 
 ## References
