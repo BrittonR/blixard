@@ -198,6 +198,39 @@ impl Node {
         Ok(())
     }
 
+    /// Get the node ID
+    pub fn get_id(&self) -> u64 {
+        self.config.id
+    }
+
+    /// Get the bind address
+    pub fn get_bind_addr(&self) -> &std::net::SocketAddr {
+        &self.config.bind_addr
+    }
+
+    /// List all VMs and their status
+    pub async fn list_vms(&self) -> BlixardResult<Vec<(crate::types::VmConfig, crate::types::VmStatus)>> {
+        let states = self.vm_states.read().await;
+        let mut result = Vec::new();
+        
+        for vm_state in states.values() {
+            result.push((vm_state.config.clone(), vm_state.status));
+        }
+        
+        Ok(result)
+    }
+
+    /// Get status of a specific VM
+    pub async fn get_vm_status(&self, name: &str) -> BlixardResult<Option<(crate::types::VmConfig, crate::types::VmStatus)>> {
+        let states = self.vm_states.read().await;
+        
+        if let Some(vm_state) = states.get(name) {
+            Ok(Some((vm_state.config.clone(), vm_state.status)))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Join a cluster
     pub async fn join_cluster(&mut self, _peer_addr: Option<std::net::SocketAddr>) -> BlixardResult<()> {
         // TODO: Implement cluster join logic via Raft

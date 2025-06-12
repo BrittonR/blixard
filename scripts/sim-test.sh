@@ -17,7 +17,9 @@ echo
 
 # Build with madsim cfg
 echo "🔨 Building simulation tests..."
-cd simulation
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR/../simulation"
 RUSTFLAGS="--cfg madsim" cargo build --release --tests
 
 # Run the tests

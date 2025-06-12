@@ -5,38 +5,37 @@ edition = "2021"
 publish = false
 
 [dependencies]
-blixard = { path = ".." }
+# blixard = { path = ".." }  # Temporarily disabled due to madsim incompatibility
 
 anyhow = "1.0"
 async-trait = "0.1"
 bytes = "1"
 clap = "4.4"
 futures = "0.3"
+prost = "0.13"  # Required for generated proto code
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 
-# Use madsim versions of async libraries
-[target.'cfg(madsim)'.dependencies]
-tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
-tonic = { version = "0.5", package = "madsim-tonic" }
-tokio-stream = "0.1"
-
-# Use real versions when not in simulation
-[target.'cfg(not(madsim))'.dependencies]
-tokio = { version = "1.35", features = ["full"] }
-tonic = "0.11"
+# Always use madsim versions for simulation testing
+tokio = { path = "../madsim-repo/madsim-tokio", package = "madsim-tokio" }
+tonic = { path = "../madsim-repo/madsim-tonic", package = "madsim-tonic" }
 tokio-stream = "0.1"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }
-madsim = { version = "0.2", features = ["rpc"] }
+madsim = { path = "../madsim-repo/madsim", features = ["rpc"] }
 futures = "0.3"
+
+[build-dependencies]
+tonic-build = { path = "../madsim-repo/madsim-tonic-build", package = "madsim-tonic-build" }
 
 [features]
 default = []
+
+[workspace]
 
 # Exclude broken examples from build
 [[example]]

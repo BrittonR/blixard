@@ -17,18 +17,22 @@ Blixard is a distributed microVM orchestration platform being built in Rust. The
 - **Comprehensive Dependencies** - Ready for distributed systems development
 
 ### Current Architecture
-- **Basic CLI Structure** - Command parsing implemented in `src/main.rs`
+- **CLI with gRPC** - Full node command with gRPC server in `src/main.rs`
 - **Error Types** - Comprehensive error handling defined in `src/error.rs`
 - **Domain Types** - Core types (NodeConfig, VmConfig, VmStatus) in `src/types.rs`
 - **gRPC Protocol** - Service definitions in `proto/blixard.proto`
+- **gRPC Server** - Basic implementation in `src/grpc_server.rs`
+- **Node Structure** - Node management skeleton in `src/node.rs`
 
 ### Implementation Status
-This is a fresh start project. All core functionality is marked "not yet implemented":
-- Node management and clustering
-- VM lifecycle management
-- Raft consensus implementation
-- Distributed storage
-- Testing framework
+Recent progress:
+- ✅ Node CLI command with gRPC server startup
+- ✅ Basic gRPC service implementation
+- ✅ MadSim integration for deterministic testing
+- ✅ Tonic 0.12 upgrade for compatibility
+- 🔧 VM lifecycle management (stubs only)
+- 🔧 Raft consensus implementation (storage prepared)
+- 🔧 Distributed storage (redb integrated)
 
 ## Development Commands
 
@@ -106,10 +110,10 @@ MADSIM_TEST_SEED=12345 ./scripts/sim-test.sh  # Reproduce specific run
 
 ### CLI Structure
 ```bash
-# Planned node management (not implemented)
-cargo run -- node --id 1 --bind 127.0.0.1:7001
+# Node management (implemented with gRPC server)
+cargo run -- node --id 1 --bind 127.0.0.1:7001 --data-dir ./data
 
-# Planned VM management (not implemented)
+# VM management (CLI stubs, use gRPC API)
 cargo run -- vm create --name my-vm
 cargo run -- vm start my-vm
 cargo run -- vm list

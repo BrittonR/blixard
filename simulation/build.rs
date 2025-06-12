@@ -1,12 +1,19 @@
-fn main() {
-    // Tell Cargo about our custom cfg
-    println!("cargo::rustc-check-cfg=cfg(madsim)");
+use std::path::PathBuf;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("cargo:rerun-if-changed=../proto/blixard.proto");
     
-    // Set cfg(madsim) when building simulation tests
-    if std::env::var("RUSTFLAGS").unwrap_or_default().contains("--cfg madsim") {
-        println!("cargo:rustc-cfg=madsim");
-    }
+    // When building with madsim, we need to output to sim/ subdirectory
+    let out_dir = std::env::var("OUT_DIR")?;
     
-    // Rerun if environment changes
-    println!("cargo:rerun-if-env-changed=RUSTFLAGS");
+    // Always use the same build tool since we have madsim-tonic-build in build deps
+    let sim_dir = PathBuf::from(&out_dir).join("sim");
+    std::fs::create_dir_all(&sim_dir)?;
+    
+    // madsim-tonic-build handles both madsim and non-madsim cases
+    tonic_build::configure()
+        .out_dir(&sim_dir)
+        .compile_protos(&["../proto/blixard.proto"], &["../proto"])?;
+    
+    Ok(())
 }

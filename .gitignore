@@ -4,3 +4,9 @@
 /tmp
 .DS_Store
 .direnv/
+
+# Test logs
+*.log
+
+# Local madsim repository copy
+madsim-repo/

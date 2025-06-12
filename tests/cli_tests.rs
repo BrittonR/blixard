@@ -28,8 +28,8 @@ fn test_node_command_with_valid_id() {
     let mut cmd = Command::cargo_bin("blixard").unwrap();
     cmd.args(&["node", "--id", "1"])
         .assert()
-        .failure() // Should fail because functionality not implemented
-        .stderr(predicate::str::contains("Node functionality not yet implemented"));
+        .failure() // Should fail because bind is required
+        .stderr(predicate::str::contains("--bind <BIND>"));
 }
 
 #[test]
@@ -75,14 +75,14 @@ fn test_node_id_edge_cases() {
     cmd.args(&["node", "--id", "0"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Node functionality not yet implemented"));
+        .stderr(predicate::str::contains("--bind <BIND>"));
 
     // Test with very large ID
     let mut cmd = Command::cargo_bin("blixard").unwrap();
     cmd.args(&["node", "--id", "18446744073709551615"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Node functionality not yet implemented"));
+        .stderr(predicate::str::contains("--bind <BIND>"));
 }
 
 #[test]
