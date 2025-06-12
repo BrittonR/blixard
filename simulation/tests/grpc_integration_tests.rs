@@ -6,7 +6,7 @@
 #![cfg(madsim)]
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+// use std::sync::Arc;  // Currently unused
 use std::time::Duration;
 
 use madsim::{runtime::Handle, time::sleep};
@@ -25,7 +25,7 @@ use blixard_simulation::{
     StartVmRequest, StartVmResponse,
     StopVmRequest, StopVmResponse,
     GetVmStatusRequest, GetVmStatusResponse,
-    NodeInfo, NodeState, VmInfo, VmState,
+    NodeInfo, NodeState,
 };
 
 /// A minimal implementation of ClusterService for testing

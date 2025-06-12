@@ -3,6 +3,9 @@ use std::path::PathBuf;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=../proto/blixard.proto");
     
+    // Tell cargo about our custom cfg flag
+    println!("cargo:rustc-check-cfg=cfg(madsim)");
+    
     // When building with madsim, we need to output to sim/ subdirectory
     let out_dir = std::env::var("OUT_DIR")?;
     

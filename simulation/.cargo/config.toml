@@ -1,0 +1,11 @@
+# Cargo configuration for the simulation workspace
+# This ensures that madsim cfg flag is always enabled when building
+# or testing within the simulation directory
+
+[build]
+# Always enable the madsim configuration flag for this workspace
+rustflags = ["--cfg", "madsim"]
+
+[target.'cfg(all())']
+# Apply to all targets in this workspace
+rustflags = ["--cfg", "madsim"]

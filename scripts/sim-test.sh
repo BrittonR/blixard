@@ -15,16 +15,16 @@ echo "   RUST_LOG: $RUST_LOG"
 echo "   MADSIM_TEST_SEED: $MADSIM_TEST_SEED"
 echo
 
-# Build with madsim cfg
+# Build with madsim cfg (handled by .cargo/config.toml)
 echo "🔨 Building simulation tests..."
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR/../simulation"
-RUSTFLAGS="--cfg madsim" cargo build --release --tests
+cargo build --release --tests
 
 # Run the tests
 echo "🚀 Running tests..."
-RUSTFLAGS="--cfg madsim" cargo test --release -- --nocapture
+cargo test --release -- --nocapture
 
 echo
 echo "✅ Simulation tests completed!"

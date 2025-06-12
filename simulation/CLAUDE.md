@@ -46,10 +46,9 @@ tonic = "0.11"
 
 ### 2. Test Organization
 
-- **cluster_tests.rs**: Node lifecycle, cluster formation
-- **network_tests.rs**: Fault injection, partitions, latency
-- **raft_tests.rs**: Consensus correctness (placeholder)
-- **integration_test.rs**: Basic functionality tests
+- **grpc_integration_tests.rs**: gRPC service integration tests
+- **integration_test.rs**: Basic madsim functionality tests  
+- **raft_tests.rs**: Consensus correctness tests (placeholder - TODOs)
 
 ### 3. Running Tests
 
@@ -63,9 +62,9 @@ MADSIM_TEST_SEED=12345 ./scripts/sim-test.sh
 # With debug logging
 RUST_LOG=debug ./scripts/sim-test.sh
 
-# Run specific test
+# Run specific test (madsim flag auto-applied via .cargo/config.toml)
 cd simulation
-RUSTFLAGS="--cfg madsim" cargo test test_name
+cargo test test_name
 ```
 
 ## Best Practices

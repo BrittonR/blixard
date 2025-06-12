@@ -29,9 +29,10 @@ This simulation workspace is currently a separate crate from the main Blixard pr
 # Run all simulation tests from the project root
 ./scripts/sim-test.sh
 
-# Or run directly with madsim flag
+# Or run directly from the simulation directory
+# (madsim flag is automatically applied via .cargo/config.toml)
 cd simulation
-RUSTFLAGS="--cfg madsim" cargo test
+cargo test
 
 # Run with specific seed for reproduction
 MADSIM_TEST_SEED=12345 ./scripts/sim-test.sh
@@ -45,14 +46,14 @@ RUST_LOG=debug ./scripts/sim-test.sh
 ```bash
 cd simulation
 
-# Build with madsim cfg
-RUSTFLAGS="--cfg madsim" cargo build --tests
+# Build (madsim cfg is automatically applied)
+cargo build --tests
 
 # Run tests
-RUSTFLAGS="--cfg madsim" cargo test -- --nocapture
+cargo test -- --nocapture
 
 # Run specific test suite
-RUSTFLAGS="--cfg madsim" cargo test raft -- --nocapture
+cargo test raft -- --nocapture
 ```
 
 ## Test Organization
