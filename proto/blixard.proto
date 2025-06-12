@@ -27,6 +27,15 @@ service ClusterService {
   rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
 }
 
+// Main Blixard service
+service BlixardService {
+  // Raft status
+  rpc GetRaftStatus(GetRaftStatusRequest) returns (GetRaftStatusResponse);
+  
+  // Task proposals
+  rpc ProposeTask(ProposeTaskRequest) returns (ProposeTaskResponse);
+}
+
 // Node management messages
 message JoinRequest {
   uint64 node_id = 1;
@@ -188,4 +197,33 @@ enum TaskStatus {
   TASK_STATUS_RUNNING = 2;
   TASK_STATUS_COMPLETED = 3;
   TASK_STATUS_FAILED = 4;
+}
+
+// Raft status messages
+message GetRaftStatusRequest {}
+
+message GetRaftStatusResponse {
+  bool is_leader = 1;
+  uint64 node_id = 2;
+  uint64 leader_id = 3;
+  uint64 term = 4;
+  string state = 5;
+}
+
+// Task proposal messages
+message ProposeTaskRequest {
+  Task task = 1;
+}
+
+message ProposeTaskResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message Task {
+  string id = 1;
+  string command = 2;
+  repeated string args = 3;
+  uint32 cpu_cores = 4;
+  uint64 memory_mb = 5;
 }

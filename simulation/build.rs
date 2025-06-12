@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // madsim-tonic-build handles both madsim and non-madsim cases
     tonic_build::configure()
         .out_dir(&sim_dir)
-        .compile_protos(&["../proto/blixard.proto"], &["../proto"])?;
+        .compile(&["../proto/blixard.proto"], &["../proto"])?;
     
     Ok(())
 }

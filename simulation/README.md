@@ -16,10 +16,9 @@ This simulation workspace is currently a separate crate from the main Blixard pr
 
 ### Working Tests
 - ✅ `grpc_integration_tests` - Basic gRPC service testing with madsim
-
-### Disabled Tests
-- ❌ Tests depending on main `blixard` crate (cluster, network, raft tests)
-- These require refactoring to work without direct dependency on the main crate
+- ✅ `grpc_mock_consensus_tests` - Mock consensus testing for gRPC integration
+- ✅ `raft_simple_demo` - Demonstrates real Raft crate usage in MadSim
+- ✅ `raft_consensus_tests` - Real Raft consensus testing (with initialization fixes needed)
 
 ## Running Tests
 
@@ -58,9 +57,11 @@ cargo test raft -- --nocapture
 
 ## Test Organization
 
-- `cluster_tests.rs` - Node lifecycle and cluster formation
-- `network_tests.rs` - Network fault injection scenarios  
-- `raft_tests.rs` - Consensus algorithm correctness
+- `grpc_integration_tests.rs` - Basic gRPC service integration tests
+- `grpc_mock_consensus_tests.rs` - Mock consensus behavior for testing gRPC flows
+- `raft_consensus_tests.rs` - Real Raft consensus implementation tests
+- `raft_simple_demo.rs` - Simple demonstrations of real Raft crate usage
+- `integration_test.rs` - Basic MadSim functionality tests
 
 ## How It Works
 
