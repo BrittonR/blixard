@@ -125,17 +125,14 @@ assert_eq!(start.elapsed(), Duration::from_secs(3600));
 ```rust
 let net = NetSim::current();
 
-// Create partition
-net.disconnect(endpoint1, endpoint2);
+// Note: Network manipulation API varies by MadSim version
+// For node failures:
+handle.kill(node_id);  // Kill a node
+handle.restart(node_id);  // Restart a node
 
-// Add latency
-net.add_latency(src, dst, Duration::from_millis(50));
-
-// Packet loss
-net.set_packet_loss(src, dst, 0.1); // 10% loss
-
-// Heal partition
-net.connect(endpoint1, endpoint2);
+// For network partitions (API depends on version):
+// Some versions use: net.clog_link(from_id, to_id)
+// Others may use configuration at runtime creation
 ```
 
 ### 4. Deterministic Randomness
@@ -364,6 +361,34 @@ loop {
     // Missing: sleep(Duration::from_millis(1)).await;
 }
 ```
+
+### Common MadSim-Tonic Pitfalls
+
+1. **Missing tokio features**: madsim-tokio 0.2 has limited API
+   - No `tokio::select!` - use manual polling or futures::select
+   - No `tokio::sync::mpsc` - use std::sync::mpsc
+   - No `tokio::time::interval` - use sleep loops
+
+2. **Client/Server separation**: Always run on different nodes
+   ```rust
+   // Server on one node
+   let server_node = handle.create_node().ip("10.0.0.1".parse().unwrap()).build();
+   
+   // Client on different node
+   let client_node = handle.create_node().ip("10.0.0.2".parse().unwrap()).build();
+   ```
+
+3. **Address binding**: Use actual IPs, not localhost
+   ```rust
+   // Bad: "127.0.0.1:8080" or "localhost:8080"
+   // Good: "10.0.0.1:8080"
+   ```
+
+4. **Send trait issues**: Use Arc wrappers for non-Send types
+   ```rust
+   // If TestNode doesn't implement Clone/Send
+   struct TestNodeService(Arc<TestNode>);
+   ```
 
 ## References
 
