@@ -1,7 +1,7 @@
 use tokio::sync::{mpsc, RwLock};
 use std::collections::HashMap;
 use std::sync::Arc;
-use redb::Database;
+use redb::{Database, ReadableTable};
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::types::{VmState, VmCommand, VmConfig, VmStatus};
@@ -27,6 +27,41 @@ impl VmManager {
         };
         
         (manager, command_rx)
+    }
+    
+    /// Load VMs from database
+    pub async fn load_from_database(&self) -> BlixardResult<()> {
+        let read_txn = self.database.begin_read().map_err(|e| BlixardError::Storage {
+            operation: "begin read transaction".to_string(),
+            source: Box::new(e),
+        })?;
+        
+        let table = read_txn.open_table(VM_STATE_TABLE).map_err(|e| BlixardError::Storage {
+            operation: "open vm state table".to_string(),
+            source: Box::new(e),
+        })?;
+        
+        let mut states = self.vm_states.write().await;
+        
+        // Load all VMs from database
+        for entry in table.iter().map_err(|e| BlixardError::Storage {
+            operation: "iterate vm state table".to_string(),
+            source: Box::new(e),
+        })? {
+            let (key, value) = entry.map_err(|e| BlixardError::Storage {
+                operation: "read table entry".to_string(),
+                source: Box::new(e),
+            })?;
+            
+            let vm_state: VmState = bincode::deserialize(value.value()).map_err(|e| BlixardError::Serialization {
+                operation: "deserialize vm state".to_string(),
+                source: Box::new(e),
+            })?;
+            
+            states.insert(vm_state.name.clone(), vm_state);
+        }
+        
+        Ok(())
     }
     
     /// Start the VM command processor

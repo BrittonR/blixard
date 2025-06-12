@@ -312,6 +312,9 @@ pub struct RaftManager {
     proposal_tx: mpsc::UnboundedSender<RaftProposal>,
     message_rx: mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>,
     message_tx: mpsc::UnboundedSender<(u64, raft::prelude::Message)>,
+    
+    // Track pending proposals
+    pending_proposals: Arc<RwLock<HashMap<Vec<u8>, oneshot::Sender<BlixardResult<()>>>>>,
 }
 
 impl RaftManager {
@@ -364,6 +367,7 @@ impl RaftManager {
             proposal_tx: proposal_tx.clone(),
             message_rx,
             message_tx: message_tx.clone(),
+            pending_proposals: Arc::new(RwLock::new(HashMap::new())),
         };
 
         Ok((manager, proposal_tx, message_tx))
@@ -389,6 +393,18 @@ impl RaftManager {
     }
 
     pub async fn run(mut self) -> BlixardResult<()> {
+        // Check if we should bootstrap as a single-node cluster
+        let should_bootstrap = {
+            let peers = self.peers.read().await;
+            peers.is_empty()
+        };
+        
+        if should_bootstrap {
+            // No peers, bootstrap as single node
+            info!(self.logger, "No peers configured, bootstrapping as single-node cluster");
+            self.bootstrap_single_node().await?;
+        }
+        
         let mut tick_timer = interval(Duration::from_millis(100));
         
         loop {
@@ -416,6 +432,14 @@ impl RaftManager {
     }
 
     async fn handle_proposal(&self, proposal: RaftProposal) -> BlixardResult<()> {
+        let proposal_id = proposal.id.clone();
+        
+        // Store the response channel if provided
+        if let Some(response_tx) = proposal.response_tx {
+            let mut pending = self.pending_proposals.write().await;
+            pending.insert(proposal_id.clone(), response_tx);
+        }
+        
         let data = bincode::serialize(&proposal.data)
             .map_err(|e| BlixardError::Serialization {
                 operation: "serialize proposal".to_string(),
@@ -423,7 +447,7 @@ impl RaftManager {
             })?;
         
         let mut node = self.raft_node.write().await;
-        node.propose(vec![], data)
+        node.propose(proposal_id, data)
             .map_err(|e| BlixardError::Raft {
                 operation: "propose".to_string(),
                 source: Box::new(e),
@@ -459,8 +483,18 @@ impl RaftManager {
         
         // Apply committed entries to state machine
         if !ready.committed_entries().is_empty() {
+            let pending_proposals = Arc::clone(&self.pending_proposals);
             for entry in ready.take_committed_entries() {
-                self.state_machine.apply_entry(&entry).await?;
+                // Apply the entry to state machine
+                let result = self.state_machine.apply_entry(&entry).await;
+                
+                // Send response to waiting proposal if any
+                if !entry.context.is_empty() {
+                    let mut pending = pending_proposals.write().await;
+                    if let Some(response_tx) = pending.remove(&entry.context) {
+                        let _ = response_tx.send(result);
+                    }
+                }
             }
         }
         

@@ -2,6 +2,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 use tempfile::TempDir;
+use std::net::{TcpListener, SocketAddr};
+use std::sync::atomic::{AtomicU16, Ordering};
 
 use blixard::{
     node::Node,
@@ -15,8 +17,29 @@ use blixard::{
     },
 };
 
-// Helper to create test node configuration with temp directory
-async fn create_test_node(id: u64, port: u16) -> (Node, TempDir) {
+// Global port counter to ensure unique ports across tests
+static PORT_COUNTER: AtomicU16 = AtomicU16::new(9000);
+
+// Helper to get a free port
+fn get_free_port() -> u16 {
+    loop {
+        let port = PORT_COUNTER.fetch_add(1, Ordering::SeqCst);
+        if port > 60000 {
+            // Reset if we get too high
+            PORT_COUNTER.store(9000, Ordering::SeqCst);
+            continue;
+        }
+        
+        // Check if port is actually free
+        if let Ok(listener) = TcpListener::bind(("127.0.0.1", port)) {
+            drop(listener);
+            return port;
+        }
+    }
+}
+
+// Helper to create test node configuration with temp directory and dynamic port
+async fn create_test_node_with_port(id: u64, port: u16) -> (Node, TempDir) {
     let temp_dir = TempDir::new().unwrap();
     let config = NodeConfig {
         id,
@@ -31,20 +54,28 @@ async fn create_test_node(id: u64, port: u16) -> (Node, TempDir) {
     (node, temp_dir)
 }
 
+// Helper to create test node with automatic port allocation
+async fn create_test_node(id: u64) -> (Node, TempDir, u16) {
+    let port = get_free_port();
+    let (node, temp_dir) = create_test_node_with_port(id, port).await;
+    (node, temp_dir, port)
+}
+
 #[tokio::test]
 async fn test_single_node_grpc_health_check() {
-    let (node, _temp_dir) = create_test_node(1, 7001).await;
+    let (node, _temp_dir, _node_port) = create_test_node(1).await;
     let node_shared = node.shared();
     
-    // Start gRPC server
-    let grpc_addr = "127.0.0.1:8001".parse().unwrap();
+    // Start gRPC server with dynamic port
+    let grpc_port = get_free_port();
+    let grpc_addr: SocketAddr = format!("127.0.0.1:{}", grpc_port).parse().unwrap();
     let server_handle = tokio::spawn(start_grpc_server(node_shared.clone(), grpc_addr));
     
     // Give server time to start
     sleep(Duration::from_millis(1000)).await;
     
     // Connect gRPC client
-    let mut client = ClusterServiceClient::connect("http://127.0.0.1:8001")
+    let mut client = ClusterServiceClient::connect(format!("http://127.0.0.1:{}", grpc_port))
         .await
         .unwrap();
     
@@ -61,10 +92,10 @@ async fn test_single_node_grpc_health_check() {
 
 #[tokio::test]
 async fn test_cluster_formation_via_grpc() {
-    // Create three nodes
-    let (mut node1, _temp1) = create_test_node(1, 7001).await;
-    let (mut node2, _temp2) = create_test_node(2, 7002).await;
-    let (mut node3, _temp3) = create_test_node(3, 7003).await;
+    // Create three nodes with dynamic ports
+    let (mut node1, _temp1, _port1) = create_test_node(1).await;
+    let (mut node2, _temp2, _port2) = create_test_node(2).await;
+    let (mut node3, _temp3, _port3) = create_test_node(3).await;
     
     // Start all nodes
     node1.start().await.unwrap();
@@ -77,10 +108,13 @@ async fn test_cluster_formation_via_grpc() {
         node3.shared(),
     ];
     
-    // Start gRPC servers
+    // Start gRPC servers with dynamic ports
     let mut handles = vec![];
-    for (i, node_shared) in node_shareds.iter().enumerate() {
-        let addr = format!("127.0.0.1:{}", 8001 + i).parse().unwrap();
+    let mut grpc_ports = vec![];
+    for node_shared in node_shareds.iter() {
+        let port = get_free_port();
+        grpc_ports.push(port);
+        let addr: SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
         let handle = tokio::spawn(start_grpc_server(node_shared.clone(), addr));
         handles.push(handle);
     }
@@ -89,10 +123,10 @@ async fn test_cluster_formation_via_grpc() {
     
     // Connect clients with retry
     let mut clients = vec![];
-    for i in 0..3 {
+    for port in &grpc_ports {
         let mut attempts = 0;
         let client = loop {
-            match ClusterServiceClient::connect(format!("http://127.0.0.1:{}", 8001 + i)).await {
+            match ClusterServiceClient::connect(format!("http://127.0.0.1:{}", port)).await {
                 Ok(client) => break client,
                 Err(e) => {
                     attempts += 1;
@@ -124,7 +158,7 @@ async fn test_cluster_formation_via_grpc() {
 
 #[tokio::test]
 async fn test_task_submission_via_grpc() {
-    let (mut node, _temp_dir) = create_test_node(1, 7001).await;
+    let (mut node, _temp_dir, _node_port) = create_test_node(1).await;
     node.start().await.unwrap();
     
     // Register the node as a worker
@@ -132,14 +166,16 @@ async fn test_task_submission_via_grpc() {
     
     let node_shared = node.shared();
     
-    // Start gRPC server
-    let grpc_addr = "127.0.0.1:8001".parse().unwrap();
+    // Start gRPC server with dynamic port
+    let grpc_port = get_free_port();
+    let grpc_addr: SocketAddr = format!("127.0.0.1:{}", grpc_port).parse().unwrap();
     let server_handle = tokio::spawn(start_grpc_server(node_shared.clone(), grpc_addr));
     
-    sleep(Duration::from_millis(500)).await;
+    // Wait longer for Raft leader election in single-node mode
+    sleep(Duration::from_millis(1000)).await;
     
     // Connect client
-    let mut client = ClusterServiceClient::connect("http://127.0.0.1:8001")
+    let mut client = ClusterServiceClient::connect(format!("http://127.0.0.1:{}", grpc_port))
         .await
         .unwrap();
     
@@ -158,6 +194,10 @@ async fn test_task_submission_via_grpc() {
     let response = client.submit_task(task_request).await.unwrap();
     let task_resp = response.into_inner();
     
+    if !task_resp.accepted {
+        eprintln!("Task submission failed: {}", task_resp.message);
+    }
+    
     assert!(task_resp.accepted);
     assert_eq!(task_resp.assigned_node, 1);
     
@@ -167,19 +207,20 @@ async fn test_task_submission_via_grpc() {
 
 #[tokio::test]
 async fn test_vm_operations_via_grpc() {
-    let (mut node, _temp_dir) = create_test_node(1, 7001).await;
+    let (mut node, _temp_dir, _node_port) = create_test_node(1).await;
     node.start().await.unwrap();
     
     let node_shared = node.shared();
     
-    // Start gRPC server
-    let grpc_addr = "127.0.0.1:8001".parse().unwrap();
+    // Start gRPC server with dynamic port
+    let grpc_port = get_free_port();
+    let grpc_addr: SocketAddr = format!("127.0.0.1:{}", grpc_port).parse().unwrap();
     let server_handle = tokio::spawn(start_grpc_server(node_shared.clone(), grpc_addr));
     
     sleep(Duration::from_millis(500)).await;
     
     // Connect client
-    let mut client = ClusterServiceClient::connect("http://127.0.0.1:8001")
+    let mut client = ClusterServiceClient::connect(format!("http://127.0.0.1:{}", grpc_port))
         .await
         .unwrap();
     
@@ -207,24 +248,27 @@ async fn test_vm_operations_via_grpc() {
 
 #[tokio::test]
 async fn test_concurrent_task_submissions() {
-    let (mut node, _temp_dir) = create_test_node(1, 7001).await;
+    let (mut node, _temp_dir, _node_port) = create_test_node(1).await;
     node.start().await.unwrap();
     node.join_cluster(None).await.unwrap();
     
     let node_shared = node.shared();
     
-    // Start gRPC server
-    let grpc_addr = "127.0.0.1:8001".parse().unwrap();
+    // Start gRPC server with dynamic port
+    let grpc_port = get_free_port();
+    let grpc_addr: SocketAddr = format!("127.0.0.1:{}", grpc_port).parse().unwrap();
     let server_handle = tokio::spawn(start_grpc_server(node_shared.clone(), grpc_addr));
     
-    sleep(Duration::from_millis(500)).await;
+    // Wait longer for Raft leader election in single-node mode
+    sleep(Duration::from_millis(1000)).await;
     
     // Create multiple clients
     let mut handles = vec![];
     
     for i in 0..10 {
+        let grpc_url = format!("http://127.0.0.1:{}", grpc_port);
         let handle = tokio::spawn(async move {
-            let mut client = ClusterServiceClient::connect("http://127.0.0.1:8001")
+            let mut client = ClusterServiceClient::connect(grpc_url)
                 .await
                 .unwrap();
             
@@ -249,8 +293,11 @@ async fn test_concurrent_task_submissions() {
     let mut success_count = 0;
     for handle in handles {
         if let Ok(Ok(response)) = handle.await {
-            if response.into_inner().accepted {
+            let resp = response.into_inner();
+            if resp.accepted {
                 success_count += 1;
+            } else {
+                eprintln!("Task submission failed: {}", resp.message);
             }
         }
     }
@@ -266,13 +313,14 @@ async fn test_concurrent_task_submissions() {
 async fn test_cluster_state_persistence() {
     let temp_dir = TempDir::new().unwrap();
     let data_dir = temp_dir.path().to_str().unwrap().to_string();
+    let node_port = get_free_port();
     
     // Phase 1: Create node, add some state
     {
         let config = NodeConfig {
             id: 1,
             data_dir: data_dir.clone(),
-            bind_addr: "127.0.0.1:7001".parse().unwrap(),
+            bind_addr: format!("127.0.0.1:{}", node_port).parse().unwrap(),
             join_addr: None,
             use_tailscale: false,
         };
@@ -298,14 +346,20 @@ async fn test_cluster_state_persistence() {
         
         // Stop node
         node.stop().await.unwrap();
+        
+        // Explicitly drop the node to ensure all resources are released
+        drop(node);
     }
+    
+    // Small delay to ensure database is fully released
+    sleep(Duration::from_millis(100)).await;
     
     // Phase 2: Restart node and verify state
     {
         let config = NodeConfig {
             id: 1,
             data_dir,
-            bind_addr: "127.0.0.1:7001".parse().unwrap(),
+            bind_addr: format!("127.0.0.1:{}", node_port).parse().unwrap(),
             join_addr: None,
             use_tailscale: false,
         };
@@ -326,19 +380,20 @@ async fn test_cluster_state_persistence() {
 
 #[tokio::test]
 async fn test_grpc_error_handling() {
-    let (mut node, _temp_dir) = create_test_node(1, 7001).await;
+    let (mut node, _temp_dir, _node_port) = create_test_node(1).await;
     node.start().await.unwrap();
     
     let node_shared = node.shared();
     
-    // Start gRPC server
-    let grpc_addr = "127.0.0.1:8001".parse().unwrap();
+    // Start gRPC server with dynamic port
+    let grpc_port = get_free_port();
+    let grpc_addr: SocketAddr = format!("127.0.0.1:{}", grpc_port).parse().unwrap();
     let server_handle = tokio::spawn(start_grpc_server(node_shared.clone(), grpc_addr));
     
     sleep(Duration::from_millis(500)).await;
     
     // Connect client
-    let mut client = ClusterServiceClient::connect("http://127.0.0.1:8001")
+    let mut client = ClusterServiceClient::connect(format!("http://127.0.0.1:{}", grpc_port))
         .await
         .unwrap();
     

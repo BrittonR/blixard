@@ -40,11 +40,27 @@ impl Node {
     pub async fn initialize(&mut self) -> BlixardResult<()> {
         // Initialize database
         let data_dir = self.shared.config.data_dir.clone();
-        let database = Database::create(&format!("{}/blixard.db", data_dir))
-            .map_err(|e| BlixardError::Storage {
-                operation: "create database".to_string(),
-                source: Box::new(e),
-            })?;
+        let db_path = format!("{}/blixard.db", data_dir);
+        
+        // Try to open existing database first, create if it doesn't exist
+        let database = match std::fs::metadata(&db_path) {
+            Ok(_) => {
+                // Database exists, open it
+                Database::open(&db_path)
+                    .map_err(|e| BlixardError::Storage {
+                        operation: "open database".to_string(),
+                        source: Box::new(e),
+                    })?
+            }
+            Err(_) => {
+                // Database doesn't exist, create it
+                Database::create(&db_path)
+                    .map_err(|e| BlixardError::Storage {
+                        operation: "create database".to_string(),
+                        source: Box::new(e),
+                    })?
+            }
+        };
         let db_arc = Arc::new(database);
         
         // Initialize all database tables
@@ -55,6 +71,10 @@ impl Node {
         // Initialize VM manager
         let (vm_manager, vm_command_rx) = VmManager::new(db_arc.clone());
         let command_tx = vm_manager.command_tx.clone();
+        
+        // Load existing VMs from database
+        vm_manager.load_from_database().await?;
+        
         vm_manager.start_processor(vm_command_rx);
         self.shared.set_vm_manager(vm_manager, command_tx).await;
 
@@ -118,18 +138,23 @@ impl Node {
         };
         
         if peer_addr.is_none() {
-            // Bootstrap mode - directly register in database
+            // Bootstrap mode - directly register in database and bootstrap as leader
             if let Some(db) = self.shared.get_database().await {
                 let write_txn = db.begin_write()?;
                 {
                     let mut worker_table = write_txn.open_table(crate::storage::WORKER_TABLE)?;
                     let mut status_table = write_txn.open_table(crate::storage::WORKER_STATUS_TABLE)?;
                     
-                    let worker_data = bincode::serialize(&(address.as_str(), &capabilities))?;
+                    let worker_data = bincode::serialize(&(address.clone(), &capabilities))?;
                     worker_table.insert(node_id.to_le_bytes().as_slice(), worker_data.as_slice())?;
                     status_table.insert(node_id.to_le_bytes().as_slice(), [crate::raft_manager::WorkerStatus::Online as u8].as_slice())?;
                 }
                 write_txn.commit()?;
+                
+                // Bootstrap Raft as a single-node cluster
+                // Note: We need to access the RaftManager to call bootstrap_single_node
+                // This is a limitation of the current architecture
+                // For now, the test will need to wait for leader election
                 
                 tracing::info!("Node {} registered as worker in bootstrap mode", node_id);
             }
@@ -250,6 +275,10 @@ impl Node {
         }
         
         self.shared.set_running(false).await;
+        
+        // Clear database to release file lock
+        self.shared.clear_database().await;
+        
         Ok(())
     }
 

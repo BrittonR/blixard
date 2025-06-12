@@ -88,6 +88,11 @@ impl SharedNodeState {
         *self.database.write().await = Some(db);
     }
     
+    /// Clear the database (for shutdown)
+    pub async fn clear_database(&self) {
+        *self.database.write().await = None;
+    }
+    
     /// Get database
     pub async fn get_database(&self) -> Option<Arc<Database>> {
         self.database.read().await.clone()
