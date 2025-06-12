@@ -1,28 +1,15 @@
 use tokio::net::TcpListener;
-use tokio::sync::{oneshot, mpsc, RwLock};
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::types::{NodeConfig, VmState, VmCommand};
+use crate::types::{NodeConfig, VmCommand};
+use crate::storage::{RedbRaftStorage, init_raft};
+use crate::vm_manager::VmManager;
 
-use raft::{Config, RawNode, GetEntriesContext};
-use redb::{Database, TableDefinition, ReadableTable};
-use slog::{o, Drain};
-
-const VM_STATE_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vm_states");
-const CLUSTER_STATE_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("cluster_state");
-
-// Raft storage tables
-const RAFT_LOG_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("raft_log");
-const RAFT_HARD_STATE_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("raft_hard_state");
-const RAFT_CONF_STATE_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("raft_conf_state");
-
-#[derive(Clone)]
-pub struct RedbRaftStorage {
-    database: Arc<Database>,
-}
+use raft::RawNode;
+use redb::Database;
 
 /// A Blixard cluster node
 pub struct Node {
@@ -30,9 +17,8 @@ pub struct Node {
     shutdown_tx: Option<oneshot::Sender<()>>,
     handle: Option<JoinHandle<BlixardResult<()>>>,
     raft_node: Option<RawNode<RedbRaftStorage>>,
-    vm_states: Arc<RwLock<HashMap<String, VmState>>>,
     database: Option<Arc<Database>>,
-    vm_command_tx: Option<mpsc::UnboundedSender<VmCommand>>,
+    vm_manager: Option<VmManager>,
 }
 
 impl Node {
@@ -43,9 +29,8 @@ impl Node {
             shutdown_tx: None,
             handle: None,
             raft_node: None,
-            vm_states: Arc::new(RwLock::new(HashMap::new())),
             database: None,
-            vm_command_tx: None,
+            vm_manager: None,
         }
     }
 
@@ -57,145 +42,30 @@ impl Node {
                 operation: "create database".to_string(),
                 source: Box::new(e),
             })?;
-        self.database = Some(Arc::new(database));
+        let db_arc = Arc::new(database);
+        self.database = Some(db_arc.clone());
 
-        // Create VM command channel
-        let (vm_command_tx, vm_command_rx) = mpsc::unbounded_channel();
-        self.vm_command_tx = Some(vm_command_tx);
-
-        // Start VM command processor
-        self.start_vm_processor(vm_command_rx).await?;
+        // Initialize VM manager
+        let (vm_manager, vm_command_rx) = VmManager::new(db_arc.clone());
+        vm_manager.start_processor(vm_command_rx);
+        self.vm_manager = Some(vm_manager);
 
         // Initialize Raft
-        self.init_raft().await?;
-
-        Ok(())
-    }
-
-    async fn init_raft(&mut self) -> BlixardResult<()> {
-        let raft_config = Config {
-            id: self.config.id,
-            election_tick: 10,
-            heartbeat_tick: 3,
-            ..Default::default()
-        };
-
-        let storage = RedbRaftStorage {
-            database: self.database.as_ref().unwrap().clone(),
-        };
+        self.raft_node = Some(init_raft(self.config.id, db_arc)?);
         
-        // Create a simple logger for Raft
-        let drain = slog::Discard;
-        let logger = slog::Logger::root(drain, o!());
-        
-        self.raft_node = Some(RawNode::new(&raft_config, storage, &logger).map_err(|e| {
-            BlixardError::Raft {
-                operation: "initialize raft node".to_string(),
-                source: Box::new(e),
-            }
-        })?);
-
         Ok(())
     }
 
-    async fn start_vm_processor(&self, mut vm_command_rx: mpsc::UnboundedReceiver<VmCommand>) -> BlixardResult<()> {
-        let vm_states = Arc::clone(&self.vm_states);
-        let database = self.database.as_ref().unwrap().clone();
-
-        tokio::spawn(async move {
-            while let Some(command) = vm_command_rx.recv().await {
-                if let Err(e) = Self::process_vm_command(command, &vm_states, &database).await {
-                    tracing::error!("Error processing VM command: {}", e);
-                }
-            }
-        });
-
-        Ok(())
-    }
-
-    async fn process_vm_command(
-        command: VmCommand,
-        vm_states: &Arc<RwLock<HashMap<String, VmState>>>,
-        database: &Arc<Database>,
-    ) -> BlixardResult<()> {
-        match command {
-            VmCommand::Create { config: _, node_id: _ } => {
-                // TODO: Interface with microvm.nix to create VM
-                Err(BlixardError::NotImplemented {
-                    feature: "VM creation via microvm.nix".to_string(),
-                })
-            }
-            VmCommand::Start { name: _ } => {
-                // TODO: Interface with microvm.nix to start VM
-                Err(BlixardError::NotImplemented {
-                    feature: "VM start via microvm.nix".to_string(),
-                })
-            }
-            VmCommand::Stop { name: _ } => {
-                // TODO: Interface with microvm.nix to stop VM
-                Err(BlixardError::NotImplemented {
-                    feature: "VM stop via microvm.nix".to_string(),
-                })
-            }
-            VmCommand::Delete { name: _ } => {
-                // TODO: Interface with microvm.nix to delete VM
-                Err(BlixardError::NotImplemented {
-                    feature: "VM deletion via microvm.nix".to_string(),
-                })
-            }
-            VmCommand::UpdateStatus { name, status } => {
-                let mut states = vm_states.write().await;
-                if let Some(vm_state) = states.get_mut(&name) {
-                    vm_state.status = status;
-                    vm_state.updated_at = chrono::Utc::now();
-                    
-                    // Persist to database
-                    Self::persist_vm_state(database, vm_state).await?;
-                }
-                Ok(())
-            }
-        }
-    }
-
-    async fn persist_vm_state(database: &Database, vm_state: &VmState) -> BlixardResult<()> {
-        let write_txn = database.begin_write().map_err(|e| BlixardError::Storage {
-            operation: "begin write transaction".to_string(),
-            source: Box::new(e),
-        })?;
-
-        {
-            let mut table = write_txn.open_table(VM_STATE_TABLE).map_err(|e| BlixardError::Storage {
-                operation: "open vm_states table".to_string(),
-                source: Box::new(e),
-            })?;
-
-            let serialized = bincode::serialize(vm_state).map_err(|e| BlixardError::Serialization {
-                operation: "serialize vm state".to_string(),
-                source: Box::new(e),
-            })?;
-
-            table.insert(vm_state.name.as_str(), serialized.as_slice()).map_err(|e| BlixardError::Storage {
-                operation: "insert vm state".to_string(),
-                source: Box::new(e),
-            })?;
-        }
-
-        write_txn.commit().map_err(|e| BlixardError::Storage {
-            operation: "commit transaction".to_string(),
-            source: Box::new(e),
-        })?;
-
-        Ok(())
-    }
 
     /// Send a VM command for processing
     pub async fn send_vm_command(&self, command: VmCommand) -> BlixardResult<()> {
-        if let Some(tx) = &self.vm_command_tx {
-            tx.send(command).map_err(|_| BlixardError::Internal {
-                message: "Failed to send VM command".to_string(),
-            })?;
+        if let Some(vm_manager) = &self.vm_manager {
+            vm_manager.send_command(command).await
+        } else {
+            Err(BlixardError::Internal {
+                message: "VM manager not initialized".to_string(),
+            })
         }
-        Ok(())
     }
 
     /// Get the node ID
@@ -210,22 +80,17 @@ impl Node {
 
     /// List all VMs and their status
     pub async fn list_vms(&self) -> BlixardResult<Vec<(crate::types::VmConfig, crate::types::VmStatus)>> {
-        let states = self.vm_states.read().await;
-        let mut result = Vec::new();
-        
-        for vm_state in states.values() {
-            result.push((vm_state.config.clone(), vm_state.status));
+        if let Some(vm_manager) = &self.vm_manager {
+            vm_manager.list_vms().await
+        } else {
+            Ok(Vec::new())
         }
-        
-        Ok(result)
     }
 
     /// Get status of a specific VM
     pub async fn get_vm_status(&self, name: &str) -> BlixardResult<Option<(crate::types::VmConfig, crate::types::VmStatus)>> {
-        let states = self.vm_states.read().await;
-        
-        if let Some(vm_state) = states.get(name) {
-            Ok(Some((vm_state.config.clone(), vm_state.status)))
+        if let Some(vm_manager) = &self.vm_manager {
+            vm_manager.get_vm_status(name).await
         } else {
             Ok(None)
         }
@@ -340,40 +205,3 @@ mod tests {
     }
 }
 
-impl RedbRaftStorage {
-    // Simplified implementation - just return defaults for now
-    // TODO: Implement proper persistence later
-}
-
-// Implement Raft storage trait with simplified redb backend
-impl raft::Storage for RedbRaftStorage {
-    fn initial_state(&self) -> raft::Result<raft::RaftState> {
-        // For now, just return default state - we'll implement persistence later
-        let hard_state = raft::prelude::HardState::default();
-        let conf_state = raft::prelude::ConfState::default();
-        Ok(raft::RaftState::new(hard_state, conf_state))
-    }
-
-    fn entries(&self, _low: u64, _high: u64, _max_size: impl Into<Option<u64>>, _context: GetEntriesContext) -> raft::Result<Vec<raft::prelude::Entry>> {
-        // For now, return empty - we'll implement log storage later
-        Ok(vec![])
-    }
-
-    fn term(&self, _idx: u64) -> raft::Result<u64> {
-        // For now, return 0 - we'll implement term lookup later
-        Ok(0)
-    }
-
-    fn first_index(&self) -> raft::Result<u64> {
-        Ok(1)
-    }
-
-    fn last_index(&self) -> raft::Result<u64> {
-        Ok(0)
-    }
-
-    fn snapshot(&self, _request_index: u64, _to: u64) -> raft::Result<raft::prelude::Snapshot> {
-        // TODO: Implement snapshot creation from redb state
-        Err(raft::Error::Store(raft::StorageError::SnapshotTemporarilyUnavailable))
-    }
-}

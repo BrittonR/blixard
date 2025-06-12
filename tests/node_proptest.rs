@@ -56,9 +56,9 @@ proptest! {
             let config = NodeConfig {
                 id,
                 data_dir: "/tmp/test".to_string(),
-                bind_addr: format!("127.0.0.1:{}", port).parse().unwrap(),
+                bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: if use_tailscale { 
-                    Some(format!("127.0.0.1:{}", port + 1).parse().unwrap())
+                    Some("127.0.0.1:0".parse().unwrap())
                 } else { 
                     None 
                 },
@@ -89,7 +89,7 @@ proptest! {
             let config = NodeConfig {
                 id,
                 data_dir: "/tmp/test".to_string(),
-                bind_addr: format!("127.0.0.1:{}", port).parse().unwrap(),
+                bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
             };
@@ -174,7 +174,7 @@ proptest! {
             let config = NodeConfig {
                 id,
                 data_dir: "/tmp/test".to_string(),
-                bind_addr: format!("127.0.0.1:{}", port).parse().unwrap(),
+                bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
             };
@@ -221,7 +221,7 @@ proptest! {
             let config = NodeConfig {
                 id,
                 data_dir: "/tmp/test".to_string(),
-                bind_addr: format!("127.0.0.1:{}", port).parse().unwrap(),
+                bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
             };
@@ -266,7 +266,7 @@ proptest! {
             let config = NodeConfig {
                 id,
                 data_dir: "/tmp/test".to_string(),
-                bind_addr: format!("127.0.0.1:{}", port).parse().unwrap(),
+                bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
             };
@@ -306,7 +306,7 @@ proptest! {
             let config = NodeConfig {
                 id,
                 data_dir: "/tmp/test".to_string(),
-                bind_addr: format!("127.0.0.1:{}", port).parse().unwrap(),
+                bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
             };
@@ -354,7 +354,7 @@ proptest! {
             let config = NodeConfig {
                 id,
                 data_dir: "/tmp/test".to_string(),
-                bind_addr: format!("127.0.0.1:{}", port).parse().unwrap(),
+                bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
             };

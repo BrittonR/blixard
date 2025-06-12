@@ -22,7 +22,9 @@ Blixard is a distributed microVM orchestration platform being built in Rust. The
 - **Domain Types** - Core types (NodeConfig, VmConfig, VmStatus) in `src/types.rs`
 - **gRPC Protocol** - Service definitions in `proto/blixard.proto`
 - **gRPC Server** - Basic implementation in `src/grpc_server.rs`
-- **Node Structure** - Node management skeleton in `src/node.rs`
+- **Node Structure** - Node management and coordination in `src/node.rs`
+- **Storage Layer** - Raft storage implementation in `src/storage.rs`
+- **VM Manager** - VM lifecycle and state management in `src/vm_manager.rs`
 
 ### Implementation Status
 Recent progress:
@@ -126,6 +128,10 @@ cargo run -- vm list
 - `src/lib.rs` - Library root
 - `src/error.rs` - Error type definitions
 - `src/types.rs` - Domain types and data structures
+- `src/node.rs` - Node lifecycle and coordination
+- `src/grpc_server.rs` - gRPC service implementation
+- `src/storage.rs` - Raft storage backend
+- `src/vm_manager.rs` - VM state management
 - `proto/blixard.proto` - gRPC service definitions
 
 ### Configuration
@@ -181,6 +187,8 @@ Based on the current foundation, the following areas need implementation:
 - Follow CLI patterns from `src/main.rs`
 - Implement gRPC services per `proto/blixard.proto`
 - Use domain types from `src/types.rs`
+- Extend storage functionality in `src/storage.rs`
+- Add VM operations to `src/vm_manager.rs`
 
 ### What AI Must NEVER Do
 - Change the gRPC protocol without approval

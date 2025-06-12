@@ -99,9 +99,9 @@ async fn test_vm_command_send_without_initialization() {
         node_id: 1,
     };
     
-    // Should succeed (no-op when channel not initialized)
+    // Should fail when not initialized
     let result = node.send_vm_command(command).await;
-    assert!(result.is_ok());
+    assert!(matches!(result, Err(BlixardError::Internal { .. })));
 }
 
 #[tokio::test]
