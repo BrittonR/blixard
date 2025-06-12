@@ -5,17 +5,15 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
-    node_shared::SharedNodeState,
+    node::Node,
     types::{VmCommand, VmStatus as InternalVmStatus},
-    raft_manager::{TaskSpec, ResourceRequirements},
     proto::{
         cluster_service_server::{ClusterService, ClusterServiceServer},
         CreateVmRequest, CreateVmResponse, GetVmStatusRequest, GetVmStatusResponse,
         HealthCheckRequest, HealthCheckResponse, JoinRequest, JoinResponse, LeaveRequest,
         LeaveResponse, ListVmsRequest, ListVmsResponse, NodeInfo, NodeState, StartVmRequest,
         StartVmResponse, StopVmRequest, StopVmResponse, VmInfo, VmState, ClusterStatusRequest,
-        ClusterStatusResponse, RaftMessageRequest, RaftMessageResponse, TaskRequest, TaskResponse,
-        TaskStatusRequest, TaskStatusResponse, TaskStatus,
+        ClusterStatusResponse,
     },
 };
 use std::sync::Arc;
@@ -23,12 +21,12 @@ use tonic::{Request, Response, Status};
 
 /// gRPC service implementation for Blixard cluster operations
 pub struct BlixardGrpcService {
-    node: Arc<SharedNodeState>,
+    node: Arc<Node>,
 }
 
 impl BlixardGrpcService {
     /// Create a new gRPC service instance
-    pub fn new(node: Arc<SharedNodeState>) -> Self {
+    pub fn new(node: Arc<Node>) -> Self {
         Self { node }
     }
 
@@ -261,103 +259,11 @@ impl ClusterService for BlixardGrpcService {
             message: format!("Node {} is healthy", self.node.get_id()),
         }))
     }
-
-    async fn send_raft_message(
-        &self,
-        request: Request<RaftMessageRequest>,
-    ) -> Result<Response<RaftMessageResponse>, Status> {
-        let req = request.into_inner();
-        
-        // Parse Raft message from bytes
-        let raft_msg = crate::raft_codec::deserialize_message(&req.raft_data)
-            .map_err(|e| Status::invalid_argument(format!("Invalid Raft message: {}", e)))?;
-        
-        // Send to Raft manager through node
-        match self.node.send_raft_message(raft_msg.from, raft_msg).await {
-            Ok(_) => Ok(Response::new(RaftMessageResponse {
-                success: true,
-                error: String::new(),
-            })),
-            Err(e) => Ok(Response::new(RaftMessageResponse {
-                success: false,
-                error: e.to_string(),
-            })),
-        }
-    }
-
-    async fn submit_task(
-        &self,
-        request: Request<TaskRequest>,
-    ) -> Result<Response<TaskResponse>, Status> {
-        let req = request.into_inner();
-        
-        // Create task specification
-        let task_spec = TaskSpec {
-            command: req.command,
-            args: req.args,
-            resources: ResourceRequirements {
-                cpu_cores: req.cpu_cores,
-                memory_mb: req.memory_mb,
-                disk_gb: req.disk_gb,
-                required_features: req.required_features,
-            },
-            timeout_secs: req.timeout_secs,
-        };
-        
-        // Submit task through Raft
-        match self.node.submit_task(&req.task_id, task_spec).await {
-            Ok(assigned_node) => Ok(Response::new(TaskResponse {
-                accepted: true,
-                message: format!("Task {} assigned to node {}", req.task_id, assigned_node),
-                assigned_node,
-            })),
-            Err(e) => Ok(Response::new(TaskResponse {
-                accepted: false,
-                message: format!("Failed to submit task: {}", e),
-                assigned_node: 0,
-            })),
-        }
-    }
-
-    async fn get_task_status(
-        &self,
-        request: Request<TaskStatusRequest>,
-    ) -> Result<Response<TaskStatusResponse>, Status> {
-        let req = request.into_inner();
-        
-        match self.node.get_task_status(&req.task_id).await {
-            Ok(Some((status, result))) => {
-                let task_status = match status.as_str() {
-                    "pending" => TaskStatus::Pending,
-                    "running" => TaskStatus::Running,
-                    "completed" => TaskStatus::Completed,
-                    "failed" => TaskStatus::Failed,
-                    _ => TaskStatus::Unknown,
-                };
-                
-                Ok(Response::new(TaskStatusResponse {
-                    found: true,
-                    status: task_status.into(),
-                    output: result.as_ref().map(|r| r.output.clone()).unwrap_or_default(),
-                    error: result.and_then(|r| r.error).unwrap_or_default(),
-                    execution_time_ms: 0, // TODO: Track execution time
-                }))
-            }
-            Ok(None) => Ok(Response::new(TaskStatusResponse {
-                found: false,
-                status: TaskStatus::Unknown.into(),
-                output: String::new(),
-                error: String::new(),
-                execution_time_ms: 0,
-            })),
-            Err(e) => Err(Self::error_to_status(e)),
-        }
-    }
 }
 
 /// Start the gRPC server
 pub async fn start_grpc_server(
-    node: Arc<SharedNodeState>,
+    node: Arc<Node>,
     bind_address: std::net::SocketAddr,
 ) -> BlixardResult<()> {
     let service = BlixardGrpcService::new(node);

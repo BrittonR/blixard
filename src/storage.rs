@@ -1,8 +1,9 @@
 use std::sync::Arc;
-use redb::{Database, TableDefinition};
+use redb::{Database, TableDefinition, ReadableTable};
 use raft::{Config, RawNode, GetEntriesContext};
 use slog::o;
 use crate::error::{BlixardError, BlixardResult};
+use crate::raft_codec;
 
 // Database table definitions
 pub const VM_STATE_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vm_states");
@@ -13,6 +14,15 @@ pub const RAFT_LOG_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("ra
 pub const RAFT_HARD_STATE_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("raft_hard_state");
 pub const RAFT_CONF_STATE_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("raft_conf_state");
 
+// Task management tables
+pub const TASK_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("tasks");
+pub const TASK_ASSIGNMENT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("task_assignments");
+pub const TASK_RESULT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("task_results");
+
+// Worker management tables
+pub const WORKER_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("workers");
+pub const WORKER_STATUS_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("worker_status");
+
 #[derive(Clone)]
 pub struct RedbRaftStorage {
     pub database: Arc<Database>,
@@ -20,34 +30,192 @@ pub struct RedbRaftStorage {
 
 impl raft::Storage for RedbRaftStorage {
     fn initial_state(&self) -> raft::Result<raft::RaftState> {
-        // For now, just return default state - we'll implement persistence later
-        let hard_state = raft::prelude::HardState::default();
-        let conf_state = raft::prelude::ConfState::default();
+        let read_txn = self.database.begin_read()
+            .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
+        
+        // Load hard state
+        let hard_state = if let Ok(table) = read_txn.open_table(RAFT_HARD_STATE_TABLE) {
+            if let Ok(Some(data)) = table.get("hard_state") {
+                raft_codec::deserialize_hard_state(data.value())
+                    .unwrap_or_else(|_| raft::prelude::HardState::default())
+            } else {
+                raft::prelude::HardState::default()
+            }
+        } else {
+            raft::prelude::HardState::default()
+        };
+        
+        // Load conf state
+        let conf_state = if let Ok(table) = read_txn.open_table(RAFT_CONF_STATE_TABLE) {
+            if let Ok(Some(data)) = table.get("conf_state") {
+                raft_codec::deserialize_conf_state(data.value())
+                    .unwrap_or_else(|_| raft::prelude::ConfState::default())
+            } else {
+                raft::prelude::ConfState::default()
+            }
+        } else {
+            raft::prelude::ConfState::default()
+        };
+        
         Ok(raft::RaftState::new(hard_state, conf_state))
     }
 
-    fn entries(&self, _low: u64, _high: u64, _max_size: impl Into<Option<u64>>, _context: GetEntriesContext) -> raft::Result<Vec<raft::prelude::Entry>> {
-        // For now, return empty - we'll implement log storage later
-        Ok(vec![])
+    fn entries(&self, low: u64, high: u64, max_size: impl Into<Option<u64>>, _context: GetEntriesContext) -> raft::Result<Vec<raft::prelude::Entry>> {
+        let max_size = max_size.into();
+        let read_txn = self.database.begin_read()
+            .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
+        
+        let table = read_txn.open_table(RAFT_LOG_TABLE)
+            .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
+        
+        let mut entries = Vec::new();
+        let mut size = 0u64;
+        
+        for idx in low..high {
+            if let Ok(Some(data)) = table.get(&idx) {
+                let entry = raft_codec::deserialize_entry(data.value())
+                    .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
+                
+                let entry_size = data.value().len() as u64;
+                size += entry_size;
+                entries.push(entry);
+                
+                if let Some(max) = max_size {
+                    if size > max {
+                        break;
+                    }
+                }
+            }
+        }
+        
+        Ok(entries)
     }
 
-    fn term(&self, _idx: u64) -> raft::Result<u64> {
-        // For now, return 0 - we'll implement term lookup later
-        Ok(0)
+    fn term(&self, idx: u64) -> raft::Result<u64> {
+        let read_txn = self.database.begin_read()
+            .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
+        
+        let table = read_txn.open_table(RAFT_LOG_TABLE)
+            .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
+        
+        if let Ok(Some(data)) = table.get(&idx) {
+            let entry = raft_codec::deserialize_entry(data.value())
+                .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
+            Ok(entry.term)
+        } else {
+            Ok(0)
+        }
     }
 
     fn first_index(&self) -> raft::Result<u64> {
-        Ok(1)
+        let read_txn = self.database.begin_read()
+            .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
+        
+        let table = read_txn.open_table(RAFT_LOG_TABLE)
+            .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
+        
+        match table.iter() {
+            Ok(mut iter) => {
+                if let Some(Ok((key, _))) = iter.next() {
+                    Ok(key.value())
+                } else {
+                    Ok(1)
+                }
+            }
+            Err(_) => Ok(1),
+        }
     }
 
     fn last_index(&self) -> raft::Result<u64> {
-        Ok(0)
+        let read_txn = self.database.begin_read()
+            .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
+        
+        let table = read_txn.open_table(RAFT_LOG_TABLE)
+            .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
+        
+        match table.iter() {
+            Ok(iter) => {
+                if let Some(Ok((key, _))) = iter.rev().next() {
+                    Ok(key.value())
+                } else {
+                    Ok(0)
+                }
+            }
+            Err(_) => Ok(0),
+        }
     }
 
     fn snapshot(&self, _request_index: u64, _to: u64) -> raft::Result<raft::prelude::Snapshot> {
         // TODO: Implement snapshot creation from redb state
         Err(raft::Error::Store(raft::StorageError::SnapshotTemporarilyUnavailable))
     }
+}
+
+impl RedbRaftStorage {
+    /// Append entries to the log
+    pub fn append(&self, entries: &[raft::prelude::Entry]) -> BlixardResult<()> {
+        let write_txn = self.database.begin_write()?;
+        
+        {
+            let mut table = write_txn.open_table(RAFT_LOG_TABLE)?;
+            
+            for entry in entries {
+                let data = raft_codec::serialize_entry(entry)?;
+                table.insert(&entry.index, data.as_slice())?;
+            }
+        }
+        
+        write_txn.commit()?;
+        Ok(())
+    }
+    
+    /// Save hard state
+    pub fn save_hard_state(&self, hard_state: &raft::prelude::HardState) -> BlixardResult<()> {
+        let write_txn = self.database.begin_write()?;
+        
+        {
+            let mut table = write_txn.open_table(RAFT_HARD_STATE_TABLE)?;
+            let data = raft_codec::serialize_hard_state(hard_state)?;
+            table.insert("hard_state", data.as_slice())?;
+        }
+        
+        write_txn.commit()?;
+        Ok(())
+    }
+    
+    /// Save configuration state
+    pub fn save_conf_state(&self, conf_state: &raft::prelude::ConfState) -> BlixardResult<()> {
+        let write_txn = self.database.begin_write()?;
+        
+        {
+            let mut table = write_txn.open_table(RAFT_CONF_STATE_TABLE)?;
+            let data = raft_codec::serialize_conf_state(conf_state)?;
+            table.insert("conf_state", data.as_slice())?;
+        }
+        
+        write_txn.commit()?;
+        Ok(())
+    }
+}
+
+/// Initialize all required database tables
+pub fn init_database_tables(database: &Arc<Database>) -> BlixardResult<()> {
+    let write_txn = database.begin_write()?;
+    
+    // Create all necessary tables
+    let _ = write_txn.open_table(VM_STATE_TABLE)?;
+    let _ = write_txn.open_table(CLUSTER_STATE_TABLE)?;
+    let _ = write_txn.open_table(RAFT_LOG_TABLE)?;
+    let _ = write_txn.open_table(RAFT_HARD_STATE_TABLE)?;
+    let _ = write_txn.open_table(RAFT_CONF_STATE_TABLE)?;
+    let _ = write_txn.open_table(TASK_TABLE)?;
+    let _ = write_txn.open_table(TASK_ASSIGNMENT_TABLE)?;
+    let _ = write_txn.open_table(TASK_RESULT_TABLE)?;
+    let _ = write_txn.open_table(WORKER_TABLE)?;
+    let _ = write_txn.open_table(WORKER_STATUS_TABLE)?;
+    
+    write_txn.commit()?;
+    Ok(())
 }
 
 /// Initialize Raft node with the given configuration and storage

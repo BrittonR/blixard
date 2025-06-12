@@ -92,14 +92,13 @@ async fn main() -> BlixardResult<()> {
             // Start the node (it spawns its own background tasks)
             node.start().await?;
             
-            // Get shared state for gRPC server
-            let shared_state = node.shared();
+            let node_arc = Arc::new(node);
 
             #[cfg(not(madsim))]
             {
                 // Start gRPC server
                 let server_handle = tokio::spawn(async move {
-                    start_grpc_server(shared_state, bind_address).await
+                    start_grpc_server(node_arc, bind_address).await
                 });
 
                 // Wait for the gRPC server
@@ -113,7 +112,7 @@ async fn main() -> BlixardResult<()> {
             #[cfg(madsim)]
             {
                 // In simulation mode, just keep the node running
-                tracing::info!("Node {} running (gRPC disabled in simulation)", node.get_id());
+                tracing::info!("Node {} running (gRPC disabled in simulation)", node_arc.get_id());
                 tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
             }
         }

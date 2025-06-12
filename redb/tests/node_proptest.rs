@@ -68,7 +68,7 @@ proptest! {
             let (node, _temp_dir) = create_test_node_with_config(config.clone()).await;
             
             // Node should be created in stopped state
-            prop_assert!(!node.is_running().await);
+            prop_assert!(!node.is_running());
             
             // Node should reflect the configuration
             // (We can't directly access private fields, but we test behavior)
@@ -101,7 +101,7 @@ proptest! {
             prop_assert!(result.is_ok());
             
             // Node should still not be running after initialization
-            prop_assert!(!node.is_running().await);
+            prop_assert!(!node.is_running());
             Ok(())
         });
     }
@@ -182,27 +182,27 @@ proptest! {
             let (mut node, _temp_dir) = create_test_node_with_config(config).await;
             
             // Initial state
-            prop_assert!(!node.is_running().await);
+            prop_assert!(!node.is_running());
             
             // Initialize
             node.initialize().await.unwrap();
-            prop_assert!(!node.is_running().await);
+            prop_assert!(!node.is_running());
             
             // Start
             node.start().await.unwrap();
-            prop_assert!(node.is_running().await);
+            prop_assert!(node.is_running());
             
             // Stop
             node.stop().await.unwrap();
-            prop_assert!(!node.is_running().await);
+            prop_assert!(!node.is_running());
             
             // Should be able to start again
             node.start().await.unwrap();
-            prop_assert!(node.is_running().await);
+            prop_assert!(node.is_running());
             
             // Final stop
             node.stop().await.unwrap();
-            prop_assert!(!node.is_running().await);
+            prop_assert!(!node.is_running());
             Ok(())
         });
     }
@@ -278,7 +278,7 @@ proptest! {
                 // Start
                 let start_result = node.start().await;
                 prop_assert!(start_result.is_ok());
-                prop_assert!(node.is_running().await);
+                prop_assert!(node.is_running());
                 
                 // Small delay to ensure start completes
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -286,7 +286,7 @@ proptest! {
                 // Stop
                 let stop_result = node.stop().await;
                 prop_assert!(stop_result.is_ok());
-                prop_assert!(!node.is_running().await);
+                prop_assert!(!node.is_running());
             }
             Ok(())
         });
@@ -369,12 +369,12 @@ proptest! {
             // Stop should always succeed
             let result = node.stop().await;
             prop_assert!(result.is_ok());
-            prop_assert!(!node.is_running().await);
+            prop_assert!(!node.is_running());
             
             // Multiple stops should be safe
             let result2 = node.stop().await;
             prop_assert!(result2.is_ok());
-            prop_assert!(!node.is_running().await);
+            prop_assert!(!node.is_running());
             Ok(())
         });
     }

@@ -28,7 +28,7 @@ async fn create_test_node(id: u64) -> (Node, TempDir) {
 #[tokio::test]
 async fn test_node_creation() {
     let (node, _temp_dir) = create_test_node(1).await;
-    assert!(!node.is_running().await);
+    assert!(!node.is_running());
 }
 
 #[tokio::test]
@@ -49,14 +49,14 @@ async fn test_node_lifecycle_with_initialization() {
     
     // Start node
     node.start().await.unwrap();
-    assert!(node.is_running().await);
+    assert!(node.is_running());
     
     // Give it a moment to start
     tokio::time::sleep(Duration::from_millis(100)).await;
     
     // Stop node
     node.stop().await.unwrap();
-    assert!(!node.is_running().await);
+    assert!(!node.is_running());
 }
 
 #[tokio::test]
@@ -128,7 +128,7 @@ async fn test_node_stop_without_start() {
     // Should succeed even if never started
     let result = node.stop().await;
     assert!(result.is_ok());
-    assert!(!node.is_running().await);
+    assert!(!node.is_running());
 }
 
 #[tokio::test]
@@ -139,11 +139,11 @@ async fn test_node_multiple_starts() {
     
     // First start
     node.start().await.unwrap();
-    assert!(node.is_running().await);
+    assert!(node.is_running());
     
     // Second start should replace the first
     node.start().await.unwrap();
-    assert!(node.is_running().await);
+    assert!(node.is_running());
     
     node.stop().await.unwrap();
 }
@@ -154,8 +154,8 @@ async fn test_node_with_different_configs() {
     let (node1, _temp1) = create_test_node(1).await;
     let (node2, _temp2) = create_test_node(999).await;
     
-    assert!(!node1.is_running().await);
-    assert!(!node2.is_running().await);
+    assert!(!node1.is_running());
+    assert!(!node2.is_running());
     
     // Test with tailscale enabled
     let temp_dir = TempDir::new().unwrap();
@@ -168,7 +168,7 @@ async fn test_node_with_different_configs() {
     };
     
     let node3 = Node::new(config);
-    assert!(!node3.is_running().await);
+    assert!(!node3.is_running());
 }
 
 #[tokio::test]

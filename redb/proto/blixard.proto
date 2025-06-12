@@ -9,13 +9,6 @@ service ClusterService {
   rpc LeaveCluster(LeaveRequest) returns (LeaveResponse);
   rpc GetClusterStatus(ClusterStatusRequest) returns (ClusterStatusResponse);
   
-  // Raft communication
-  rpc SendRaftMessage(RaftMessageRequest) returns (RaftMessageResponse);
-  
-  // Task management
-  rpc SubmitTask(TaskRequest) returns (TaskResponse);
-  rpc GetTaskStatus(TaskStatusRequest) returns (TaskStatusResponse);
-  
   // VM operations
   rpc CreateVm(CreateVmRequest) returns (CreateVmResponse);
   rpc StartVm(StartVmRequest) returns (StartVmResponse);
@@ -140,52 +133,4 @@ message HealthCheckRequest {}
 message HealthCheckResponse {
   bool healthy = 1;
   string message = 2;
-}
-
-// Raft messages
-message RaftMessageRequest {
-  bytes raft_data = 1; // Serialized raft::prelude::Message
-}
-
-message RaftMessageResponse {
-  bool success = 1;
-  string error = 2;
-}
-
-// Task management messages
-message TaskRequest {
-  string task_id = 1;
-  string command = 2;
-  repeated string args = 3;
-  uint32 cpu_cores = 4;
-  uint64 memory_mb = 5;
-  uint64 disk_gb = 6;
-  repeated string required_features = 7;
-  uint64 timeout_secs = 8;
-}
-
-message TaskResponse {
-  bool accepted = 1;
-  string message = 2;
-  uint64 assigned_node = 3;
-}
-
-message TaskStatusRequest {
-  string task_id = 1;
-}
-
-message TaskStatusResponse {
-  bool found = 1;
-  TaskStatus status = 2;
-  string output = 3;
-  string error = 4;
-  uint64 execution_time_ms = 5;
-}
-
-enum TaskStatus {
-  TASK_STATUS_UNKNOWN = 0;
-  TASK_STATUS_PENDING = 1;
-  TASK_STATUS_RUNNING = 2;
-  TASK_STATUS_COMPLETED = 3;
-  TASK_STATUS_FAILED = 4;
 }

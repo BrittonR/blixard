@@ -11,7 +11,7 @@ use crate::storage::VM_STATE_TABLE;
 pub struct VmManager {
     vm_states: Arc<RwLock<HashMap<String, VmState>>>,
     database: Arc<Database>,
-    pub(crate) command_tx: mpsc::UnboundedSender<VmCommand>,
+    command_tx: mpsc::UnboundedSender<VmCommand>,
 }
 
 impl VmManager {
@@ -79,30 +79,11 @@ impl VmManager {
         database: &Arc<Database>,
     ) -> BlixardResult<()> {
         match command {
-            VmCommand::Create { config, node_id } => {
-                // Create VM state in memory (actual VM creation via microvm.nix is TODO)
-                let vm_state = VmState {
-                    name: config.name.clone(),
-                    config: config.clone(),
-                    status: VmStatus::Creating,
-                    node_id,
-                    created_at: chrono::Utc::now(),
-                    updated_at: chrono::Utc::now(),
-                };
-                
-                let mut states = vm_states.write().await;
-                states.insert(config.name.clone(), vm_state.clone());
-                
-                // Also persist to database
-                let write_txn = database.begin_write()?;
-                {
-                    let mut table = write_txn.open_table(VM_STATE_TABLE)?;
-                    table.insert(config.name.as_str(), bincode::serialize(&vm_state)?.as_slice())?;
-                }
-                write_txn.commit()?;
-                
-                tracing::info!("VM '{}' created on node {}", config.name, node_id);
-                Ok(())
+            VmCommand::Create { config: _, node_id: _ } => {
+                // TODO: Interface with microvm.nix to create VM
+                Err(BlixardError::NotImplemented {
+                    feature: "VM creation via microvm.nix".to_string(),
+                })
             }
             VmCommand::Start { name: _ } => {
                 // TODO: Interface with microvm.nix to start VM
