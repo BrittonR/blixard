@@ -26,6 +26,9 @@ use blixard_simulation::{
     StopVmRequest, StopVmResponse,
     GetVmStatusRequest, GetVmStatusResponse,
     NodeInfo, NodeState,
+    RaftMessageRequest, RaftMessageResponse,
+    TaskRequest, TaskResponse,
+    TaskStatusRequest, TaskStatusResponse, TaskStatus,
 };
 
 /// A minimal implementation of ClusterService for testing
@@ -120,10 +123,44 @@ impl ClusterService for TestClusterService {
         &self,
         request: Request<GetVmStatusRequest>,
     ) -> Result<Response<GetVmStatusResponse>, Status> {
-        let req = request.into_inner();
+        let _req = request.into_inner();
         Ok(Response::new(GetVmStatusResponse {
             found: false,
             vm_info: None,
+        }))
+    }
+
+    async fn send_raft_message(
+        &self,
+        _request: Request<RaftMessageRequest>,
+    ) -> Result<Response<RaftMessageResponse>, Status> {
+        Ok(Response::new(RaftMessageResponse {
+            success: true,
+            error: String::new(),
+        }))
+    }
+
+    async fn submit_task(
+        &self,
+        _request: Request<TaskRequest>,
+    ) -> Result<Response<TaskResponse>, Status> {
+        Ok(Response::new(TaskResponse {
+            accepted: true,
+            message: "Task accepted".to_string(),
+            assigned_node: self.node_id,
+        }))
+    }
+
+    async fn get_task_status(
+        &self,
+        _request: Request<TaskStatusRequest>,
+    ) -> Result<Response<TaskStatusResponse>, Status> {
+        Ok(Response::new(TaskStatusResponse {
+            found: false,
+            status: TaskStatus::Unknown as i32,
+            output: String::new(),
+            error: String::new(),
+            execution_time_ms: 0,
         }))
     }
 }

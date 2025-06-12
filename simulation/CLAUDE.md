@@ -20,12 +20,27 @@ blixard/
 ├── Cargo.toml          # Main project
 ├── src/                # Production code
 ├── simulation/         # MadSim test crate
-│   ├── Cargo.toml     # Conditional deps
+│   ├── Cargo.toml     # Separate dependencies
+│   ├── proto/         # Simulation-specific protos
 │   ├── tests/         # Test suites
 │   └── examples/      # Usage examples
 └── scripts/
     └── sim-test.sh    # Test runner
 ```
+
+### Important: Separation of Concerns
+
+**The simulation crate is completely separate from the main blixard crate:**
+
+1. **No need to make blixard madsim-compatible** - Production code remains unchanged
+2. **Simulation has its own proto definitions** - Built with madsim-tonic-build
+3. **Tests use mock implementations** - Not the actual blixard services
+4. **Focus on distributed behavior** - Test protocols and failure scenarios
+
+This separation means:
+- Production code has no test dependencies
+- Tests can freely use MadSim features
+- Protocol testing without implementation details
 
 ## Key Concepts
 
@@ -134,18 +149,65 @@ let value: u32 = rng.gen(); // Deterministic based on seed
 
 ## Common Patterns
 
-### Pattern 1: Cluster Testing
+### Pattern 1: Creating Test Services
+
+```rust
+// Test implementation of the service
+struct TestRaftNode {
+    node_id: u64,
+    state: Arc<Mutex<TestState>>,
+}
+
+#[tonic::async_trait]
+impl ClusterService for TestRaftNode {
+    // Implement trait methods with test logic
+}
+
+// Helper to create and start a node
+async fn create_test_node(handle: &Handle, id: u64, ip: &str, port: u16) -> (NodeHandle, SocketAddr) {
+    let addr = format!("{}:{}", ip, port).parse().unwrap();
+    let node = handle.create_node()
+        .name(format!("node-{}", id))
+        .ip(ip.parse().unwrap())
+        .build();
+    
+    let service = TestRaftNode::new(id, addr);
+    node.spawn(async move {
+        Server::builder()
+            .add_service(ClusterServiceServer::new(service))
+            .serve(addr)
+            .await
+            .unwrap();
+    });
+    
+    (node, addr)
+}
+```
+
+### Pattern 2: Cluster Testing
 
 ```rust
 async fn test_cluster_formation() {
-    let nodes = spawn_cluster(5).await;
+    let handle = Handle::current();
     
-    // Wait for stabilization
-    sleep(Duration::from_secs(2)).await;
+    // Create nodes with specific IPs
+    let nodes = vec![
+        create_test_node(&handle, 1, "10.0.0.1", 7001).await,
+        create_test_node(&handle, 2, "10.0.0.2", 7002).await,
+        create_test_node(&handle, 3, "10.0.0.3", 7003).await,
+    ];
     
-    // Verify all nodes joined
-    for node in &nodes {
-        assert!(node.is_connected());
+    // Give services time to start
+    sleep(Duration::from_millis(100)).await;
+    
+    // Use gRPC clients to interact
+    for (_, addr) in &nodes {
+        let mut client = ClusterServiceClient::connect(format!("http://{}", addr))
+            .await
+            .expect("Failed to connect");
+        
+        let response = client.health_check(Request::new(HealthCheckRequest {})).await?;
+        assert!(response.into_inner().healthy);
     }
 }
 ```
