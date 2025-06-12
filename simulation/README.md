@@ -18,7 +18,8 @@ This simulation workspace is currently a separate crate from the main Blixard pr
 - ✅ `grpc_integration_tests` - Basic gRPC service testing with madsim
 - ✅ `grpc_mock_consensus_tests` - Mock consensus testing for gRPC integration
 - ✅ `raft_simple_demo` - Demonstrates real Raft crate usage in MadSim
-- ✅ `raft_comprehensive_tests` - Comprehensive Raft consensus verification
+- ✅ `raft_comprehensive_tests` - Mock Raft implementation with fixed Send trait issues
+- ✅ `raft_real_consensus_tests` - Real Raft implementation using the `raft` crate
 - ✅ `raft_property_tests` - Property-based testing for Raft invariants
 - ✅ `raft_leader_election_test` - Focused leader election testing
 - ✅ `test_util` - Shared utilities for Raft testing

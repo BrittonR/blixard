@@ -44,11 +44,12 @@ use test_util::{
     run_test, random_election_timeout,
 };
 
-/// Wrapper for Arc<TestRaftNode> to implement ClusterService
+/// Wrapper for TestRaftNode to implement ClusterService
 #[derive(Clone)]
-struct TestRaftNodeService(Arc<TestRaftNode>);
+struct TestRaftNodeService(TestRaftNode);
 
 /// Comprehensive Raft node implementation for testing
+#[derive(Clone)]
 struct TestRaftNode {
     node_id: u64,
     addr: String,
@@ -75,7 +76,7 @@ struct TestRaftNode {
     last_heartbeat: Arc<Mutex<Instant>>,
     
     // Message handling
-    message_tx: std::sync::mpsc::Sender<RaftMessage>,
+    message_tx: Arc<std::sync::Mutex<std::sync::mpsc::Sender<RaftMessage>>>,
     
     // Applied entries (simulated state machine)
     applied_entries: Arc<Mutex<Vec<LogEntry>>>,
@@ -125,10 +126,10 @@ enum RaftMessage {
 }
 
 impl TestRaftNode {
-    fn new(node_id: u64, addr: String, peers: HashSet<u64>) -> Arc<Self> {
+    fn new(node_id: u64, addr: String, peers: HashSet<u64>) -> Self {
         let (tx, _rx) = std::sync::mpsc::channel();  // Note: In real implementation, we'd handle messages
         
-        let node = Arc::new(Self {
+        Self {
             node_id,
             addr,
             state: Arc::new(Mutex::new(RaftNodeState::Follower)),
@@ -142,15 +143,13 @@ impl TestRaftNode {
             peers: Arc::new(Mutex::new(peers)),
             election_timeout: Arc::new(Mutex::new(Instant::now() + Duration::from_millis(150))),
             last_heartbeat: Arc::new(Mutex::new(Instant::now())),
-            message_tx: tx,
+            message_tx: Arc::new(std::sync::Mutex::new(tx)),
             applied_entries: Arc::new(Mutex::new(vec![])),
-        });
-        
-        node
+        }
     }
     
     /// Start the Raft node's main loop
-    async fn run(self: Arc<Self>) {
+    async fn run(&self) {
         // Main tick loop
         loop {
             self.tick().await;
@@ -183,10 +182,11 @@ impl TestRaftNode {
         info!("Node {} starting election", self.node_id);
         
         // Increment term and transition to candidate
-        let mut term = self.current_term.lock().unwrap();
-        *term += 1;
-        let election_term = *term;
-        drop(term);
+        let election_term = {
+            let mut term = self.current_term.lock().unwrap();
+            *term += 1;
+            *term
+        };
         
         *self.state.lock().unwrap() = RaftNodeState::Candidate;
         *self.voted_for.lock().unwrap() = Some(self.node_id);
@@ -199,10 +199,12 @@ impl TestRaftNode {
         );
         
         // Get last log info
-        let log = self.log.lock().unwrap();
-        let last_log_index = log.len() as u64;
-        let last_log_term = log.last().map(|e| e.term).unwrap_or(0);
-        drop(log);
+        let (last_log_index, last_log_term) = {
+            let log = self.log.lock().unwrap();
+            let last_log_index = log.len() as u64;
+            let last_log_term = log.last().map(|e| e.term).unwrap_or(0);
+            (last_log_index, last_log_term)
+        };
         
         // Request votes from all peers
         let peers = self.peers.lock().unwrap().clone();
@@ -387,7 +389,7 @@ impl ClusterService for TestRaftNodeService {
         let req = request.into_inner();
         
         if let Ok(msg) = bincode::deserialize::<RaftMessage>(&req.raft_data) {
-            let _ = self.0.message_tx.send(msg);
+            let _ = self.0.message_tx.lock().unwrap().send(msg);
             Ok(Response::new(RaftMessageResponse {
                 success: true,
                 error: String::new(),
@@ -544,12 +546,11 @@ async fn test_leader_election_with_partition() {
         
         // Start the node with both server and tick loop
         node_handle.spawn(async move {
-            // TODO: Run the Raft tick loop in background
-            // Currently commented out due to Send trait issues with mutex guards
-            // let node_for_tick = node.clone();
-            // spawn(async move {
-            //     node_for_tick.run().await;
-            // });
+            // Run the Raft tick loop in background
+            let node_for_tick = node.clone();
+            spawn(async move {
+                node_for_tick.run().await;
+            });
             
             // Run the server
             Server::builder()
@@ -673,12 +674,11 @@ async fn test_concurrent_elections() {
         
         // Start the node with both server and tick loop
         node_handle.spawn(async move {
-            // TODO: Run the Raft tick loop in background
-            // Currently commented out due to Send trait issues with mutex guards
-            // let node_for_tick = node.clone();
-            // spawn(async move {
-            //     node_for_tick.run().await;
-            // });
+            // Run the Raft tick loop in background
+            let node_for_tick = node.clone();
+            spawn(async move {
+                node_for_tick.run().await;
+            });
             
             // Run the server
             Server::builder()
@@ -749,12 +749,11 @@ async fn test_log_replication_basic() {
         
         // Start the node with both server and tick loop
         node_handle.spawn(async move {
-            // TODO: Run the Raft tick loop in background
-            // Currently commented out due to Send trait issues with mutex guards
-            // let node_for_tick = node.clone();
-            // spawn(async move {
-            //     node_for_tick.run().await;
-            // });
+            // Run the Raft tick loop in background
+            let node_for_tick = node.clone();
+            spawn(async move {
+                node_for_tick.run().await;
+            });
             
             // Run the server
             Server::builder()
@@ -858,12 +857,11 @@ async fn test_log_replication_with_failures() {
         
         // Start the node with both server and tick loop
         node_handle.spawn(async move {
-            // TODO: Run the Raft tick loop in background
-            // Currently commented out due to Send trait issues with mutex guards
-            // let node_for_tick = node.clone();
-            // spawn(async move {
-            //     node_for_tick.run().await;
-            // });
+            // Run the Raft tick loop in background
+            let node_for_tick = node.clone();
+            spawn(async move {
+                node_for_tick.run().await;
+            });
             
             // Run the server
             Server::builder()
@@ -989,12 +987,11 @@ async fn test_leader_failover() {
         
         // Start the node with both server and tick loop
         node_handle.spawn(async move {
-            // TODO: Run the Raft tick loop in background
-            // Currently commented out due to Send trait issues with mutex guards
-            // let node_for_tick = node.clone();
-            // spawn(async move {
-            //     node_for_tick.run().await;
-            // });
+            // Run the Raft tick loop in background
+            let node_for_tick = node.clone();
+            spawn(async move {
+                node_for_tick.run().await;
+            });
             
             // Run the server
             Server::builder()

@@ -386,12 +386,19 @@ loop {
    ```
 
 4. **Send trait issues**: 
-   - Use Arc wrappers for non-Send types
-   - Avoid holding mutex guards across await points
-   - Consider restructuring async code to release guards before awaiting
+   - Make structs Clone instead of wrapping in Arc when possible
+   - Avoid holding mutex guards across await points - use block scoping
+   - Wrap non-Send types (like std::sync::mpsc::Sender) in Arc<Mutex<>>
    ```rust
-   // If TestNode doesn't implement Clone/Send
-   struct TestNodeService(Arc<TestNode>);
+   // Good: Release guard before await
+   let value = {
+       let guard = mutex.lock().unwrap();
+       guard.clone()
+   }; // guard dropped here
+   some_async_call(value).await;
+   
+   // For non-Send types
+   message_tx: Arc<std::sync::Mutex<std::sync::mpsc::Sender<T>>>,
    ```
 
 5. **Import paths in tests**: Use crate name, not `crate::`
