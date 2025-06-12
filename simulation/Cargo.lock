@@ -272,6 +272,7 @@ dependencies = [
  "clap",
  "criterion",
  "futures",
+ "lazy_static",
  "madsim",
  "madsim-tokio",
  "madsim-tonic",
