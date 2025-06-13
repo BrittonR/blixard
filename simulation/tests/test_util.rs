@@ -18,7 +18,9 @@ use serde::{Serialize, Deserialize};
 use blixard_simulation::{
     cluster_service_server::{ClusterService, ClusterServiceServer},
     cluster_service_client::ClusterServiceClient,
+    ClusterStatusRequest,
 };
+use tonic::Request;
 
 /// Test cluster configuration
 #[derive(Clone, Debug)]
@@ -188,7 +190,7 @@ impl ConsensusVerifier {
         
         while start.elapsed() < timeout {
             for client in nodes.iter_mut() {
-                if let Ok(response) = client.get_cluster_status(blixard_simulation::ClusterStatusRequest {}).await {
+                if let Ok(response) = client.get_cluster_status(Request::new(ClusterStatusRequest {})).await {
                     let status = response.into_inner();
                     if status.leader_id != 0 {
                         return Ok(status.leader_id);
@@ -200,6 +202,30 @@ impl ConsensusVerifier {
         }
         
         Err("No leader elected within timeout".to_string())
+    }
+    
+    /// Wait for a leader to be elected among specific nodes
+    pub async fn wait_for_leader_among(
+        nodes: &mut [ClusterServiceClient<tonic::transport::Channel>],
+        valid_leaders: &HashSet<u64>,
+        timeout: Duration,
+    ) -> Result<u64, String> {
+        let start = Instant::now();
+        
+        while start.elapsed() < timeout {
+            for client in nodes.iter_mut() {
+                if let Ok(response) = client.get_cluster_status(Request::new(ClusterStatusRequest {})).await {
+                    let status = response.into_inner();
+                    if status.leader_id != 0 && valid_leaders.contains(&status.leader_id) {
+                        return Ok(status.leader_id);
+                    }
+                }
+            }
+            
+            sleep(Duration::from_millis(50)).await;
+        }
+        
+        Err(format!("No leader elected among nodes {:?} within timeout", valid_leaders))
     }
 }
 

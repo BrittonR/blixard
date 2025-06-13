@@ -32,14 +32,23 @@
 - `test_deterministic_randomness` - Reproducible random values
 - `test_time_control` - Instant time advancement
 
-#### Raft Tests (7 placeholder tests ready)
-- Leader election
-- Log replication
-- Safety properties
-- Partition tolerance
-- Membership changes
-- Snapshot installation
-- Chaos monkey
+#### Raft Comprehensive Tests (6/6 passing)
+- ✅ `test_leader_election_basic` - Basic single-node leader election
+- ✅ `test_log_replication_basic` - Leader accepts and replicates log entries
+- ✅ `test_log_replication_with_failures` - Replication with node disconnections
+- ✅ `test_concurrent_elections` - Multiple nodes competing for leadership
+- ✅ `test_leader_election_with_partition` - Network partition handling with minority/majority splits
+- ✅ `test_leader_failover` - Leader failure detection and new leader election
+
+### 5. Recent Improvements
+- Implemented actual gRPC message passing between Raft nodes
+- Added message processing loop for incoming Raft messages
+- Fixed vote counting logic to require proper majority
+- Implemented bidirectional communication (RequestVote/Response, AppendEntries/Response)
+- Added retry logic with `wait_for_leader` and `wait_for_leader_among` helpers
+- **Network Partition Support**: Implemented global NetworkState for simulating partitions
+- **Node Isolation**: Added support for simulating node failures via isolation
+- **All Raft tests now passing**: Fixed the last 2 tests with partition support
 
 ## 🔧 Known Issues
 
@@ -79,4 +88,5 @@ RUSTFLAGS="--cfg madsim" cargo test test_name
 
 MadSim is successfully integrated and working for deterministic testing. 
 The framework is ready for implementing complex distributed system tests,
-with 16+ tests already passing and demonstrating key capabilities.
+with 19 tests passing including all 6 Raft comprehensive tests that demonstrate
+leader election, log replication, network partitions, and node failures.

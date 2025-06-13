@@ -16,7 +16,7 @@ use madsim::{
 };
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{info, debug, warn};
 use serde::{Serialize, Deserialize};
@@ -43,6 +43,54 @@ use test_util::{
     TestClusterConfig, ConsensusVerifier, NetworkPartition,
     run_test, random_election_timeout,
 };
+
+/// Global network state for simulating partitions
+static NETWORK_STATE: once_cell::sync::Lazy<Arc<RwLock<NetworkState>>> = 
+    once_cell::sync::Lazy::new(|| Arc::new(RwLock::new(NetworkState::new())));
+
+#[derive(Debug, Clone)]
+struct NetworkState {
+    /// Set of blocked connections (from_node, to_node)
+    blocked_connections: HashSet<(u64, u64)>,
+    /// Set of isolated nodes
+    isolated_nodes: HashSet<u64>,
+}
+
+impl NetworkState {
+    fn new() -> Self {
+        Self {
+            blocked_connections: HashSet::new(),
+            isolated_nodes: HashSet::new(),
+        }
+    }
+    
+    fn block_connection(&mut self, from: u64, to: u64) {
+        self.blocked_connections.insert((from, to));
+    }
+    
+    fn unblock_connection(&mut self, from: u64, to: u64) {
+        self.blocked_connections.remove(&(from, to));
+    }
+    
+    fn isolate_node(&mut self, node_id: u64) {
+        self.isolated_nodes.insert(node_id);
+    }
+    
+    fn unisolate_node(&mut self, node_id: u64) {
+        self.isolated_nodes.remove(&node_id);
+    }
+    
+    fn is_blocked(&self, from: u64, to: u64) -> bool {
+        self.isolated_nodes.contains(&from) || 
+        self.isolated_nodes.contains(&to) ||
+        self.blocked_connections.contains(&(from, to))
+    }
+    
+    fn clear(&mut self) {
+        self.blocked_connections.clear();
+        self.isolated_nodes.clear();
+    }
+}
 
 /// Wrapper for TestRaftNode to implement ClusterService
 #[derive(Clone)]
@@ -77,6 +125,10 @@ struct TestRaftNode {
     
     // Message handling
     message_tx: Arc<std::sync::Mutex<std::sync::mpsc::Sender<RaftMessage>>>,
+    message_rx: Arc<std::sync::Mutex<std::sync::mpsc::Receiver<RaftMessage>>>,
+    
+    // Vote tracking
+    votes_received: Arc<Mutex<HashSet<u64>>>,
     
     // Applied entries (simulated state machine)
     applied_entries: Arc<Mutex<Vec<LogEntry>>>,
@@ -127,7 +179,7 @@ enum RaftMessage {
 
 impl TestRaftNode {
     fn new(node_id: u64, addr: String, peers: HashSet<u64>) -> Self {
-        let (tx, _rx) = std::sync::mpsc::channel();  // Note: In real implementation, we'd handle messages
+        let (tx, rx) = std::sync::mpsc::channel();
         
         Self {
             node_id,
@@ -144,12 +196,34 @@ impl TestRaftNode {
             election_timeout: Arc::new(Mutex::new(Instant::now() + Duration::from_millis(150))),
             last_heartbeat: Arc::new(Mutex::new(Instant::now())),
             message_tx: Arc::new(std::sync::Mutex::new(tx)),
+            message_rx: Arc::new(std::sync::Mutex::new(rx)),
+            votes_received: Arc::new(Mutex::new(HashSet::new())),
             applied_entries: Arc::new(Mutex::new(vec![])),
         }
     }
     
     /// Start the Raft node's main loop
     async fn run(&self) {
+        // Spawn message handler
+        let node = self.clone();
+        spawn(async move {
+            loop {
+                // Try to receive messages without blocking
+                let msg_opt = {
+                    if let Ok(rx) = node.message_rx.try_lock() {
+                        rx.try_recv().ok()
+                    } else {
+                        None
+                    }
+                };
+                
+                if let Some(msg) = msg_opt {
+                    node.handle_message(msg).await;
+                }
+                sleep(Duration::from_millis(1)).await;
+            }
+        });
+        
         // Main tick loop
         loop {
             self.tick().await;
@@ -191,6 +265,10 @@ impl TestRaftNode {
         *self.state.lock().unwrap() = RaftNodeState::Candidate;
         *self.voted_for.lock().unwrap() = Some(self.node_id);
         
+        // Clear previous votes and vote for self
+        self.votes_received.lock().unwrap().clear();
+        self.votes_received.lock().unwrap().insert(self.node_id);
+        
         // Reset election timeout
         *self.election_timeout.lock().unwrap() = Instant::now() + random_election_timeout(
             Duration::from_millis(150),
@@ -216,6 +294,12 @@ impl TestRaftNode {
     }
     
     async fn send_request_vote(&self, to: u64, term: u64, last_log_index: u64, last_log_term: u64) {
+        // Check if connection is blocked
+        if NETWORK_STATE.read().unwrap().is_blocked(self.node_id, to) {
+            debug!("Node {} blocked from sending RequestVote to {} (network partition)", self.node_id, to);
+            return;
+        }
+        
         let msg = RaftMessage::RequestVote {
             term,
             candidate_id: self.node_id,
@@ -223,8 +307,17 @@ impl TestRaftNode {
             last_log_term,
         };
         
-        // In real implementation, send via gRPC
+        // Actually send via gRPC
+        let addr = format!("http://10.0.0.{}:700{}", to, to);
         debug!("Node {} sending RequestVote to {} for term {}", self.node_id, to, term);
+        
+        let _ = spawn(async move {
+            if let Ok(mut client) = ClusterServiceClient::connect(addr).await {
+                let _ = client.send_raft_message(Request::new(RaftMessageRequest {
+                    raft_data: bincode::serialize(&msg).unwrap(),
+                })).await;
+            }
+        });
     }
     
     async fn send_heartbeats(&self) {
@@ -234,6 +327,12 @@ impl TestRaftNode {
         
         for peer_id in peers {
             if peer_id != self.node_id {
+                // Check if connection is blocked
+                if NETWORK_STATE.read().unwrap().is_blocked(self.node_id, peer_id) {
+                    debug!("Node {} blocked from sending heartbeat to {} (network partition)", self.node_id, peer_id);
+                    continue;
+                }
+                
                 let msg = RaftMessage::AppendEntries {
                     term,
                     leader_id: self.node_id,
@@ -243,8 +342,17 @@ impl TestRaftNode {
                     leader_commit: commit_index,
                 };
                 
-                // In real implementation, send via gRPC
+                // Actually send via gRPC
+                let addr = format!("http://10.0.0.{}:700{}", peer_id, peer_id);
                 debug!("Node {} sending heartbeat to {}", self.node_id, peer_id);
+                
+                let _ = spawn(async move {
+                    if let Ok(mut client) = ClusterServiceClient::connect(addr).await {
+                        let _ = client.send_raft_message(Request::new(RaftMessageRequest {
+                            raft_data: bincode::serialize(&msg).unwrap(),
+                        })).await;
+                    }
+                });
             }
         }
     }
@@ -257,10 +365,15 @@ impl TestRaftNode {
             RaftMessage::RequestVoteResponse { term, vote_granted, from } => {
                 self.handle_vote_response(term, vote_granted, from).await;
             }
-            RaftMessage::AppendEntries { term, leader_id, .. } => {
-                self.handle_append_entries(term, leader_id).await;
+            RaftMessage::AppendEntries { term, leader_id, prev_log_index, prev_log_term, entries, leader_commit } => {
+                self.handle_append_entries(term, leader_id, prev_log_index, prev_log_term, entries, leader_commit).await;
             }
-            _ => {}
+            RaftMessage::AppendEntriesResponse { term, success, from, match_index } => {
+                // Leader processes follower responses
+                if *self.state.lock().unwrap() == RaftNodeState::Leader {
+                    debug!("Leader {} received AppendEntries response from {} (success={})", self.node_id, from, success);
+                }
+            }
         }
     }
     
@@ -283,6 +396,28 @@ impl TestRaftNode {
         };
         
         info!("Node {} vote response: granted={} to {} for term {}", self.node_id, vote_granted, candidate_id, term);
+        
+        // Check if connection is blocked before sending response
+        if NETWORK_STATE.read().unwrap().is_blocked(self.node_id, candidate_id) {
+            debug!("Node {} blocked from sending vote response to {} (network partition)", self.node_id, candidate_id);
+            return;
+        }
+        
+        // Send response back to candidate
+        let response = RaftMessage::RequestVoteResponse {
+            term: *current_term,
+            vote_granted,
+            from: self.node_id,
+        };
+        
+        let addr = format!("http://10.0.0.{}:700{}", candidate_id, candidate_id);
+        let _ = spawn(async move {
+            if let Ok(mut client) = ClusterServiceClient::connect(addr).await {
+                let _ = client.send_raft_message(Request::new(RaftMessageRequest {
+                    raft_data: bincode::serialize(&response).unwrap(),
+                })).await;
+            }
+        });
     }
     
     async fn handle_vote_response(&self, term: u64, vote_granted: bool, from: u64) {
@@ -294,32 +429,50 @@ impl TestRaftNode {
         }
         
         if vote_granted {
-            // Count votes (simplified - in real implementation track votes properly)
-            let peers = self.peers.lock().unwrap();
-            let majority = (peers.len() + 1) / 2 + 1;
+            // Track votes properly
+            let should_become_leader = {
+                let mut votes = self.votes_received.lock().unwrap();
+                votes.insert(from);
+                
+                let peers = self.peers.lock().unwrap();
+                let majority = peers.len() / 2 + 1;  // Majority of all nodes (including self)
+                
+                info!("Node {} received vote from {}, total votes: {}/{}", self.node_id, from, votes.len(), majority);
+                
+                // Check if we have majority
+                votes.len() >= majority && *self.state.lock().unwrap() == RaftNodeState::Candidate
+            };
             
             // If we have majority, become leader
-            info!("Node {} received vote from {}, checking majority", self.node_id, from);
-            *self.state.lock().unwrap() = RaftNodeState::Leader;
-            info!("Node {} became leader for term {}", self.node_id, term);
-            
-            // Initialize leader state
-            let peers = self.peers.lock().unwrap().clone();
-            let mut next_index = self.next_index.lock().unwrap();
-            let mut match_index = self.match_index.lock().unwrap();
-            let log_len = self.log.lock().unwrap().len() as u64;
-            
-            for peer in peers {
-                next_index.insert(peer, log_len + 1);
-                match_index.insert(peer, 0);
+            if should_become_leader {
+                *self.state.lock().unwrap() = RaftNodeState::Leader;
+                info!("Node {} became leader for term {} ", self.node_id, term);
+                
+                // Initialize leader state
+                {
+                    let peers = self.peers.lock().unwrap().clone();
+                    let mut next_index = self.next_index.lock().unwrap();
+                    let mut match_index = self.match_index.lock().unwrap();
+                    let log_len = self.log.lock().unwrap().len() as u64;
+                    
+                    for peer in peers {
+                        if peer != self.node_id {
+                            next_index.insert(peer, log_len + 1);
+                            match_index.insert(peer, 0);
+                        }
+                    }
+                }
+                
+                // Send initial heartbeats immediately
+                self.send_heartbeats().await;
             }
         }
     }
     
-    async fn handle_append_entries(&self, term: u64, leader_id: u64) {
+    async fn handle_append_entries(&self, term: u64, leader_id: u64, _prev_log_index: u64, _prev_log_term: u64, _entries: Vec<LogEntry>, _leader_commit: u64) {
         let mut current_term = self.current_term.lock().unwrap();
         
-        if term >= *current_term {
+        let success = if term >= *current_term {
             *current_term = term;
             *self.state.lock().unwrap() = RaftNodeState::Follower;
             *self.voted_for.lock().unwrap() = None;
@@ -332,7 +485,33 @@ impl TestRaftNode {
             );
             
             debug!("Node {} accepted leader {} for term {}", self.node_id, leader_id, term);
+            true
+        } else {
+            false
+        };
+        
+        // Check if connection is blocked before sending response
+        if NETWORK_STATE.read().unwrap().is_blocked(self.node_id, leader_id) {
+            debug!("Node {} blocked from sending append entries response to {} (network partition)", self.node_id, leader_id);
+            return;
         }
+        
+        // Send response back to leader
+        let response = RaftMessage::AppendEntriesResponse {
+            term: *current_term,
+            success,
+            from: self.node_id,
+            match_index: self.log.lock().unwrap().len() as u64,
+        };
+        
+        let addr = format!("http://10.0.0.{}:700{}", leader_id, leader_id);
+        let _ = spawn(async move {
+            if let Ok(mut client) = ClusterServiceClient::connect(addr).await {
+                let _ = client.send_raft_message(Request::new(RaftMessageRequest {
+                    raft_data: bincode::serialize(&response).unwrap(),
+                })).await;
+            }
+        });
     }
 }
 
@@ -523,8 +702,14 @@ async fn test_leader_election_basic() {
 
 #[madsim::test] 
 async fn test_leader_election_with_partition() {
+    // Clear any previous network state
+    {
+        let mut network_state = NETWORK_STATE.write().unwrap();
+        network_state.clear();
+    }
+    
     let handle = Handle::current();
-    let net = NetSim::current();
+    let _net = NetSim::current();
     
     // Create 5-node cluster
     let peers: HashSet<u64> = vec![1, 2, 3, 4, 5].into_iter().collect();
@@ -583,22 +768,29 @@ async fn test_leader_election_with_partition() {
             }
         }
         
-        // Wait for initial election
-        sleep(Duration::from_secs(2)).await;
+        // Wait for initial leader election
+        let initial_leader = ConsensusVerifier::wait_for_leader(&mut clients, Duration::from_secs(10))
+            .await
+            .expect("Failed to elect initial leader");
+        info!("Initial leader elected: {}", initial_leader);
         
         info!("Creating network partition: [1,2] | [3,4,5]");
         
         // Create partition: minority [1,2] | majority [3,4,5]
         let partition = NetworkPartition::create(&[1, 2, 3, 4, 5], 2);
         
-        // Apply partition using node handles
-        for i in 1..=2 {
-            for j in 3..=5 {
-                // Block communication between minority and majority
-                // Note: In real MadSim usage, we'd use net.clog_link or similar
-                // For now, simulate with node isolation
+        // Apply partition by blocking communication between minority and majority
+        {
+            let mut network_state = NETWORK_STATE.write().unwrap();
+            for &minority_node in &partition.minority {
+                for &majority_node in &partition.majority {
+                    // Block bidirectional communication
+                    network_state.block_connection(minority_node, majority_node);
+                    network_state.block_connection(majority_node, minority_node);
+                }
             }
         }
+        info!("Applied network partition between {:?} and {:?}", partition.minority, partition.majority);
         
         // Wait for partition effects
         sleep(Duration::from_secs(3)).await;
@@ -621,30 +813,38 @@ async fn test_leader_election_with_partition() {
         info!("✅ Minority partition has no leader");
         
         // Check that majority can still operate
-        let mut majority_has_leader = false;
-        for i in 2..5 {
-            if let Ok(response) = clients[i].get_cluster_status(Request::new(ClusterStatusRequest {})).await {
-                let inner = response.into_inner();
-                if inner.leader_id != 0 && partition.majority.contains(&inner.leader_id) {
-                    majority_has_leader = true;
-                }
-            }
-        }
+        let majority_set: HashSet<u64> = partition.majority.iter().copied().collect();
+        let majority_leader = ConsensusVerifier::wait_for_leader_among(
+            &mut clients[2..5], 
+            &majority_set,
+            Duration::from_secs(10)
+        ).await.expect("Majority partition should elect a leader");
         
-        if !majority_has_leader {
-            panic!("Majority partition should elect a leader");
-        }
-        
-        info!("✅ Majority partition has leader");
+        info!("✅ Majority partition has leader: {}", majority_leader);
         
         // Heal partition
         info!("Healing network partition");
-        // In real MadSim usage, we'd use net.unclog_link or similar
+        {
+            let mut network_state = NETWORK_STATE.write().unwrap();
+            network_state.clear(); // Clear all partitions
+        }
         
-        sleep(Duration::from_secs(2)).await;
+        // Wait for nodes to converge on a single leader after healing
+        info!("Waiting for cluster to converge after healing partition...");
+        let start = Instant::now();
+        let mut converged = false;
         
-        // Verify convergence
-        ConsensusVerifier::verify_log_matching(&mut clients).await.expect("Log matching failed");
+        while start.elapsed() < Duration::from_secs(20) {
+            if let Ok(()) = ConsensusVerifier::verify_log_matching(&mut clients).await {
+                converged = true;
+                break;
+            }
+            sleep(Duration::from_millis(500)).await;
+        }
+        
+        if !converged {
+            panic!("Cluster failed to converge after healing partition");
+        }
         
         info!("✅ Leader election with partition test passed");
     }).await.unwrap();
@@ -965,6 +1165,12 @@ async fn test_log_replication_with_failures() {
 
 #[madsim::test]
 async fn test_leader_failover() {
+    // Clear any previous network state
+    {
+        let mut network_state = NETWORK_STATE.write().unwrap();
+        network_state.clear();
+    }
+    
     let handle = Handle::current();
     
     // Create 5-node cluster
@@ -1014,58 +1220,50 @@ async fn test_leader_failover() {
     
     // Run all client tests
     client_node.spawn(async move {
-        // Find current leader
+        // Connect to all nodes
         let mut clients = vec![];
-        let mut current_leader = 0;
-        
         for i in 1..=5 {
             let addr = format!("http://10.0.0.{}:700{}", i, i);
-            if let Ok(mut client) = ClusterServiceClient::connect(addr).await {
-                if let Ok(response) = client.get_cluster_status(Request::new(ClusterStatusRequest {})).await {
-                    let status = response.into_inner();
-                    if status.leader_id == i {
-                        current_leader = i;
-                    }
-                }
+            if let Ok(client) = ClusterServiceClient::connect(addr).await {
                 clients.push(client);
             }
         }
         
-        if current_leader == 0 {
-            panic!("No leader found");
-        }
+        // Wait for initial leader
+        let current_leader = ConsensusVerifier::wait_for_leader(&mut clients, Duration::from_secs(10))
+            .await
+            .expect("Failed to elect initial leader");
         
         info!("Current leader is node {}", current_leader);
         
         // Simulate leader failure by isolating it
-        // TODO: Implement network isolation once MadSim API is clarified
-        // In MadSim, node failures are typically simulated through handle.kill() or configuration
+        {
+            let mut network_state = NETWORK_STATE.write().unwrap();
+            network_state.isolate_node(current_leader);
+        }
         
         info!("Isolated leader node {}", current_leader);
         
-        // Wait for new election
-        sleep(Duration::from_secs(3)).await;
-        
-        // Verify new leader elected
-        let mut new_leader = 0;
-        for (i, client) in clients.iter_mut().enumerate() {
-            if (i + 1) as u64 == current_leader {
-                continue; // Skip isolated node
-            }
-            
-            if let Ok(response) = client.get_cluster_status(Request::new(ClusterStatusRequest {})).await {
-                let status = response.into_inner();
-                if status.leader_id != 0 && status.leader_id != current_leader {
-                    new_leader = status.leader_id;
-                    break;
-                }
+        // Wait for new leader election (excluding the old leader)
+        let mut remaining_nodes = HashSet::new();
+        for i in 1..=5 {
+            if i != current_leader {
+                remaining_nodes.insert(i);
             }
         }
         
-        if new_leader == 0 {
-            panic!("No new leader elected after failover");
-        }
+        let new_leader = ConsensusVerifier::wait_for_leader_among(
+            &mut clients, 
+            &remaining_nodes,
+            Duration::from_secs(15)
+        ).await.expect("No new leader elected after failover");
         
         info!("✅ New leader elected: node {}", new_leader);
+        
+        // Clean up network state
+        {
+            let mut network_state = NETWORK_STATE.write().unwrap();
+            network_state.clear();
+        }
     }).await.unwrap();
 }

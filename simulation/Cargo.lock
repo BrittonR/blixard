@@ -300,6 +300,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "madsim-tonic-build",
+ "once_cell",
  "proptest",
  "prost 0.13.5",
  "protobuf",
