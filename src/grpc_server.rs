@@ -10,18 +10,21 @@ use crate::{
     raft_manager::{TaskSpec, ResourceRequirements},
     proto::{
         cluster_service_server::{ClusterService, ClusterServiceServer},
+        blixard_service_server::{BlixardService, BlixardServiceServer},
         CreateVmRequest, CreateVmResponse, GetVmStatusRequest, GetVmStatusResponse,
         HealthCheckRequest, HealthCheckResponse, JoinRequest, JoinResponse, LeaveRequest,
         LeaveResponse, ListVmsRequest, ListVmsResponse, NodeInfo, NodeState, StartVmRequest,
         StartVmResponse, StopVmRequest, StopVmResponse, VmInfo, VmState, ClusterStatusRequest,
         ClusterStatusResponse, RaftMessageRequest, RaftMessageResponse, TaskRequest, TaskResponse,
         TaskStatusRequest, TaskStatusResponse, TaskStatus,
+        GetRaftStatusRequest, GetRaftStatusResponse, ProposeTaskRequest, ProposeTaskResponse,
     },
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
 /// gRPC service implementation for Blixard cluster operations
+#[derive(Clone)]
 pub struct BlixardGrpcService {
     node: Arc<SharedNodeState>,
 }
@@ -355,18 +358,84 @@ impl ClusterService for BlixardGrpcService {
     }
 }
 
+#[tonic::async_trait]
+impl BlixardService for BlixardGrpcService {
+    async fn get_raft_status(
+        &self,
+        _request: Request<GetRaftStatusRequest>,
+    ) -> Result<Response<GetRaftStatusResponse>, Status> {
+        // Get Raft status from the node
+        match self.node.get_raft_status().await {
+            Ok(status) => {
+                Ok(Response::new(GetRaftStatusResponse {
+                    is_leader: status.is_leader,
+                    node_id: status.node_id,
+                    leader_id: status.leader_id.unwrap_or(0),
+                    term: status.term,
+                    state: status.state,
+                }))
+            }
+            Err(e) => Err(Self::error_to_status(e)),
+        }
+    }
+
+    async fn propose_task(
+        &self,
+        request: Request<ProposeTaskRequest>,
+    ) -> Result<Response<ProposeTaskResponse>, Status> {
+        let req = request.into_inner();
+        
+        // Validate task
+        let task = req.task.ok_or_else(|| Status::invalid_argument("Task is required"))?;
+        
+        if task.id.is_empty() {
+            return Ok(Response::new(ProposeTaskResponse {
+                success: false,
+                message: "Task ID cannot be empty".to_string(),
+            }));
+        }
+        
+        // Create task specification from proto task
+        let task_spec = TaskSpec {
+            command: task.command,
+            args: task.args,
+            resources: ResourceRequirements {
+                cpu_cores: task.cpu_cores,
+                memory_mb: task.memory_mb,
+                disk_gb: 0, // Not in proto Task, default to 0
+                required_features: vec![], // Not in proto Task, default to empty
+            },
+            timeout_secs: 300, // Default 5 minute timeout
+        };
+        
+        // Submit task through Raft consensus
+        match self.node.submit_task(&task.id, task_spec).await {
+            Ok(assigned_node) => Ok(Response::new(ProposeTaskResponse {
+                success: true,
+                message: format!("Task {} proposed successfully, assigned to node {}", task.id, assigned_node),
+            })),
+            Err(e) => Ok(Response::new(ProposeTaskResponse {
+                success: false,
+                message: format!("Failed to propose task: {}", e),
+            })),
+        }
+    }
+}
+
 /// Start the gRPC server
 pub async fn start_grpc_server(
     node: Arc<SharedNodeState>,
     bind_address: std::net::SocketAddr,
 ) -> BlixardResult<()> {
     let service = BlixardGrpcService::new(node);
-    let server = ClusterServiceServer::new(service);
+    let cluster_server = ClusterServiceServer::new(service.clone());
+    let blixard_server = BlixardServiceServer::new(service);
 
     tracing::info!("Starting gRPC server on {}", bind_address);
 
     tonic::transport::Server::builder()
-        .add_service(server)
+        .add_service(cluster_server)
+        .add_service(blixard_server)
         .serve(bind_address)
         .await
         .map_err(|e| BlixardError::Internal { 

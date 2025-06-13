@@ -133,19 +133,45 @@ Nodes can be configured with:
 - `--data-dir`: Directory for persistent storage
 - `--tailscale`: Enable Tailscale discovery
 
+## gRPC API
+
+Blixard exposes two gRPC services for programmatic access:
+
+### BlixardService
+- `GetRaftStatus`: Query the current Raft consensus state
+- `ProposeTask`: Submit tasks through Raft consensus
+
+### ClusterService  
+- `JoinCluster`: Join a node to the cluster
+- `LeaveCluster`: Remove a node from the cluster
+- `GetClusterStatus`: Get current cluster state
+- `SendRaftMessage`: Internal Raft message routing
+- `SubmitTask`: Submit resource-aware tasks
+- `GetTaskStatus`: Query task execution status
+- VM operations: `CreateVm`, `StartVm`, `StopVm`, `ListVms`, `GetVmStatus`
+- `HealthCheck`: Node health status
+
+Example client usage:
+```bash
+# Run the example gRPC client
+cargo run --example blixard_grpc_client [server_address]
+
+# Default connects to http://127.0.0.1:7001
+cargo run --example blixard_grpc_client
+```
+
 ## Development
 
 The codebase is organized as:
 - `src/main.rs`: CLI entry point
 - `src/node.rs`: Node management and lifecycle
-- `src/raft_node_v2.rs`: Raft consensus implementation with runtime abstraction
-- `src/state_machine.rs`: Replicated state machine
+- `src/raft_manager.rs`: Raft consensus implementation
+- `src/grpc_server.rs`: gRPC service implementations
 - `src/storage.rs`: Persistent storage layer
-- `src/microvm.rs`: MicroVM integration
-- `src/network.rs`: Network communication
-- `src/tailscale.rs`: Tailscale discovery
-- `src/runtime/`: Deterministic simulation testing framework
-- `src/runtime_traits.rs`: Runtime abstraction layer for testing
+- `src/vm_manager.rs`: VM lifecycle management
+- `src/types.rs`: Core domain types
+- `src/error.rs`: Error handling
+- `proto/`: Protocol buffer definitions
 
 ## License
 

@@ -7,6 +7,16 @@ use crate::types::{NodeConfig, VmCommand, VmConfig, VmStatus};
 use crate::vm_manager::VmManager;
 use crate::raft_manager::{RaftProposal, TaskSpec, TaskResult};
 
+/// Raft status information
+#[derive(Debug, Clone)]
+pub struct RaftStatus {
+    pub is_leader: bool,
+    pub node_id: u64,
+    pub leader_id: Option<u64>,
+    pub term: u64,
+    pub state: String,
+}
+
 /// Shared node state that is Send + Sync
 /// This can be safely wrapped in Arc and shared across threads
 pub struct SharedNodeState {
@@ -23,6 +33,9 @@ pub struct SharedNodeState {
     
     // Track running state
     is_running: RwLock<bool>,
+    
+    // Raft status
+    raft_status: RwLock<RaftStatus>,
 }
 
 /// Thread-safe wrapper for VM manager operations
@@ -33,6 +46,7 @@ pub struct VmManagerShared {
 
 impl SharedNodeState {
     pub fn new(config: NodeConfig) -> Self {
+        let node_id = config.id;
         Self {
             config,
             database: RwLock::new(None),
@@ -41,6 +55,13 @@ impl SharedNodeState {
             raft_message_tx: Mutex::new(None),
             vm_manager: RwLock::new(None),
             is_running: RwLock::new(false),
+            raft_status: RwLock::new(RaftStatus {
+                is_leader: false,
+                node_id,
+                leader_id: None,
+                term: 0,
+                state: "follower".to_string(),
+            }),
         }
     }
     
@@ -277,6 +298,20 @@ impl SharedNodeState {
     /// Set running state
     pub async fn set_running(&self, running: bool) {
         *self.is_running.write().await = running;
+    }
+    
+    /// Get Raft status
+    pub async fn get_raft_status(&self) -> BlixardResult<RaftStatus> {
+        Ok(self.raft_status.read().await.clone())
+    }
+    
+    /// Update Raft status
+    pub async fn update_raft_status(&self, is_leader: bool, leader_id: Option<u64>, term: u64, state: String) {
+        let mut status = self.raft_status.write().await;
+        status.is_leader = is_leader;
+        status.leader_id = leader_id;
+        status.term = term;
+        status.state = state;
     }
 }
 
