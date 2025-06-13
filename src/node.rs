@@ -89,6 +89,13 @@ impl Node {
             vec![] // Start with no peers, bootstrap as single node
         };
         let node_id = self.shared.get_id();
+        
+        // If we're bootstrapping (no peers), initialize storage first
+        if peers.is_empty() {
+            let storage = crate::storage::RedbRaftStorage { database: db_arc.clone() };
+            storage.initialize_single_node(node_id)?;
+        }
+        
         let (raft_manager, proposal_tx, message_tx, conf_change_tx, outgoing_rx) = RaftManager::new(
             node_id,
             db_arc.clone(),

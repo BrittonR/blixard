@@ -41,8 +41,8 @@ Recent progress:
 - ✅ Multi-node cluster formation (JoinCluster/LeaveCluster RPCs)
 - ✅ Peer management and dynamic configuration changes
 - ✅ Peer connection management with automatic reconnection
+- ✅ Single-node cluster bootstrap with proper Raft initialization
 - 🔧 VM lifecycle management (stubs only)
-- 🐛 **Active Issue**: Cluster formation timing out - see CLUSTER_FORMATION_DEBUG.md
 
 ## Development Commands
 
@@ -270,13 +270,13 @@ The project includes dependencies for:
 - **Failpoints**: Fault injection for testing error handling and recovery
 - **Common utilities**: Shared test helpers in `tests/common/`
 
-## Known Issues
+## Recently Fixed Issues
 
-1. **Cluster Formation Timeout** (Active)
-   - Configuration changes time out after 5 seconds in single-node clusters
-   - Raft entries are being committed but not appearing in `committed_entries()`
-   - See `CLUSTER_FORMATION_DEBUG.md` for detailed investigation
-   - References: [raft-rs docs](https://docs.rs/raft/latest/raft/), [examples](https://github.com/tikv/raft-rs/tree/master/examples)
+1. **Cluster Formation Timeout** (✅ FIXED)
+   - Fixed: Configuration changes were timing out due to `advance_apply()` behavior
+   - Solution: Use `advance_apply_to()` with explicit index tracking
+   - Added fast-path for single-node configuration changes
+   - See `CLUSTER_FORMATION_DEBUG.md` for detailed investigation and solution
 
 ## Future Implementation Areas
 

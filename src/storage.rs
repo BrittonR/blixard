@@ -196,6 +196,28 @@ impl RedbRaftStorage {
         write_txn.commit()?;
         Ok(())
     }
+    
+    /// Initialize storage for a single-node cluster
+    pub fn initialize_single_node(&self, node_id: u64) -> BlixardResult<()> {
+        // Check if already initialized
+        let read_txn = self.database.begin_read()?;
+        if let Ok(table) = read_txn.open_table(RAFT_CONF_STATE_TABLE) {
+            if let Ok(Some(_)) = table.get("conf_state") {
+                // Already initialized
+                return Ok(());
+            }
+        }
+        drop(read_txn);
+        
+        // Create initial ConfState with this node as the sole voter
+        let mut conf_state = raft::prelude::ConfState::default();
+        conf_state.voters = vec![node_id];
+        
+        // Save the initial configuration
+        self.save_conf_state(&conf_state)?;
+        
+        Ok(())
+    }
 }
 
 /// Initialize all required database tables

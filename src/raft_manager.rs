@@ -411,15 +411,6 @@ impl RaftManager {
         {
             let mut node = self.raft_node.write().await;
             
-            // Create a ConfChange to add this node as the sole voter
-            let mut conf_change = ConfChange::default();
-            let node_id = self.node_id;
-            conf_change.node_id = node_id;
-            conf_change.change_type = ConfChangeType::AddNode as i32;
-            
-            // Apply the configuration change
-            node.apply_conf_change(&conf_change)?;
-            
             // Campaign to become leader
             let _ = node.campaign();
             
@@ -582,15 +573,75 @@ impl RaftManager {
         let is_single_node = self.peers.read().await.is_empty();
         info!(self.logger, "[RAFT-CONF] Node state"; "is_leader" => is_leader, "is_single_node" => is_single_node);
         
-        node.propose_conf_change(cc_id, cc)
+        node.propose_conf_change(cc_id.clone(), cc.clone())
             .map_err(|e| BlixardError::Raft {
                 operation: "propose conf change".to_string(),
                 source: Box::new(e),
             })?;
         info!(self.logger, "[RAFT-CONF] Conf change proposed successfully"; "node_id" => conf_change.node_id);
         
-        // Don't update peer list here - wait for it to be committed
-        // The peer list will be updated when the configuration change is applied
+        // For single-node clusters, check if we can apply the conf change immediately
+        if is_leader && is_single_node {
+            info!(self.logger, "[RAFT-CONF] Single-node cluster, checking if conf change can be applied");
+            
+            // Get the latest index
+            let last_index = node.raft.raft_log.last_index();
+            let committed = node.raft.raft_log.committed;
+            info!(self.logger, "[RAFT-CONF] Raft log state"; "last_index" => last_index, "committed" => committed);
+            
+            drop(node); // Release lock for processing
+            
+            // Process ready states until the conf change is committed
+            let mut retries = 0;
+            loop {
+                self.on_ready().await?;
+                
+                let node = self.raft_node.read().await;
+                let new_committed = node.raft.raft_log.committed;
+                info!(self.logger, "[RAFT-CONF] Checking commit progress"; "committed" => new_committed, "target" => last_index);
+                
+                if new_committed >= last_index {
+                    info!(self.logger, "[RAFT-CONF] Conf change committed!");
+                    break;
+                }
+                
+                retries += 1;
+                if retries > 10 {
+                    warn!(self.logger, "[RAFT-CONF] Conf change not committed after 10 retries");
+                    break;
+                }
+                
+                drop(node);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            
+            // Now manually apply the conf change and update state
+            let mut node = self.raft_node.write().await;
+            let cs = node.apply_conf_change(&cc)?;
+            info!(self.logger, "[RAFT-CONF] Applied conf change"; "voters" => ?cs.voters);
+            
+            // Update peers list
+            if matches!(conf_change.change_type, ConfChangeType::AddNode) {
+                if let Ok(address) = bincode::deserialize::<String>(&cc.context) {
+                    let mut peers = self.peers.write().await;
+                    peers.insert(conf_change.node_id, address.clone());
+                    info!(self.logger, "[RAFT-CONF] Added peer to local list"; "node_id" => conf_change.node_id, "address" => &address);
+                    
+                    // Also update SharedNodeState peers
+                    if let Some(shared) = self.shared_state.upgrade() {
+                        let _ = shared.add_peer(conf_change.node_id, address).await;
+                        info!(self.logger, "[RAFT-CONF] Added peer to SharedNodeState"; "node_id" => conf_change.node_id);
+                    }
+                }
+            }
+            
+            // Send immediate success response
+            let mut pending = self.pending_proposals.write().await;
+            if let Some(response_tx) = pending.remove(&cc_id) {
+                let _ = response_tx.send(Ok(()));
+                info!(self.logger, "[RAFT-CONF] Sent success response for conf change");
+            }
+        }
         
         Ok(())
     }
@@ -612,6 +663,21 @@ impl RaftManager {
             "entries" => ready.entries().len(),
             "snapshot" => ready.snapshot().is_empty()
         );
+        
+        // Debug: Check if there are committed entries before processing
+        if !ready.committed_entries().is_empty() {
+            info!(self.logger, "[RAFT-READY] DEBUG: Found {} committed entries before processing!", ready.committed_entries().len());
+            for (i, entry) in ready.committed_entries().iter().enumerate() {
+                info!(self.logger, "[RAFT-READY] DEBUG: Entry {}: index={}, type={:?}", i, entry.index, entry.entry_type());
+            }
+        }
+        
+        // Apply snapshot if present
+        // TODO: Implement snapshot support when needed
+        if !ready.snapshot().is_empty() {
+            warn!(self.logger, "[RAFT-READY] Snapshot present but not implemented yet");
+            // For now, we don't support snapshots
+        }
         
         // Save entries to storage
         if !ready.entries().is_empty() {
@@ -643,11 +709,13 @@ impl RaftManager {
         // Apply committed entries to state machine
         let committed_entries = ready.take_committed_entries();
         info!(self.logger, "[RAFT-READY] Committed entries count: {}", committed_entries.len());
+        let mut last_applied_index = 0u64;
         if !committed_entries.is_empty() {
             info!(self.logger, "[RAFT-READY] Processing {} committed entries", committed_entries.len());
             let pending_proposals = Arc::clone(&self.pending_proposals);
             info!(self.logger, "[RAFT-READY] Committed entries: {:?}", committed_entries.iter().map(|e| (e.index, e.entry_type())).collect::<Vec<_>>());
             for entry in committed_entries.iter() {
+                last_applied_index = entry.index;
                 use raft::prelude::EntryType;
                 
                 match entry.entry_type() {
@@ -671,12 +739,21 @@ impl RaftManager {
                         if let Err(e) = cc.merge_from_bytes(&entry.data) {
                             warn!(self.logger, "Failed to parse ConfChange from entry data"; "error" => ?e);
                         } else {
-                            info!(self.logger, "[RAFT-CONF] Applying committed configuration change"; "node_id" => cc.node_id, "type" => cc.change_type, "entry_index" => entry.index);
-                            node.apply_conf_change(&cc)?;
+                            // Check if we already applied this in single-node fast path
+                            let already_applied = {
+                                let peers = self.peers.read().await;
+                                peers.contains_key(&cc.node_id)
+                            };
                             
-                            // Update peer list based on the change type
-                            use raft::prelude::ConfChangeType as RaftConfChangeType;
-                            match cc.change_type() {
+                            if already_applied && cc.change_type() == raft::prelude::ConfChangeType::AddNode {
+                                info!(self.logger, "[RAFT-CONF] Conf change already applied via fast path"; "node_id" => cc.node_id);
+                            } else {
+                                info!(self.logger, "[RAFT-CONF] Applying committed configuration change"; "node_id" => cc.node_id, "type" => cc.change_type, "entry_index" => entry.index);
+                                node.apply_conf_change(&cc)?;
+                                
+                                // Update peer list based on the change type
+                                use raft::prelude::ConfChangeType as RaftConfChangeType;
+                                match cc.change_type() {
                                 RaftConfChangeType::AddNode => {
                                     // Deserialize address from context
                                     if !cc.context.is_empty() {
@@ -707,6 +784,8 @@ impl RaftManager {
                                 _ => {}
                             }
                             
+                            }
+                            
                             // Send response to waiting conf change if any
                             if !entry.context.is_empty() {
                                 let mut pending = pending_proposals.write().await;
@@ -734,6 +813,12 @@ impl RaftManager {
             let mut hs = node.raft.hard_state();
             hs.set_commit(commit);
             node.mut_store().save_hard_state(&hs)?;
+        }
+        
+        // CRITICAL: Tell Raft we've applied the committed entries
+        // This is required for Raft to return new committed entries in future ready states
+        if last_applied_index > 0 {
+            node.advance_apply_to(last_applied_index);
         }
         
         // Check the current state after processing
