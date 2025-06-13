@@ -593,14 +593,20 @@ pub async fn start_grpc_server(
 
     tracing::info!("Starting gRPC server on {}", bind_address);
 
-    tonic::transport::Server::builder()
+    match tonic::transport::Server::builder()
         .add_service(cluster_server)
         .add_service(blixard_server)
         .serve(bind_address)
         .await
-        .map_err(|e| BlixardError::Internal { 
-            message: format!("gRPC server error: {}", e) 
-        })?;
+    {
+        Ok(()) => (),
+        Err(e) => {
+            tracing::error!("Failed to start gRPC server on {}: {:?}", bind_address, e);
+            return Err(BlixardError::Internal { 
+                message: format!("gRPC server error: {}", e) 
+            });
+        }
+    }
 
     Ok(())
 }

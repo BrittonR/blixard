@@ -1,4 +1,3 @@
-use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use std::sync::Arc;
@@ -90,8 +89,8 @@ impl Node {
         };
         let node_id = self.shared.get_id();
         
-        // If we're bootstrapping (no peers), initialize storage first
-        if peers.is_empty() {
+        // If we're bootstrapping (no peers AND no join_addr), initialize storage first
+        if peers.is_empty() && self.shared.config.join_addr.is_none() {
             let storage = crate::storage::RedbRaftStorage { database: db_arc.clone() };
             storage.initialize_single_node(node_id)?;
         }
@@ -130,6 +129,17 @@ impl Node {
             raft_manager.run().await
         });
         self.raft_handle = Some(raft_handle);
+        
+        // If we have a join address, send join request after initialization
+        if self.shared.config.join_addr.is_some() {
+            // Give the Raft manager a moment to start
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            
+            if let Err(e) = self.send_join_request().await {
+                tracing::error!("Failed to join cluster: {}", e);
+                return Err(e);
+            }
+        }
         
         Ok(())
     }
@@ -309,34 +319,19 @@ impl Node {
 
     /// Start the node
     pub async fn start(&mut self) -> BlixardResult<()> {
-        let bind_addr = *self.shared.get_bind_addr();
         let node_id = self.shared.get_id();
-        let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
         self.shared.set_shutdown_tx(shutdown_tx).await;
 
+        // The node doesn't need its own TCP listener since all communication
+        // is handled via the gRPC server. We just need a task to manage the
+        // node's lifecycle and respond to shutdown signals.
         let handle = tokio::spawn(async move {
-            let listener = TcpListener::bind(&bind_addr).await?;
-            tracing::info!("Node {} listening on {}", node_id, bind_addr);
+            tracing::info!("Node {} started", node_id);
 
-            loop {
-                tokio::select! {
-                    result = listener.accept() => {
-                        match result {
-                            Ok((_stream, addr)) => {
-                                tracing::debug!("New connection from {}", addr);
-                                // Handle connection
-                            }
-                            Err(e) => {
-                                tracing::error!("Accept error: {}", e);
-                            }
-                        }
-                    }
-                    _ = &mut shutdown_rx => {
-                        tracing::info!("Node {} shutting down", node_id);
-                        break;
-                    }
-                }
-            }
+            // Wait for shutdown signal
+            let _ = shutdown_rx.await;
+            tracing::info!("Node {} shutting down", node_id);
 
             Ok(())
         });

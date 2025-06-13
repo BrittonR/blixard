@@ -443,17 +443,29 @@ impl RaftManager {
         // Check if we should bootstrap as a single-node cluster
         let should_bootstrap = {
             let peers = self.peers.read().await;
-            peers.is_empty()
+            let has_join_addr = if let Some(shared) = self.shared_state.upgrade() {
+                shared.config.join_addr.is_some()
+            } else {
+                false
+            };
+            
+            // Only bootstrap if we have no peers AND no join address
+            peers.is_empty() && !has_join_addr
         };
         
         if should_bootstrap {
-            // No peers, bootstrap as single node
-            info!(self.logger, "No peers configured, bootstrapping as single-node cluster");
+            // No peers and no join address, bootstrap as single node
+            info!(self.logger, "No peers configured and no join address, bootstrapping as single-node cluster");
             self.bootstrap_single_node().await?;
         } else {
-            // We have peers, don't bootstrap - wait to join existing cluster
+            // Either we have peers or a join address - don't bootstrap
             let peer_ids: Vec<u64> = self.peers.read().await.keys().cloned().collect();
-            info!(self.logger, "Peers configured, waiting to join existing cluster"; "peers" => ?peer_ids);
+            let has_join_addr = if let Some(shared) = self.shared_state.upgrade() {
+                shared.config.join_addr.is_some()
+            } else {
+                false
+            };
+            info!(self.logger, "Not bootstrapping"; "peers" => ?peer_ids, "has_join_addr" => has_join_addr);
         }
         
         let mut tick_timer = interval(Duration::from_millis(100));

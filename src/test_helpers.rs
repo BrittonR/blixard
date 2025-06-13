@@ -49,6 +49,13 @@ impl TestNode {
         let mut node = Node::new(config);
         let shared_state = node.shared();
         
+        // If we have a join address, add it as a peer before initializing
+        // This helps the Raft layer know it's part of a cluster
+        if let Some(join_addr) = join_addr {
+            // Assume node 1 is always the bootstrap node for tests
+            let _ = shared_state.add_peer(1, join_addr.to_string()).await;
+        }
+        
         // Initialize the node (database, raft, etc)
         node.initialize().await?;
         

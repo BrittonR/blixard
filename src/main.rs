@@ -68,19 +68,34 @@ async fn main() -> BlixardResult<()> {
     let cli = Cli::parse();
     
     match cli.command {
-        Commands::Node { id, bind, data_dir, peers: _ } => {
+        Commands::Node { id, bind, data_dir, peers } => {
             // Parse bind address
             let bind_address: SocketAddr = bind.parse()
                 .map_err(|e| blixard::error::BlixardError::ConfigError(
                     format!("Invalid bind address '{}': {}", bind, e)
                 ))?;
 
+            // Parse join address from peers (use the first peer)
+            let join_addr = if let Some(peers_str) = peers {
+                let peer_addrs: Vec<&str> = peers_str.split(',').collect();
+                if !peer_addrs.is_empty() {
+                    Some(peer_addrs[0].parse::<SocketAddr>()
+                        .map_err(|e| blixard::error::BlixardError::ConfigError(
+                            format!("Invalid peer address '{}': {}", peer_addrs[0], e)
+                        ))?)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             // Create node configuration
             let config = NodeConfig {
                 id,
                 bind_addr: bind_address,
                 data_dir,
-                join_addr: None,
+                join_addr,
                 use_tailscale: false,
             };
 
@@ -93,26 +108,26 @@ async fn main() -> BlixardResult<()> {
             
             // Get shared state for gRPC server
             let shared_state = node.shared();
+            #[cfg(madsim)]
+            let node_id = node.get_id();
 
             #[cfg(not(madsim))]
             {
+                // Keep node alive while running gRPC server
+                let _node = node;
+                
                 // Start gRPC server
-                let server_handle = tokio::spawn(async move {
-                    start_grpc_server(shared_state, bind_address).await
-                });
-
-                // Wait for the gRPC server
-                match server_handle.await {
-                    Ok(Ok(())) => tracing::info!("gRPC server shut down gracefully"),
-                    Ok(Err(e)) => tracing::error!("gRPC server error: {}", e),
-                    Err(e) => tracing::error!("gRPC server task panic: {}", e),
+                match start_grpc_server(shared_state, bind_address).await {
+                    Ok(()) => tracing::info!("gRPC server shut down gracefully"),
+                    Err(e) => tracing::error!("gRPC server error: {}", e),
                 }
             }
             
             #[cfg(madsim)]
             {
                 // In simulation mode, just keep the node running
-                tracing::info!("Node {} running (gRPC disabled in simulation)", node.get_id());
+                let _node = node;
+                tracing::info!("Node {} running (gRPC disabled in simulation)", node_id);
                 tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
             }
         }

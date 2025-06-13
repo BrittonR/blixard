@@ -11,8 +11,9 @@ use blixard::{
     },
 };
 
-// mod common;
-// use common::test_timing::wait_for_condition;
+#[path = "common/mod.rs"]
+mod common;
+use common::test_timing::wait_for_condition;
 
 async fn create_client(addr: SocketAddr) -> ClusterServiceClient<Channel> {
     let endpoint = format!("http://{}", addr);
@@ -28,6 +29,35 @@ async fn create_client(addr: SocketAddr) -> ClusterServiceClient<Channel> {
     }).await.expect("Failed to connect to server");
     
     client
+}
+
+/// Wait for all nodes in the cluster to converge to the expected member count
+async fn wait_for_cluster_convergence(
+    clients: Vec<ClusterServiceClient<Channel>>,
+    expected_nodes: usize,
+    timeout_duration: Duration,
+) -> Result<(), String> {
+    wait_for_condition(
+        move || {
+            let clients_clone = clients.clone();
+            async move {
+                // Check if all clients see the expected number of nodes
+                for mut client in clients_clone {
+                    if let Ok(status) = client.get_cluster_status(ClusterStatusRequest {}).await {
+                        if status.into_inner().nodes.len() != expected_nodes {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+                true
+            }
+        },
+        timeout_duration,
+        Duration::from_millis(100),
+    )
+    .await
 }
 
 #[tokio::test]
@@ -78,17 +108,43 @@ async fn test_two_node_cluster_formation() {
     
     assert!(join_result.success, "Join failed: {}", join_result.message);
     
-    // Wait for cluster to stabilize - both nodes should see 2 members
-    // For now, use a simple sleep instead of wait_for_condition
-    sleep(Duration::from_secs(5)).await;
+    // Give the configuration change some time to be processed
+    sleep(Duration::from_millis(500)).await;
     
-    // Check cluster status from both nodes
+    // WORKAROUND: Node 2 needs to receive log entries to know it's part of the cluster
+    // Send a health check through node 1 to trigger log replication
+    let _ = client1.health_check(HealthCheckRequest {}).await;
+    
+    // Wait for cluster to stabilize - both nodes should see 2 members
+    // The configuration change needs to propagate from node 1 to node 2
+    let client1_clone = client1.clone();
+    let client2_clone = client2.clone();
+    
+    wait_for_condition(
+        move || {
+            let mut c1 = client1_clone.clone();
+            let mut c2 = client2_clone.clone();
+            async move {
+                // Check if both nodes see 2 members
+                if let Ok(status1) = c1.get_cluster_status(ClusterStatusRequest {}).await {
+                    if let Ok(status2) = c2.get_cluster_status(ClusterStatusRequest {}).await {
+                        let s1 = status1.into_inner();
+                        let s2 = status2.into_inner();
+                        return s1.nodes.len() == 2 && s2.nodes.len() == 2;
+                    }
+                }
+                false
+            }
+        },
+        Duration::from_secs(10),
+        Duration::from_millis(100),
+    )
+    .await
+    .expect("Cluster failed to converge to 2 nodes");
+    
+    // Now check the actual status
     let status1 = client1.get_cluster_status(ClusterStatusRequest {}).await.unwrap().into_inner();
     let status2 = client2.get_cluster_status(ClusterStatusRequest {}).await.unwrap().into_inner();
-    
-    // Both should see 2 nodes
-    assert_eq!(status1.nodes.len(), 2);
-    assert_eq!(status2.nodes.len(), 2);
     
     // Verify node IDs
     let node_ids1: Vec<u64> = status1.nodes.iter().map(|n| n.id).collect();
@@ -124,7 +180,13 @@ async fn test_node_leave_cluster() {
     client1.join_cluster(join_req).await.unwrap();
     
     // Wait for cluster to stabilize
-    sleep(Duration::from_secs(2)).await;
+    wait_for_cluster_convergence(
+        vec![client1.clone()],
+        2,
+        Duration::from_secs(10),
+    )
+    .await
+    .expect("Cluster failed to converge to 2 nodes");
     
     // Verify 2 nodes in cluster
     let status = client1.get_cluster_status(ClusterStatusRequest {}).await.unwrap().into_inner();
@@ -138,7 +200,13 @@ async fn test_node_leave_cluster() {
     assert!(leave_result.success, "Leave failed: {}", leave_result.message);
     
     // Wait for node removal to complete
-    sleep(Duration::from_secs(2)).await;
+    wait_for_cluster_convergence(
+        vec![client1.clone()],
+        1,
+        Duration::from_secs(10),
+    )
+    .await
+    .expect("Cluster failed to converge to 1 node after removal");
     
     // Verify only 1 node remains
     let status = client1.get_cluster_status(ClusterStatusRequest {}).await.unwrap().into_inner();
@@ -285,16 +353,23 @@ async fn test_three_node_cluster() {
     };
     client1.join_cluster(join3).await.unwrap();
     
-    // Wait for all nodes to see the complete cluster
-    sleep(Duration::from_secs(3)).await;
-    
-    // Check all nodes see the full cluster
+    // Create clients for all nodes
     let clients = vec![
         create_client(addr1).await,
         create_client(addr2).await,
         create_client(addr3).await,
     ];
     
+    // Wait for all nodes to see the complete cluster
+    wait_for_cluster_convergence(
+        clients.clone(),
+        3,
+        Duration::from_secs(15),
+    )
+    .await
+    .expect("Cluster failed to converge to 3 nodes");
+    
+    // Verify all nodes see the full cluster
     for mut client in clients {
         let status = client.get_cluster_status(ClusterStatusRequest {}).await.unwrap().into_inner();
         assert_eq!(status.nodes.len(), 3);
