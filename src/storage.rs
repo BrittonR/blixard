@@ -218,6 +218,36 @@ impl RedbRaftStorage {
         
         Ok(())
     }
+    
+    /// Initialize storage for a node joining an existing cluster
+    pub fn initialize_joining_node(&self) -> BlixardResult<()> {
+        // Check if already initialized
+        let read_txn = self.database.begin_read()?;
+        if let Ok(table) = read_txn.open_table(RAFT_CONF_STATE_TABLE) {
+            if let Ok(Some(_)) = table.get("conf_state") {
+                // Already initialized
+                return Ok(());
+            }
+        }
+        drop(read_txn);
+        
+        // Create empty ConfState for a joining node
+        let conf_state = raft::prelude::ConfState::default();
+        // No voters - this node isn't a voter yet
+        
+        // Create initial hard state with term 0, no vote
+        let hard_state = raft::prelude::HardState {
+            term: 0,
+            vote: 0,
+            commit: 0,
+        };
+        
+        // Save both states
+        self.save_conf_state(&conf_state)?;
+        self.save_hard_state(&hard_state)?;
+        
+        Ok(())
+    }
 }
 
 /// Initialize all required database tables

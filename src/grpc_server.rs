@@ -139,13 +139,29 @@ impl ClusterService for BlixardGrpcService {
                 tracing::info!("[JOIN] Configuration change proposed to Raft for node {}", req.node_id);
                 // Get current peers to return
                 let peers = self.node.get_peers().await;
-                let peer_infos: Vec<NodeInfo> = peers.into_iter()
+                let mut peer_infos: Vec<NodeInfo> = peers.into_iter()
                     .map(|p| NodeInfo {
                         id: p.id,
                         address: p.address,
                         state: NodeState::Follower.into(), // TODO: Get actual state
                     })
                     .collect();
+                
+                // Include the current node (leader) in the response
+                tracing::info!("[JOIN] Including self (node {}) at {} in join response", 
+                    self.node.get_id(), self.node.get_bind_addr());
+                peer_infos.push(NodeInfo {
+                    id: self.node.get_id(),
+                    address: self.node.get_bind_addr().to_string(),
+                    state: if is_leader {
+                        NodeState::Leader.into()
+                    } else {
+                        NodeState::Follower.into()
+                    },
+                });
+                
+                tracing::info!("[JOIN] Returning {} peers in join response to node {}", 
+                    peer_infos.len(), req.node_id);
                 
                 Ok(Response::new(JoinResponse {
                     success: true,

@@ -90,6 +90,7 @@ async fn test_two_node_cluster_formation() {
     let addr1 = node1.addr;
     
     // Start second node with join_addr pointing to first node
+    // The node will automatically send join request during initialization
     let node2 = TestNode::start_with_join(2, 17003, Some(addr1)).await.unwrap();
     let addr2 = node2.addr;
     
@@ -97,16 +98,7 @@ async fn test_two_node_cluster_formation() {
     let mut client1 = create_client(addr1).await;
     let mut client2 = create_client(addr2).await;
     
-    // Node 2 joins cluster at node 1
-    let join_req = JoinRequest {
-        node_id: 2,
-        bind_address: addr2.to_string(),
-    };
-    
-    let join_resp = client1.join_cluster(join_req).await.unwrap();
-    let join_result = join_resp.into_inner();
-    
-    assert!(join_result.success, "Join failed: {}", join_result.message);
+    // No need to manually join - node2 already sent join request during initialization
     
     // Give the configuration change some time to be processed
     sleep(Duration::from_millis(500)).await;

@@ -318,6 +318,7 @@ pub struct RaftManager {
     node_id: u64,
     raft_node: RwLock<RawNode<RedbRaftStorage>>,
     state_machine: Arc<RaftStateMachine>,
+    storage: RedbRaftStorage,  // Keep a reference to storage for conf state updates
     peers: RwLock<HashMap<u64, String>>, // node_id -> address
     logger: Logger,
     shared_state: Weak<crate::node_shared::SharedNodeState>,
@@ -335,6 +336,9 @@ pub struct RaftManager {
     
     // Message sender callback - using channel instead of async closure
     outgoing_messages: mpsc::UnboundedSender<(u64, raft::prelude::Message)>,
+    
+    // Flag to trigger replication after config changes
+    needs_replication_trigger: Arc<RwLock<bool>>,
 }
 
 impl RaftManager {
@@ -370,8 +374,8 @@ impl RaftManager {
         let drain = slog_async::Async::new(drain).build().fuse();
         let logger = slog::Logger::root(drain, o!("node_id" => node_id));
 
-        // Create Raft node
-        let raft_node = RawNode::new(&cfg, storage, &logger)
+        // Create Raft node with a clone of storage
+        let raft_node = RawNode::new(&cfg, storage.clone(), &logger)
             .map_err(|e| BlixardError::Raft {
                 operation: "create raft node".to_string(),
                 source: Box::new(e),
@@ -390,6 +394,7 @@ impl RaftManager {
             node_id,
             raft_node: RwLock::new(raft_node),
             state_machine,
+            storage,
             peers: RwLock::new(peers.into_iter().collect()),
             logger,
             shared_state,
@@ -401,6 +406,7 @@ impl RaftManager {
             conf_change_tx: conf_change_tx.clone(),
             pending_proposals: Arc::new(RwLock::new(HashMap::new())),
             outgoing_messages: outgoing_tx,
+            needs_replication_trigger: Arc::new(RwLock::new(false)),
         };
 
         Ok((manager, proposal_tx, message_tx, conf_change_tx, outgoing_rx))
@@ -499,6 +505,23 @@ impl RaftManager {
             loop {
                 if !self.on_ready().await? {
                     break;
+                }
+            }
+            
+            // Check if we need to trigger replication after conf change
+            let needs_trigger = {
+                let mut flag = self.needs_replication_trigger.write().await;
+                let needs = *flag;
+                *flag = false; // Reset the flag
+                needs
+            };
+            
+            if needs_trigger {
+                let mut node = self.raft_node.write().await;
+                if node.raft.state == StateRole::Leader {
+                    info!(self.logger, "[RAFT-CONF] Triggering replication by proposing empty entry");
+                    node.propose(vec![], vec![])?;
+                    // The next ready cycle will send AppendEntries to all nodes
                 }
             }
         }
@@ -632,6 +655,10 @@ impl RaftManager {
             let cs = node.apply_conf_change(&cc)?;
             info!(self.logger, "[RAFT-CONF] Applied conf change"; "voters" => ?cs.voters);
             
+            // Save the new configuration state to storage
+            self.storage.save_conf_state(&cs)?;
+            info!(self.logger, "[RAFT-CONF] Saved new configuration state to storage");
+            
             // Update peers list
             if matches!(conf_change.change_type, ConfChangeType::AddNode) {
                 if let Ok(address) = bincode::deserialize::<String>(&cc.context) {
@@ -644,6 +671,14 @@ impl RaftManager {
                         let _ = shared.add_peer(conf_change.node_id, address).await;
                         info!(self.logger, "[RAFT-CONF] Added peer to SharedNodeState"; "node_id" => conf_change.node_id);
                     }
+                    
+                    // Set flag to trigger replication after adding node
+                    *self.needs_replication_trigger.write().await = true;
+                    info!(self.logger, "[RAFT-CONF] Set replication trigger flag for new node");
+                    
+                    // Give a small delay to allow peer connection to establish
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    info!(self.logger, "[RAFT-CONF] Waited for peer connection establishment");
                 }
             }
             
@@ -652,6 +687,13 @@ impl RaftManager {
             if let Some(response_tx) = pending.remove(&cc_id) {
                 let _ = response_tx.send(Ok(()));
                 info!(self.logger, "[RAFT-CONF] Sent success response for conf change");
+            }
+            
+            // IMPORTANT: Set flag to trigger replication after ready processing
+            // This ensures the new node receives the configuration change log entry
+            if matches!(conf_change.change_type, ConfChangeType::AddNode) {
+                *self.needs_replication_trigger.write().await = true;
+                info!(self.logger, "[RAFT-CONF] Set flag to trigger replication to new node");
             }
         }
         
@@ -669,6 +711,12 @@ impl RaftManager {
         let mut ready = node.ready();
         
         // Log ready state details
+        // Debug messages in ready state
+        for msg in ready.messages() {
+            info!(self.logger, "[RAFT-READY] Has message in ready"; 
+                "from" => msg.from, "to" => msg.to, "type" => ?msg.msg_type());
+        }
+        
         info!(self.logger, "[RAFT-READY] Ready state details";
             "messages" => ready.messages().len(),
             "committed_entries" => ready.committed_entries().len(),
@@ -761,7 +809,11 @@ impl RaftManager {
                                 info!(self.logger, "[RAFT-CONF] Conf change already applied via fast path"; "node_id" => cc.node_id);
                             } else {
                                 info!(self.logger, "[RAFT-CONF] Applying committed configuration change"; "node_id" => cc.node_id, "type" => cc.change_type, "entry_index" => entry.index);
-                                node.apply_conf_change(&cc)?;
+                                let cs = node.apply_conf_change(&cc)?;
+                                
+                                // Save the new configuration state to storage
+                                self.storage.save_conf_state(&cs)?;
+                                info!(self.logger, "[RAFT-CONF] Saved new configuration state to storage"; "voters" => ?cs.voters);
                                 
                                 // Update peer list based on the change type
                                 use raft::prelude::ConfChangeType as RaftConfChangeType;
@@ -781,6 +833,14 @@ impl RaftManager {
                                             }
                                         }
                                     }
+                                    
+                                    // Set flag to trigger replication after adding node
+                                    *self.needs_replication_trigger.write().await = true;
+                                    info!(self.logger, "[RAFT-CONF] Set replication trigger flag for new node");
+                                    
+                                    // Give a small delay to allow peer connection to establish
+                                    tokio::time::sleep(Duration::from_millis(100)).await;
+                                    info!(self.logger, "[RAFT-CONF] Waited for peer connection establishment");
                                 }
                                 RaftConfChangeType::RemoveNode => {
                                     let mut peers = self.peers.write().await;
@@ -804,6 +864,14 @@ impl RaftManager {
                                 if let Some(response_tx) = pending.remove(&entry.context) {
                                     let _ = response_tx.send(Ok(()));
                                 }
+                            }
+                            
+                            // IMPORTANT: After adding a new node, we need to trigger replication
+                            // Set flag to trigger after ready state is processed
+                            use raft::prelude::ConfChangeType as RaftConfChangeType;
+                            if cc.change_type() == RaftConfChangeType::AddNode {
+                                *self.needs_replication_trigger.write().await = true;
+                                info!(self.logger, "[RAFT-CONF] Set flag to trigger replication after ready state");
                             }
                         }
                     }

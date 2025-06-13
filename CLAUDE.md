@@ -272,11 +272,14 @@ The project includes dependencies for:
 
 ## Recently Fixed Issues
 
-1. **Cluster Formation Timeout** (✅ FIXED)
-   - Fixed: Configuration changes were timing out due to `advance_apply()` behavior
-   - Solution: Use `advance_apply_to()` with explicit index tracking
-   - Added fast-path for single-node configuration changes
-   - See `CLUSTER_FORMATION_DEBUG.md` for detailed investigation and solution
+1. **Cluster Formation Improvements** (✅ PARTIALLY FIXED)
+   - Fixed: Configuration state persistence after applying changes
+   - Fixed: Storage initialization for joining nodes
+   - Fixed: Message buffering during peer connection establishment
+   - Fixed: Peer discovery - joining nodes now learn about the leader
+   - Fixed: Replication triggering after configuration changes
+   - Remaining: Three-node clusters fail due to log replication issues
+   - See `CLUSTER_FORMATION_DEBUG.md` for detailed investigation and solutions
 
 ## Future Implementation Areas
 

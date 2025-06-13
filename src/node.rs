@@ -89,10 +89,14 @@ impl Node {
         };
         let node_id = self.shared.get_id();
         
-        // If we're bootstrapping (no peers AND no join_addr), initialize storage first
-        if peers.is_empty() && self.shared.config.join_addr.is_none() {
-            let storage = crate::storage::RedbRaftStorage { database: db_arc.clone() };
+        // Initialize storage based on node type
+        let storage = crate::storage::RedbRaftStorage { database: db_arc.clone() };
+        if self.shared.config.join_addr.is_none() {
+            // Bootstrap as single node
             storage.initialize_single_node(node_id)?;
+        } else {
+            // Initialize as joining node
+            storage.initialize_joining_node()?;
         }
         
         let (raft_manager, proposal_tx, message_tx, conf_change_tx, outgoing_rx) = RaftManager::new(
@@ -166,10 +170,14 @@ impl Node {
                                     let resp = response.into_inner();
                                     if resp.success {
                                         tracing::info!("Successfully joined cluster at {}", join_addr);
+                                        tracing::info!("Join response contains {} peers", resp.peers.len());
                                         // Add peers from response
                                         for peer in resp.peers {
                                             if peer.id != self.shared.get_id() {
+                                                tracing::info!("Adding peer {} at {} from join response", peer.id, peer.address);
                                                 let _ = self.shared.add_peer(peer.id, peer.address).await;
+                                            } else {
+                                                tracing::info!("Skipping self (node {}) in peer list", peer.id);
                                             }
                                         }
                                     } else {
