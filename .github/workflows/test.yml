@@ -1,0 +1,89 @@
+name: Test
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+env:
+  CARGO_TERM_COLOR: always
+  # CI environment variable triggers timeout multipliers
+  CI: true
+  # Optional: Override timeout multiplier (default is 3x for CI)
+  # TEST_TIMEOUT_MULTIPLIER: 5
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Cache cargo index
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Cache cargo build
+      uses: actions/cache@v3
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Build
+      run: cargo build --verbose
+    
+    - name: Run tests
+      run: cargo test --verbose
+      env:
+        RUST_LOG: debug
+    
+    - name: Run timing stability tests
+      run: ./scripts/test-timing.sh
+      env:
+        TEST_ITERATIONS: 5  # Reduced for CI, but enough to catch flakiness
+        FAIL_FAST: false
+    
+    - name: Upload test logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-timing-logs
+        path: test-timing-logs/
+
+  simulation-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+    
+    - name: Run simulation tests
+      run: ./scripts/sim-test.sh
+      env:
+        CI: true
+        RUST_LOG: info
+    
+    - name: Run determinism verification
+      run: ./scripts/verify-determinism.sh
+      env:
+        CI: true

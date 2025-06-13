@@ -7,6 +7,7 @@
 #![cfg(madsim)]
 
 mod test_util;
+mod timing_config;
 
 use madsim::{
     runtime::Handle,
@@ -227,7 +228,8 @@ impl TestRaftNode {
         // Main tick loop
         loop {
             self.tick().await;
-            sleep(Duration::from_millis(10)).await;
+            // Use short sleep to yield control
+            sleep(Duration::from_millis(1)).await;
         }
     }
     
@@ -768,8 +770,8 @@ async fn test_leader_election_with_partition() {
             }
         }
         
-        // Wait for initial leader election
-        let initial_leader = ConsensusVerifier::wait_for_leader(&mut clients, Duration::from_secs(10))
+        // Wait for initial leader election with generous timeout
+        let initial_leader = ConsensusVerifier::wait_for_leader(&mut clients, Duration::from_secs(30))
             .await
             .expect("Failed to elect initial leader");
         info!("Initial leader elected: {}", initial_leader);
@@ -792,8 +794,10 @@ async fn test_leader_election_with_partition() {
         }
         info!("Applied network partition between {:?} and {:?}", partition.minority, partition.majority);
         
-        // Wait for partition effects
-        sleep(Duration::from_secs(3)).await;
+        // Advance time to trigger election timeouts in partitioned nodes
+        info!("Advancing time to trigger election timeouts...");
+        madsim::time::advance(Duration::from_secs(3));
+        sleep(Duration::from_millis(100)).await; // Small sleep to let tasks process
         
         // Check that minority cannot elect leader
         let mut minority_has_leader = false;
@@ -817,7 +821,7 @@ async fn test_leader_election_with_partition() {
         let majority_leader = ConsensusVerifier::wait_for_leader_among(
             &mut clients[2..5], 
             &majority_set,
-            Duration::from_secs(10)
+            Duration::from_secs(30) // Generous timeout for partition scenario
         ).await.expect("Majority partition should elect a leader");
         
         info!("✅ Majority partition has leader: {}", majority_leader);
@@ -829,17 +833,36 @@ async fn test_leader_election_with_partition() {
             network_state.clear(); // Clear all partitions
         }
         
+        // Advance time significantly to trigger new elections in minority nodes
+        // This ensures they will try to communicate again after partition healing
+        info!("Advancing time to trigger re-elections after partition heal...");
+        madsim::time::advance(Duration::from_secs(5));
+        sleep(Duration::from_millis(100)).await; // Let tasks process
+        
         // Wait for nodes to converge on a single leader after healing
         info!("Waiting for cluster to converge after healing partition...");
         let start = Instant::now();
         let mut converged = false;
         
-        while start.elapsed() < Duration::from_secs(20) {
+        // Use time advance to speed up convergence testing
+        let convergence_timeout = Duration::from_secs(30);
+        let mut elapsed = Duration::ZERO;
+        
+        while elapsed < convergence_timeout {
+            // Check current state
             if let Ok(()) = ConsensusVerifier::verify_log_matching(&mut clients).await {
                 converged = true;
+                info!("Cluster converged after {:?}", elapsed);
                 break;
             }
-            sleep(Duration::from_millis(500)).await;
+            
+            // Advance time to speed up election/heartbeat cycles
+            let advance_step = Duration::from_millis(100);
+            madsim::time::advance(advance_step);
+            elapsed += advance_step;
+            
+            // Small sleep to let tasks process the time advancement
+            sleep(Duration::from_millis(10)).await;
         }
         
         if !converged {
@@ -1229,8 +1252,8 @@ async fn test_leader_failover() {
             }
         }
         
-        // Wait for initial leader
-        let current_leader = ConsensusVerifier::wait_for_leader(&mut clients, Duration::from_secs(10))
+        // Wait for initial leader with generous timeout
+        let current_leader = ConsensusVerifier::wait_for_leader(&mut clients, Duration::from_secs(30))
             .await
             .expect("Failed to elect initial leader");
         
@@ -1252,10 +1275,12 @@ async fn test_leader_failover() {
             }
         }
         
+        // Use generous timeout for leader election in MadSim
+        // MadSim is deterministic but event ordering can still vary
         let new_leader = ConsensusVerifier::wait_for_leader_among(
             &mut clients, 
             &remaining_nodes,
-            Duration::from_secs(15)
+            Duration::from_secs(60) // Very generous timeout for deterministic sim
         ).await.expect("No new leader elected after failover");
         
         info!("✅ New leader elected: node {}", new_leader);

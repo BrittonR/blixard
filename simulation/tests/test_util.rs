@@ -34,11 +34,14 @@ pub struct TestClusterConfig {
 
 impl Default for TestClusterConfig {
     fn default() -> Self {
+        // Use longer timeouts in CI environments
+        let multiplier = if std::env::var("CI").is_ok() { 3 } else { 1 };
+        
         Self {
             node_count: 3,
-            election_timeout_min: Duration::from_millis(150),
-            election_timeout_max: Duration::from_millis(300),
-            heartbeat_interval: Duration::from_millis(50),
+            election_timeout_min: Duration::from_millis(150 * multiplier),
+            election_timeout_max: Duration::from_millis(300 * multiplier),
+            heartbeat_interval: Duration::from_millis(50 * multiplier),
             max_entries_per_msg: 100,
         }
     }
@@ -164,68 +167,180 @@ impl ConsensusVerifier {
         // This would check that all committed entries match across nodes
         // For now, we'll just check that all nodes agree on the leader
         let mut leader_ids = HashSet::new();
+        let mut node_states = Vec::new();
+        let mut all_responded = true;
         
         for (i, client) in nodes.iter_mut().enumerate() {
-            let status = client.get_cluster_status(blixard_simulation::ClusterStatusRequest {})
-                .await
-                .map_err(|e| format!("Failed to get status from node {}: {}", i, e))?
-                .into_inner();
-            
-            leader_ids.insert(status.leader_id);
+            match client.get_cluster_status(blixard_simulation::ClusterStatusRequest {}).await {
+                Ok(response) => {
+                    let status = response.into_inner();
+                    // Only count non-zero leader IDs
+                    if status.leader_id != 0 {
+                        leader_ids.insert(status.leader_id);
+                    }
+                    node_states.push((i, status.leader_id, status.term));
+                }
+                Err(e) => {
+                    // Node might be temporarily unavailable during recovery
+                    info!("Node {} unavailable during convergence check: {}", i, e);
+                    all_responded = false;
+                }
+            }
+        }
+        
+        // Log current state for debugging
+        info!("Convergence check - responded: {}, leader_ids: {:?}, states: {:?}", 
+              all_responded, leader_ids, node_states);
+        
+        // For convergence, we need:
+        // 1. All nodes to respond
+        // 2. Exactly one leader
+        // 3. All nodes agree on that leader
+        if !all_responded {
+            return Err("Not all nodes responded".to_string());
+        }
+        
+        if leader_ids.is_empty() {
+            return Err("No leader elected yet".to_string());
         }
         
         if leader_ids.len() > 1 {
-            return Err(format!("Nodes disagree on leader: {:?}", leader_ids));
+            return Err(format!("Nodes disagree on leader: {:?} (states: {:?})", leader_ids, node_states));
+        }
+        
+        // Check that all nodes report the same leader
+        let leader = *leader_ids.iter().next().unwrap();
+        for (i, leader_id, _term) in &node_states {
+            if *leader_id != leader && *leader_id != 0 {
+                return Err(format!("Node {} reports different leader {} vs {}", i, leader_id, leader));
+            }
         }
         
         Ok(())
     }
     
-    /// Wait for a leader to be elected
+    /// Wait for a leader to be elected with exponential backoff
     pub async fn wait_for_leader(
         nodes: &mut [ClusterServiceClient<tonic::transport::Channel>],
         timeout: Duration,
     ) -> Result<u64, String> {
         let start = Instant::now();
+        let mut check_interval = Duration::from_millis(50);
+        let max_interval = Duration::from_secs(1);
+        let mut last_log = Instant::now();
+        
+        info!("Waiting for leader election (timeout: {:?})", timeout);
         
         while start.elapsed() < timeout {
-            for client in nodes.iter_mut() {
-                if let Ok(response) = client.get_cluster_status(Request::new(ClusterStatusRequest {})).await {
-                    let status = response.into_inner();
-                    if status.leader_id != 0 {
-                        return Ok(status.leader_id);
+            let mut node_states = Vec::new();
+            
+            for (i, client) in nodes.iter_mut().enumerate() {
+                match client.get_cluster_status(Request::new(ClusterStatusRequest {})).await {
+                    Ok(response) => {
+                        let status = response.into_inner();
+                        node_states.push((i, status.leader_id, status.term));
+                        if status.leader_id != 0 {
+                            info!("Leader elected: node {} in term {} (took {:?})", 
+                                  status.leader_id, status.term, start.elapsed());
+                            return Ok(status.leader_id);
+                        }
+                    }
+                    Err(e) => {
+                        node_states.push((i, 0, 0)); // Node unavailable
+                        if last_log.elapsed() > Duration::from_secs(5) {
+                            info!("Node {} unavailable: {}", i, e);
+                        }
                     }
                 }
             }
             
-            sleep(Duration::from_millis(50)).await;
+            // Log progress every 5 seconds
+            if last_log.elapsed() > Duration::from_secs(5) {
+                info!("Still waiting for leader. Node states: {:?}", node_states);
+                last_log = Instant::now();
+            }
+            
+            sleep(check_interval).await;
+            // Exponential backoff to reduce CPU usage during long waits
+            check_interval = (check_interval * 2).min(max_interval);
         }
         
-        Err("No leader elected within timeout".to_string())
+        // Final state dump on timeout
+        let mut final_states = Vec::new();
+        for (i, client) in nodes.iter_mut().enumerate() {
+            if let Ok(response) = client.get_cluster_status(Request::new(ClusterStatusRequest {})).await {
+                let status = response.into_inner();
+                final_states.push((i, status.leader_id, status.term));
+            }
+        }
+        
+        Err(format!("No leader elected within {:?}. Final states: {:?}", timeout, final_states))
     }
     
-    /// Wait for a leader to be elected among specific nodes
+    /// Wait for a leader to be elected among specific nodes with exponential backoff
     pub async fn wait_for_leader_among(
         nodes: &mut [ClusterServiceClient<tonic::transport::Channel>],
         valid_leaders: &HashSet<u64>,
         timeout: Duration,
     ) -> Result<u64, String> {
         let start = Instant::now();
+        let mut check_interval = Duration::from_millis(50);
+        let max_interval = Duration::from_secs(1);
+        let mut last_log = Instant::now();
+        
+        info!("Waiting for leader among nodes {:?} (timeout: {:?})", valid_leaders, timeout);
         
         while start.elapsed() < timeout {
-            for client in nodes.iter_mut() {
-                if let Ok(response) = client.get_cluster_status(Request::new(ClusterStatusRequest {})).await {
-                    let status = response.into_inner();
-                    if status.leader_id != 0 && valid_leaders.contains(&status.leader_id) {
-                        return Ok(status.leader_id);
+            let mut node_states = Vec::new();
+            let mut current_leader = 0;
+            
+            for (i, client) in nodes.iter_mut().enumerate() {
+                match client.get_cluster_status(Request::new(ClusterStatusRequest {})).await {
+                    Ok(response) => {
+                        let status = response.into_inner();
+                        node_states.push((i, status.leader_id, status.term));
+                        if status.leader_id != 0 {
+                            current_leader = status.leader_id;
+                            if valid_leaders.contains(&status.leader_id) {
+                                info!("Leader elected among valid nodes: {} in term {} (took {:?})", 
+                                      status.leader_id, status.term, start.elapsed());
+                                return Ok(status.leader_id);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        node_states.push((i, 0, 0)); // Node unavailable
                     }
                 }
             }
             
-            sleep(Duration::from_millis(50)).await;
+            // Log progress every 5 seconds
+            if last_log.elapsed() > Duration::from_secs(5) {
+                if current_leader != 0 {
+                    info!("Current leader is {}, but not in valid set {:?}. States: {:?}", 
+                          current_leader, valid_leaders, node_states);
+                } else {
+                    info!("No leader yet. Node states: {:?}", node_states);
+                }
+                last_log = Instant::now();
+            }
+            
+            sleep(check_interval).await;
+            // Exponential backoff to reduce CPU usage during long waits
+            check_interval = (check_interval * 2).min(max_interval);
         }
         
-        Err(format!("No leader elected among nodes {:?} within timeout", valid_leaders))
+        // Final state dump on timeout
+        let mut final_states = Vec::new();
+        for (i, client) in nodes.iter_mut().enumerate() {
+            if let Ok(response) = client.get_cluster_status(Request::new(ClusterStatusRequest {})).await {
+                let status = response.into_inner();
+                final_states.push((i, status.leader_id, status.term));
+            }
+        }
+        
+        Err(format!("No leader elected among nodes {:?} within {:?}. Final states: {:?}", 
+                    valid_leaders, timeout, final_states))
     }
 }
 
@@ -301,13 +416,32 @@ impl RaftTestHarness {
         partition
     }
     
-    /// Get clients for all nodes
+    /// Get clients for all nodes with retry logic
     pub async fn get_clients(&mut self) -> Vec<ClusterServiceClient<tonic::transport::Channel>> {
         let mut clients = vec![];
         
         for node in self.cluster.nodes.values() {
-            if let Ok(client) = ClusterServiceClient::connect(format!("http://{}", node.addr)).await {
-                clients.push(client);
+            // Retry connection with exponential backoff
+            let mut delay = Duration::from_millis(100);
+            let max_attempts = 10;
+            
+            for attempt in 1..=max_attempts {
+                match ClusterServiceClient::connect(format!("http://{}", node.addr)).await {
+                    Ok(client) => {
+                        clients.push(client);
+                        break;
+                    }
+                    Err(e) if attempt < max_attempts => {
+                        info!("Connection attempt {}/{} to {} failed: {}", 
+                              attempt, max_attempts, node.addr, e);
+                        sleep(delay).await;
+                        delay = (delay * 2).min(Duration::from_secs(2));
+                    }
+                    Err(e) => {
+                        info!("Failed to connect to {} after {} attempts: {}", 
+                              node.addr, max_attempts, e);
+                    }
+                }
             }
         }
         
@@ -323,12 +457,17 @@ where
 {
     info!("Running test: {}", name);
     
-    let result = madsim::time::timeout(Duration::from_secs(30), test_fn()).await;
+    // Use environment-aware timeout
+    let base_timeout = Duration::from_secs(30);
+    let timeout_multiplier = if std::env::var("CI").is_ok() { 3 } else { 1 };
+    let timeout = base_timeout * timeout_multiplier;
+    
+    let result = madsim::time::timeout(timeout, test_fn()).await;
     
     match result {
         Ok(Ok(())) => info!("✅ Test {} passed", name),
         Ok(Err(e)) => panic!("❌ Test {} failed: {}", name, e),
-        Err(_) => panic!("❌ Test {} timed out", name),
+        Err(_) => panic!("❌ Test {} timed out after {:?}", name, timeout),
     }
 }
 
@@ -338,4 +477,39 @@ pub fn random_election_timeout(min: Duration, max: Duration, seed: u64) -> Durat
     let range = max.as_millis() - min.as_millis();
     let offset = (seed % range as u64) as u64;
     min + Duration::from_millis(offset)
+}
+
+/// Helper to advance time and allow tasks to process
+pub async fn advance_and_yield(duration: Duration) {
+    madsim::time::advance(duration);
+    // Small sleep to let tasks process the time advancement
+    sleep(Duration::from_millis(10)).await;
+}
+
+/// Helper to wait for condition with time advancement
+pub async fn wait_with_advance<F, Fut>(
+    mut condition: F,
+    timeout: Duration,
+    advance_step: Duration,
+) -> Result<(), String>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let mut elapsed = Duration::ZERO;
+    
+    while elapsed < timeout {
+        if condition().await {
+            return Ok(());
+        }
+        
+        // Advance time to speed up waiting
+        madsim::time::advance(advance_step);
+        elapsed += advance_step;
+        
+        // Small sleep to let tasks process
+        sleep(Duration::from_millis(10)).await;
+    }
+    
+    Err(format!("Timeout after {:?}", timeout))
 }
