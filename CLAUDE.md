@@ -162,6 +162,98 @@ cargo run -- vm list
 - Type-safe configuration and state management
 - Clean separation between CLI, library, and protocol layers
 
+### Debugging Distributed Systems Issues
+
+When debugging complex distributed systems issues (especially Raft/consensus problems), follow this systematic approach:
+
+1. **Start with Official Documentation**
+   - Check the library's official docs first (e.g., https://docs.rs/raft/latest/raft/)
+   - Review canonical examples from the library repository
+   - Look for similar issues in the library's GitHub issues
+
+2. **Create a Debugging Document**
+   - Create a `*_DEBUG.md` file to track the investigation
+   - Document each hypothesis and test result
+   - Include relevant log outputs and error messages
+   - Add external references and documentation links
+
+3. **Systematic Investigation**
+   - Start with the simplest test case (e.g., single node before multi-node)
+   - Add extensive logging at key points
+   - Check assumptions about library behavior
+   - Compare your implementation with working examples
+
+4. **Common Raft Debugging Patterns**
+   - Verify initial configuration and bootstrap process
+   - Check ready state processing loops
+   - Ensure proper handling of committed vs applied indices
+   - Verify message serialization/deserialization
+   - Check for timing issues in single-node vs multi-node scenarios
+
+5. **Document Failed Attempts**
+   - Keep track of what doesn't work and why
+   - This prevents repeating the same attempts
+   - Helps identify patterns in the failures
+
+### Enhanced Todo Usage for Complex Tasks
+
+When working on complex debugging or multi-step implementation:
+
+1. **Create Hypothesis-Based Todos**
+   - Each todo should represent a testable hypothesis
+   - Include expected outcome in the todo description
+   - Example: "Check if Raft entries are committed in single-node - expect commit index > 0"
+
+2. **Track Investigation Results**
+   - Update todo descriptions with findings
+   - Mark as completed even if hypothesis was wrong
+   - Create follow-up todos based on results
+
+3. **Maintain Context Across Sessions**
+   - Use todos to record current understanding
+   - Include references to relevant files/lines
+   - Note which approaches have been tried
+
+4. **Example Debugging Todo Structure**
+   ```
+   - [ ] Review library examples for single-node bootstrap pattern
+   - [ ] Test if adding empty proposal after bootstrap helps
+   - [ ] Check if applied index needs different initialization
+   - [ ] Compare our ready loop with canonical example
+   ```
+
+### Test-Driven Debugging
+
+When debugging issues, use tests to guide your investigation:
+
+1. **Start with Minimal Reproduction**
+   - Create the smallest possible test that reproduces the issue
+   - Test single components before testing integration
+   - Use `--nocapture` to see all output during test runs
+
+2. **Interpret Test Output Systematically**
+   - Look for patterns in test failures
+   - Use grep/rg to filter relevant log lines
+   - Pay attention to timing and ordering of events
+   - Save test outputs for comparison across attempts
+
+3. **Create Focused Test Cases**
+   - Write specific tests for each hypothesis
+   - Use property-based tests to find edge cases
+   - Add logging/tracing to existing tests rather than only adding new tests
+
+4. **Test Output as Investigation Guide**
+   ```bash
+   # Example: Filter and analyze test output
+   cargo test test_name --features test-helpers -- --nocapture 2>&1 | grep -E "pattern1|pattern2" | tail -50
+   
+   # Save outputs for comparison
+   cargo test > output1.log 2>&1
+   # Make changes
+   cargo test > output2.log 2>&1
+   diff output1.log output2.log
+   ```
+
 ### Dependencies Available
 The project includes dependencies for:
 - **Distributed Systems**: tokio, async-trait, futures
@@ -212,6 +304,31 @@ Based on the current foundation, the following areas need implementation:
 - Alter the CLI structure without discussion
 - Commit secrets or configuration files with sensitive data
 
+### External Reference Usage
+
+When working with external libraries and debugging issues:
+
+1. **Consult Documentation Early**
+   - Check official docs before implementing features
+   - Review library examples before writing code
+   - Look for migration guides when updating dependencies
+
+2. **Reference Canonical Implementations**
+   - Study how the library authors use their own code
+   - Check test files in the library repository
+   - Look for production usage in well-known projects
+
+3. **Include References in Code and Docs**
+   - Add links to relevant documentation in comments
+   - Include example references in debugging documents
+   - Link to specific versions to avoid confusion with API changes
+
+4. **Common External References for This Project**
+   - Raft: https://docs.rs/raft/latest/raft/
+   - Raft Examples: https://github.com/tikv/raft-rs/tree/master/examples
+   - Tonic/gRPC: https://docs.rs/tonic/
+   - MadSim: https://docs.rs/madsim/latest/madsim/
+
 ### Error Handling Pattern
 ```rust
 use crate::error::{BlixardError, BlixardResult};
@@ -223,3 +340,42 @@ fn example_operation() -> BlixardResult<String> {
     })
 }
 ```
+
+### Commit Messages for Debugging Work
+
+When committing debugging efforts that don't result in a complete fix:
+
+1. **Structure for Investigation Commits**
+   ```
+   debug(component): investigate issue description
+   
+   - What was tried
+   - What was discovered
+   - What didn't work and why
+   - Next steps to try
+   
+   Created ISSUE_DEBUG.md to track investigation
+   References: [relevant docs/issues]
+   ```
+
+2. **Document Partial Progress**
+   - Use `debug:` or `wip:` prefix for investigation commits
+   - Always reference the debugging document created
+   - Include external references consulted
+
+3. **Example Debugging Commit**
+   ```
+   debug(raft): investigate cluster formation timeout
+   
+   Attempted fixes:
+   - Fixed protobuf serialization for Raft messages
+   - Added timeout handling for conf changes
+   - Enhanced ready state processing
+   
+   Findings:
+   - Entries are committed (index advances) but not in committed_entries()
+   - Appears related to applied index tracking
+   
+   See CLUSTER_FORMATION_DEBUG.md for full investigation
+   Refs: https://docs.rs/raft/latest/raft/
+   ```
