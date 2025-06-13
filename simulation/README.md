@@ -17,12 +17,8 @@ This simulation workspace is currently a separate crate from the main Blixard pr
 ### Working Tests
 - ✅ `grpc_integration_tests` - Basic gRPC service testing with madsim
 - ✅ `grpc_mock_consensus_tests` - Mock consensus testing for gRPC integration
-- ✅ `raft_simple_demo` - Demonstrates real Raft crate usage in MadSim
-- ✅ `raft_comprehensive_tests` - Mock Raft implementation with fixed Send trait issues
-- ✅ `raft_real_consensus_tests` - Real Raft implementation using the `raft` crate
-- ✅ `raft_property_tests` - Property-based testing for Raft invariants
-- ✅ `raft_leader_election_test` - Focused leader election testing
-- ✅ `test_util` - Shared utilities for Raft testing
+- ✅ `raft_comprehensive_tests` - Enhanced mock Raft with log replication and comprehensive test scenarios
+- ✅ `test_util` - Shared utilities for Raft testing including consensus verification
 
 ## Running Tests
 
@@ -63,9 +59,14 @@ cargo test raft -- --nocapture
 
 - `grpc_integration_tests.rs` - Basic gRPC service integration tests
 - `grpc_mock_consensus_tests.rs` - Mock consensus behavior for testing gRPC flows
-- `raft_consensus_tests.rs` - Real Raft consensus implementation tests
-- `raft_simple_demo.rs` - Simple demonstrations of real Raft crate usage
+- `raft_comprehensive_tests.rs` - Comprehensive Raft consensus tests with mock implementation including:
+  - Leader election (basic, with partitions, failover)
+  - Log replication (basic, with failures)
+  - Split-vote scenarios
+  - Stale leader rejoin
+  - Rapid leader changes
 - `integration_test.rs` - Basic MadSim functionality tests
+- `test_util.rs` - Shared test utilities for consensus verification and timing
 
 ## How It Works
 
