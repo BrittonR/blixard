@@ -530,6 +530,17 @@ impl RaftManager {
     async fn tick(&self) -> BlixardResult<()> {
         let mut node = self.raft_node.write().await;
         node.tick();
+        
+        // After tick, check if there are any messages to send (e.g., heartbeats)
+        let msgs = node.raft.msgs.drain(..).collect::<Vec<_>>();
+        drop(node); // Release the lock before sending messages
+        
+        if !msgs.is_empty() {
+            for msg in msgs {
+                self.send_raft_message(msg).await?;
+            }
+        }
+        
         Ok(())
     }
 
@@ -558,14 +569,68 @@ impl RaftManager {
         Ok(())
     }
 
-    async fn handle_raft_message(&self, _from: u64, msg: raft::prelude::Message) -> BlixardResult<()> {
-        info!(self.logger, "[RAFT-MSG] Received message"; "from" => _from, "to" => msg.to, "type" => ?msg.msg_type());
+    async fn handle_raft_message(&self, from: u64, msg: raft::prelude::Message) -> BlixardResult<()> {
+        info!(self.logger, "[RAFT-MSG] Received message"; "from" => from, "to" => msg.to, "type" => ?msg.msg_type());
+        
+        // Log AppendEntries responses in detail
+        if msg.msg_type() == raft::prelude::MessageType::MsgAppendResponse {
+            info!(self.logger, "[RAFT-MSG] Received MsgAppendResponse";
+                "from" => msg.from,
+                "to" => msg.to,
+                "index" => msg.index,
+                "reject" => msg.reject,
+                "reject_hint" => msg.reject_hint,
+                "log_term" => msg.log_term
+            );
+        }
+        
+        // Ensure we know about the sender for all messages, not just MsgAppend
+        // This is critical for bidirectional communication
+        if let Some(shared) = self.shared_state.upgrade() {
+            // For any message from a peer we don't know about, try to get their info
+            let mut peers = self.peers.write().await;
+            if !peers.contains_key(&from) {
+                if let Some(peer_info) = shared.get_peer(from).await {
+                    peers.insert(from, peer_info.address.clone());
+                    info!(self.logger, "[RAFT-MSG] Added sender {} at {} to peer list from incoming {:?} message", 
+                        from, peer_info.address, msg.msg_type());
+                    
+                    // Also ensure we have a connection to this peer
+                    if let Some(peer_connector) = shared.get_peer_connector().await {
+                        let peer_info_clone = peer_info.clone();
+                        let connector = peer_connector.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = connector.connect_to_peer(&peer_info_clone).await {
+                                tracing::warn!("[RAFT-MSG] Failed to connect to message sender {}: {}", from, e);
+                            }
+                        });
+                    }
+                }
+            }
+        }
+        
         let mut node = self.raft_node.write().await;
         node.step(msg)
             .map_err(|e| BlixardError::Raft {
                 operation: "step message".to_string(),
                 source: Box::new(e),
             })?;
+        
+        // After stepping a message, check if there are any response messages to send
+        // Some messages (like MsgAppendResponse) may be generated immediately but don't
+        // trigger has_ready(), so we need to check and send them right away
+        let msgs = node.raft.msgs.drain(..).collect::<Vec<_>>();
+        drop(node); // Release the lock before sending messages
+        
+        if !msgs.is_empty() {
+            info!(self.logger, "[RAFT-MSG] Found {} messages after step", msgs.len());
+            for msg in msgs {
+                info!(self.logger, "[RAFT-MSG] Sending response after step"; 
+                    "from" => msg.from, "to" => msg.to, "type" => ?msg.msg_type());
+                self.send_raft_message(msg).await?;
+            }
+        }
+        
         Ok(())
     }
     
@@ -668,8 +733,23 @@ impl RaftManager {
                     
                     // Also update SharedNodeState peers
                     if let Some(shared) = self.shared_state.upgrade() {
-                        let _ = shared.add_peer(conf_change.node_id, address).await;
+                        let _ = shared.add_peer(conf_change.node_id, address.clone()).await;
                         info!(self.logger, "[RAFT-CONF] Added peer to SharedNodeState"; "node_id" => conf_change.node_id);
+                        
+                        // Proactively connect to the new peer
+                        if let Some(peer_connector) = shared.get_peer_connector().await {
+                            if let Some(peer_info) = shared.get_peer(conf_change.node_id).await {
+                                let connector = peer_connector.clone();
+                                let peer_info_clone = peer_info.clone();
+                                tokio::spawn(async move {
+                                    tracing::info!("[RAFT-CONF] Proactively connecting to new peer {} at {}", 
+                                        peer_info_clone.id, peer_info_clone.address);
+                                    if let Err(e) = connector.connect_to_peer(&peer_info_clone).await {
+                                        tracing::warn!("[RAFT-CONF] Failed to connect to new peer: {}", e);
+                                    }
+                                });
+                            }
+                        }
                     }
                     
                     // Set flag to trigger replication after adding node
@@ -702,7 +782,10 @@ impl RaftManager {
 
     async fn on_ready(&self) -> BlixardResult<bool> {
         let mut node = self.raft_node.write().await;
+        
+        // Check if there's a ready state to process
         if !node.has_ready() {
+            // No ready state - messages are now handled immediately after step()
             return Ok(false);
         }
         
@@ -762,6 +845,17 @@ impl RaftManager {
         if !ready.messages().is_empty() {
             info!(self.logger, "[RAFT-READY] Sending {} messages", ready.messages().len());
             for msg in ready.take_messages() {
+                // Add more detailed logging for AppendEntries
+                if msg.msg_type() == raft::prelude::MessageType::MsgAppend {
+                    info!(self.logger, "[RAFT-MSG] Sending MsgAppend";
+                        "to" => msg.to,
+                        "from" => msg.from,
+                        "index" => msg.index,
+                        "log_term" => msg.log_term,
+                        "entries_count" => msg.entries.len(),
+                        "commit" => msg.commit
+                    );
+                }
                 self.send_raft_message(msg).await?;
             }
         }
@@ -828,8 +922,23 @@ impl RaftManager {
                                             
                                             // Also update SharedNodeState peers
                                             if let Some(shared) = self.shared_state.upgrade() {
-                                                let _ = shared.add_peer(cc.node_id, address).await;
+                                                let _ = shared.add_peer(cc.node_id, address.clone()).await;
                                                 info!(self.logger, "[RAFT-CONF] Added peer to SharedNodeState"; "node_id" => cc.node_id);
+                                                
+                                                // Proactively connect to the new peer
+                                                if let Some(peer_connector) = shared.get_peer_connector().await {
+                                                    if let Some(peer_info) = shared.get_peer(cc.node_id).await {
+                                                        let connector = peer_connector.clone();
+                                                        let peer_info_clone = peer_info.clone();
+                                                        tokio::spawn(async move {
+                                                            tracing::info!("[RAFT-CONF] Proactively connecting to new peer {} at {}", 
+                                                                peer_info_clone.id, peer_info_clone.address);
+                                                            if let Err(e) = connector.connect_to_peer(&peer_info_clone).await {
+                                                                tracing::warn!("[RAFT-CONF] Failed to connect to new peer: {}", e);
+                                                            }
+                                                        });
+                                                    }
+                                                }
                                             }
                                         }
                                     }

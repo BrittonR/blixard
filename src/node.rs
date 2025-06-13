@@ -113,6 +113,9 @@ impl Node {
         // Create peer connector
         let peer_connector = Arc::new(PeerConnector::new(self.shared.clone()));
         
+        // Store peer connector in shared state
+        self.shared.set_peer_connector(peer_connector.clone()).await;
+        
         // Start peer connection maintenance
         peer_connector.clone().start_connection_maintenance();
         
@@ -135,9 +138,15 @@ impl Node {
         self.raft_handle = Some(raft_handle);
         
         // If we have a join address, send join request after initialization
-        if self.shared.config.join_addr.is_some() {
+        if let Some(join_addr) = self.shared.config.join_addr.clone() {
             // Give the Raft manager a moment to start
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            
+            // Pre-connect to the join address to ensure bidirectional connectivity
+            if let Some(peer) = self.shared.get_peer(1).await {
+                let _ = peer_connector.connect_to_peer(&peer).await;
+                tracing::info!("Pre-connected to leader at {} before sending join request", join_addr);
+            }
             
             if let Err(e) = self.send_join_request().await {
                 tracing::error!("Failed to join cluster: {}", e);

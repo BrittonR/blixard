@@ -111,15 +111,30 @@ impl ClusterService for BlixardGrpcService {
             }));
         }
         
-        // Add peer to local tracking
+        // Add peer to local tracking BEFORE proposing to Raft
+        // This ensures the peer info is available for message routing
         match self.node.add_peer(req.node_id, req.bind_address.clone()).await {
-            Ok(_) => {},
+            Ok(_) => {
+                tracing::info!("[JOIN] Added peer {} at {} to local tracking", req.node_id, req.bind_address);
+            },
             Err(e) => {
                 return Ok(Response::new(JoinResponse {
                     success: false,
                     message: format!("Failed to add peer: {}", e),
                     peers: vec![],
                 }));
+            }
+        }
+        
+        // Establish bidirectional connection before Raft operations
+        // This ensures responses can be routed back
+        if let Some(peer_connector) = self.node.get_peer_connector().await {
+            if let Some(peer_info) = self.node.get_peer(req.node_id).await {
+                tracing::info!("[JOIN] Pre-connecting to new node {} at {}", req.node_id, req.bind_address);
+                if let Err(e) = peer_connector.connect_to_peer(&peer_info).await {
+                    tracing::warn!("[JOIN] Failed to pre-connect to new node: {}", e);
+                    // Don't fail the join - connection will be retried
+                }
             }
         }
         

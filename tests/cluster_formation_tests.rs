@@ -153,6 +153,64 @@ async fn test_two_node_cluster_formation() {
 }
 
 #[tokio::test]
+async fn test_three_node_cluster_formation() {
+    // Start first node
+    let node1 = TestNode::start(1, 17010).await.unwrap();
+    let addr1 = node1.addr;
+    
+    // Start second node with join_addr pointing to first node
+    let node2 = TestNode::start_with_join(2, 17011, Some(addr1)).await.unwrap();
+    let addr2 = node2.addr;
+    
+    // Create clients
+    let mut client1 = create_client(addr1).await;
+    let mut client2 = create_client(addr2).await;
+    
+    // Wait for 2-node cluster to stabilize first
+    wait_for_cluster_convergence(
+        vec![client1.clone(), client2.clone()],
+        2,
+        Duration::from_secs(10),
+    )
+    .await
+    .expect("Cluster failed to converge to 2 nodes");
+    
+    // Now add third node
+    let node3 = TestNode::start_with_join(3, 17012, Some(addr1)).await.unwrap();
+    let addr3 = node3.addr;
+    let mut client3 = create_client(addr3).await;
+    
+    // Wait for 3-node cluster to stabilize
+    wait_for_cluster_convergence(
+        vec![client1.clone(), client2.clone(), client3.clone()],
+        3,
+        Duration::from_secs(10),
+    )
+    .await
+    .expect("Cluster failed to converge to 3 nodes");
+    
+    // Verify all nodes see 3 members
+    let status1 = client1.get_cluster_status(ClusterStatusRequest {}).await.unwrap().into_inner();
+    let status2 = client2.get_cluster_status(ClusterStatusRequest {}).await.unwrap().into_inner();
+    let status3 = client3.get_cluster_status(ClusterStatusRequest {}).await.unwrap().into_inner();
+    
+    assert_eq!(status1.nodes.len(), 3);
+    assert_eq!(status2.nodes.len(), 3);
+    assert_eq!(status3.nodes.len(), 3);
+    
+    // Check that node IDs are correct
+    let node_ids: Vec<u64> = status1.nodes.iter().map(|n| n.id).collect();
+    assert!(node_ids.contains(&1));
+    assert!(node_ids.contains(&2));
+    assert!(node_ids.contains(&3));
+    
+    // Cleanup
+    node1.shutdown().await;
+    node2.shutdown().await;
+    node3.shutdown().await;
+}
+
+#[tokio::test]
 async fn test_node_leave_cluster() {
     // Start first node
     let node1 = TestNode::start(1, 17004).await.unwrap();

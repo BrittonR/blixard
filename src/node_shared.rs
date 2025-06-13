@@ -49,6 +49,9 @@ pub struct SharedNodeState {
     
     // Peer management
     peers: RwLock<HashMap<u64, PeerInfo>>,
+    
+    // Peer connector for managing connections
+    peer_connector: RwLock<Option<Arc<crate::peer_connector::PeerConnector>>>,
 }
 
 /// Thread-safe wrapper for VM manager operations
@@ -77,6 +80,7 @@ impl SharedNodeState {
                 state: "follower".to_string(),
             }),
             peers: RwLock::new(HashMap::new()),
+            peer_connector: RwLock::new(None),
         }
     }
     
@@ -137,6 +141,16 @@ impl SharedNodeState {
     /// Get database
     pub async fn get_database(&self) -> Option<Arc<Database>> {
         self.database.read().await.clone()
+    }
+    
+    /// Set the peer connector
+    pub async fn set_peer_connector(&self, connector: Arc<crate::peer_connector::PeerConnector>) {
+        *self.peer_connector.write().await = Some(connector);
+    }
+    
+    /// Get the peer connector
+    pub async fn get_peer_connector(&self) -> Option<Arc<crate::peer_connector::PeerConnector>> {
+        self.peer_connector.read().await.clone()
     }
     
     /// Send a raft proposal
