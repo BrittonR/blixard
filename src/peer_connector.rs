@@ -83,6 +83,8 @@ impl PeerConnector {
     pub async fn send_raft_message(&self, to: u64, message: raft::prelude::Message) -> BlixardResult<()> {
         use crate::proto::RaftMessageRequest;
         
+        tracing::debug!("[PEER-CONN] Sending Raft message to node {}, type: {:?}", to, message.msg_type());
+        
         // Serialize the message
         let raft_data = crate::raft_codec::serialize_message(&message)?;
         
@@ -111,7 +113,9 @@ impl PeerConnector {
             }
         } else {
             // Try to reconnect
+            tracing::info!("[PEER-CONN] No connection to node {}, attempting to connect", to);
             if let Some(peer) = self.node.get_peer(to).await {
+                tracing::info!("[PEER-CONN] Found peer info for node {}: {}", to, peer.address);
                 self.connect_to_peer(&peer).await?;
                 
                 // Retry sending

@@ -68,10 +68,10 @@ impl TestNode {
         // Give server time to start
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         
-        // Send join request if we have a join_addr
-        if join_addr.is_some() {
-            node.send_join_request().await?;
-        }
+        // Don't automatically send join request - let the test control this
+        // if join_addr.is_some() {
+        //     node.send_join_request().await?;
+        // }
         
         Ok(TestNode {
             node,

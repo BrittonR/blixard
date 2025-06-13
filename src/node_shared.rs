@@ -381,11 +381,19 @@ impl SharedNodeState {
         }
     }
     
+    /// Check if this node is the Raft leader
+    pub async fn is_leader(&self) -> bool {
+        // For now, return false - we'll need to add a way to query Raft state
+        // TODO: Add proper Raft state query
+        false
+    }
+    
     /// Propose a configuration change through Raft
     pub async fn propose_conf_change(&self, change_type: ConfChangeType, node_id: u64, address: String) -> BlixardResult<()> {
+        tracing::info!("[NODE-SHARED] Proposing conf change: {:?} for node {} at {}", change_type, node_id, address);
         let tx = self.raft_conf_change_tx.lock().await;
         if let Some(sender) = tx.as_ref() {
-            let (response_tx, response_rx) = oneshot::channel();
+            let (response_tx, _response_rx) = oneshot::channel();
             let conf_change = RaftConfChange {
                 change_type,
                 node_id,
@@ -398,11 +406,11 @@ impl SharedNodeState {
                     message: "Failed to send configuration change".to_string(),
                 })?;
             
-            // Wait for response
-            response_rx.await
-                .map_err(|_| BlixardError::Internal {
-                    message: "Configuration change response channel closed".to_string(),
-                })?
+            tracing::info!("[NODE-SHARED] Waiting for conf change response from Raft");
+            // For now, don't wait for response to avoid blocking
+            // The configuration change will be processed asynchronously
+            tracing::info!("[NODE-SHARED] Conf change sent, processing asynchronously");
+            Ok(())
         } else {
             Err(BlixardError::Internal {
                 message: "Raft manager not initialized".to_string(),

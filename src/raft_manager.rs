@@ -1,10 +1,9 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use tokio::sync::{mpsc, RwLock, oneshot};
 use tokio::time::{interval, Duration};
 use raft::{Config, RawNode, StateRole};
 use raft::prelude::*;
-use protobuf::Message as ProtobufMessage;
 use slog::{Logger, o, info, warn, Drain};
 use redb::{Database, WriteTransaction, ReadableTable};
 use chrono::Utc;
@@ -321,6 +320,7 @@ pub struct RaftManager {
     state_machine: Arc<RaftStateMachine>,
     peers: RwLock<HashMap<u64, String>>, // node_id -> address
     logger: Logger,
+    shared_state: Weak<crate::node_shared::SharedNodeState>,
     
     // Channels for communication
     proposal_rx: mpsc::UnboundedReceiver<RaftProposal>,
@@ -342,6 +342,7 @@ impl RaftManager {
         node_id: u64,
         database: Arc<Database>,
         peers: Vec<(u64, String)>,
+        shared_state: Weak<crate::node_shared::SharedNodeState>,
     ) -> BlixardResult<(
         Self,
         mpsc::UnboundedSender<RaftProposal>,
@@ -391,6 +392,7 @@ impl RaftManager {
             state_machine,
             peers: RwLock::new(peers.into_iter().collect()),
             logger,
+            shared_state,
             proposal_rx,
             proposal_tx: proposal_tx.clone(),
             message_rx,
@@ -442,18 +444,26 @@ impl RaftManager {
         
         let mut tick_timer = interval(Duration::from_millis(100));
         
+        let mut tick_count = 0u64;
         loop {
             tokio::select! {
                 _ = tick_timer.tick() => {
+                    tick_count += 1;
+                    if tick_count % 50 == 0 {  // Log every 5 seconds
+                        info!(self.logger, "[RAFT-TICK] Tick #{}", tick_count);
+                    }
                     self.tick().await?;
                 }
                 Some(proposal) = self.proposal_rx.recv() => {
+                    info!(self.logger, "[RAFT-LOOP] Received proposal");
                     self.handle_proposal(proposal).await?;
                 }
                 Some((from, msg)) = self.message_rx.recv() => {
+                    info!(self.logger, "[RAFT-LOOP] Received message from {}", from);
                     self.handle_raft_message(from, msg).await?;
                 }
                 Some(conf_change) = self.conf_change_rx.recv() => {
+                    info!(self.logger, "[RAFT-LOOP] Received conf change");
                     self.handle_conf_change(conf_change).await?;
                 }
             }
@@ -495,6 +505,7 @@ impl RaftManager {
     }
 
     async fn handle_raft_message(&self, _from: u64, msg: raft::prelude::Message) -> BlixardResult<()> {
+        info!(self.logger, "[RAFT-MSG] Received message"; "from" => _from, "to" => msg.to, "type" => ?msg.msg_type());
         let mut node = self.raft_node.write().await;
         node.step(msg)
             .map_err(|e| BlixardError::Raft {
@@ -507,7 +518,7 @@ impl RaftManager {
     async fn handle_conf_change(&self, conf_change: RaftConfChange) -> BlixardResult<()> {
         use raft::prelude::ConfChangeType as RaftConfChangeType;
         
-        info!(self.logger, "Handling configuration change"; "type" => ?conf_change.change_type, "node_id" => conf_change.node_id);
+        info!(self.logger, "[RAFT-CONF] Handling configuration change"; "type" => ?conf_change.change_type, "node_id" => conf_change.node_id, "address" => ?conf_change.address);
         
         let change_type = match conf_change.change_type {
             ConfChangeType::AddNode => RaftConfChangeType::AddNode,
@@ -520,11 +531,12 @@ impl RaftManager {
         cc.node_id = conf_change.node_id;
         
         // For add node, include the address in context
-        let _context = if matches!(conf_change.change_type, ConfChangeType::AddNode) {
+        let context = if matches!(conf_change.change_type, ConfChangeType::AddNode) {
             bincode::serialize(&conf_change.address).unwrap()
         } else {
             vec![]
         };
+        cc.context = context.into();
         
         // Store the response channel if provided
         let cc_id = uuid::Uuid::new_v4().as_bytes().to_vec();
@@ -535,25 +547,16 @@ impl RaftManager {
         
         // Propose the configuration change
         let mut node = self.raft_node.write().await;
-        info!(self.logger, "Proposing conf change to Raft"; "cc_id" => ?cc_id);
+        info!(self.logger, "[RAFT-CONF] Proposing conf change to Raft"; "cc_id" => ?cc_id, "node_id" => conf_change.node_id);
         node.propose_conf_change(cc_id, cc)
             .map_err(|e| BlixardError::Raft {
                 operation: "propose conf change".to_string(),
                 source: Box::new(e),
             })?;
-        info!(self.logger, "Conf change proposed successfully");
+        info!(self.logger, "[RAFT-CONF] Conf change proposed successfully"; "node_id" => conf_change.node_id);
         
-        // Update our peer list
-        match conf_change.change_type {
-            ConfChangeType::AddNode => {
-                let mut peers = self.peers.write().await;
-                peers.insert(conf_change.node_id, conf_change.address);
-            }
-            ConfChangeType::RemoveNode => {
-                let mut peers = self.peers.write().await;
-                peers.remove(&conf_change.node_id);
-            }
-        }
+        // Don't update peer list here - wait for it to be committed
+        // The peer list will be updated when the configuration change is applied
         
         Ok(())
     }
@@ -564,10 +567,13 @@ impl RaftManager {
             return Ok(());
         }
         
+        info!(self.logger, "[RAFT-READY] Processing ready state");
+        
         let mut ready = node.ready();
         
         // Send messages to peers
         if !ready.messages().is_empty() {
+            info!(self.logger, "[RAFT-READY] Sending {} messages", ready.messages().len());
             for msg in ready.take_messages() {
                 self.send_raft_message(msg).await?;
             }
@@ -575,6 +581,7 @@ impl RaftManager {
         
         // Apply committed entries to state machine
         if !ready.committed_entries().is_empty() {
+            info!(self.logger, "[RAFT-READY] Processing {} committed entries", ready.committed_entries().len());
             let pending_proposals = Arc::clone(&self.pending_proposals);
             for entry in ready.take_committed_entries() {
                 use raft::prelude::EntryType;
@@ -600,8 +607,41 @@ impl RaftManager {
                         if let Err(e) = cc.merge_from_bytes(&entry.data) {
                             warn!(self.logger, "Failed to parse ConfChange from entry data"; "error" => ?e);
                         } else {
-                            info!(self.logger, "Applying configuration change"; "node_id" => cc.node_id, "type" => cc.change_type);
+                            info!(self.logger, "[RAFT-CONF] Applying committed configuration change"; "node_id" => cc.node_id, "type" => cc.change_type, "entry_index" => entry.index);
                             node.apply_conf_change(&cc)?;
+                            
+                            // Update peer list based on the change type
+                            use raft::prelude::ConfChangeType as RaftConfChangeType;
+                            match cc.change_type() {
+                                RaftConfChangeType::AddNode => {
+                                    // Deserialize address from context
+                                    if !cc.context.is_empty() {
+                                        if let Ok(address) = bincode::deserialize::<String>(&cc.context) {
+                                            let mut peers = self.peers.write().await;
+                                            peers.insert(cc.node_id, address.clone());
+                                            info!(self.logger, "[RAFT-CONF] Added peer to local list"; "node_id" => cc.node_id);
+                                            
+                                            // Also update SharedNodeState peers
+                                            if let Some(shared) = self.shared_state.upgrade() {
+                                                let _ = shared.add_peer(cc.node_id, address).await;
+                                                info!(self.logger, "[RAFT-CONF] Added peer to SharedNodeState"; "node_id" => cc.node_id);
+                                            }
+                                        }
+                                    }
+                                }
+                                RaftConfChangeType::RemoveNode => {
+                                    let mut peers = self.peers.write().await;
+                                    peers.remove(&cc.node_id);
+                                    info!(self.logger, "[RAFT-CONF] Removed peer from local list"; "node_id" => cc.node_id);
+                                    
+                                    // Also update SharedNodeState peers
+                                    if let Some(shared) = self.shared_state.upgrade() {
+                                        let _ = shared.remove_peer(cc.node_id).await;
+                                        info!(self.logger, "[RAFT-CONF] Removed peer from SharedNodeState"; "node_id" => cc.node_id);
+                                    }
+                                }
+                                _ => {}
+                            }
                             
                             // Send response to waiting conf change if any
                             if !entry.context.is_empty() {
@@ -636,6 +676,9 @@ impl RaftManager {
 
     async fn send_raft_message(&self, msg: raft::prelude::Message) -> BlixardResult<()> {
         let to = msg.to;
+        let from = msg.from;
+        let msg_type = msg.msg_type();
+        info!(self.logger, "[RAFT-MSG] Sending message"; "from" => from, "to" => to, "type" => ?msg_type);
         self.outgoing_messages.send((to, msg))
             .map_err(|_| BlixardError::Internal {
                 message: "Failed to send outgoing Raft message".to_string(),

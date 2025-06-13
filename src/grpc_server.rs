@@ -123,15 +123,20 @@ impl ClusterService for BlixardGrpcService {
             }
         }
         
+        // Check if we're the leader
+        let is_leader = self.node.is_leader().await;
+        tracing::info!("[JOIN] Node {} is_leader: {}", self.node.get_id(), is_leader);
+        
         // Propose configuration change through Raft
-        tracing::info!("Proposing configuration change to add node {}", req.node_id);
+        tracing::info!("[JOIN] Proposing configuration change to add node {} at address {}", req.node_id, req.bind_address);
         match self.node.propose_conf_change(
             crate::raft_manager::ConfChangeType::AddNode,
             req.node_id,
             req.bind_address.clone()
         ).await {
             Ok(_) => {
-                tracing::info!("Configuration change proposed successfully for node {}", req.node_id);
+                // Note: The configuration change has been proposed, but not necessarily committed yet
+                tracing::info!("[JOIN] Configuration change proposed to Raft for node {}", req.node_id);
                 // Get current peers to return
                 let peers = self.node.get_peers().await;
                 let peer_infos: Vec<NodeInfo> = peers.into_iter()
@@ -197,6 +202,7 @@ impl ClusterService for BlixardGrpcService {
             .unwrap_or_default();
         
         // Propose configuration change through Raft
+        tracing::info!("[LEAVE] Proposing configuration change to remove node {}", req.node_id);
         match self.node.propose_conf_change(
             crate::raft_manager::ConfChangeType::RemoveNode,
             req.node_id,

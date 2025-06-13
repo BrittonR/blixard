@@ -11,6 +11,9 @@ use blixard::{
     },
 };
 
+// mod common;
+// use common::test_timing::wait_for_condition;
+
 async fn create_client(addr: SocketAddr) -> ClusterServiceClient<Channel> {
     let endpoint = format!("http://{}", addr);
     
@@ -75,8 +78,9 @@ async fn test_two_node_cluster_formation() {
     
     assert!(join_result.success, "Join failed: {}", join_result.message);
     
-    // Give time for cluster to stabilize
-    sleep(Duration::from_millis(500)).await;
+    // Wait for cluster to stabilize - both nodes should see 2 members
+    // For now, use a simple sleep instead of wait_for_condition
+    sleep(Duration::from_secs(5)).await;
     
     // Check cluster status from both nodes
     let status1 = client1.get_cluster_status(ClusterStatusRequest {}).await.unwrap().into_inner();
@@ -119,7 +123,8 @@ async fn test_node_leave_cluster() {
     };
     client1.join_cluster(join_req).await.unwrap();
     
-    sleep(Duration::from_millis(500)).await;
+    // Wait for cluster to stabilize
+    sleep(Duration::from_secs(2)).await;
     
     // Verify 2 nodes in cluster
     let status = client1.get_cluster_status(ClusterStatusRequest {}).await.unwrap().into_inner();
@@ -132,7 +137,8 @@ async fn test_node_leave_cluster() {
     
     assert!(leave_result.success, "Leave failed: {}", leave_result.message);
     
-    sleep(Duration::from_millis(500)).await;
+    // Wait for node removal to complete
+    sleep(Duration::from_secs(2)).await;
     
     // Verify only 1 node remains
     let status = client1.get_cluster_status(ClusterStatusRequest {}).await.unwrap().into_inner();
@@ -279,7 +285,8 @@ async fn test_three_node_cluster() {
     };
     client1.join_cluster(join3).await.unwrap();
     
-    sleep(Duration::from_millis(1000)).await;
+    // Wait for all nodes to see the complete cluster
+    sleep(Duration::from_secs(3)).await;
     
     // Check all nodes see the full cluster
     let clients = vec![

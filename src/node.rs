@@ -93,6 +93,7 @@ impl Node {
             node_id,
             db_arc.clone(),
             peers,
+            Arc::downgrade(&self.shared),
         )?;
         
         self.shared.set_raft_proposal_tx(proposal_tx).await;
@@ -368,6 +369,11 @@ impl Node {
     /// Check if the node is running
     pub async fn is_running(&self) -> bool {
         self.shared.is_running().await
+    }
+    
+    /// Check if this node is the Raft leader
+    pub async fn is_leader(&self) -> bool {
+        self.shared.is_leader().await
     }
     
     /// Send a Raft message to the Raft manager
