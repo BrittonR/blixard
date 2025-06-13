@@ -4,7 +4,8 @@ use tokio::sync::{mpsc, RwLock, oneshot};
 use tokio::time::{interval, Duration};
 use raft::{Config, RawNode, StateRole};
 use raft::prelude::*;
-use slog::{Logger, o, info, Drain};
+use protobuf::Message as ProtobufMessage;
+use slog::{Logger, o, info, warn, Drain};
 use redb::{Database, WriteTransaction, ReadableTable};
 use chrono::Utc;
 use serde::{Serialize, Deserialize};
@@ -21,7 +22,21 @@ pub enum RaftMessage {
     // Application-specific messages
     Propose(RaftProposal),
     // Configuration changes
-    ConfChange(ConfChange),
+    ConfChange(RaftConfChange),
+}
+
+#[derive(Debug)]
+pub struct RaftConfChange {
+    pub change_type: ConfChangeType,
+    pub node_id: u64,
+    pub address: String,
+    pub response_tx: Option<oneshot::Sender<BlixardResult<()>>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ConfChangeType {
+    AddNode,
+    RemoveNode,
 }
 
 #[derive(Debug)]
@@ -312,9 +327,14 @@ pub struct RaftManager {
     proposal_tx: mpsc::UnboundedSender<RaftProposal>,
     message_rx: mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>,
     _message_tx: mpsc::UnboundedSender<(u64, raft::prelude::Message)>,
+    conf_change_rx: mpsc::UnboundedReceiver<RaftConfChange>,
+    conf_change_tx: mpsc::UnboundedSender<RaftConfChange>,
     
     // Track pending proposals
     pending_proposals: Arc<RwLock<HashMap<Vec<u8>, oneshot::Sender<BlixardResult<()>>>>>,
+    
+    // Message sender callback - using channel instead of async closure
+    outgoing_messages: mpsc::UnboundedSender<(u64, raft::prelude::Message)>,
 }
 
 impl RaftManager {
@@ -322,7 +342,13 @@ impl RaftManager {
         node_id: u64,
         database: Arc<Database>,
         peers: Vec<(u64, String)>,
-    ) -> BlixardResult<(Self, mpsc::UnboundedSender<RaftProposal>, mpsc::UnboundedSender<(u64, raft::prelude::Message)>)> {
+    ) -> BlixardResult<(
+        Self,
+        mpsc::UnboundedSender<RaftProposal>,
+        mpsc::UnboundedSender<(u64, raft::prelude::Message)>,
+        mpsc::UnboundedSender<RaftConfChange>,
+        mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>
+    )> {
         // Create Raft configuration
         let cfg = Config {
             id: node_id,
@@ -356,6 +382,8 @@ impl RaftManager {
         // Create channels
         let (proposal_tx, proposal_rx) = mpsc::unbounded_channel();
         let (message_tx, message_rx) = mpsc::unbounded_channel();
+        let (conf_change_tx, conf_change_rx) = mpsc::unbounded_channel();
+        let (outgoing_tx, outgoing_rx) = mpsc::unbounded_channel();
 
         let manager = Self {
             node_id,
@@ -367,10 +395,13 @@ impl RaftManager {
             proposal_tx: proposal_tx.clone(),
             message_rx,
             _message_tx: message_tx.clone(),
+            conf_change_rx,
+            conf_change_tx: conf_change_tx.clone(),
             pending_proposals: Arc::new(RwLock::new(HashMap::new())),
+            outgoing_messages: outgoing_tx,
         };
 
-        Ok((manager, proposal_tx, message_tx))
+        Ok((manager, proposal_tx, message_tx, conf_change_tx, outgoing_rx))
     }
     
     /// Bootstrap a single-node cluster
@@ -403,6 +434,10 @@ impl RaftManager {
             // No peers, bootstrap as single node
             info!(self.logger, "No peers configured, bootstrapping as single-node cluster");
             self.bootstrap_single_node().await?;
+        } else {
+            // We have peers, don't bootstrap - wait to join existing cluster
+            let peer_ids: Vec<u64> = self.peers.read().await.keys().cloned().collect();
+            info!(self.logger, "Peers configured, waiting to join existing cluster"; "peers" => ?peer_ids);
         }
         
         let mut tick_timer = interval(Duration::from_millis(100));
@@ -417,6 +452,9 @@ impl RaftManager {
                 }
                 Some((from, msg)) = self.message_rx.recv() => {
                     self.handle_raft_message(from, msg).await?;
+                }
+                Some(conf_change) = self.conf_change_rx.recv() => {
+                    self.handle_conf_change(conf_change).await?;
                 }
             }
             
@@ -465,6 +503,60 @@ impl RaftManager {
             })?;
         Ok(())
     }
+    
+    async fn handle_conf_change(&self, conf_change: RaftConfChange) -> BlixardResult<()> {
+        use raft::prelude::ConfChangeType as RaftConfChangeType;
+        
+        info!(self.logger, "Handling configuration change"; "type" => ?conf_change.change_type, "node_id" => conf_change.node_id);
+        
+        let change_type = match conf_change.change_type {
+            ConfChangeType::AddNode => RaftConfChangeType::AddNode,
+            ConfChangeType::RemoveNode => RaftConfChangeType::RemoveNode,
+        };
+        
+        // Create Raft ConfChange
+        let mut cc = ConfChange::default();
+        cc.set_change_type(change_type);
+        cc.node_id = conf_change.node_id;
+        
+        // For add node, include the address in context
+        let _context = if matches!(conf_change.change_type, ConfChangeType::AddNode) {
+            bincode::serialize(&conf_change.address).unwrap()
+        } else {
+            vec![]
+        };
+        
+        // Store the response channel if provided
+        let cc_id = uuid::Uuid::new_v4().as_bytes().to_vec();
+        if let Some(response_tx) = conf_change.response_tx {
+            let mut pending = self.pending_proposals.write().await;
+            pending.insert(cc_id.clone(), response_tx);
+        }
+        
+        // Propose the configuration change
+        let mut node = self.raft_node.write().await;
+        info!(self.logger, "Proposing conf change to Raft"; "cc_id" => ?cc_id);
+        node.propose_conf_change(cc_id, cc)
+            .map_err(|e| BlixardError::Raft {
+                operation: "propose conf change".to_string(),
+                source: Box::new(e),
+            })?;
+        info!(self.logger, "Conf change proposed successfully");
+        
+        // Update our peer list
+        match conf_change.change_type {
+            ConfChangeType::AddNode => {
+                let mut peers = self.peers.write().await;
+                peers.insert(conf_change.node_id, conf_change.address);
+            }
+            ConfChangeType::RemoveNode => {
+                let mut peers = self.peers.write().await;
+                peers.remove(&conf_change.node_id);
+            }
+        }
+        
+        Ok(())
+    }
 
     async fn on_ready(&self) -> BlixardResult<()> {
         let mut node = self.raft_node.write().await;
@@ -485,14 +577,44 @@ impl RaftManager {
         if !ready.committed_entries().is_empty() {
             let pending_proposals = Arc::clone(&self.pending_proposals);
             for entry in ready.take_committed_entries() {
-                // Apply the entry to state machine
-                let result = self.state_machine.apply_entry(&entry).await;
+                use raft::prelude::EntryType;
                 
-                // Send response to waiting proposal if any
-                if !entry.context.is_empty() {
-                    let mut pending = pending_proposals.write().await;
-                    if let Some(response_tx) = pending.remove(&entry.context) {
-                        let _ = response_tx.send(result);
+                match entry.entry_type() {
+                    EntryType::EntryNormal => {
+                        // Apply normal entry to state machine
+                        let result = self.state_machine.apply_entry(&entry).await;
+                        
+                        // Send response to waiting proposal if any
+                        if !entry.context.is_empty() {
+                            let mut pending = pending_proposals.write().await;
+                            if let Some(response_tx) = pending.remove(&entry.context) {
+                                let _ = response_tx.send(result);
+                            }
+                        }
+                    }
+                    EntryType::EntryConfChange => {
+                        // Handle configuration change
+                        // The entry data contains the serialized ConfChange
+                        use protobuf::Message as ProtobufMessage;
+                        let mut cc = ConfChange::default();
+                        if let Err(e) = cc.merge_from_bytes(&entry.data) {
+                            warn!(self.logger, "Failed to parse ConfChange from entry data"; "error" => ?e);
+                        } else {
+                            info!(self.logger, "Applying configuration change"; "node_id" => cc.node_id, "type" => cc.change_type);
+                            node.apply_conf_change(&cc)?;
+                            
+                            // Send response to waiting conf change if any
+                            if !entry.context.is_empty() {
+                                let mut pending = pending_proposals.write().await;
+                                if let Some(response_tx) = pending.remove(&entry.context) {
+                                    let _ = response_tx.send(Ok(()));
+                                }
+                            }
+                        }
+                    }
+                    EntryType::EntryConfChangeV2 => {
+                        // We don't use V2 conf changes yet
+                        warn!(self.logger, "Received EntryConfChangeV2, not implemented");
                     }
                 }
             }
@@ -513,11 +635,11 @@ impl RaftManager {
     }
 
     async fn send_raft_message(&self, msg: raft::prelude::Message) -> BlixardResult<()> {
-        let peers = self.peers.read().await;
-        if let Some(_addr) = peers.get(&msg.to) {
-            // TODO: Send message via gRPC to peer
-            info!(self.logger, "Sending Raft message"; "to" => msg.to, "type" => ?msg.msg_type);
-        }
+        let to = msg.to;
+        self.outgoing_messages.send((to, msg))
+            .map_err(|_| BlixardError::Internal {
+                message: "Failed to send outgoing Raft message".to_string(),
+            })?;
         Ok(())
     }
 
@@ -552,6 +674,27 @@ impl RaftManager {
         rx.await
             .map_err(|_| BlixardError::Internal {
                 message: "Proposal response channel closed".to_string(),
+            })?
+    }
+    
+    pub async fn propose_conf_change(&self, change_type: ConfChangeType, node_id: u64, address: String) -> BlixardResult<()> {
+        let (tx, rx) = oneshot::channel();
+        let conf_change = RaftConfChange {
+            change_type,
+            node_id,
+            address,
+            response_tx: Some(tx),
+        };
+        
+        self.conf_change_tx.send(conf_change)
+            .map_err(|_| BlixardError::Internal {
+                message: "Failed to send conf change".to_string(),
+            })?;
+        
+        // Wait for response
+        rx.await
+            .map_err(|_| BlixardError::Internal {
+                message: "Conf change response channel closed".to_string(),
             })?
     }
 }

@@ -82,35 +82,189 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<JoinRequest>,
     ) -> Result<Response<JoinResponse>, Status> {
-        let _req = request.into_inner();
+        let req = request.into_inner();
+        tracing::info!("Received join request from node {} at {}", req.node_id, req.bind_address);
         
-        // TODO: Implement cluster join logic once Raft is ready
-        Err(Status::unimplemented("Cluster join not yet implemented"))
+        // Validate the request
+        if req.node_id == 0 {
+            return Ok(Response::new(JoinResponse {
+                success: false,
+                message: "Invalid node ID: must be non-zero".to_string(),
+                peers: vec![],
+            }));
+        }
+        
+        if req.bind_address.is_empty() {
+            return Ok(Response::new(JoinResponse {
+                success: false,
+                message: "Bind address cannot be empty".to_string(),
+                peers: vec![],
+            }));
+        }
+        
+        // Check if node already exists
+        if let Some(_) = self.node.get_peer(req.node_id).await {
+            return Ok(Response::new(JoinResponse {
+                success: false,
+                message: format!("Node {} already exists in cluster", req.node_id),
+                peers: vec![],
+            }));
+        }
+        
+        // Add peer to local tracking
+        match self.node.add_peer(req.node_id, req.bind_address.clone()).await {
+            Ok(_) => {},
+            Err(e) => {
+                return Ok(Response::new(JoinResponse {
+                    success: false,
+                    message: format!("Failed to add peer: {}", e),
+                    peers: vec![],
+                }));
+            }
+        }
+        
+        // Propose configuration change through Raft
+        tracing::info!("Proposing configuration change to add node {}", req.node_id);
+        match self.node.propose_conf_change(
+            crate::raft_manager::ConfChangeType::AddNode,
+            req.node_id,
+            req.bind_address.clone()
+        ).await {
+            Ok(_) => {
+                tracing::info!("Configuration change proposed successfully for node {}", req.node_id);
+                // Get current peers to return
+                let peers = self.node.get_peers().await;
+                let peer_infos: Vec<NodeInfo> = peers.into_iter()
+                    .map(|p| NodeInfo {
+                        id: p.id,
+                        address: p.address,
+                        state: NodeState::Follower.into(), // TODO: Get actual state
+                    })
+                    .collect();
+                
+                Ok(Response::new(JoinResponse {
+                    success: true,
+                    message: format!("Node {} successfully joined cluster", req.node_id),
+                    peers: peer_infos,
+                }))
+            }
+            Err(e) => {
+                // Remove peer on failure
+                let _ = self.node.remove_peer(req.node_id).await;
+                
+                Ok(Response::new(JoinResponse {
+                    success: false,
+                    message: format!("Failed to join cluster: {}", e),
+                    peers: vec![],
+                }))
+            }
+        }
     }
 
     async fn leave_cluster(
         &self,
         request: Request<LeaveRequest>,
     ) -> Result<Response<LeaveResponse>, Status> {
-        let _req = request.into_inner();
+        let req = request.into_inner();
         
-        // TODO: Implement cluster leave logic once Raft is ready
-        Err(Status::unimplemented("Cluster leave not yet implemented"))
+        // Validate the request
+        if req.node_id == 0 {
+            return Ok(Response::new(LeaveResponse {
+                success: false,
+                message: "Invalid node ID: must be non-zero".to_string(),
+            }));
+        }
+        
+        // Check if trying to remove self
+        if req.node_id == self.node.get_id() {
+            return Ok(Response::new(LeaveResponse {
+                success: false,
+                message: "Cannot remove self from cluster. Use shutdown instead.".to_string(),
+            }));
+        }
+        
+        // Check if node exists
+        if self.node.get_peer(req.node_id).await.is_none() {
+            return Ok(Response::new(LeaveResponse {
+                success: false,
+                message: format!("Node {} not found in cluster", req.node_id),
+            }));
+        }
+        
+        // Get peer address before removal
+        let peer_address = self.node.get_peer(req.node_id).await
+            .map(|p| p.address)
+            .unwrap_or_default();
+        
+        // Propose configuration change through Raft
+        match self.node.propose_conf_change(
+            crate::raft_manager::ConfChangeType::RemoveNode,
+            req.node_id,
+            peer_address
+        ).await {
+            Ok(_) => {
+                // Remove peer from local tracking
+                match self.node.remove_peer(req.node_id).await {
+                    Ok(_) => {
+                        Ok(Response::new(LeaveResponse {
+                            success: true,
+                            message: format!("Node {} successfully removed from cluster", req.node_id),
+                        }))
+                    }
+                    Err(e) => {
+                        Ok(Response::new(LeaveResponse {
+                            success: false,
+                            message: format!("Failed to remove peer from tracking: {}", e),
+                        }))
+                    }
+                }
+            }
+            Err(e) => {
+                Ok(Response::new(LeaveResponse {
+                    success: false,
+                    message: format!("Failed to remove node from cluster: {}", e),
+                }))
+            }
+        }
     }
 
     async fn get_cluster_status(
         &self,
         _request: Request<ClusterStatusRequest>,
     ) -> Result<Response<ClusterStatusResponse>, Status> {
-        // TODO: Get actual cluster status from Raft
+        // Get Raft status
+        let raft_status = self.node.get_raft_status().await
+            .map_err(|e| Self::error_to_status(e))?;
+        
+        // Get all peers
+        let peers = self.node.get_peers().await;
+        
+        // Build node list - include self and all peers
+        let mut nodes = vec![NodeInfo {
+            id: self.node.get_id(),
+            address: self.node.get_bind_addr().to_string(),
+            state: if raft_status.is_leader {
+                NodeState::Leader.into()
+            } else if raft_status.state == "candidate" {
+                NodeState::Candidate.into()
+            } else {
+                NodeState::Follower.into()
+            },
+        }];
+        
+        // Add peers
+        for peer in peers {
+            nodes.push(NodeInfo {
+                id: peer.id,
+                address: peer.address,
+                state: NodeState::Follower.into(), // TODO: Track actual peer states
+            });
+        }
+        
         let response = ClusterStatusResponse {
-            leader_id: 0,
-            nodes: vec![NodeInfo {
-                id: self.node.get_id(),
-                address: self.node.get_bind_addr().to_string(),
-                state: NodeState::Follower.into(),
-            }],
-            term: 0,
+            leader_id: raft_status.leader_id.unwrap_or(0),
+            nodes,
+            term: raft_status.term,
         };
 
         Ok(Response::new(response))

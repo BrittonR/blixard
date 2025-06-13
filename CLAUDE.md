@@ -23,8 +23,10 @@ Blixard is a distributed microVM orchestration platform being built in Rust. The
 - **gRPC Protocol** - Service definitions in `proto/blixard.proto`
 - **gRPC Server** - Basic implementation in `src/grpc_server.rs`
 - **Node Structure** - Node management and coordination in `src/node.rs`
+- **Node Shared State** - Thread-safe shared state with peer management in `src/node_shared.rs`
 - **Storage Layer** - Raft storage implementation in `src/storage.rs`
 - **VM Manager** - VM lifecycle and state management in `src/vm_manager.rs`
+- **Peer Connector** - Manages gRPC connections to cluster peers in `src/peer_connector.rs`
 
 ### Implementation Status
 Recent progress:
@@ -36,6 +38,9 @@ Recent progress:
 - ✅ Distributed storage (redb integrated)
 - ✅ Task scheduling with resource requirements
 - ✅ Worker management and health monitoring
+- ✅ Multi-node cluster formation (JoinCluster/LeaveCluster RPCs)
+- ✅ Peer management and dynamic configuration changes
+- ✅ Peer connection management with automatic reconnection
 - 🔧 VM lifecycle management (stubs only)
 
 ## Development Commands

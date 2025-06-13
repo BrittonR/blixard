@@ -8,6 +8,7 @@ use crate::types::{NodeConfig, VmCommand};
 use crate::vm_manager::VmManager;
 use crate::raft_manager::{RaftManager, RaftProposal, ProposalData};
 use crate::node_shared::SharedNodeState;
+use crate::peer_connector::PeerConnector;
 
 use redb::Database;
 
@@ -79,10 +80,16 @@ impl Node {
         self.shared.set_vm_manager(vm_manager, command_tx).await;
 
         // Initialize Raft manager
-        // TODO: Get peers from configuration or discovery
-        let peers = vec![]; // Start with no peers, they'll be added via join_cluster
+        // If join_addr is provided, don't bootstrap as single node
+        let peers = if let Some(join_addr) = &self.shared.config.join_addr {
+            // We're joining an existing cluster, add a dummy peer to prevent bootstrap
+            // The actual peer will be discovered during join
+            vec![(1, join_addr.to_string())] // Use node 1 as default leader
+        } else {
+            vec![] // Start with no peers, bootstrap as single node
+        };
         let node_id = self.shared.get_id();
-        let (raft_manager, proposal_tx, message_tx) = RaftManager::new(
+        let (raft_manager, proposal_tx, message_tx, conf_change_tx, outgoing_rx) = RaftManager::new(
             node_id,
             db_arc.clone(),
             peers,
@@ -90,6 +97,25 @@ impl Node {
         
         self.shared.set_raft_proposal_tx(proposal_tx).await;
         self.shared.set_raft_message_tx(message_tx).await;
+        self.shared.set_raft_conf_change_tx(conf_change_tx).await;
+        
+        // Create peer connector
+        let peer_connector = Arc::new(PeerConnector::new(self.shared.clone()));
+        
+        // Start peer connection maintenance
+        peer_connector.clone().start_connection_maintenance();
+        
+        // Start task to handle outgoing Raft messages
+        let peer_connector_clone = peer_connector.clone();
+        let _outgoing_handle = tokio::spawn(async move {
+            let mut outgoing_rx = outgoing_rx;
+            while let Some((to, msg)) = outgoing_rx.recv().await {
+                if let Err(e) = peer_connector_clone.send_raft_message(to, msg).await {
+                    tracing::warn!("Failed to send Raft message to {}: {}", to, e);
+                }
+            }
+            Ok::<(), BlixardError>(())
+        });
         
         // Start Raft manager in background
         let raft_handle = tokio::spawn(async move {
@@ -100,6 +126,63 @@ impl Node {
         Ok(())
     }
 
+
+    /// Send join request to a cluster
+    pub async fn send_join_request(&self) -> BlixardResult<()> {
+        if let Some(join_addr) = &self.shared.config.join_addr {
+            tracing::info!("Sending join request to {}", join_addr);
+            // Create gRPC client to join node
+            let endpoint = format!("http://{}", join_addr);
+            match tonic::transport::Channel::from_shared(endpoint.clone()) {
+                Ok(channel) => {
+                    match channel.connect().await {
+                        Ok(channel) => {
+                            let mut client = crate::proto::cluster_service_client::ClusterServiceClient::new(channel);
+                            let join_request = crate::proto::JoinRequest {
+                                node_id: self.shared.get_id(),
+                                bind_address: self.shared.get_bind_addr().to_string(),
+                            };
+                            
+                            match client.join_cluster(join_request).await {
+                                Ok(response) => {
+                                    let resp = response.into_inner();
+                                    if resp.success {
+                                        tracing::info!("Successfully joined cluster at {}", join_addr);
+                                        // Add peers from response
+                                        for peer in resp.peers {
+                                            if peer.id != self.shared.get_id() {
+                                                let _ = self.shared.add_peer(peer.id, peer.address).await;
+                                            }
+                                        }
+                                    } else {
+                                        return Err(BlixardError::ClusterJoin {
+                                            reason: resp.message,
+                                        });
+                                    }
+                                }
+                                Err(e) => {
+                                    return Err(BlixardError::ClusterJoin {
+                                        reason: format!("Failed to send join request: {}", e),
+                                    });
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            return Err(BlixardError::ClusterJoin {
+                                reason: format!("Failed to connect to join address {}: {}", join_addr, e),
+                            });
+                        }
+                    }
+                }
+                Err(e) => {
+                    return Err(BlixardError::ClusterJoin {
+                        reason: format!("Invalid join address {}: {}", join_addr, e),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
 
     /// Send a VM command for processing
     pub async fn send_vm_command(&self, command: VmCommand) -> BlixardResult<()> {

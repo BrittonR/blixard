@@ -7,6 +7,11 @@ pub mod raft_codec;
 pub mod raft_manager;
 pub mod storage;
 pub mod vm_manager;
+pub mod peer_connector;
+
+// Test helpers are exposed for integration tests
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod test_helpers;
 
 // Include the generated proto code
 #[cfg(not(madsim))]

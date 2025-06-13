@@ -1,11 +1,12 @@
 use std::sync::Arc;
+use std::collections::HashMap;
 use tokio::sync::{RwLock, Mutex, mpsc, oneshot};
 use redb::Database;
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::types::{NodeConfig, VmCommand, VmConfig, VmStatus};
 use crate::vm_manager::VmManager;
-use crate::raft_manager::{RaftProposal, TaskSpec, TaskResult};
+use crate::raft_manager::{RaftProposal, TaskSpec, TaskResult, RaftConfChange, ConfChangeType};
 
 /// Raft status information
 #[derive(Debug, Clone)]
@@ -15,6 +16,14 @@ pub struct RaftStatus {
     pub leader_id: Option<u64>,
     pub term: u64,
     pub state: String,
+}
+
+/// Peer information
+#[derive(Debug, Clone)]
+pub struct PeerInfo {
+    pub id: u64,
+    pub address: String,
+    pub is_connected: bool,
 }
 
 /// Shared node state that is Send + Sync
@@ -27,6 +36,7 @@ pub struct SharedNodeState {
     shutdown_tx: Mutex<Option<oneshot::Sender<()>>>,
     raft_proposal_tx: Mutex<Option<mpsc::UnboundedSender<RaftProposal>>>,
     raft_message_tx: Mutex<Option<mpsc::UnboundedSender<(u64, raft::prelude::Message)>>>,
+    raft_conf_change_tx: Mutex<Option<mpsc::UnboundedSender<RaftConfChange>>>,
     
     // VM manager wrapped for thread safety
     vm_manager: RwLock<Option<Arc<VmManagerShared>>>,
@@ -36,6 +46,9 @@ pub struct SharedNodeState {
     
     // Raft status
     raft_status: RwLock<RaftStatus>,
+    
+    // Peer management
+    peers: RwLock<HashMap<u64, PeerInfo>>,
 }
 
 /// Thread-safe wrapper for VM manager operations
@@ -53,6 +66,7 @@ impl SharedNodeState {
             shutdown_tx: Mutex::new(None),
             raft_proposal_tx: Mutex::new(None),
             raft_message_tx: Mutex::new(None),
+            raft_conf_change_tx: Mutex::new(None),
             vm_manager: RwLock::new(None),
             is_running: RwLock::new(false),
             raft_status: RwLock::new(RaftStatus {
@@ -62,6 +76,7 @@ impl SharedNodeState {
                 term: 0,
                 state: "follower".to_string(),
             }),
+            peers: RwLock::new(HashMap::new()),
         }
     }
     
@@ -83,6 +98,11 @@ impl SharedNodeState {
     /// Set the raft message sender
     pub async fn set_raft_message_tx(&self, tx: mpsc::UnboundedSender<(u64, raft::prelude::Message)>) {
         *self.raft_message_tx.lock().await = Some(tx);
+    }
+    
+    /// Set the raft conf change sender
+    pub async fn set_raft_conf_change_tx(&self, tx: mpsc::UnboundedSender<RaftConfChange>) {
+        *self.raft_conf_change_tx.lock().await = Some(tx);
     }
     
     /// Set the VM manager
@@ -312,6 +332,82 @@ impl SharedNodeState {
         status.leader_id = leader_id;
         status.term = term;
         status.state = state;
+    }
+    
+    /// Add a peer
+    pub async fn add_peer(&self, id: u64, address: String) -> BlixardResult<()> {
+        let mut peers = self.peers.write().await;
+        if peers.contains_key(&id) {
+            return Err(BlixardError::ClusterError(format!("Peer {} already exists", id)));
+        }
+        peers.insert(id, PeerInfo {
+            id,
+            address,
+            is_connected: false,
+        });
+        Ok(())
+    }
+    
+    /// Remove a peer
+    pub async fn remove_peer(&self, id: u64) -> BlixardResult<()> {
+        let mut peers = self.peers.write().await;
+        if !peers.contains_key(&id) {
+            return Err(BlixardError::ClusterError(format!("Peer {} not found", id)));
+        }
+        peers.remove(&id);
+        Ok(())
+    }
+    
+    /// Get all peers
+    pub async fn get_peers(&self) -> Vec<PeerInfo> {
+        let peers = self.peers.read().await;
+        peers.values().cloned().collect()
+    }
+    
+    /// Get a specific peer
+    pub async fn get_peer(&self, id: u64) -> Option<PeerInfo> {
+        let peers = self.peers.read().await;
+        peers.get(&id).cloned()
+    }
+    
+    /// Update peer connection status
+    pub async fn update_peer_connection(&self, id: u64, is_connected: bool) -> BlixardResult<()> {
+        let mut peers = self.peers.write().await;
+        if let Some(peer) = peers.get_mut(&id) {
+            peer.is_connected = is_connected;
+            Ok(())
+        } else {
+            Err(BlixardError::ClusterError(format!("Peer {} not found", id)))
+        }
+    }
+    
+    /// Propose a configuration change through Raft
+    pub async fn propose_conf_change(&self, change_type: ConfChangeType, node_id: u64, address: String) -> BlixardResult<()> {
+        let tx = self.raft_conf_change_tx.lock().await;
+        if let Some(sender) = tx.as_ref() {
+            let (response_tx, response_rx) = oneshot::channel();
+            let conf_change = RaftConfChange {
+                change_type,
+                node_id,
+                address,
+                response_tx: Some(response_tx),
+            };
+            
+            sender.send(conf_change)
+                .map_err(|_| BlixardError::Internal {
+                    message: "Failed to send configuration change".to_string(),
+                })?;
+            
+            // Wait for response
+            response_rx.await
+                .map_err(|_| BlixardError::Internal {
+                    message: "Configuration change response channel closed".to_string(),
+                })?
+        } else {
+            Err(BlixardError::Internal {
+                message: "Raft manager not initialized".to_string(),
+            })
+        }
     }
 }
 

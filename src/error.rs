@@ -26,6 +26,9 @@ pub enum BlixardError {
     #[error("Cluster error: {0}")]
     ClusterError(String),
     
+    #[error("Failed to join cluster: {reason}")]
+    ClusterJoin { reason: String },
+    
     #[error("Node error: {0}")]
     NodeError(String),
     
