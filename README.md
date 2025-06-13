@@ -4,12 +4,14 @@ A distributed microVM orchestration platform built in Rust, providing enterprise
 
 ## Features
 
-- **Raft Consensus**: Production-grade distributed consensus using tikv/raft-rs
+- **Raft Consensus**: Production-grade distributed consensus using tikv/raft-rs (✅ Implemented)
 - **MicroVM Integration**: Seamless integration with microvm.nix for lightweight virtualization
 - **Tailscale Discovery**: Automatic node discovery via Tailscale networking
-- **Persistent Storage**: Durable state management with redb
+- **Persistent Storage**: Durable state management with redb (✅ Implemented)
 - **Fault Tolerant**: Designed for high availability with automatic failover
 - **Deterministic Testing**: TigerBeetle/FoundationDB-style simulation testing for reproducible verification
+- **Task Scheduling**: Resource-aware task assignment with distributed state machine
+- **Worker Management**: Dynamic worker registration and health monitoring
 
 ## Architecture
 

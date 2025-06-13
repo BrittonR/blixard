@@ -6,7 +6,8 @@
 
 ### High Priority - Core Infrastructure
 - [ ] Create gRPC server implementation for BlixardService in `proto/blixard.proto`
-- [ ] Implement Raft consensus integration using raft crate with redb persistence
+- [ ] Implement multi-node cluster formation via gRPC
+- [ ] Add cluster membership management commands
 
 ### Medium Priority - VM Management
 - [ ] Implement VM lifecycle operations (create, start, stop, delete) via microvm.nix
@@ -51,6 +52,14 @@
 
 - [x] **Create gRPC server implementation for BlixardService**
   - ✅ Full gRPC service implementation in `src/grpc_server.rs`
+
+- [x] **Implement Raft consensus integration using raft crate with redb persistence**
+  - ✅ Complete storage trait implementation in src/storage.rs
+  - ✅ Add Raft message handling in src/node.rs  
+  - ✅ Create Raft manager in src/raft_manager.rs
+  - ✅ Implement leader election and log replication
+  - ✅ Test with property-based tests and integration tests
+  - ✅ Full state machine implementation for tasks, workers, and VMs
   - ✅ All cluster service endpoints (join, leave, status)
   - ✅ All VM management endpoints (create, start, stop, list, get status)
   - ✅ Health check endpoint

@@ -32,9 +32,11 @@ Recent progress:
 - ✅ Basic gRPC service implementation
 - ✅ MadSim integration for deterministic testing
 - ✅ Tonic 0.12 upgrade for compatibility
+- ✅ Raft consensus implementation (complete with state machine)
+- ✅ Distributed storage (redb integrated)
+- ✅ Task scheduling with resource requirements
+- ✅ Worker management and health monitoring
 - 🔧 VM lifecycle management (stubs only)
-- 🔧 Raft consensus implementation (storage prepared)
-- 🔧 Distributed storage (redb integrated)
 
 ## Development Commands
 
@@ -173,12 +175,12 @@ The project includes dependencies for:
 ## Future Implementation Areas
 
 Based on the current foundation, the following areas need implementation:
-1. **Node Management** - Cluster membership and lifecycle
-2. **Raft Consensus** - Distributed consensus using raft crate
-3. **VM Orchestration** - MicroVM lifecycle management via microvm.nix
-4. **Storage Layer** - Persistent state with redb
-5. **Testing Framework** - Deterministic testing setup
-6. **gRPC Services** - Server and client implementations
+1. **Multi-Node Clustering** - gRPC-based node discovery and joining
+2. **VM Orchestration** - MicroVM lifecycle management via microvm.nix
+3. **Snapshot Support** - Raft log compaction and state snapshots
+4. **Metrics & Observability** - Performance monitoring and tracing
+5. **Network Partition Handling** - Production-grade fault tolerance
+6. **Dynamic Membership** - Safe cluster reconfiguration
 
 ## AI Development Guidelines
 

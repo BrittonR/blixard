@@ -311,7 +311,7 @@ pub struct RaftManager {
     proposal_rx: mpsc::UnboundedReceiver<RaftProposal>,
     proposal_tx: mpsc::UnboundedSender<RaftProposal>,
     message_rx: mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>,
-    message_tx: mpsc::UnboundedSender<(u64, raft::prelude::Message)>,
+    _message_tx: mpsc::UnboundedSender<(u64, raft::prelude::Message)>,
     
     // Track pending proposals
     pending_proposals: Arc<RwLock<HashMap<Vec<u8>, oneshot::Sender<BlixardResult<()>>>>>,
@@ -366,7 +366,7 @@ impl RaftManager {
             proposal_rx,
             proposal_tx: proposal_tx.clone(),
             message_rx,
-            message_tx: message_tx.clone(),
+            _message_tx: message_tx.clone(),
             pending_proposals: Arc::new(RwLock::new(HashMap::new())),
         };
 

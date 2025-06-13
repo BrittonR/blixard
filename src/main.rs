@@ -1,6 +1,5 @@
 use clap::Parser;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use blixard::{
     error::BlixardResult,
     node::Node,

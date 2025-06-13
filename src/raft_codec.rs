@@ -253,7 +253,7 @@ pub fn deserialize_message(data: &[u8]) -> BlixardResult<Message> {
     cursor += 4; // entries count
     
     // Skip snapshot
-    cursor += 1;
+    let _ = cursor + 1;
     
     Ok(msg)
 }

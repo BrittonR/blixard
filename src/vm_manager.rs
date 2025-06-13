@@ -48,7 +48,7 @@ impl VmManager {
             operation: "iterate vm state table".to_string(),
             source: Box::new(e),
         })? {
-            let (key, value) = entry.map_err(|e| BlixardError::Storage {
+            let (_key, value) = entry.map_err(|e| BlixardError::Storage {
                 operation: "read table entry".to_string(),
                 source: Box::new(e),
             })?;
