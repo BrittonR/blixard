@@ -393,7 +393,7 @@ impl SharedNodeState {
         tracing::info!("[NODE-SHARED] Proposing conf change: {:?} for node {} at {}", change_type, node_id, address);
         let tx = self.raft_conf_change_tx.lock().await;
         if let Some(sender) = tx.as_ref() {
-            let (response_tx, _response_rx) = oneshot::channel();
+            let (response_tx, response_rx) = oneshot::channel();
             let conf_change = RaftConfChange {
                 change_type,
                 node_id,
@@ -407,10 +407,26 @@ impl SharedNodeState {
                 })?;
             
             tracing::info!("[NODE-SHARED] Waiting for conf change response from Raft");
-            // For now, don't wait for response to avoid blocking
-            // The configuration change will be processed asynchronously
-            tracing::info!("[NODE-SHARED] Conf change sent, processing asynchronously");
-            Ok(())
+            // Wait for the configuration change to be committed
+            // Use a timeout to prevent indefinite blocking
+            match tokio::time::timeout(tokio::time::Duration::from_secs(5), response_rx).await {
+                Ok(Ok(result)) => {
+                    tracing::info!("[NODE-SHARED] Conf change completed successfully");
+                    result
+                }
+                Ok(Err(_)) => {
+                    tracing::warn!("[NODE-SHARED] Conf change response channel closed");
+                    Err(BlixardError::Internal {
+                        message: "Configuration change response channel closed".to_string(),
+                    })
+                }
+                Err(_) => {
+                    tracing::warn!("[NODE-SHARED] Conf change timed out after 5 seconds");
+                    Err(BlixardError::Internal {
+                        message: "Configuration change timed out".to_string(),
+                    })
+                }
+            }
         } else {
             Err(BlixardError::Internal {
                 message: "Raft manager not initialized".to_string(),

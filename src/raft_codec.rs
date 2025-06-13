@@ -1,4 +1,5 @@
 use raft::prelude::*;
+use protobuf::Message as ProtobufMessage;
 use crate::error::{BlixardError, BlixardResult};
 
 // Wrapper functions for Raft type serialization/deserialization
@@ -182,78 +183,22 @@ pub fn deserialize_conf_state(data: &[u8]) -> BlixardResult<ConfState> {
 }
 
 pub fn serialize_message(msg: &Message) -> BlixardResult<Vec<u8>> {
-    // For Raft messages, we need to handle protobuf encoding
-    // This is a simplified version - in production you'd use proper protobuf
-    let mut buf = Vec::new();
+    // Raft messages have protobuf methods from raft-proto
+    let bytes = msg.write_to_bytes().map_err(|e| BlixardError::Serialization {
+        operation: "serialize raft message".to_string(),
+        source: Box::new(e),
+    })?;
     
-    // Basic fields
-    buf.extend_from_slice(&msg.msg_type.to_le_bytes());
-    buf.extend_from_slice(&msg.to.to_le_bytes());
-    buf.extend_from_slice(&msg.from.to_le_bytes());
-    buf.extend_from_slice(&msg.term.to_le_bytes());
-    buf.extend_from_slice(&msg.log_term.to_le_bytes());
-    buf.extend_from_slice(&msg.index.to_le_bytes());
-    buf.extend_from_slice(&msg.commit.to_le_bytes());
-    buf.push(if msg.reject { 1 } else { 0 });
-    buf.extend_from_slice(&msg.reject_hint.to_le_bytes());
-    
-    // Context
-    buf.extend_from_slice(&(msg.context.len() as u32).to_le_bytes());
-    buf.extend_from_slice(&msg.context);
-    
-    // For entries, we'll skip them for now as they're complex
-    buf.extend_from_slice(&0u32.to_le_bytes()); // entries count
-    
-    // Snapshot - simplified
-    buf.push(0); // no snapshot
-    
-    Ok(buf)
+    Ok(bytes)
 }
 
 pub fn deserialize_message(data: &[u8]) -> BlixardResult<Message> {
-    if data.len() < 73 { // Minimum size
-        return Err(BlixardError::Serialization {
-            operation: "deserialize message".to_string(),
-            source: "insufficient data".into(),
-        });
-    }
-    
-    let mut msg = Message::default();
-    let mut cursor = 0;
-    
-    // Basic fields
-    msg.msg_type = i32::from_le_bytes(data[cursor..cursor+4].try_into().unwrap());
-    cursor += 4;
-    msg.to = u64::from_le_bytes(data[cursor..cursor+8].try_into().unwrap());
-    cursor += 8;
-    msg.from = u64::from_le_bytes(data[cursor..cursor+8].try_into().unwrap());
-    cursor += 8;
-    msg.term = u64::from_le_bytes(data[cursor..cursor+8].try_into().unwrap());
-    cursor += 8;
-    msg.log_term = u64::from_le_bytes(data[cursor..cursor+8].try_into().unwrap());
-    cursor += 8;
-    msg.index = u64::from_le_bytes(data[cursor..cursor+8].try_into().unwrap());
-    cursor += 8;
-    msg.commit = u64::from_le_bytes(data[cursor..cursor+8].try_into().unwrap());
-    cursor += 8;
-    msg.reject = data[cursor] != 0;
-    cursor += 1;
-    msg.reject_hint = u64::from_le_bytes(data[cursor..cursor+8].try_into().unwrap());
-    cursor += 8;
-    
-    // Context
-    let context_len = u32::from_le_bytes(data[cursor..cursor+4].try_into().unwrap()) as usize;
-    cursor += 4;
-    if cursor + context_len <= data.len() {
-        msg.context = data[cursor..cursor+context_len].to_vec();
-        cursor += context_len;
-    }
-    
-    // Skip entries for now
-    cursor += 4; // entries count
-    
-    // Skip snapshot
-    let _ = cursor + 1;
+    // Raft messages have protobuf methods from raft-proto
+    let mut msg = Message::new();
+    msg.merge_from_bytes(data).map_err(|e| BlixardError::Serialization {
+        operation: "deserialize raft message".to_string(),
+        source: Box::new(e),
+    })?;
     
     Ok(msg)
 }

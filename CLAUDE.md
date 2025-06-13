@@ -42,6 +42,7 @@ Recent progress:
 - ✅ Peer management and dynamic configuration changes
 - ✅ Peer connection management with automatic reconnection
 - 🔧 VM lifecycle management (stubs only)
+- 🐛 **Active Issue**: Cluster formation timing out - see CLUSTER_FORMATION_DEBUG.md
 
 ## Development Commands
 
@@ -177,10 +178,18 @@ The project includes dependencies for:
 - **Failpoints**: Fault injection for testing error handling and recovery
 - **Common utilities**: Shared test helpers in `tests/common/`
 
+## Known Issues
+
+1. **Cluster Formation Timeout** (Active)
+   - Configuration changes time out after 5 seconds in single-node clusters
+   - Raft entries are being committed but not appearing in `committed_entries()`
+   - See `CLUSTER_FORMATION_DEBUG.md` for detailed investigation
+   - References: [raft-rs docs](https://docs.rs/raft/latest/raft/), [examples](https://github.com/tikv/raft-rs/tree/master/examples)
+
 ## Future Implementation Areas
 
 Based on the current foundation, the following areas need implementation:
-1. **Multi-Node Clustering** - gRPC-based node discovery and joining
+1. **Multi-Node Clustering** - Fix cluster formation issue first
 2. **VM Orchestration** - MicroVM lifecycle management via microvm.nix
 3. **Snapshot Support** - Raft log compaction and state snapshots
 4. **Metrics & Observability** - Performance monitoring and tracing

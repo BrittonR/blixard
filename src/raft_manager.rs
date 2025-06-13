@@ -407,20 +407,43 @@ impl RaftManager {
     }
     
     /// Bootstrap a single-node cluster
-    pub async fn bootstrap_single_node(&mut self) -> BlixardResult<()> {
-        let mut node = self.raft_node.write().await;
+    pub async fn bootstrap_single_node(&self) -> BlixardResult<()> {
+        {
+            let mut node = self.raft_node.write().await;
+            
+            // Create a ConfChange to add this node as the sole voter
+            let mut conf_change = ConfChange::default();
+            let node_id = self.node_id;
+            conf_change.node_id = node_id;
+            conf_change.change_type = ConfChangeType::AddNode as i32;
+            
+            // Apply the configuration change
+            node.apply_conf_change(&conf_change)?;
+            
+            // Campaign to become leader
+            let _ = node.campaign();
+            
+            info!(self.logger, "[RAFT-BOOTSTRAP] After bootstrap campaign"; 
+                "state" => ?node.raft.state,
+                "commit" => node.raft.raft_log.committed,
+                "applied" => node.raft.raft_log.applied
+            );
+        }
         
-        // Create a ConfChange to add this node as the sole voter
-        let mut conf_change = ConfChange::default();
-        let node_id = self.node_id;
-        conf_change.node_id = node_id;
-        conf_change.change_type = ConfChangeType::AddNode as i32;
+        // Process ready immediately to handle the bootstrap entry
+        self.on_ready().await?;
         
-        // Apply the configuration change
-        node.apply_conf_change(&conf_change)?;
+        // Propose an empty entry to establish leadership
+        {
+            let mut node = self.raft_node.write().await;
+            if node.raft.state == StateRole::Leader {
+                info!(self.logger, "[RAFT-BOOTSTRAP] Proposing empty entry to establish leadership");
+                node.propose(vec![], vec![])?;
+            }
+        }
         
-        // Campaign to become leader
-        let _ = node.campaign();
+        // Process ready again to commit the empty entry
+        self.on_ready().await?;
         
         Ok(())
     }
@@ -468,8 +491,13 @@ impl RaftManager {
                 }
             }
             
-            // Process ready state
-            self.on_ready().await?;
+            // Process ready state after any event
+            // Keep processing until there are no more ready states
+            loop {
+                if !self.on_ready().await? {
+                    break;
+                }
+            }
         }
     }
 
@@ -548,6 +576,12 @@ impl RaftManager {
         // Propose the configuration change
         let mut node = self.raft_node.write().await;
         info!(self.logger, "[RAFT-CONF] Proposing conf change to Raft"; "cc_id" => ?cc_id, "node_id" => conf_change.node_id);
+        
+        // Check if we're leader and single-node
+        let is_leader = node.raft.state == StateRole::Leader;
+        let is_single_node = self.peers.read().await.is_empty();
+        info!(self.logger, "[RAFT-CONF] Node state"; "is_leader" => is_leader, "is_single_node" => is_single_node);
+        
         node.propose_conf_change(cc_id, cc)
             .map_err(|e| BlixardError::Raft {
                 operation: "propose conf change".to_string(),
@@ -561,15 +595,42 @@ impl RaftManager {
         Ok(())
     }
 
-    async fn on_ready(&self) -> BlixardResult<()> {
+    async fn on_ready(&self) -> BlixardResult<bool> {
         let mut node = self.raft_node.write().await;
         if !node.has_ready() {
-            return Ok(());
+            return Ok(false);
         }
         
         info!(self.logger, "[RAFT-READY] Processing ready state");
         
         let mut ready = node.ready();
+        
+        // Log ready state details
+        info!(self.logger, "[RAFT-READY] Ready state details";
+            "messages" => ready.messages().len(),
+            "committed_entries" => ready.committed_entries().len(),
+            "entries" => ready.entries().len(),
+            "snapshot" => ready.snapshot().is_empty()
+        );
+        
+        // Save entries to storage
+        if !ready.entries().is_empty() {
+            info!(self.logger, "[RAFT-READY] Saving {} entries to storage", ready.entries().len());
+            node.mut_store().append(&ready.entries())?;
+            
+            // In a single-node cluster, we might need to update the commit index immediately
+            if self.peers.read().await.is_empty() && node.raft.state == StateRole::Leader {
+                // Single node cluster - can commit immediately
+                let last_index = ready.entries().last().map(|e| e.index).unwrap_or(0);
+                info!(self.logger, "[RAFT-READY] Single node cluster, checking commit"; "last_index" => last_index);
+            }
+        }
+        
+        // Save hard state if it changed
+        if let Some(hs) = ready.hs() {
+            info!(self.logger, "[RAFT-READY] Saving hard state"; "term" => hs.term, "vote" => hs.vote, "commit" => hs.commit);
+            node.mut_store().save_hard_state(&hs)?;
+        }
         
         // Send messages to peers
         if !ready.messages().is_empty() {
@@ -580,10 +641,13 @@ impl RaftManager {
         }
         
         // Apply committed entries to state machine
-        if !ready.committed_entries().is_empty() {
-            info!(self.logger, "[RAFT-READY] Processing {} committed entries", ready.committed_entries().len());
+        let committed_entries = ready.take_committed_entries();
+        info!(self.logger, "[RAFT-READY] Committed entries count: {}", committed_entries.len());
+        if !committed_entries.is_empty() {
+            info!(self.logger, "[RAFT-READY] Processing {} committed entries", committed_entries.len());
             let pending_proposals = Arc::clone(&self.pending_proposals);
-            for entry in ready.take_committed_entries() {
+            info!(self.logger, "[RAFT-READY] Committed entries: {:?}", committed_entries.iter().map(|e| (e.index, e.entry_type())).collect::<Vec<_>>());
+            for entry in committed_entries.iter() {
                 use raft::prelude::EntryType;
                 
                 match entry.entry_type() {
@@ -665,13 +729,23 @@ impl RaftManager {
         
         // Update commit index if needed
         if let Some(commit) = light_rd.commit_index() {
+            info!(self.logger, "[RAFT-READY] Light ready has commit index"; "commit" => commit);
             // Store commit index update
             let mut hs = node.raft.hard_state();
             hs.set_commit(commit);
             node.mut_store().save_hard_state(&hs)?;
         }
         
-        Ok(())
+        // Check the current state after processing
+        info!(self.logger, "[RAFT-READY] After processing - raft state"; 
+            "term" => node.raft.term,
+            "commit" => node.raft.raft_log.committed,
+            "applied" => node.raft.raft_log.applied,
+            "last_index" => node.raft.raft_log.last_index()
+        );
+        
+        // Return true to indicate we processed a ready state
+        Ok(true)
     }
 
     async fn send_raft_message(&self, msg: raft::prelude::Message) -> BlixardResult<()> {

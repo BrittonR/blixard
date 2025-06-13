@@ -2,12 +2,14 @@
 
 ## In Progress
 
+- [ ] Add cluster membership management commands (CLI commands for join/leave)
+  - Need to add `cluster join` and `cluster leave` CLI subcommands
+  - Commands should use gRPC client to call existing JoinCluster/LeaveCluster RPCs
+  - Add `cluster status` command to show current cluster membership
+
 ## Pending
 
 ### High Priority - Core Infrastructure
-- [ ] Create gRPC server implementation for BlixardService in `proto/blixard.proto`
-- [ ] Implement multi-node cluster formation via gRPC
-- [ ] Add cluster membership management commands
 
 ### Medium Priority - VM Management
 - [ ] Implement VM lifecycle operations (create, start, stop, delete) via microvm.nix
@@ -52,6 +54,13 @@
 
 - [x] **Create gRPC server implementation for BlixardService**
   - ✅ Full gRPC service implementation in `src/grpc_server.rs`
+
+- [x] **Implement multi-node cluster formation via gRPC**
+  - ✅ JoinCluster and LeaveCluster RPCs implemented
+  - ✅ Dynamic Raft configuration changes working
+  - ✅ Peer connection management with automatic reconnection
+  - ✅ Comprehensive test suite in `tests/cluster_formation_tests.rs`
+  - ✅ Three-node cluster formation tested and working
 
 - [x] **Implement Raft consensus integration using raft crate with redb persistence**
   - ✅ Complete storage trait implementation in src/storage.rs
