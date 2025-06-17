@@ -52,6 +52,7 @@ Recent progress:
 ```bash
 cargo build                # Build the project
 cargo test                 # Run all tests
+cargo test --features test-helpers  # Run integration tests that use test infrastructure
 cargo test --features simulation    # Run with madsim deterministic simulation
 cargo test --features failpoints    # Run with failpoint injection
 cargo test --features all-tests     # Run all testing frameworks
@@ -292,6 +293,13 @@ The project includes dependencies for:
    - Solution: Added `shutdown_components()` method to properly clean up all database references
    - Solution: Updated `stop()` method to ensure complete shutdown with file lock release
    - Test `test_database_persistence_across_restarts` now passes consistently
+
+3. **Test-Helpers Feature Compilation** (✅ FIXED)
+   - Fixed: Three-node cluster tests failing to compile due to missing test-helpers feature
+   - Fixed: Integration tests couldn't access `test_helpers` module
+   - Solution: Added `#![cfg(feature = "test-helpers")]` to test files
+   - Solution: Configured example to require feature in Cargo.toml
+   - Tests must be run with `--features test-helpers` flag
 
 ## Known Test Reliability Issues
 

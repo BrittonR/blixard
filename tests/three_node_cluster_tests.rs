@@ -3,6 +3,8 @@
 //! This test suite addresses the known issues with 3-node cluster formation
 //! documented in TEST_RELIABILITY_ISSUES.md
 
+#![cfg(feature = "test-helpers")]
+
 use std::time::Duration;
 use std::collections::HashSet;
 

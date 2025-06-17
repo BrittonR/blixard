@@ -3,6 +3,8 @@
 //! This test demonstrates a more reliable approach to 3-node cluster testing
 //! by manually managing node creation and join operations.
 
+#![cfg(feature = "test-helpers")]
+
 use std::time::Duration;
 use blixard::{
     test_helpers::{TestNode, timing},

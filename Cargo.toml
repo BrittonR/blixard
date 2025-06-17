@@ -121,6 +121,10 @@ test-helpers = []
 name = "blixard"
 path = "src/main.rs"
 
+[[example]]
+name = "three_node_cluster_example"
+required-features = ["test-helpers"]
+
 [profile.release]
 lto = true
 codegen-units = 1
