@@ -584,6 +584,20 @@ impl RaftManager {
             );
         }
         
+        // Log snapshot messages
+        if msg.msg_type() == raft::prelude::MessageType::MsgSnapshot {
+            let snapshot = msg.get_snapshot();
+            let metadata = snapshot.get_metadata();
+            info!(self.logger, "[RAFT-MSG] Received MsgSnapshot";
+                "from" => msg.from,
+                "to" => msg.to,
+                "snapshot_index" => metadata.index,
+                "snapshot_term" => metadata.term,
+                "snapshot_voters" => ?metadata.get_conf_state().voters,
+                "data_size" => snapshot.data.len()
+            );
+        }
+        
         // Ensure we know about the sender for all messages, not just MsgAppend
         // This is critical for bidirectional communication
         if let Some(shared) = self.shared_state.upgrade() {
@@ -816,10 +830,22 @@ impl RaftManager {
         }
         
         // Apply snapshot if present
-        // TODO: Implement snapshot support when needed
         if !ready.snapshot().is_empty() {
-            warn!(self.logger, "[RAFT-READY] Snapshot present but not implemented yet");
-            // For now, we don't support snapshots
+            info!(self.logger, "[RAFT-READY] Applying snapshot");
+            let snapshot = ready.snapshot();
+            
+            // Apply the snapshot to storage
+            self.storage.apply_snapshot(snapshot)?;
+            
+            // The Raft library will handle updating its internal state
+            // We just need to ensure our storage reflects the snapshot
+            
+            let metadata = snapshot.get_metadata();
+            info!(self.logger, "[RAFT-READY] Snapshot applied"; 
+                "index" => metadata.index, 
+                "term" => metadata.term,
+                "voters" => ?metadata.get_conf_state().voters
+            );
         }
         
         // Save entries to storage
@@ -893,25 +919,72 @@ impl RaftManager {
                         if let Err(e) = cc.merge_from_bytes(&entry.data) {
                             warn!(self.logger, "Failed to parse ConfChange from entry data"; "error" => ?e);
                         } else {
-                            // Check if we already applied this in single-node fast path
-                            let already_applied = {
-                                let peers = self.peers.read().await;
-                                peers.contains_key(&cc.node_id)
-                            };
+                            // Always apply configuration changes from committed entries
+                            // The Raft library handles deduplication internally
                             
-                            if already_applied && cc.change_type() == raft::prelude::ConfChangeType::AddNode {
-                                info!(self.logger, "[RAFT-CONF] Conf change already applied via fast path"; "node_id" => cc.node_id);
-                            } else {
-                                info!(self.logger, "[RAFT-CONF] Applying committed configuration change"; "node_id" => cc.node_id, "type" => cc.change_type, "entry_index" => entry.index);
-                                let cs = node.apply_conf_change(&cc)?;
+                            // Log the current voters before applying the change
+                            let current_voters: Vec<u64> = node.raft.prs().votes().keys().cloned().collect();
+                            info!(self.logger, "[RAFT-CONF] Current voters before conf change"; "voters" => ?current_voters);
+                            
+                            info!(self.logger, "[RAFT-CONF] Applying committed configuration change"; "node_id" => cc.node_id, "type" => cc.change_type, "entry_index" => entry.index);
+                            let cs = node.apply_conf_change(&cc)?;
+                            
+                            // Log what the returned ConfState contains
+                            info!(self.logger, "[RAFT-CONF] apply_conf_change returned ConfState"; 
+                                "cs.voters" => ?cs.voters, 
+                                "cs.learners" => ?cs.learners,
+                                "cs.voters_outgoing" => ?cs.voters_outgoing,
+                                "cs.learners_next" => ?cs.learners_next,
+                                "cs.auto_leave" => cs.auto_leave
+                            );
+                            
+                            // WORKAROUND: For joining nodes, the returned ConfState might be incomplete
+                            // If we're adding a node and the current voters list is incomplete,
+                            // we need to ensure the configuration includes all nodes
+                            let mut corrected_cs = cs.clone();
+                            if cc.change_type() == raft::prelude::ConfChangeType::AddNode {
+                                // For AddNode, if the returned voters list doesn't include the node itself
+                                // or other expected nodes, we need to reconstruct it
+                                info!(self.logger, "[RAFT-CONF] Checking configuration completeness";
+                                    "node_id" => self.node_id,
+                                    "returned_voters" => ?cs.voters,
+                                    "added_node" => cc.node_id
+                                );
                                 
-                                // Save the new configuration state to storage
-                                self.storage.save_conf_state(&cs)?;
-                                info!(self.logger, "[RAFT-CONF] Saved new configuration state to storage"; "voters" => ?cs.voters);
-                                
-                                // Update peer list based on the change type
-                                use raft::prelude::ConfChangeType as RaftConfChangeType;
-                                match cc.change_type() {
+                                // Special handling: if this node is processing an AddNode for another node
+                                // but the returned configuration only contains the new node,
+                                // we need to include this node as well
+                                if !cs.voters.is_empty() && !cs.voters.contains(&self.node_id) {
+                                    info!(self.logger, "[RAFT-CONF] Configuration missing self, reconstructing";
+                                        "self_id" => self.node_id,
+                                        "returned_voters" => ?cs.voters
+                                    );
+                                    
+                                    // Load the previous configuration state and add the new node
+                                    if let Ok(prev_conf) = self.storage.load_conf_state() {
+                                        let mut new_voters = prev_conf.voters;
+                                        if !new_voters.contains(&cc.node_id) {
+                                            new_voters.push(cc.node_id);
+                                        }
+                                        corrected_cs.voters = new_voters;
+                                        info!(self.logger, "[RAFT-CONF] Reconstructed configuration";
+                                            "corrected_voters" => ?corrected_cs.voters
+                                        );
+                                    }
+                                }
+                            }
+                            
+                            // Save the corrected configuration state to storage
+                            self.storage.save_conf_state(&corrected_cs)?;
+                            info!(self.logger, "[RAFT-CONF] Saved new configuration state to storage"; "voters" => ?corrected_cs.voters);
+                            
+                            // Verify the actual voters after applying the change
+                            let new_voters: Vec<u64> = node.raft.prs().votes().keys().cloned().collect();
+                            info!(self.logger, "[RAFT-CONF] Actual voters after conf change"; "voters" => ?new_voters);
+                            
+                            // Update peer list based on the change type
+                            use raft::prelude::ConfChangeType as RaftConfChangeType;
+                            match cc.change_type() {
                                 RaftConfChangeType::AddNode => {
                                     // Deserialize address from context
                                     if !cc.context.is_empty() {
@@ -950,6 +1023,25 @@ impl RaftManager {
                                     // Give a small delay to allow peer connection to establish
                                     tokio::time::sleep(Duration::from_millis(100)).await;
                                     info!(self.logger, "[RAFT-CONF] Waited for peer connection establishment");
+                                    
+                                    // Check if the new node needs a snapshot
+                                    // New nodes often need snapshots to get the current configuration
+                                    if let Some(progress) = node.raft.prs().get(cc.node_id) {
+                                        let last_index = node.raft.raft_log.last_index();
+                                        info!(self.logger, "[RAFT-CONF] New node progress check";
+                                            "node_id" => cc.node_id,
+                                            "matched" => progress.matched,
+                                            "last_index" => last_index
+                                        );
+                                        
+                                        // If the node is behind, send a snapshot
+                                        if progress.matched == 0 && last_index > 0 {
+                                            info!(self.logger, "[RAFT-CONF] New node needs snapshot, triggering send";
+                                                "node_id" => cc.node_id
+                                            );
+                                            node.raft.send_append(cc.node_id);
+                                        }
+                                    }
                                 }
                                 RaftConfChangeType::RemoveNode => {
                                     let mut peers = self.peers.write().await;
@@ -965,8 +1057,6 @@ impl RaftManager {
                                 _ => {}
                             }
                             
-                            }
-                            
                             // Send response to waiting conf change if any
                             if !entry.context.is_empty() {
                                 let mut pending = pending_proposals.write().await;
@@ -977,7 +1067,6 @@ impl RaftManager {
                             
                             // IMPORTANT: After adding a new node, we need to trigger replication
                             // Set flag to trigger after ready state is processed
-                            use raft::prelude::ConfChangeType as RaftConfChangeType;
                             if cc.change_type() == RaftConfChangeType::AddNode {
                                 *self.needs_replication_trigger.write().await = true;
                                 info!(self.logger, "[RAFT-CONF] Set flag to trigger replication after ready state");
@@ -1018,6 +1107,11 @@ impl RaftManager {
             "last_index" => node.raft.raft_log.last_index()
         );
         
+        // Check if any nodes need snapshots (only leaders should do this)
+        if node.raft.state == raft::StateRole::Leader {
+            self.check_and_send_snapshots(&mut node).await?;
+        }
+        
         // Return true to indicate we processed a ready state
         Ok(true)
     }
@@ -1027,10 +1121,73 @@ impl RaftManager {
         let from = msg.from;
         let msg_type = msg.msg_type();
         info!(self.logger, "[RAFT-MSG] Sending message"; "from" => from, "to" => to, "type" => ?msg_type);
+        
+        // Log snapshot messages being sent
+        if msg_type == raft::prelude::MessageType::MsgSnapshot {
+            let snapshot = msg.get_snapshot();
+            let metadata = snapshot.get_metadata();
+            info!(self.logger, "[RAFT-MSG] Sending MsgSnapshot";
+                "to" => to,
+                "snapshot_index" => metadata.index,
+                "snapshot_term" => metadata.term,
+                "snapshot_voters" => ?metadata.get_conf_state().voters,
+                "data_size" => snapshot.data.len()
+            );
+        }
+        
         self.outgoing_messages.send((to, msg))
             .map_err(|_| BlixardError::Internal {
                 message: "Failed to send outgoing Raft message".to_string(),
             })?;
+        Ok(())
+    }
+    
+    /// Check if any followers need snapshots and trigger sending
+    async fn check_and_send_snapshots(&self, node: &mut RawNode<RedbRaftStorage>) -> BlixardResult<()> {
+        let last_index = node.raft.raft_log.last_index();
+        
+        // Check each follower's progress
+        let followers_needing_snapshot: Vec<u64> = node.raft.prs().iter()
+            .filter_map(|(id, pr)| {
+                if *id == self.node_id {
+                    return None; // Skip self
+                }
+                
+                // For new nodes (matched = 0) or nodes that are far behind
+                // Send snapshot if:
+                // 1. Node has never received any entries (matched = 0)
+                // 2. Node is more than 5 entries behind and has committed configuration changes
+                let needs_snapshot = if pr.matched == 0 && last_index > 0 {
+                    // New node that has never synced
+                    true
+                } else {
+                    // Check if node is too far behind
+                    let lag = last_index.saturating_sub(pr.matched);
+                    lag > 5 && self.storage.last_index().unwrap_or(0) > 3
+                };
+                
+                if needs_snapshot {
+                    info!(self.logger, "[RAFT-SNAPSHOT] Follower needs snapshot";
+                        "follower_id" => id,
+                        "matched" => pr.matched,
+                        "last_index" => last_index,
+                        "lag" => last_index.saturating_sub(pr.matched)
+                    );
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        
+        // Send snapshots to lagging followers
+        for follower_id in followers_needing_snapshot {
+            info!(self.logger, "[RAFT-SNAPSHOT] Triggering snapshot send to follower"; "follower_id" => follower_id);
+            // The Raft library will handle creating and sending the snapshot message
+            // when we try to replicate to this follower
+            node.raft.send_append(follower_id);
+        }
+        
         Ok(())
     }
 
@@ -1046,6 +1203,19 @@ impl RaftManager {
     pub async fn get_leader_id(&self) -> Option<u64> {
         let node = self.raft_node.read().await;
         Some(node.raft.leader_id)
+    }
+    
+    /// Report snapshot status after sending or receiving
+    pub async fn report_snapshot(&self, to: u64, status: raft::SnapshotStatus) -> BlixardResult<()> {
+        let mut node = self.raft_node.write().await;
+        node.report_snapshot(to, status);
+        
+        info!(self.logger, "[RAFT-SNAPSHOT] Reported snapshot status";
+            "to" => to,
+            "status" => ?status
+        );
+        
+        Ok(())
     }
 
     pub async fn propose(&self, data: ProposalData) -> BlixardResult<()> {

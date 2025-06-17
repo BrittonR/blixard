@@ -296,32 +296,22 @@ impl SharedNodeState {
     
     /// Get cluster status
     pub async fn get_cluster_status(&self) -> BlixardResult<(u64, Vec<u64>, u64)> {
-        use redb::ReadableTable;
+        // Get Raft peers (nodes in the cluster)
+        let peers = self.peers.read().await;
+        let mut node_ids: Vec<u64> = peers.keys().cloned().collect();
         
-        let database = self.database.read().await;
-        if let Some(db) = database.as_ref() {
-            let read_txn = db.begin_read()?;
-            
-            // Get worker nodes
-            let mut node_ids = Vec::new();
-            if let Ok(worker_table) = read_txn.open_table(crate::storage::WORKER_TABLE) {
-                for entry in worker_table.iter()? {
-                    let (node_id_bytes, _) = entry?;
-                    let node_id = u64::from_le_bytes(node_id_bytes.value().try_into().unwrap());
-                    node_ids.push(node_id);
-                }
-            }
-            
-            // TODO: Get leader_id and term from Raft state
-            let leader_id = self.config.id; // Placeholder
-            let term = 0; // Placeholder
-            
-            Ok((leader_id, node_ids, term))
-        } else {
-            Err(BlixardError::Internal {
-                message: "Database not initialized".to_string(),
-            })
+        // Include self in the node list
+        if !node_ids.contains(&self.config.id) {
+            node_ids.push(self.config.id);
         }
+        node_ids.sort();
+        
+        // Get Raft status for leader and term info
+        let raft_status = self.raft_status.read().await;
+        let leader_id = raft_status.leader_id.unwrap_or(0);
+        let term = raft_status.term;
+        
+        Ok((self.config.id, node_ids, leader_id))
     }
     
     /// Check if node is running
@@ -444,6 +434,21 @@ impl SharedNodeState {
         } else {
             Err(BlixardError::Internal {
                 message: "Raft manager not initialized".to_string(),
+            })
+        }
+    }
+    
+    /// Get the current voters from the Raft configuration
+    pub async fn get_current_voters(&self) -> BlixardResult<Vec<u64>> {
+        let database = self.database.read().await;
+        if let Some(db) = database.as_ref() {
+            // Load configuration state from storage
+            let storage = crate::storage::RedbRaftStorage { database: db.clone() };
+            let conf_state = storage.load_conf_state()?;
+            Ok(conf_state.voters)
+        } else {
+            Err(BlixardError::Internal {
+                message: "Database not initialized".to_string(),
             })
         }
     }

@@ -91,6 +91,7 @@ impl ClusterService for BlixardGrpcService {
                 success: false,
                 message: "Invalid node ID: must be non-zero".to_string(),
                 peers: vec![],
+                voters: vec![],
             }));
         }
         
@@ -99,6 +100,7 @@ impl ClusterService for BlixardGrpcService {
                 success: false,
                 message: "Bind address cannot be empty".to_string(),
                 peers: vec![],
+                voters: vec![],
             }));
         }
         
@@ -108,6 +110,7 @@ impl ClusterService for BlixardGrpcService {
                 success: false,
                 message: format!("Node {} already exists in cluster", req.node_id),
                 peers: vec![],
+                voters: vec![],
             }));
         }
         
@@ -122,6 +125,7 @@ impl ClusterService for BlixardGrpcService {
                     success: false,
                     message: format!("Failed to add peer: {}", e),
                     peers: vec![],
+                    voters: vec![],
                 }));
             }
         }
@@ -178,10 +182,15 @@ impl ClusterService for BlixardGrpcService {
                 tracing::info!("[JOIN] Returning {} peers in join response to node {}", 
                     peer_infos.len(), req.node_id);
                 
+                // Get current configuration state to include in response
+                let voters = self.node.get_current_voters().await.unwrap_or_default();
+                tracing::info!("[JOIN] Current cluster voters: {:?}", voters);
+                
                 Ok(Response::new(JoinResponse {
                     success: true,
                     message: format!("Node {} successfully joined cluster", req.node_id),
                     peers: peer_infos,
+                    voters,
                 }))
             }
             Err(e) => {
@@ -192,6 +201,7 @@ impl ClusterService for BlixardGrpcService {
                     success: false,
                     message: format!("Failed to join cluster: {}", e),
                     peers: vec![],
+                    voters: vec![],
                 }))
             }
         }

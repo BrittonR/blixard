@@ -6,7 +6,7 @@ pub struct NodeConfig {
     pub id: u64,
     pub data_dir: String,
     pub bind_addr: SocketAddr,
-    pub join_addr: Option<SocketAddr>,
+    pub join_addr: Option<String>,
     pub use_tailscale: bool,
 }
 

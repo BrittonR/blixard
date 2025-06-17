@@ -79,10 +79,12 @@ async fn main() -> BlixardResult<()> {
             let join_addr = if let Some(peers_str) = peers {
                 let peer_addrs: Vec<&str> = peers_str.split(',').collect();
                 if !peer_addrs.is_empty() {
-                    Some(peer_addrs[0].parse::<SocketAddr>()
+                    // Validate that it's a valid socket address
+                    let _: SocketAddr = peer_addrs[0].parse()
                         .map_err(|e| blixard::error::BlixardError::ConfigError(
                             format!("Invalid peer address '{}': {}", peer_addrs[0], e)
-                        ))?)
+                        ))?;
+                    Some(peer_addrs[0].to_string())
                 } else {
                     None
                 }

@@ -46,6 +46,7 @@ message JoinResponse {
   bool success = 1;
   string message = 2;
   repeated NodeInfo peers = 3;
+  repeated uint64 voters = 4;  // Current voting members
 }
 
 message LeaveRequest {

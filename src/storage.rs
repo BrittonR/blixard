@@ -4,6 +4,26 @@ use raft::{Config, RawNode, GetEntriesContext};
 use slog::o;
 use crate::error::{BlixardError, BlixardResult};
 use crate::raft_codec;
+use serde::{Serialize, Deserialize};
+
+/// Snapshot data structure containing all state machine data
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotData {
+    /// VM states
+    pub vm_states: Vec<(String, Vec<u8>)>,
+    /// Cluster state
+    pub cluster_state: Vec<(String, Vec<u8>)>,
+    /// Tasks
+    pub tasks: Vec<(String, Vec<u8>)>,
+    /// Task assignments
+    pub task_assignments: Vec<(String, Vec<u8>)>,
+    /// Task results
+    pub task_results: Vec<(String, Vec<u8>)>,
+    /// Workers
+    pub workers: Vec<(Vec<u8>, Vec<u8>)>,
+    /// Worker status
+    pub worker_status: Vec<(Vec<u8>, Vec<u8>)>,
+}
 
 // Database table definitions
 pub const VM_STATE_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vm_states");
@@ -145,9 +165,45 @@ impl raft::Storage for RedbRaftStorage {
         }
     }
 
-    fn snapshot(&self, _request_index: u64, _to: u64) -> raft::Result<raft::prelude::Snapshot> {
-        // TODO: Implement snapshot creation from redb state
-        Err(raft::Error::Store(raft::StorageError::SnapshotTemporarilyUnavailable))
+    fn snapshot(&self, request_index: u64, _to: u64) -> raft::Result<raft::prelude::Snapshot> {
+        // Create a snapshot of the current state
+        let mut snapshot = raft::prelude::Snapshot::default();
+        
+        // Get the current configuration state
+        let conf_state = self.load_conf_state()
+            .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
+        
+        // Get the last index from the log
+        let last_index = self.last_index()?;
+        let term = if last_index > 0 {
+            self.term(last_index)?
+        } else {
+            0
+        };
+        
+        // Build snapshot metadata
+        let mut metadata = raft::prelude::SnapshotMetadata::default();
+        metadata.set_conf_state(conf_state);
+        metadata.index = std::cmp::min(request_index, last_index);
+        metadata.term = term;
+        
+        let snapshot_index = metadata.index;
+        let snapshot_term = metadata.term;
+        
+        snapshot.set_metadata(metadata);
+        
+        // Create snapshot data with all state machine tables
+        let snapshot_data = self.create_snapshot_data()
+            .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
+        
+        // Serialize the snapshot data
+        snapshot.data = bincode::serialize(&snapshot_data)
+            .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
+        
+        tracing::info!("Created snapshot at index {} term {} with {} bytes of data", 
+            snapshot_index, snapshot_term, snapshot.data.len());
+        
+        Ok(snapshot)
     }
 }
 
@@ -246,6 +302,285 @@ impl RedbRaftStorage {
         self.save_conf_state(&conf_state)?;
         self.save_hard_state(&hard_state)?;
         
+        Ok(())
+    }
+    
+    /// Load configuration state from storage
+    pub fn load_conf_state(&self) -> BlixardResult<raft::prelude::ConfState> {
+        let read_txn = self.database.begin_read()?;
+        
+        if let Ok(table) = read_txn.open_table(RAFT_CONF_STATE_TABLE) {
+            if let Ok(Some(data)) = table.get("conf_state") {
+                return crate::raft_codec::deserialize_conf_state(data.value())
+                    .map_err(|e| BlixardError::Serialization {
+                        operation: "deserialize conf state".to_string(),
+                        source: Box::new(e),
+                    });
+            }
+        }
+        
+        // Return default if not found
+        Ok(raft::prelude::ConfState::default())
+    }
+    
+    /// Create a snapshot of all state machine data
+    pub fn create_snapshot_data(&self) -> BlixardResult<SnapshotData> {
+        let read_txn = self.database.begin_read()?;
+        
+        let mut snapshot_data = SnapshotData {
+            vm_states: Vec::new(),
+            cluster_state: Vec::new(),
+            tasks: Vec::new(),
+            task_assignments: Vec::new(),
+            task_results: Vec::new(),
+            workers: Vec::new(),
+            worker_status: Vec::new(),
+        };
+        
+        // Read VM states
+        if let Ok(table) = read_txn.open_table(VM_STATE_TABLE) {
+            for entry in table.iter()? {
+                let (key, value) = entry?;
+                snapshot_data.vm_states.push((key.value().to_string(), value.value().to_vec()));
+            }
+        }
+        
+        // Read cluster state
+        if let Ok(table) = read_txn.open_table(CLUSTER_STATE_TABLE) {
+            for entry in table.iter()? {
+                let (key, value) = entry?;
+                snapshot_data.cluster_state.push((key.value().to_string(), value.value().to_vec()));
+            }
+        }
+        
+        // Read tasks
+        if let Ok(table) = read_txn.open_table(TASK_TABLE) {
+            for entry in table.iter()? {
+                let (key, value) = entry?;
+                snapshot_data.tasks.push((key.value().to_string(), value.value().to_vec()));
+            }
+        }
+        
+        // Read task assignments
+        if let Ok(table) = read_txn.open_table(TASK_ASSIGNMENT_TABLE) {
+            for entry in table.iter()? {
+                let (key, value) = entry?;
+                snapshot_data.task_assignments.push((key.value().to_string(), value.value().to_vec()));
+            }
+        }
+        
+        // Read task results
+        if let Ok(table) = read_txn.open_table(TASK_RESULT_TABLE) {
+            for entry in table.iter()? {
+                let (key, value) = entry?;
+                snapshot_data.task_results.push((key.value().to_string(), value.value().to_vec()));
+            }
+        }
+        
+        // Read workers
+        if let Ok(table) = read_txn.open_table(WORKER_TABLE) {
+            for entry in table.iter()? {
+                let (key, value) = entry?;
+                snapshot_data.workers.push((key.value().to_vec(), value.value().to_vec()));
+            }
+        }
+        
+        // Read worker status
+        if let Ok(table) = read_txn.open_table(WORKER_STATUS_TABLE) {
+            for entry in table.iter()? {
+                let (key, value) = entry?;
+                snapshot_data.worker_status.push((key.value().to_vec(), value.value().to_vec()));
+            }
+        }
+        
+        Ok(snapshot_data)
+    }
+    
+    /// Restore state machine from snapshot data
+    pub fn restore_from_snapshot(&self, data: &[u8]) -> BlixardResult<()> {
+        let snapshot_data: SnapshotData = bincode::deserialize(data)
+            .map_err(|e| BlixardError::Serialization {
+                operation: "deserialize snapshot data".to_string(),
+                source: Box::new(e),
+            })?;
+        
+        let write_txn = self.database.begin_write()?;
+        
+        // Clear and restore VM states
+        {
+            let mut table = write_txn.open_table(VM_STATE_TABLE)?;
+            // Clear all existing entries
+            let keys_to_remove: Vec<String> = table.iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(key.as_str())?;
+            }
+            // Insert new entries
+            for (key, value) in snapshot_data.vm_states {
+                table.insert(key.as_str(), value.as_slice())?;
+            }
+        }
+        
+        // Clear and restore cluster state
+        {
+            let mut table = write_txn.open_table(CLUSTER_STATE_TABLE)?;
+            // Clear all existing entries
+            let keys_to_remove: Vec<String> = table.iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(key.as_str())?;
+            }
+            // Insert new entries
+            for (key, value) in snapshot_data.cluster_state {
+                table.insert(key.as_str(), value.as_slice())?;
+            }
+        }
+        
+        // Clear and restore tasks
+        {
+            let mut table = write_txn.open_table(TASK_TABLE)?;
+            // Clear all existing entries
+            let keys_to_remove: Vec<String> = table.iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(key.as_str())?;
+            }
+            // Insert new entries
+            for (key, value) in snapshot_data.tasks {
+                table.insert(key.as_str(), value.as_slice())?;
+            }
+        }
+        
+        // Clear and restore task assignments
+        {
+            let mut table = write_txn.open_table(TASK_ASSIGNMENT_TABLE)?;
+            // Clear all existing entries
+            let keys_to_remove: Vec<String> = table.iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(key.as_str())?;
+            }
+            // Insert new entries
+            for (key, value) in snapshot_data.task_assignments {
+                table.insert(key.as_str(), value.as_slice())?;
+            }
+        }
+        
+        // Clear and restore task results
+        {
+            let mut table = write_txn.open_table(TASK_RESULT_TABLE)?;
+            // Clear all existing entries
+            let keys_to_remove: Vec<String> = table.iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(key.as_str())?;
+            }
+            // Insert new entries
+            for (key, value) in snapshot_data.task_results {
+                table.insert(key.as_str(), value.as_slice())?;
+            }
+        }
+        
+        // Clear and restore workers
+        {
+            let mut table = write_txn.open_table(WORKER_TABLE)?;
+            // Clear all existing entries
+            let keys_to_remove: Vec<Vec<u8>> = table.iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_vec()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(key.as_slice())?;
+            }
+            // Insert new entries
+            for (key, value) in snapshot_data.workers {
+                table.insert(key.as_slice(), value.as_slice())?;
+            }
+        }
+        
+        // Clear and restore worker status
+        {
+            let mut table = write_txn.open_table(WORKER_STATUS_TABLE)?;
+            // Clear all existing entries
+            let keys_to_remove: Vec<Vec<u8>> = table.iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_vec()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(key.as_slice())?;
+            }
+            // Insert new entries
+            for (key, value) in snapshot_data.worker_status {
+                table.insert(key.as_slice(), value.as_slice())?;
+            }
+        }
+        
+        write_txn.commit()?;
+        
+        tracing::info!("Restored state machine from snapshot");
+        Ok(())
+    }
+    
+    /// Apply a snapshot to the storage
+    pub fn apply_snapshot(&self, snapshot: &raft::prelude::Snapshot) -> BlixardResult<()> {
+        let metadata = snapshot.get_metadata();
+        
+        // Save the configuration state from the snapshot
+        self.save_conf_state(metadata.get_conf_state())?;
+        
+        // Update hard state with snapshot's term and commit index
+        let mut hard_state = raft::prelude::HardState::default();
+        hard_state.term = metadata.term;
+        hard_state.commit = metadata.index;
+        self.save_hard_state(&hard_state)?;
+        
+        // Restore state machine from snapshot data
+        if !snapshot.data.is_empty() {
+            self.restore_from_snapshot(&snapshot.data)?;
+        }
+        
+        // Clear old log entries before the snapshot index
+        self.compact_log_before(metadata.index)?;
+        
+        tracing::info!("Applied snapshot at index {} term {} with voters {:?}", 
+            metadata.index, metadata.term, metadata.get_conf_state().voters);
+        
+        Ok(())
+    }
+    
+    /// Compact log entries before the given index
+    pub fn compact_log_before(&self, index: u64) -> BlixardResult<()> {
+        if index == 0 {
+            return Ok(());
+        }
+        
+        let write_txn = self.database.begin_write()?;
+        {
+            let mut table = write_txn.open_table(RAFT_LOG_TABLE)?;
+            // Remove all entries with index < compact_index
+            let keys_to_remove: Vec<u64> = table.iter()?
+                .filter_map(|entry| {
+                    entry.ok().and_then(|(k, _)| {
+                        let key = k.value();
+                        if key < index {
+                            Some(key)
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect();
+            
+            for key in keys_to_remove {
+                table.remove(&key)?;
+            }
+        }
+        write_txn.commit()?;
+        
+        tracing::info!("Compacted log entries before index {}", index);
         Ok(())
     }
 }

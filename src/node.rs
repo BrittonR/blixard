@@ -179,7 +179,21 @@ impl Node {
                                     let resp = response.into_inner();
                                     if resp.success {
                                         tracing::info!("Successfully joined cluster at {}", join_addr);
-                                        tracing::info!("Join response contains {} peers", resp.peers.len());
+                                        tracing::info!("Join response contains {} peers and {} voters", resp.peers.len(), resp.voters.len());
+                                        
+                                        // Update local configuration state with current cluster voters
+                                        if !resp.voters.is_empty() {
+                                            tracing::info!("Updating local configuration with voters: {:?}", resp.voters);
+                                            if let Some(db) = self.shared.get_database().await {
+                                                let storage = crate::storage::RedbRaftStorage { database: db };
+                                                let mut conf_state = raft::prelude::ConfState::default();
+                                                conf_state.voters = resp.voters.clone();
+                                                if let Err(e) = storage.save_conf_state(&conf_state) {
+                                                    tracing::warn!("Failed to save initial configuration state: {}", e);
+                                                }
+                                            }
+                                        }
+                                        
                                         // Add peers from response
                                         for peer in resp.peers {
                                             if peer.id != self.shared.get_id() {

@@ -186,7 +186,7 @@ impl TestNode {
 pub struct TestNodeBuilder {
     id: Option<u64>,
     port: Option<u16>,
-    join_addr: Option<SocketAddr>,
+    join_addr: Option<String>,
     data_dir: Option<String>,
 }
 
@@ -207,7 +207,7 @@ impl TestNodeBuilder {
     }
     
     pub fn with_join_addr(mut self, addr: Option<SocketAddr>) -> Self {
-        self.join_addr = addr;
+        self.join_addr = addr.map(|a| a.to_string());
         self
     }
     
@@ -237,7 +237,7 @@ impl TestNodeBuilder {
             id,
             bind_addr: addr,
             data_dir,
-            join_addr: self.join_addr,
+            join_addr: self.join_addr.clone(),
             use_tailscale: false,
         };
         
@@ -246,29 +246,30 @@ impl TestNodeBuilder {
         let shared_state = node.shared();
         
         // If we have a join address, add it as a peer before initializing
-        if let Some(join_addr) = self.join_addr {
+        if let Some(join_addr) = &self.join_addr {
             // Assume node 1 is always the bootstrap node for tests
-            let _ = shared_state.add_peer(1, join_addr.to_string()).await;
+            let _ = shared_state.add_peer(1, join_addr.clone()).await;
         }
-        
-        // Initialize the node (database, raft, etc)
-        node.initialize().await?;
-        
-        // Set running state
-        shared_state.set_running(true).await;
         
         // Create shutdown channel
         let (shutdown_tx, _shutdown_rx) = oneshot::channel();
         shared_state.set_shutdown_tx(shutdown_tx).await;
         
-        // Start gRPC server
+        // Start gRPC server BEFORE initializing node
+        // This ensures the server is ready when join requests are sent
         let state_clone = shared_state.clone();
         let server_handle = tokio::spawn(async move {
             start_grpc_server(state_clone, addr).await.unwrap();
         });
         
-        // Wait for server to be ready with scaled timeout
+        // Wait for server to be ready
         wait_for_server_ready(addr).await?;
+        
+        // Now initialize the node (which may send join request)
+        node.initialize().await?;
+        
+        // Set running state
+        shared_state.set_running(true).await;
         
         Ok(TestNode {
             id,
@@ -423,7 +424,7 @@ impl TestCluster {
         // Get leader address
         let leader_addr = self.nodes.values()
             .find(|n| n.id == 1)
-            .map(|n| n.addr)
+            .map(|n| n.addr.to_string())
             .ok_or_else(|| BlixardError::NodeError(
                 "Bootstrap node not found".to_string()
             ))?;
@@ -431,7 +432,7 @@ impl TestCluster {
         let node = TestNode::builder()
             .with_id(id)
             .with_auto_port()
-            .with_join_addr(Some(leader_addr))
+            .with_join_addr(Some(leader_addr.parse().unwrap()))
             .build()
             .await?;
         
@@ -572,12 +573,15 @@ impl TestClusterBuilder {
                 for node in cluster.nodes.values() {
                     if let Ok((_, peers, _)) = node.shared_state.get_cluster_status().await {
                         if peers.len() < node_count {
+                            eprintln!("Node {} sees {} peers, expected {}", node.id, peers.len(), node_count);
                             return false;
                         }
                     } else {
+                        eprintln!("Node {} failed to get cluster status", node.id);
                         return false;
                     }
                 }
+                eprintln!("All nodes see {} peers", node_count);
                 true
             },
             convergence_timeout,
