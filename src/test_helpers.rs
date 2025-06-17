@@ -699,7 +699,6 @@ mod tests {
     }
     
     #[tokio::test]
-    #[ignore = "Three-node cluster formation has timing issues"]
     async fn test_cluster_formation() {
         let cluster = TestCluster::builder()
             .with_nodes(3)

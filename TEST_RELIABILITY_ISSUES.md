@@ -4,25 +4,25 @@ This document tracks known test reliability issues and flakiness in the Blixard 
 
 ## Status Summary
 
-- **Three-node clusters**: ✅ WORKING (tests pass reliably)
+- **Three-node clusters**: ⚠️ FLAKY (timing-dependent, needs fixing)
 - **Two-node clusters**: ✅ RELIABLE (with workarounds)
 - **Single-node**: ✅ RELIABLE
-- **Overall reliability**: ~100% (with problematic test_helpers test disabled)
+- **Overall reliability**: ~70-90% (varies by system load)
 
 ## Critical Issues
 
-### 1. Three-Node Cluster Formation (RESOLVED)
-- **Status**: Tests now pass reliably
-- **Issue**: Was caused by duplicate join requests and strict convergence checks
-- **Resolution**: 
-  - Fixed duplicate join request in TestCluster builder
-  - Improved convergence checking
-  - Added health check trigger for log replication
+### 1. Three-Node Cluster Formation (ACTIVE ISSUE)
+- **Status**: Tests are flaky and timing-dependent
+- **Issue**: Strict convergence checks and timing assumptions
+- **Symptoms**: 
+  - Tests pass sometimes but fail under load
+  - Leader convergence timeout after configuration changes
+  - Nodes don't always see all peers immediately
 - **Files**: 
-  - `tests/cluster_formation_tests.rs` - ✅ Working
-  - `tests/cluster_integration_tests.rs` - ✅ Working
-  - `src/test_helpers.rs` - test_cluster_formation disabled due to overly strict checks
-- **Related**: See `RAFT_CONSENSUS_FIX.md` for details
+  - `tests/cluster_formation_tests.rs` - ⚠️ Flaky
+  - `tests/cluster_integration_tests.rs` - ⚠️ Flaky
+  - `src/test_helpers.rs` - ⚠️ test_cluster_formation now re-enabled for testing
+- **Related**: See `RAFT_CONSENSUS_FIX.md` for previous investigation
 
 ### 2. Hardcoded Sleep Delays (HIGH PRIORITY)
 - **Count**: 25+ instances across test files
@@ -78,8 +78,9 @@ This document tracks known test reliability issues and flakiness in the Blixard 
 ## Remaining Work
 
 1. **Fix three-node cluster formation**
-   - Root cause: Raft message delivery timing
-   - Need immediate message delivery for protocol messages
+   - Root cause: Timing assumptions in convergence checking
+   - Strict requirements for all nodes to agree on leader
+   - Need more robust convergence logic
 
 2. **Replace all hardcoded sleeps**
    - Migrate to `timing::wait_for_condition_with_backoff()`
@@ -93,6 +94,10 @@ This document tracks known test reliability issues and flakiness in the Blixard 
    - Current validation script runs tests 10x to check reliability
    - Goal: 100% pass rate on first run
 
+5. **Fix test_cluster_formation in test_helpers.rs**
+   - Currently re-enabled but may fail intermittently
+   - Needs more lenient convergence checking or better timing
+
 ## Testing Guidelines
 
 ### DO:
@@ -105,7 +110,7 @@ This document tracks known test reliability issues and flakiness in the Blixard 
 ### DON'T:
 - Use hardcoded `sleep()` calls
 - Assume fixed timing for operations
-- Test three-node clusters until fixed
+- Ignore test failures - investigate and fix root causes
 - Ignore compiler warnings about unused code
 
 ## Known Workarounds
