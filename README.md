@@ -115,6 +115,19 @@ MADSIM_TEST_SEED=12345 cargo test -p blixard-madsim-tests
 ./test_cluster.sh
 ```
 
+### Known Test Reliability Issues
+
+**⚠️ WARNING**: Some tests have known reliability issues. See [TEST_RELIABILITY_ISSUES.md](TEST_RELIABILITY_ISSUES.md) for details.
+
+- **Three-node clusters**: Currently broken (tests disabled)
+- **Two-node clusters**: Flaky, require workarounds
+- **Single-node**: Reliable
+
+To check current test reliability:
+```bash
+./scripts/validate-cluster-formation.sh
+```
+
 ### Deterministic Testing
 
 Blixard features a sophisticated deterministic testing framework inspired by TigerBeetle and FoundationDB:

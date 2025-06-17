@@ -281,6 +281,20 @@ The project includes dependencies for:
    - Remaining: Three-node clusters fail due to log replication issues
    - See `CLUSTER_FORMATION_DEBUG.md` for detailed investigation and solutions
 
+## Known Test Reliability Issues
+
+See `TEST_RELIABILITY_ISSUES.md` for full details. Major issues:
+
+1. **Three-node cluster tests are disabled** - Log replication timing issues
+2. **25+ hardcoded sleep() calls** - Should use condition-based waiting
+3. **Test workarounds required** - E.g., sending health checks to trigger log replication
+4. **~70% test reliability** - Validation script shows tests fail 3/10 times
+
+When working on tests:
+- Use `test_helpers::TestNode` and `TestCluster` abstractions
+- Use `timing::wait_for_condition_with_backoff()` instead of `sleep()`
+- Be aware that multi-node tests are unreliable
+
 ## Future Implementation Areas
 
 Based on the current foundation, the following areas need implementation:
