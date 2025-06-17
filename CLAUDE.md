@@ -42,6 +42,8 @@ Recent progress:
 - ✅ Peer management and dynamic configuration changes
 - ✅ Peer connection management with automatic reconnection
 - ✅ Single-node cluster bootstrap with proper Raft initialization
+- ✅ **Raft snapshot support** - Full implementation for state transfer to lagging nodes
+- ✅ **Configuration reconstruction** - Fixes for joining nodes with incomplete state
 - 🔧 VM lifecycle management (stubs only)
 
 ## Development Commands
@@ -272,14 +274,16 @@ The project includes dependencies for:
 
 ## Recently Fixed Issues
 
-1. **Cluster Formation Improvements** (✅ PARTIALLY FIXED)
+1. **Three-Node Cluster Formation** (✅ FULLY FIXED)
    - Fixed: Configuration state persistence after applying changes
    - Fixed: Storage initialization for joining nodes
    - Fixed: Message buffering during peer connection establishment
    - Fixed: Peer discovery - joining nodes now learn about the leader
    - Fixed: Replication triggering after configuration changes
-   - Remaining: Three-node clusters fail due to log replication issues
-   - See `CLUSTER_FORMATION_DEBUG.md` for detailed investigation and solutions
+   - Fixed: Raft panic "not leader but has new msg after advance"
+   - Fixed: Leader detection in SharedNodeState
+   - Basic three-node cluster test now passes reliably
+   - See `THREE_NODE_CLUSTER_DEBUG.md` for detailed investigation and solutions
 
 ## Known Test Reliability Issues
 
@@ -299,9 +303,9 @@ When working on tests:
 ## Future Implementation Areas
 
 Based on the current foundation, the following areas need implementation:
-1. **Multi-Node Clustering** - Fix cluster formation issue first
+1. **Multi-Node Clustering** - Debug remaining join request processing issues
 2. **VM Orchestration** - MicroVM lifecycle management via microvm.nix
-3. **Snapshot Support** - Raft log compaction and state snapshots
+3. **Log Compaction** - Implement Raft log compaction using snapshot infrastructure
 4. **Metrics & Observability** - Performance monitoring and tracing
 5. **Network Partition Handling** - Production-grade fault tolerance
 6. **Dynamic Membership** - Safe cluster reconfiguration

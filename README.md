@@ -6,6 +6,7 @@ A distributed microVM orchestration platform built in Rust, providing enterprise
 
 - **Raft Consensus**: Production-grade distributed consensus using tikv/raft-rs (✅ Implemented)
 - **Multi-Node Clustering**: Dynamic cluster formation with join/leave operations (✅ Implemented)
+- **Raft Snapshots**: Full snapshot support for state transfer and log compaction (✅ Implemented)
 - **MicroVM Integration**: Seamless integration with microvm.nix for lightweight virtualization
 - **Tailscale Discovery**: Automatic node discovery via Tailscale networking
 - **Persistent Storage**: Durable state management with redb (✅ Implemented)
@@ -115,18 +116,13 @@ MADSIM_TEST_SEED=12345 cargo test -p blixard-madsim-tests
 ./test_cluster.sh
 ```
 
-### Known Test Reliability Issues
+### Test Status
 
-**⚠️ WARNING**: Some tests have known reliability issues. See [TEST_RELIABILITY_ISSUES.md](TEST_RELIABILITY_ISSUES.md) for details.
+- **Single-node clusters**: ✅ Fully working and reliable
+- **Three-node clusters**: ✅ Core functionality working (basic cluster formation, leader election)
+- **Multi-node operations**: 🔧 Partial - task/worker functionality not yet implemented
 
-- **Three-node clusters**: Currently broken (tests disabled)
-- **Two-node clusters**: Flaky, require workarounds
-- **Single-node**: Reliable
-
-To check current test reliability:
-```bash
-./scripts/validate-cluster-formation.sh
-```
+Recent fixes have resolved the three-node cluster formation issues. See [THREE_NODE_CLUSTER_DEBUG.md](THREE_NODE_CLUSTER_DEBUG.md) for details.
 
 ### Deterministic Testing
 

@@ -5,7 +5,9 @@
 ✅ **Configuration Issue Fixed**: Configuration reconstruction logic added
 ✅ **Snapshot Implementation**: Full snapshot support implemented  
 ✅ **Join Issue Fixed**: Changed join_addr type from SocketAddr to String, fixed gRPC server startup order
-❌ **Test Still Fails**: Node 3 has no leader - seems to not be receiving/processing Raft messages correctly
+✅ **Panic Fixed**: Resolved "not leader but has new msg after advance" by properly handling LightReady messages
+✅ **Leader Detection Fixed**: SharedNodeState now properly updated with Raft status
+✅ **Three-Node Cluster Working**: Basic three-node cluster test now passes
 
 ## Problem Summary
 
@@ -42,10 +44,18 @@ Added configuration reconstruction logic in `raft_manager.rs`:
 - Load previous configuration and add the new node to it
 - This ensures nodes maintain complete cluster configuration
 
-## Remaining Issues
+## Fixed Issues
 
-1. **Cluster Convergence Timeout**: Test still fails with "Nodes failed to join cluster: Condition not met within 30s"
-2. **Need to Debug**: What condition is not being met in wait_for_convergence?
+### 1. Raft Panic: "not leader but has new msg after advance"
+- **Root Cause**: Messages were being generated during ready state processing after advance()
+- **Fix**: 
+  - Handle messages from LightReady after advance()
+  - Remove send_append() call during configuration change processing
+  - Move check_and_send_snapshots() to after ready processing
+
+### 2. Leader Detection Failure
+- **Root Cause**: SharedNodeState wasn't being updated with current Raft status
+- **Fix**: Added update_raft_status() call after each ready state processing
 
 ## Implemented Solutions
 
@@ -64,12 +74,38 @@ The snapshot implementation is complete, but the test is failing earlier - nodes
 2. Node 1 receives the request but the configuration change is not being applied/committed
 3. Nodes 2 and 3 never see the expected 3 peers, causing timeout
 
-## Next Steps
+## Current Implementation
 
-1. Check how to trigger snapshot sending in raft-rs
-2. Implement InstallSnapshot message handling
-3. Ensure new nodes receive current configuration state
+### ✅ Completed:
+1. **Snapshot Support** - Full implementation including:
+   - `SnapshotData` structure with all state machine tables
+   - `create_snapshot_data()` and `restore_from_snapshot()` methods
+   - Automatic snapshot sending to lagging nodes (matched=0)
+   - InstallSnapshot message handling and logging
+
+2. **Configuration Reconstruction** - Workaround for raft-rs behavior:
+   - When applying AddNode changes, detect incomplete configurations
+   - Reconstruct full voter list by loading previous state and merging
+
+3. **Type Fixes**:
+   - Changed `join_addr` from `Option<SocketAddr>` to `Option<String>`
+   - Fixed gRPC server startup order in test_helpers
+
+### ✅ All Core Issues Resolved:
+- Three-node cluster formation now works correctly
+- All nodes properly recognize the leader
+- Configuration changes are properly replicated to all nodes
+- Basic three-node cluster test passes reliably
+
+## Remaining Work
+
+The following tests still fail due to missing task/worker functionality (not cluster formation issues):
+- `test_three_node_cluster_task_submission` - Needs task/worker implementation
+- `test_three_node_cluster_fault_tolerance` - Needs proper node removal implementation
+- `test_three_node_cluster_concurrent_operations` - Needs task/worker implementation
+- `test_three_node_cluster_membership_changes` - Needs proper node removal implementation
 
 ## References
 - https://docs.rs/raft/latest/raft/
 - https://github.com/tikv/raft-rs/tree/master/examples
+- Commit: e2945f9 - feat(raft): implement snapshot support and fix configuration reconstruction

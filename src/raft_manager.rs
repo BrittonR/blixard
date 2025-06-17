@@ -524,6 +524,16 @@ impl RaftManager {
                     // The next ready cycle will send AppendEntries to all nodes
                 }
             }
+            
+            // Check if any nodes need snapshots (only leaders should do this)
+            // This is done AFTER all ready processing is complete to avoid generating
+            // messages during the advance phase
+            {
+                let mut node = self.raft_node.write().await;
+                if node.raft.state == raft::StateRole::Leader {
+                    self.check_and_send_snapshots(&mut node).await?;
+                }
+            }
         }
     }
 
@@ -1034,12 +1044,13 @@ impl RaftManager {
                                             "last_index" => last_index
                                         );
                                         
-                                        // If the node is behind, send a snapshot
+                                        // If the node is behind, log it but don't send append here
+                                        // The snapshot will be sent in the next ready cycle
                                         if progress.matched == 0 && last_index > 0 {
-                                            info!(self.logger, "[RAFT-CONF] New node needs snapshot, triggering send";
+                                            info!(self.logger, "[RAFT-CONF] New node needs snapshot, will be sent in next cycle";
                                                 "node_id" => cc.node_id
                                             );
-                                            node.raft.send_append(cc.node_id);
+                                            // Don't call send_append here - it generates messages during ready processing
                                         }
                                     }
                                 }
@@ -1082,7 +1093,15 @@ impl RaftManager {
         }
         
         // Advance the Raft node
-        let light_rd = node.advance(ready);
+        let mut light_rd = node.advance(ready);
+        
+        // Handle messages from LightReady
+        if !light_rd.messages().is_empty() {
+            info!(self.logger, "[RAFT-READY] Sending {} messages from LightReady", light_rd.messages().len());
+            for msg in light_rd.take_messages() {
+                self.send_raft_message(msg).await?;
+            }
+        }
         
         // Update commit index if needed
         if let Some(commit) = light_rd.commit_index() {
@@ -1107,10 +1126,23 @@ impl RaftManager {
             "last_index" => node.raft.raft_log.last_index()
         );
         
-        // Check if any nodes need snapshots (only leaders should do this)
-        if node.raft.state == raft::StateRole::Leader {
-            self.check_and_send_snapshots(&mut node).await?;
+        // Update SharedNodeState with current Raft status
+        if let Some(shared) = self.shared_state.upgrade() {
+            let is_leader = node.raft.state == StateRole::Leader;
+            let leader_id = if node.raft.leader_id == 0 {
+                None
+            } else {
+                Some(node.raft.leader_id)
+            };
+            let term = node.raft.term;
+            let state = format!("{:?}", node.raft.state);
+            
+            shared.update_raft_status(is_leader, leader_id, term, state).await;
         }
+        
+        // IMPORTANT: Do NOT call any methods that might generate messages after advance
+        // but before the next ready cycle. This includes check_and_send_snapshots which
+        // calls send_append and might generate messages on non-leader nodes.
         
         // Return true to indicate we processed a ready state
         Ok(true)
