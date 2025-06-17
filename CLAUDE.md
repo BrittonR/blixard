@@ -44,6 +44,9 @@ Recent progress:
 - ✅ Single-node cluster bootstrap with proper Raft initialization
 - ✅ **Raft snapshot support** - Full implementation for state transfer to lagging nodes
 - ✅ **Configuration reconstruction** - Fixes for joining nodes with incomplete state
+- ✅ **Test reliability improvements** - Replaced 37 sleep() calls with condition-based waiting
+- ✅ **Worker registration system** - Automatic registration and capacity tracking
+- ✅ **Raft proposal pipeline** - Fixed hanging task submissions
 - 🔧 VM lifecycle management (stubs only)
 
 ## Development Commands

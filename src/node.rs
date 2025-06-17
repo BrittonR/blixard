@@ -94,6 +94,29 @@ impl Node {
         if self.shared.config.join_addr.is_none() {
             // Bootstrap as single node
             storage.initialize_single_node(node_id)?;
+            
+            // Register this node as a worker in bootstrap mode
+            let address = self.shared.get_bind_addr().to_string();
+            let capabilities = crate::raft_manager::WorkerCapabilities {
+                cpu_cores: num_cpus::get() as u32,
+                memory_mb: 8192, // TODO: Get actual memory
+                disk_gb: 100, // TODO: Get actual disk space
+                features: vec!["microvm".to_string()],
+            };
+            
+            // Directly register in database since we're bootstrapping
+            let write_txn = db_arc.begin_write()?;
+            {
+                let mut worker_table = write_txn.open_table(crate::storage::WORKER_TABLE)?;
+                let mut status_table = write_txn.open_table(crate::storage::WORKER_STATUS_TABLE)?;
+                
+                let worker_data = bincode::serialize(&(address.clone(), capabilities))?;
+                worker_table.insert(node_id.to_le_bytes().as_slice(), worker_data.as_slice())?;
+                status_table.insert(node_id.to_le_bytes().as_slice(), [crate::raft_manager::WorkerStatus::Online as u8].as_slice())?;
+            }
+            write_txn.commit()?;
+            
+            tracing::info!("Node {} registered as worker in bootstrap mode", node_id);
         } else {
             // Initialize as joining node
             storage.initialize_joining_node()?;
@@ -270,25 +293,31 @@ impl Node {
         };
         
         if peer_addr.is_none() {
-            // Bootstrap mode - directly register in database and bootstrap as leader
+            // Bootstrap mode - check if already registered during initialization
             if let Some(db) = self.shared.get_database().await {
-                let write_txn = db.begin_write()?;
-                {
-                    let mut worker_table = write_txn.open_table(crate::storage::WORKER_TABLE)?;
-                    let mut status_table = write_txn.open_table(crate::storage::WORKER_STATUS_TABLE)?;
+                let read_txn = db.begin_read()?;
+                let worker_table = read_txn.open_table(crate::storage::WORKER_TABLE)?;
+                
+                // Check if already registered
+                if worker_table.get(node_id.to_le_bytes().as_slice())?.is_none() {
+                    drop(read_txn);
                     
-                    let worker_data = bincode::serialize(&(address.clone(), &capabilities))?;
-                    worker_table.insert(node_id.to_le_bytes().as_slice(), worker_data.as_slice())?;
-                    status_table.insert(node_id.to_le_bytes().as_slice(), [crate::raft_manager::WorkerStatus::Online as u8].as_slice())?;
+                    // Not registered yet, register now
+                    let write_txn = db.begin_write()?;
+                    {
+                        let mut worker_table = write_txn.open_table(crate::storage::WORKER_TABLE)?;
+                        let mut status_table = write_txn.open_table(crate::storage::WORKER_STATUS_TABLE)?;
+                        
+                        let worker_data = bincode::serialize(&(address.clone(), &capabilities))?;
+                        worker_table.insert(node_id.to_le_bytes().as_slice(), worker_data.as_slice())?;
+                        status_table.insert(node_id.to_le_bytes().as_slice(), [crate::raft_manager::WorkerStatus::Online as u8].as_slice())?;
+                    }
+                    write_txn.commit()?;
+                    
+                    tracing::info!("Node {} registered as worker in bootstrap mode", node_id);
+                } else {
+                    tracing::info!("Node {} already registered as worker", node_id);
                 }
-                write_txn.commit()?;
-                
-                // Bootstrap Raft as a single-node cluster
-                // Note: We need to access the RaftManager to call bootstrap_single_node
-                // This is a limitation of the current architecture
-                // For now, the test will need to wait for leader election
-                
-                tracing::info!("Node {} registered as worker in bootstrap mode", node_id);
             }
         } else {
             // Join existing cluster via Raft proposal

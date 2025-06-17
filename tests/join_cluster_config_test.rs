@@ -1,8 +1,10 @@
 use std::time::Duration;
-use tokio::time::sleep;
 use tracing::info;
-use std::sync::Arc;
-use raft::prelude::*;
+use blixard::proto::{cluster_service_client::ClusterServiceClient, HealthCheckRequest};
+
+// Include common test utilities
+mod common;
+use common::test_timing::wait_for_condition;
 
 #[tokio::test]
 async fn test_join_cluster_configuration_update() {
@@ -34,7 +36,19 @@ async fn test_join_cluster_configuration_update() {
     });
     
     // Wait for leader to be ready
-    sleep(Duration::from_secs(2)).await;
+    wait_for_condition(
+        || async {
+            // Check if leader node is responsive via gRPC
+            match ClusterServiceClient::connect(format!("http://{}", addr1)).await {
+                Ok(mut client) => {
+                    client.health_check(HealthCheckRequest {}).await.is_ok()
+                }
+                Err(_) => false,
+            }
+        },
+        Duration::from_secs(5),
+        Duration::from_millis(100),
+    ).await.expect("Leader node failed to become ready");
     
     // Check leader's initial configuration
     {
@@ -86,7 +100,27 @@ async fn test_join_cluster_configuration_update() {
     });
     
     // Wait for join to complete and configuration to propagate
-    sleep(Duration::from_secs(5)).await;
+    let node2_shared = node2.shared();
+    wait_for_condition(
+        || async {
+            // Check if node2's configuration has been updated
+            if let Some(db) = node2_shared.get_database().await {
+                let storage = blixard::storage::RedbRaftStorage { database: db };
+                if let Ok(conf_state) = storage.load_conf_state() {
+                    // Join is complete when node2 sees both nodes in the configuration
+                    conf_state.voters.len() == 2 && 
+                    conf_state.voters.contains(&1) && 
+                    conf_state.voters.contains(&2)
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        },
+        Duration::from_secs(10),
+        Duration::from_millis(200),
+    ).await.expect("Node failed to join cluster");
     
     // Check if joining node's configuration was updated
     {
@@ -115,6 +149,21 @@ async fn test_join_cluster_configuration_update() {
         assert!(conf_state.voters.contains(&2), "Leader should have node 2 in voters");
         assert_eq!(conf_state.voters.len(), 2, "Should have exactly 2 voters");
     }
+    
+    // Wait for both nodes to agree on the leader
+    wait_for_condition(
+        || async {
+            if let (Ok((leader1, _, _)), Ok((leader2, _, _))) = 
+                (node1.get_cluster_status().await, node2.get_cluster_status().await) {
+                // Both nodes should see node 1 as leader
+                leader1 == 1 && leader2 == 1
+            } else {
+                false
+            }
+        },
+        Duration::from_secs(5),
+        Duration::from_millis(100),
+    ).await.expect("Nodes failed to agree on leader");
     
     // Check cluster status from both nodes
     let (leader_id1, peers1, term1) = node1.get_cluster_status().await.unwrap();

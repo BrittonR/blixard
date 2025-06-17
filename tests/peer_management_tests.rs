@@ -200,7 +200,14 @@ async fn test_raft_status_tracking() {
     assert_eq!(status.state, "follower");
     
     // Update to leader
-    node.update_raft_status(true, Some(1), 5, "leader".to_string()).await;
+    let status = blixard::node_shared::RaftStatus {
+        is_leader: true,
+        node_id: 1,
+        leader_id: Some(1),
+        term: 5,
+        state: "leader".to_string(),
+    };
+    node.update_raft_status(status).await;
     
     let status = node.get_raft_status().await.unwrap();
     assert!(status.is_leader);

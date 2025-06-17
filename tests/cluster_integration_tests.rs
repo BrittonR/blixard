@@ -196,8 +196,11 @@ async fn test_task_submission_via_grpc() {
     wait_for_condition(
         || async {
             // In single-node mode, the node should quickly become leader
-            // We'll check via the node's internal state
-            true // For now, just wait the timeout
+            let raft_status = node_shared.get_raft_status().await.ok();
+            match raft_status {
+                Some(status) => status.is_leader,
+                None => false
+            }
         },
         scaled_timeout(Duration::from_secs(3)),
         Duration::from_millis(100),
@@ -314,8 +317,11 @@ async fn test_concurrent_task_submissions() {
     wait_for_condition(
         || async {
             // In single-node mode, the node should quickly become leader
-            // We'll check via the node's internal state
-            true // For now, just wait the timeout
+            let raft_status = node_shared.get_raft_status().await.ok();
+            match raft_status {
+                Some(status) => status.is_leader,
+                None => false
+            }
         },
         scaled_timeout(Duration::from_secs(3)),
         Duration::from_millis(100),

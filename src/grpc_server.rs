@@ -156,6 +156,33 @@ impl ClusterService for BlixardGrpcService {
             Ok(_) => {
                 // Note: The configuration change has been proposed, but not necessarily committed yet
                 tracing::info!("[JOIN] Configuration change proposed to Raft for node {}", req.node_id);
+                
+                // Also propose worker registration for the joining node
+                let capabilities = crate::raft_manager::WorkerCapabilities {
+                    cpu_cores: 4, // Default capabilities for joining nodes
+                    memory_mb: 8192,
+                    disk_gb: 100,
+                    features: vec!["microvm".to_string()],
+                };
+                
+                let proposal_data = crate::raft_manager::ProposalData::RegisterWorker {
+                    node_id: req.node_id,
+                    address: req.bind_address.clone(),
+                    capabilities,
+                };
+                
+                let (response_tx, _response_rx) = tokio::sync::oneshot::channel();
+                let proposal = crate::raft_manager::RaftProposal {
+                    id: uuid::Uuid::new_v4().as_bytes().to_vec(),
+                    data: proposal_data,
+                    response_tx: Some(response_tx),
+                };
+                
+                // Send worker registration proposal
+                if let Err(e) = self.node.send_raft_proposal(proposal).await {
+                    tracing::warn!("[JOIN] Failed to propose worker registration for node {}: {}", req.node_id, e);
+                    // Don't fail the join - worker registration can be retried
+                }
                 // Get current peers to return
                 let peers = self.node.get_peers().await;
                 let mut peer_infos: Vec<NodeInfo> = peers.into_iter()

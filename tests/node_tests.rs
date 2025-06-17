@@ -55,8 +55,11 @@ async fn test_node_lifecycle_with_initialization() {
     node.start().await.unwrap();
     assert!(node.is_running().await);
     
-    // Give it a moment to start
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Wait for node to be fully running
+    common::wait_for_condition(
+        || async { node.is_running().await },
+        Duration::from_secs(5)
+    ).await.expect("Node should start within timeout");
     
     // Stop node
     node.stop().await.unwrap();
@@ -205,8 +208,7 @@ async fn test_vm_status_update_command() {
     let result = node.send_vm_command(command).await;
     assert!(result.is_ok());
     
-    // Give command time to process
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // No need to wait - command is sent asynchronously
 }
 
 // ===== Database Tests =====
@@ -285,8 +287,14 @@ async fn test_database_persistence_across_restarts() {
             node_id,
         }).await.unwrap();
         
-        // Give more time for VM command to be processed and persisted
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        // Wait for VM to be created
+        common::wait_for_condition(
+            || async {
+                let vms = node.list_vms().await.unwrap_or_default();
+                !vms.is_empty()
+            },
+            Duration::from_secs(2)
+        ).await.expect("VM should be created within timeout");
         
         // Verify VM was created before shutdown
         let vms = node.list_vms().await.unwrap();
@@ -296,15 +304,31 @@ async fn test_database_persistence_across_restarts() {
         // Explicitly stop the node to ensure clean shutdown
         node.stop().await.unwrap();
         
-        // Give a moment for async cleanup to complete
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Wait for node to be fully stopped
+        common::wait_for_condition(
+            || async { !node.is_running().await },
+            Duration::from_secs(1)
+        ).await.expect("Node should stop within timeout");
         
         // Ensure node is dropped
         drop(node);
     }
     
-    // Wait for database file to be fully released
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    // Wait for database file to be fully released by checking if we can open it
+    let db_path = data_dir.join("blixard.db");
+    common::wait_for_condition(
+        || async {
+            // Try to open the database file to check if it's released
+            match Database::open(&db_path) {
+                Ok(db) => {
+                    drop(db);
+                    true
+                },
+                Err(_) => false
+            }
+        },
+        Duration::from_secs(5)
+    ).await.expect("Database file should be released within timeout");
     
     // Create new node with same data directory
     {
@@ -358,8 +382,14 @@ async fn test_database_concurrent_access() {
         assert!(handle.await.unwrap().is_ok());
     }
     
-    // Give time to process
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Wait for all VMs to be created
+    common::wait_for_condition(
+        || async {
+            let vms = node.list_vms().await.unwrap_or_default();
+            vms.len() == 10
+        },
+        Duration::from_secs(2)
+    ).await.expect("All VMs should be created within timeout");
     
     // Verify all VMs were created
     let vms = node.list_vms().await.unwrap();
@@ -379,8 +409,14 @@ async fn test_raft_manager_initialization() {
     // After initialization, Raft should be running
     node.initialize().await.unwrap();
     
-    // Give Raft time to start
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Wait for Raft to be ready to accept messages
+    common::wait_for_condition(
+        || async {
+            // Try sending a message - if it succeeds, Raft is ready
+            node.send_raft_message(2, raft::prelude::Message::default()).await.is_ok()
+        },
+        Duration::from_secs(2)
+    ).await.expect("Raft should be ready within timeout");
     
     // Now Raft messages should be accepted (though may not be processed without peers)
     let result = node.send_raft_message(2, raft::prelude::Message::default()).await;
@@ -399,8 +435,23 @@ async fn test_task_submission() {
     // Bootstrap mode - register as worker
     node.join_cluster(None).await.unwrap();
     
-    // Give more time for Raft to initialize and elect itself as leader
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    // Wait for node to become leader in bootstrap mode
+    common::wait_for_condition(
+        || async {
+            // In bootstrap mode, node should elect itself as leader
+            match node.get_cluster_status().await {
+                Ok((leader, members, term)) => {
+                    println!("DEBUG: get_cluster_status returned leader={}, members={:?}, term={}", leader, members, term);
+                    leader == 1
+                },
+                Err(e) => {
+                    println!("DEBUG: get_cluster_status error: {:?}", e);
+                    false
+                }
+            }
+        },
+        Duration::from_secs(5)
+    ).await.expect("Node should become leader within timeout");
     
     let task_spec = TaskSpec {
         command: "echo".to_string(),
@@ -414,9 +465,11 @@ async fn test_task_submission() {
         timeout_secs: 60,
     };
     
+    println!("DEBUG: Submitting task...");
     let result = node.submit_task("test-task-1", task_spec).await;
     match result {
         Ok(worker_id) => {
+            println!("DEBUG: Task assigned to worker {}", worker_id);
             assert!(worker_id > 0, "Should assign to a valid worker");
         }
         Err(e) => {
@@ -433,7 +486,17 @@ async fn test_task_status_retrieval() {
     
     // Bootstrap mode
     node.join_cluster(None).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    
+    // Wait for cluster to be ready
+    common::wait_for_condition(
+        || async {
+            match node.get_cluster_status().await {
+                Ok((_, members, _)) => !members.is_empty(),
+                Err(_) => false
+            }
+        },
+        Duration::from_secs(2)
+    ).await.expect("Node should join cluster within timeout");
     
     // Submit a task
     let task_spec = TaskSpec {
@@ -486,8 +549,16 @@ async fn test_cluster_status_after_join() {
     // Bootstrap mode
     node.join_cluster(None).await.unwrap();
     
-    // Give time for Raft to process
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Wait for cluster to be formed
+    common::wait_for_condition(
+        || async {
+            match node.get_cluster_status().await {
+                Ok((leader, members, term)) => leader > 0 && !members.is_empty() && term > 0,
+                Err(_) => false
+            }
+        },
+        Duration::from_secs(2)
+    ).await.expect("Cluster should be formed within timeout");
     
     let (leader, members, term) = node.get_cluster_status().await.unwrap();
     assert!(leader > 0); // Should have a leader
@@ -503,7 +574,17 @@ async fn test_leave_cluster() {
     
     // Join first
     node.join_cluster(None).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    
+    // Wait for node to be registered in cluster
+    common::wait_for_condition(
+        || async {
+            match node.get_cluster_status().await {
+                Ok((_, members, _)) => !members.is_empty(),
+                Err(_) => false
+            }
+        },
+        Duration::from_secs(2)
+    ).await.expect("Node should join cluster within timeout");
     
     // Then leave
     let result = node.leave_cluster().await;
@@ -538,8 +619,7 @@ async fn test_vm_command_channel_closed() {
     // Stop the node to close channels
     node.stop().await.unwrap();
     
-    // Give time for channels to close
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // No need to wait - channels should close synchronously
     
     // Try to send command after stop - this should still work through shared state
     let result = node.send_vm_command(VmCommand::UpdateStatus {
@@ -599,14 +679,27 @@ async fn test_vm_lifecycle_operations() {
         node_id: 1,
     }).await.unwrap();
     
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Wait for VM to be created in storage
+    common::wait_for_condition(
+        || async {
+            let vms = node.list_vms().await.unwrap_or_default();
+            vms.iter().any(|(config, _)| config.name == vm_name)
+        },
+        Duration::from_secs(2)
+    ).await.expect("VM should be created within timeout");
     
     // Start VM
     node.send_vm_command(VmCommand::Start {
         name: vm_name.to_string(),
     }).await.unwrap();
     
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Wait for VM status to be updated
+    common::wait_for_condition(
+        || async {
+            node.get_vm_status(vm_name).await.unwrap_or(None).is_some()
+        },
+        Duration::from_secs(2)
+    ).await.expect("VM status should be available within timeout");
     
     // Check status
     let status = node.get_vm_status(vm_name).await.unwrap();
@@ -617,7 +710,16 @@ async fn test_vm_lifecycle_operations() {
         name: vm_name.to_string(),
     }).await.unwrap();
     
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Wait for VM to be stopped
+    common::wait_for_condition(
+        || async {
+            match node.get_vm_status(vm_name).await.unwrap_or(None) {
+                Some((_, status)) => !matches!(status, blixard::types::VmStatus::Running),
+                None => false
+            }
+        },
+        Duration::from_secs(2)
+    ).await.expect("VM should stop within timeout");
     
     // Delete VM
     node.send_vm_command(VmCommand::Delete {
@@ -645,7 +747,14 @@ async fn test_multiple_vm_operations() {
         }).await.unwrap();
     }
     
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Wait for all VMs to be created
+    common::wait_for_condition(
+        || async {
+            let vms = node.list_vms().await.unwrap_or_default();
+            vms.len() == 5
+        },
+        Duration::from_secs(2)
+    ).await.expect("All VMs should be created within timeout");
     
     // List all VMs
     let vms = node.list_vms().await.unwrap();

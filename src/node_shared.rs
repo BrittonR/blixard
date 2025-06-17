@@ -237,13 +237,21 @@ impl SharedNodeState {
     
     /// Submit a task to the cluster
     pub async fn submit_task(&self, task_id: &str, task: TaskSpec) -> BlixardResult<u64> {
+        tracing::info!("submit_task called for task_id: {}", task_id);
+        
         let proposal_tx = self.raft_proposal_tx.lock().await;
         
         let database = self.database.read().await;
         if let (Some(tx), Some(db)) = (proposal_tx.as_ref(), database.as_ref()) {
+            tracing::info!("Checking if we can schedule the task...");
             // Check if we can schedule the task
             let assigned_node = crate::raft_manager::schedule_task(db.clone(), task_id, &task).await?
-                .ok_or_else(|| BlixardError::ClusterError("No suitable worker available".to_string()))?;
+                .ok_or_else(|| {
+                    tracing::error!("No suitable worker available for task {}", task_id);
+                    BlixardError::ClusterError("No suitable worker available".to_string())
+                })?;
+            
+            tracing::info!("Task {} assigned to worker node {}", task_id, assigned_node);
             
             // Submit the task assignment through Raft
             let proposal_data = crate::raft_manager::ProposalData::AssignTask {
@@ -253,20 +261,40 @@ impl SharedNodeState {
             };
             
             let (response_tx, response_rx) = oneshot::channel();
+            let proposal_id = uuid::Uuid::new_v4().as_bytes().to_vec();
+            tracing::info!("Creating task proposal with id length: {}", proposal_id.len());
+            
             let proposal = RaftProposal {
-                id: uuid::Uuid::new_v4().as_bytes().to_vec(),
+                id: proposal_id.clone(),
                 data: proposal_data,
                 response_tx: Some(response_tx),
             };
             
+            tracing::info!("Sending proposal to Raft manager");
             tx.send(proposal).map_err(|_| BlixardError::Internal {
                 message: "Failed to send task proposal".to_string(),
             })?;
             
-            // Wait for response
-            response_rx.await.map_err(|_| BlixardError::Internal {
-                message: "Task proposal response channel closed".to_string(),
-            })??;
+            tracing::info!("Waiting for proposal response...");
+            // Wait for response with a timeout
+            match tokio::time::timeout(tokio::time::Duration::from_secs(10), response_rx).await {
+                Ok(Ok(result)) => {
+                    tracing::info!("Received proposal response: {:?}", result.is_ok());
+                    result?;
+                }
+                Ok(Err(_)) => {
+                    tracing::error!("Proposal response channel closed without response");
+                    return Err(BlixardError::Internal {
+                        message: "Task proposal response channel closed".to_string(),
+                    });
+                }
+                Err(_) => {
+                    tracing::error!("Proposal timed out after 10 seconds");
+                    return Err(BlixardError::Internal {
+                        message: "Task proposal timed out".to_string(),
+                    });
+                }
+            }
             
             Ok(assigned_node)
         } else {
@@ -348,12 +376,8 @@ impl SharedNodeState {
     }
     
     /// Update Raft status
-    pub async fn update_raft_status(&self, is_leader: bool, leader_id: Option<u64>, term: u64, state: String) {
-        let mut status = self.raft_status.write().await;
-        status.is_leader = is_leader;
-        status.leader_id = leader_id;
-        status.term = term;
-        status.state = state;
+    pub async fn update_raft_status(&self, status: RaftStatus) {
+        *self.raft_status.write().await = status;
     }
     
     /// Add a peer

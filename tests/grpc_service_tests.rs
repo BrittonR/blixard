@@ -112,7 +112,14 @@ async fn test_get_raft_status_after_update() {
     let (state, addr, handle) = setup_test_server().await;
     
     // Update Raft status
-    state.update_raft_status(true, Some(1), 5, "leader".to_string()).await;
+    let status = blixard::node_shared::RaftStatus {
+        is_leader: true,
+        node_id: 1,
+        leader_id: Some(1),
+        term: 5,
+        state: "leader".to_string(),
+    };
+    state.update_raft_status(status).await;
     
     let (mut blixard_client, _cluster_client) = create_client(addr).await;
     
@@ -316,7 +323,14 @@ async fn test_error_handling_for_invalid_raft_state() {
     let (state, addr, handle) = setup_test_server().await;
     
     // Set some edge case values
-    state.update_raft_status(false, None, u64::MAX, "unknown".to_string()).await;
+    let status = blixard::node_shared::RaftStatus {
+        is_leader: false,
+        node_id: 1,
+        leader_id: None,
+        term: u64::MAX,
+        state: "unknown".to_string(),
+    };
+    state.update_raft_status(status).await;
     
     let (mut blixard_client, _cluster_client) = create_client(addr).await;
     

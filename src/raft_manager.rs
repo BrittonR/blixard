@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 use tokio::sync::{mpsc, RwLock, oneshot};
 use tokio::time::{interval, Duration};
-use raft::{Config, RawNode, StateRole};
+use raft::{Config, RawNode, StateRole, GetEntriesContext};
 use raft::prelude::*;
 use slog::{Logger, o, info, warn, Drain};
 use redb::{Database, WriteTransaction, ReadableTable};
@@ -508,6 +508,38 @@ impl RaftManager {
                 }
             }
             
+            // After processing all ready states, check if we have unapplied commits
+            // This can happen in single-node clusters where commits happen in light ready
+            {
+                let node = self.raft_node.read().await;
+                if node.raft.raft_log.committed > node.raft.raft_log.applied {
+                    info!(self.logger, "[RAFT-LOOP] Unapplied commits after ready processing";
+                        "committed" => node.raft.raft_log.committed,
+                        "applied" => node.raft.raft_log.applied
+                    );
+                    drop(node);
+                    
+                    // Manually trigger a tick to force Raft to generate a new ready state
+                    info!(self.logger, "[RAFT-LOOP] Triggering tick to process unapplied commits");
+                    self.tick().await?;
+                    
+                    // Process any new ready states
+                    let mut ready_count = 0;
+                    loop {
+                        if !self.on_ready().await? {
+                            break;
+                        }
+                        ready_count += 1;
+                    }
+                    
+                    if ready_count == 0 {
+                        warn!(self.logger, "[RAFT-LOOP] No ready states after tick for unapplied commits");
+                    } else {
+                        info!(self.logger, "[RAFT-LOOP] Processed {} ready states after tick", ready_count);
+                    }
+                }
+            }
+            
             // Check if we need to trigger replication after conf change
             let needs_trigger = {
                 let mut flag = self.needs_replication_trigger.write().await;
@@ -541,6 +573,26 @@ impl RaftManager {
         let mut node = self.raft_node.write().await;
         node.tick();
         
+        // Update shared state with current Raft status
+        if let Some(shared) = self.shared_state.upgrade() {
+            let is_leader = node.raft.state == StateRole::Leader;
+            let leader_id = if is_leader {
+                Some(self.node_id)
+            } else {
+                Some(node.raft.leader_id) // Get leader from Raft's perspective
+            };
+            
+            let status = crate::node_shared::RaftStatus {
+                is_leader,
+                node_id: self.node_id,
+                leader_id,
+                term: node.raft.term,
+                state: format!("{:?}", node.raft.state).to_lowercase(),
+            };
+            
+            shared.update_raft_status(status).await;
+        }
+        
         // After tick, check if there are any messages to send (e.g., heartbeats)
         let msgs = node.raft.msgs.drain(..).collect::<Vec<_>>();
         drop(node); // Release the lock before sending messages
@@ -556,11 +608,21 @@ impl RaftManager {
 
     async fn handle_proposal(&self, proposal: RaftProposal) -> BlixardResult<()> {
         let proposal_id = proposal.id.clone();
+        let has_response = proposal.response_tx.is_some();
+        
+        info!(self.logger, "[RAFT-PROPOSAL] Handling proposal"; 
+            "id_len" => proposal_id.len(),
+            "has_response_tx" => has_response,
+            "data_type" => format!("{:?}", proposal.data)
+        );
         
         // Store the response channel if provided
         if let Some(response_tx) = proposal.response_tx {
             let mut pending = self.pending_proposals.write().await;
             pending.insert(proposal_id.clone(), response_tx);
+            info!(self.logger, "[RAFT-PROPOSAL] Stored response channel"; 
+                "pending_count" => pending.len()
+            );
         }
         
         let data = bincode::serialize(&proposal.data)
@@ -569,12 +631,44 @@ impl RaftManager {
                 source: Box::new(e),
             })?;
         
+        info!(self.logger, "[RAFT-PROPOSAL] Proposing to Raft"; 
+            "id_len" => proposal_id.len(),
+            "data_len" => data.len()
+        );
+        
         let mut node = self.raft_node.write().await;
-        node.propose(proposal_id, data)
-            .map_err(|e| BlixardError::Raft {
-                operation: "propose".to_string(),
-                source: Box::new(e),
-            })?;
+        
+        // Ensure we're passing the proposal_id as context correctly
+        info!(self.logger, "[RAFT-PROPOSAL] About to call node.propose"; 
+            "context_len" => proposal_id.len(),
+            "data_len" => data.len()
+        );
+        
+        match node.propose(proposal_id.clone(), data) {
+            Ok(_) => {
+                info!(self.logger, "[RAFT-PROPOSAL] Proposal submitted to Raft successfully");
+            }
+            Err(e) => {
+                warn!(self.logger, "[RAFT-PROPOSAL] Failed to propose"; "error" => %e);
+                
+                // If proposal fails, remove from pending and send error
+                let error_msg = format!("Failed to propose: {}", e);
+                
+                if has_response {
+                    let mut pending = self.pending_proposals.write().await;
+                    if let Some(response_tx) = pending.remove(&proposal_id) {
+                        let _ = response_tx.send(Err(BlixardError::Internal {
+                            message: error_msg.clone(),
+                        }));
+                    }
+                }
+                
+                return Err(BlixardError::Raft {
+                    operation: "propose".to_string(),
+                    source: Box::new(e),
+                });
+            }
+        }
         
         Ok(())
     }
@@ -824,18 +918,34 @@ impl RaftManager {
                 "from" => msg.from, "to" => msg.to, "type" => ?msg.msg_type());
         }
         
+        // Log the current state of the raft log BEFORE processing
+        info!(self.logger, "[RAFT-READY] Raft log state BEFORE processing";
+            "applied" => node.raft.raft_log.applied,
+            "committed" => node.raft.raft_log.committed,
+            "last_index" => node.raft.raft_log.last_index()
+        );
+        
         info!(self.logger, "[RAFT-READY] Ready state details";
             "messages" => ready.messages().len(),
             "committed_entries" => ready.committed_entries().len(),
             "entries" => ready.entries().len(),
-            "snapshot" => ready.snapshot().is_empty()
+            "has_snapshot" => !ready.snapshot().is_empty()
         );
         
         // Debug: Check if there are committed entries before processing
         if !ready.committed_entries().is_empty() {
-            info!(self.logger, "[RAFT-READY] DEBUG: Found {} committed entries before processing!", ready.committed_entries().len());
+            info!(self.logger, "[RAFT-READY] Found {} committed entries in ready state", ready.committed_entries().len());
             for (i, entry) in ready.committed_entries().iter().enumerate() {
-                info!(self.logger, "[RAFT-READY] DEBUG: Entry {}: index={}, type={:?}", i, entry.index, entry.entry_type());
+                info!(self.logger, "[RAFT-READY] Committed entry {}: index={}, type={:?}, context_len={}, data_len={}", 
+                    i, entry.index, entry.entry_type(), entry.context.len(), entry.data.len());
+            }
+        } else {
+            // If no committed entries but we're behind, something is wrong
+            if node.raft.raft_log.committed > node.raft.raft_log.applied {
+                warn!(self.logger, "[RAFT-READY] No committed entries but behind on applied!";
+                    "committed" => node.raft.raft_log.committed,
+                    "applied" => node.raft.raft_log.applied
+                );
             }
         }
         
@@ -861,6 +971,19 @@ impl RaftManager {
         // Save entries to storage
         if !ready.entries().is_empty() {
             info!(self.logger, "[RAFT-READY] Saving {} entries to storage", ready.entries().len());
+            
+            // Log detailed entry information
+            for (i, entry) in ready.entries().iter().enumerate() {
+                info!(self.logger, "[RAFT-READY] Entry details";
+                    "entry_num" => i,
+                    "index" => entry.index,
+                    "term" => entry.term,
+                    "entry_type" => ?entry.entry_type(),
+                    "context_len" => entry.context.len(),
+                    "data_len" => entry.data.len()
+                );
+            }
+            
             node.mut_store().append(&ready.entries())?;
             
             // In a single-node cluster, we might need to update the commit index immediately
@@ -897,28 +1020,91 @@ impl RaftManager {
         }
         
         // Apply committed entries to state machine
-        let committed_entries = ready.take_committed_entries();
+        let mut committed_entries = ready.take_committed_entries();
         info!(self.logger, "[RAFT-READY] Committed entries count: {}", committed_entries.len());
+        
+        // IMPORTANT: Check if we're behind on applying entries
+        // This can happen when entries were committed in previous ready cycles
+        // but we haven't processed them yet (e.g., during bootstrap)
+        if committed_entries.is_empty() && node.raft.raft_log.committed > node.raft.raft_log.applied {
+            warn!(self.logger, "[RAFT-READY] No committed entries but we're behind on applying";
+                "committed" => node.raft.raft_log.committed,
+                "applied" => node.raft.raft_log.applied
+            );
+            // This is a bug - we should have gotten these entries in committed_entries!
+        }
+        
         let mut last_applied_index = 0u64;
         if !committed_entries.is_empty() {
             info!(self.logger, "[RAFT-READY] Processing {} committed entries", committed_entries.len());
             let pending_proposals = Arc::clone(&self.pending_proposals);
-            info!(self.logger, "[RAFT-READY] Committed entries: {:?}", committed_entries.iter().map(|e| (e.index, e.entry_type())).collect::<Vec<_>>());
-            for entry in committed_entries.iter() {
+            info!(self.logger, "[RAFT-READY] Processing committed entries");
+            for (idx, entry) in committed_entries.iter().enumerate() {
+                info!(self.logger, "[RAFT-READY] Processing committed entry";
+                    "entry_num" => idx,
+                    "index" => entry.index,
+                    "term" => entry.term,
+                    "type" => ?entry.entry_type(),
+                    "context_len" => entry.context.len(),
+                    "data_len" => entry.data.len(),
+                    "has_context" => !entry.context.is_empty(),
+                    "has_data" => !entry.data.is_empty()
+                );
+                
                 last_applied_index = entry.index;
                 use raft::prelude::EntryType;
                 
                 match entry.entry_type() {
                     EntryType::EntryNormal => {
+                        info!(self.logger, "[RAFT-READY] Processing normal entry"; 
+                            "index" => entry.index, 
+                            "context_len" => entry.context.len(),
+                            "has_data" => !entry.data.is_empty(),
+                            "is_empty" => entry.data.is_empty() && entry.context.is_empty()
+                        );
+                        
                         // Apply normal entry to state machine
                         let result = self.state_machine.apply_entry(&entry).await;
                         
+                        // Log the result
+                        match &result {
+                            Ok(_) => info!(self.logger, "[RAFT-READY] Entry applied successfully"; "index" => entry.index),
+                            Err(e) => warn!(self.logger, "[RAFT-READY] Failed to apply entry"; "index" => entry.index, "error" => %e),
+                        }
+                        
                         // Send response to waiting proposal if any
                         if !entry.context.is_empty() {
+                            let pending_count = pending_proposals.read().await.len();
+                            info!(self.logger, "[RAFT-READY] Looking for pending proposal"; 
+                                "context_len" => entry.context.len(),
+                                "pending_count" => pending_count
+                            );
+                            
+                            // Log all pending proposal IDs for debugging
+                            {
+                                let pending_read = pending_proposals.read().await;
+                                info!(self.logger, "[RAFT-READY] Checking pending proposals");
+                                for (id, _) in pending_read.iter() {
+                                    info!(self.logger, "[RAFT-READY] Pending proposal"; 
+                                        "id_len" => id.len(),
+                                        "matches_context" => (id == &entry.context)
+                                    );
+                                }
+                            }
+                            
                             let mut pending = pending_proposals.write().await;
                             if let Some(response_tx) = pending.remove(&entry.context) {
-                                let _ = response_tx.send(result);
+                                info!(self.logger, "[RAFT-READY] Found and sending proposal response"; "success" => result.is_ok());
+                                if let Err(_) = response_tx.send(result) {
+                                    warn!(self.logger, "[RAFT-READY] Failed to send proposal response - receiver dropped");
+                                }
+                            } else {
+                                warn!(self.logger, "[RAFT-READY] No pending proposal found for context"; 
+                                    "context_len" => entry.context.len()
+                                );
                             }
+                        } else {
+                            info!(self.logger, "[RAFT-READY] Entry has no context, no response to send");
                         }
                     }
                     EntryType::EntryConfChange => {
@@ -1093,7 +1279,15 @@ impl RaftManager {
         }
         
         // Advance the Raft node
+        info!(self.logger, "[RAFT-READY] About to call advance on ready state";
+            "applied_before" => node.raft.raft_log.applied,
+            "committed_before" => node.raft.raft_log.committed
+        );
         let mut light_rd = node.advance(ready);
+        info!(self.logger, "[RAFT-READY] Advanced ready state";
+            "applied_after" => node.raft.raft_log.applied,
+            "committed_after" => node.raft.raft_log.committed
+        );
         
         // Handle messages from LightReady
         if !light_rd.messages().is_empty() {
@@ -1104,18 +1298,101 @@ impl RaftManager {
         }
         
         // Update commit index if needed
-        if let Some(commit) = light_rd.commit_index() {
+        let had_commit_update = if let Some(commit) = light_rd.commit_index() {
             info!(self.logger, "[RAFT-READY] Light ready has commit index"; "commit" => commit);
             // Store commit index update
             let mut hs = node.raft.hard_state();
             hs.set_commit(commit);
             node.mut_store().save_hard_state(&hs)?;
+            true
+        } else {
+            false
+        };
+        
+        // CRITICAL: Check if new entries were committed during this ready cycle
+        // This happens in single-node clusters where commits happen immediately
+        let current_applied = if last_applied_index > 0 { last_applied_index } else { node.raft.raft_log.applied };
+        if had_commit_update && node.raft.raft_log.committed > current_applied {
+            // We have newly committed entries that weren't in ready.committed_entries()
+            // Fetch and process them now
+            let start = current_applied + 1;
+            let end = node.raft.raft_log.committed + 1;
+            
+            info!(self.logger, "[RAFT-READY] Fetching newly committed entries after light ready";
+                "start" => start,
+                "end" => end,
+                "last_applied" => last_applied_index,
+                "committed" => node.raft.raft_log.committed
+            );
+            
+            if let Ok(entries) = node.mut_store().entries(start, end, None, GetEntriesContext::empty(false)) {
+                info!(self.logger, "[RAFT-READY] Processing {} newly committed entries", entries.len());
+                
+                // Process these entries
+                for (idx, entry) in entries.iter().enumerate() {
+                    info!(self.logger, "[RAFT-READY] Processing newly committed entry";
+                        "entry_num" => idx,
+                        "index" => entry.index,
+                        "term" => entry.term,
+                        "type" => ?entry.entry_type(),
+                        "context_len" => entry.context.len(),
+                        "data_len" => entry.data.len()
+                    );
+                    
+                    last_applied_index = entry.index;
+                    
+                    match entry.entry_type() {
+                        EntryType::EntryNormal => {
+                            info!(self.logger, "[RAFT-READY] Processing normal entry"; 
+                                "index" => entry.index, 
+                                "context_len" => entry.context.len(),
+                                "has_data" => !entry.data.is_empty()
+                            );
+                            
+                            // Apply normal entry to state machine
+                            let result = self.state_machine.apply_entry(&entry).await;
+                            
+                            // Log the result
+                            match &result {
+                                Ok(_) => info!(self.logger, "[RAFT-READY] Entry applied successfully"; "index" => entry.index),
+                                Err(e) => warn!(self.logger, "[RAFT-READY] Failed to apply entry"; "index" => entry.index, "error" => %e),
+                            }
+                            
+                            // Send response to waiting proposal if any
+                            if !entry.context.is_empty() {
+                                let pending_count = self.pending_proposals.read().await.len();
+                                info!(self.logger, "[RAFT-READY] Looking for pending proposal"; 
+                                    "context_len" => entry.context.len(),
+                                    "pending_count" => pending_count
+                                );
+                                
+                                let mut pending = self.pending_proposals.write().await;
+                                if let Some(response_tx) = pending.remove(&entry.context) {
+                                    info!(self.logger, "[RAFT-READY] Found and sending proposal response"; "success" => result.is_ok());
+                                    if let Err(_) = response_tx.send(result) {
+                                        warn!(self.logger, "[RAFT-READY] Failed to send proposal response - receiver dropped");
+                                    }
+                                } else {
+                                    warn!(self.logger, "[RAFT-READY] No pending proposal found for context"; 
+                                        "context_len" => entry.context.len()
+                                    );
+                                }
+                            }
+                        }
+                        _ => {
+                            // Handle other entry types if needed
+                            warn!(self.logger, "[RAFT-READY] Skipping non-normal entry type"; "type" => ?entry.entry_type());
+                        }
+                    }
+                }
+            }
         }
         
         // CRITICAL: Tell Raft we've applied the committed entries
         // This is required for Raft to return new committed entries in future ready states
         if last_applied_index > 0 {
             node.advance_apply_to(last_applied_index);
+            info!(self.logger, "[RAFT-READY] Advanced applied index to {}", last_applied_index);
         }
         
         // Check the current state after processing
@@ -1134,15 +1411,34 @@ impl RaftManager {
             } else {
                 Some(node.raft.leader_id)
             };
-            let term = node.raft.term;
-            let state = format!("{:?}", node.raft.state);
             
-            shared.update_raft_status(is_leader, leader_id, term, state).await;
+            let status = crate::node_shared::RaftStatus {
+                is_leader,
+                node_id: self.node_id,
+                leader_id,
+                term: node.raft.term,
+                state: format!("{:?}", node.raft.state).to_lowercase(),
+            };
+            
+            shared.update_raft_status(status).await;
         }
         
         // IMPORTANT: Do NOT call any methods that might generate messages after advance
         // but before the next ready cycle. This includes check_and_send_snapshots which
         // calls send_append and might generate messages on non-leader nodes.
+        
+        // Check if there's another ready state immediately available
+        let has_more_ready = node.has_ready();
+        if has_more_ready {
+            info!(self.logger, "[RAFT-READY] Another ready state is immediately available");
+        } else if had_commit_update {
+            // If we had a commit update but no ready state, we might need to
+            // trigger another cycle to process the newly committed entries
+            info!(self.logger, "[RAFT-READY] Had commit update but no immediate ready state";
+                "committed" => node.raft.raft_log.committed,
+                "applied" => node.raft.raft_log.applied
+            );
+        }
         
         // Return true to indicate we processed a ready state
         Ok(true)
@@ -1300,6 +1596,8 @@ pub async fn schedule_task(
 ) -> BlixardResult<Option<u64>> {
     use crate::storage::{WORKER_TABLE, WORKER_STATUS_TABLE};
     
+    tracing::info!("Scheduling task with requirements: {:?}", task.resources);
+    
     let read_txn = database.begin_read()?;
     let worker_table = read_txn.open_table(WORKER_TABLE)?;
     let status_table = read_txn.open_table(WORKER_STATUS_TABLE)?;
@@ -1307,21 +1605,31 @@ pub async fn schedule_task(
     // Find available workers
     let mut best_worker: Option<(u64, i32)> = None; // (node_id, score)
     
+    let mut worker_count = 0;
     for entry in worker_table.iter()? {
         let (node_id_bytes, worker_data) = entry?;
         let node_id = u64::from_le_bytes(node_id_bytes.value().try_into().unwrap());
+        worker_count += 1;
+        
+        tracing::info!("Found worker {}", node_id);
         
         // Check if worker is online
         if let Some(status_data) = status_table.get(node_id_bytes.value())? {
             let status = WorkerStatus::try_from(status_data.value()[0]).ok();
+            tracing::info!("Worker {} status: {:?}", node_id, status);
             if status != Some(WorkerStatus::Online) {
                 continue;
             }
+        } else {
+            tracing::warn!("Worker {} has no status entry", node_id);
+            continue;
         }
         
         // Deserialize worker capabilities
         let (_address, capabilities): (String, WorkerCapabilities) = 
             bincode::deserialize(worker_data.value()).unwrap();
+        
+        tracing::info!("Worker {} capabilities: {:?}", node_id, capabilities);
         
         // Check if worker meets requirements
         if capabilities.cpu_cores >= task.resources.cpu_cores &&
@@ -1339,5 +1647,6 @@ pub async fn schedule_task(
         }
     }
     
+    tracing::info!("Total workers found: {}, best worker: {:?}", worker_count, best_worker);
     Ok(best_worker.map(|(node_id, _)| node_id))
 }
