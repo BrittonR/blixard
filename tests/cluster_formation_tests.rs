@@ -100,8 +100,24 @@ async fn test_two_node_cluster_formation() {
     
     // No need to manually join - node2 already sent join request during initialization
     
-    // Give the configuration change some time to be processed
-    sleep(Duration::from_millis(500)).await;
+    // Wait for node 2 to be added to the cluster on node 1
+    let client1_clone = client1.clone();
+    wait_for_condition(
+        move || {
+            let mut c1 = client1_clone.clone();
+            async move {
+                if let Ok(status) = c1.get_cluster_status(ClusterStatusRequest {}).await {
+                    status.into_inner().nodes.len() >= 2
+                } else {
+                    false
+                }
+            }
+        },
+        Duration::from_secs(5),
+        Duration::from_millis(100),
+    )
+    .await
+    .expect("Node 2 failed to join cluster");
     
     // WORKAROUND: Node 2 needs to receive log entries to know it's part of the cluster
     // Send a health check through node 1 to trigger log replication
