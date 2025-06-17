@@ -285,6 +285,14 @@ The project includes dependencies for:
    - Basic three-node cluster test now passes reliably
    - See `THREE_NODE_CLUSTER_DEBUG.md` for detailed investigation and solutions
 
+2. **Database Persistence Test Cleanup** (✅ FIXED)
+   - Fixed: Database file locking issues during node restarts
+   - Fixed: Incomplete component shutdown leaving database references
+   - Fixed: Property tests using hardcoded paths instead of temporary directories
+   - Solution: Added `shutdown_components()` method to properly clean up all database references
+   - Solution: Updated `stop()` method to ensure complete shutdown with file lock release
+   - Test `test_database_persistence_across_restarts` now passes consistently
+
 ## Known Test Reliability Issues
 
 See `TEST_RELIABILITY_ISSUES.md` for full details. Major issues:

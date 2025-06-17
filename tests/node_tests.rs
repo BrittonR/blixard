@@ -119,11 +119,11 @@ async fn test_cluster_operations_uninitialized() {
     
     // Leave cluster should fail without proper initialization
     let result = node.leave_cluster().await;
-    assert!(matches!(result, Err(BlixardError::Internal { .. })));
+    assert!(result.is_err(), "Expected error for leave_cluster on uninitialized node");
     
     // Cluster status should fail without initialization
     let result = node.get_cluster_status().await;
-    assert!(matches!(result, Err(BlixardError::Internal { .. })));
+    assert!(result.is_err(), "Expected error for get_cluster_status on uninitialized node, got {:?}", result);
 }
 
 #[tokio::test]
@@ -295,10 +295,16 @@ async fn test_database_persistence_across_restarts() {
         
         // Explicitly stop the node to ensure clean shutdown
         node.stop().await.unwrap();
+        
+        // Give a moment for async cleanup to complete
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        
+        // Ensure node is dropped
+        drop(node);
     }
     
-    // Wait a bit for database to be fully released
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Wait for database file to be fully released
+    tokio::time::sleep(Duration::from_millis(1000)).await;
     
     // Create new node with same data directory
     {

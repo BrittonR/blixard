@@ -53,7 +53,7 @@ async fn test_join_cluster_configuration_update() {
         id: 2,
         bind_addr: addr2,
         data_dir: temp_dir2.path().to_string_lossy().to_string(),
-        join_addr: Some(addr1),
+        join_addr: Some(addr1.to_string()),
         use_tailscale: false,
     };
     

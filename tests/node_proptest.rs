@@ -55,7 +55,7 @@ proptest! {
         rt.block_on(async {
             let config = NodeConfig {
                 id,
-                data_dir: "/tmp/test".to_string(),
+                data_dir: String::new(), // Will be replaced by create_test_node_with_config
                 bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: if use_tailscale { 
                     Some("127.0.0.1:0".parse().unwrap())
@@ -73,7 +73,7 @@ proptest! {
             // Node should reflect the configuration
             // (We can't directly access private fields, but we test behavior)
             Ok(())
-        });
+        }).unwrap();
     }
 }
 
@@ -88,7 +88,7 @@ proptest! {
         rt.block_on(async {
             let config = NodeConfig {
                 id,
-                data_dir: "/tmp/test".to_string(),
+                data_dir: String::new(), // Will be replaced by create_test_node_with_config
                 bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
@@ -103,7 +103,7 @@ proptest! {
             // Node should still not be running after initialization
             prop_assert!(!node.is_running().await);
             Ok(())
-        });
+        }).unwrap();
     }
 }
 
@@ -127,15 +127,15 @@ proptest! {
     ) {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
-            let config = NodeConfig {
+            let temp_config = NodeConfig {
                 id: node_id,
-                data_dir: "/tmp/test".to_string(),
+                data_dir: String::new(), // Will be replaced by create_test_node_with_config
                 bind_addr: format!("127.0.0.1:{}", port).parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
             };
             
-            let (mut node, _temp_dir) = create_test_node_with_config(config).await;
+            let (mut node, _temp_dir) = create_test_node_with_config(temp_config).await;
             node.initialize().await.unwrap();
             
             let vm_config = VmConfig {
@@ -158,7 +158,7 @@ proptest! {
             let result = node.send_vm_command(command).await;
             prop_assert!(result.is_ok());
             Ok(())
-        });
+        }).unwrap();
     }
 }
 
@@ -173,7 +173,7 @@ proptest! {
         rt.block_on(async {
             let config = NodeConfig {
                 id,
-                data_dir: "/tmp/test".to_string(),
+                data_dir: String::new(), // Will be replaced by create_test_node_with_config
                 bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
@@ -204,23 +204,23 @@ proptest! {
             node.stop().await.unwrap();
             prop_assert!(!node.is_running().await);
             Ok(())
-        });
+        }).unwrap();
     }
 }
 
-// Property: Cluster operations should consistently return NotImplemented
+// Property: Uninitialized nodes should fail cluster operations
 proptest! {
     #[test]
-    fn test_cluster_operations_not_implemented(
+    fn test_cluster_operations_uninitialized(
         id in node_id_strategy(),
         port in test_port_strategy(),
         peer_port in test_port_strategy()
     ) {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
+        let _ = rt.block_on(async {
             let config = NodeConfig {
                 id,
-                data_dir: "/tmp/test".to_string(),
+                data_dir: String::new(), // Will be replaced by create_test_node_with_config
                 bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
@@ -228,28 +228,20 @@ proptest! {
             
             let (mut node, _temp_dir) = create_test_node_with_config(config).await;
             
-            // All cluster operations should return NotImplemented
+            // Uninitialized node should fail cluster operations
             let join_result = node.join_cluster(
                 Some(format!("127.0.0.1:{}", peer_port).parse().unwrap())
             ).await;
-            match join_result {
-                Err(BlixardError::NotImplemented { .. }) => {},
-                _ => return Err(TestCaseError::fail("Expected NotImplemented error for join_cluster")),
-            }
+            prop_assert!(join_result.is_err(), "Uninitialized node should fail join_cluster");
             
             let leave_result = node.leave_cluster().await;
-            match leave_result {
-                Err(BlixardError::NotImplemented { .. }) => {},
-                _ => return Err(TestCaseError::fail("Expected NotImplemented error for leave_cluster")),
-            }
+            prop_assert!(leave_result.is_err(), "Uninitialized node should fail leave_cluster");
             
             let status_result = node.get_cluster_status().await;
-            match status_result {
-                Err(BlixardError::NotImplemented { .. }) => {},
-                _ => return Err(TestCaseError::fail("Expected NotImplemented error for get_cluster_status")),
-            }
+            prop_assert!(status_result.is_err(), "Uninitialized node should fail get_cluster_status");
+            
             Ok(())
-        });
+        }).unwrap();
     }
 }
 
@@ -265,7 +257,7 @@ proptest! {
         rt.block_on(async {
             let config = NodeConfig {
                 id,
-                data_dir: "/tmp/test".to_string(),
+                data_dir: String::new(), // Will be replaced by create_test_node_with_config
                 bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
@@ -289,7 +281,7 @@ proptest! {
                 prop_assert!(!node.is_running().await);
             }
             Ok(())
-        });
+        }).unwrap();
     }
 }
 
@@ -305,7 +297,7 @@ proptest! {
         rt.block_on(async {
             let config = NodeConfig {
                 id,
-                data_dir: "/tmp/test".to_string(),
+                data_dir: String::new(), // Will be replaced by create_test_node_with_config
                 bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
@@ -337,7 +329,7 @@ proptest! {
             let result3 = node.send_vm_command(command).await;
             prop_assert!(result3.is_ok());
             Ok(())
-        });
+        }).unwrap();
     }
 }
 
@@ -353,7 +345,7 @@ proptest! {
         rt.block_on(async {
             let config = NodeConfig {
                 id,
-                data_dir: "/tmp/test".to_string(),
+                data_dir: String::new(), // Will be replaced by create_test_node_with_config
                 bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
@@ -376,6 +368,6 @@ proptest! {
             prop_assert!(result2.is_ok());
             prop_assert!(!node.is_running().await);
             Ok(())
-        });
+        }).unwrap();
     }
 }

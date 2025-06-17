@@ -138,6 +138,24 @@ impl SharedNodeState {
         *self.database.write().await = None;
     }
     
+    /// Shutdown all components that hold database references
+    pub async fn shutdown_components(&self) {
+        // Clear VM manager to release its database reference
+        *self.vm_manager.write().await = None;
+        
+        // Clear peer connector
+        *self.peer_connector.write().await = None;
+        
+        // Clear all channel senders
+        *self.raft_proposal_tx.lock().await = None;
+        *self.raft_message_tx.lock().await = None;
+        *self.raft_conf_change_tx.lock().await = None;
+        *self.shutdown_tx.lock().await = None;
+        
+        // Finally clear the database
+        *self.database.write().await = None;
+    }
+    
     /// Get database
     pub async fn get_database(&self) -> Option<Arc<Database>> {
         self.database.read().await.clone()
@@ -311,7 +329,7 @@ impl SharedNodeState {
         let leader_id = raft_status.leader_id.unwrap_or(0);
         let term = raft_status.term;
         
-        Ok((self.config.id, node_ids, leader_id))
+        Ok((leader_id, node_ids, term))
     }
     
     /// Check if node is running
@@ -387,9 +405,7 @@ impl SharedNodeState {
     
     /// Check if this node is the Raft leader
     pub async fn is_leader(&self) -> bool {
-        // For now, return false - we'll need to add a way to query Raft state
-        // TODO: Add proper Raft state query
-        false
+        self.raft_status.read().await.is_leader
     }
     
     /// Propose a configuration change through Raft

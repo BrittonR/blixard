@@ -393,8 +393,11 @@ impl Node {
         
         self.shared.set_running(false).await;
         
-        // Clear database to release file lock
-        self.shared.clear_database().await;
+        // Shutdown all components to release database references
+        self.shared.shutdown_components().await;
+        
+        // Add a small delay to ensure file locks are released
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         
         Ok(())
     }
