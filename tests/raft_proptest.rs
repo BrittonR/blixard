@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::collections::{HashMap, HashSet};
 use redb::{Database, ReadableTable};
 use tempfile::TempDir;
+use once_cell::sync::Lazy;
 
 use blixard::{
     raft_manager::{
@@ -12,6 +13,11 @@ use blixard::{
     storage::{TASK_RESULT_TABLE, WORKER_TABLE, WORKER_STATUS_TABLE},
     types::{VmConfig, VmCommand},
 };
+
+// Shared runtime to prevent resource exhaustion from creating too many runtimes
+static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+    tokio::runtime::Runtime::new().unwrap()
+});
 
 // Property: Tasks can only be assigned to workers that meet resource requirements
 proptest! {
@@ -24,8 +30,7 @@ proptest! {
         worker_mem in 512u64..65536,
         worker_disk in 10u64..2000,
     ) {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
+        RUNTIME.block_on(async {
             let temp_dir = TempDir::new().unwrap();
             let db_path = temp_dir.path().join("test.db");
             let database = Arc::new(Database::create(db_path).unwrap());
@@ -86,8 +91,7 @@ proptest! {
         success in prop::collection::vec(any::<bool>(), 1..10),
         outputs in prop::collection::vec("[a-zA-Z0-9 ]{0,100}", 1..10),
     ) {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
+        RUNTIME.block_on(async {
             let temp_dir = TempDir::new().unwrap();
             let db_path = temp_dir.path().join("test.db");
             let database = Arc::new(Database::create(db_path).unwrap());
@@ -148,8 +152,7 @@ proptest! {
             1..10
         ),
     ) {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
+        RUNTIME.block_on(async {
             let temp_dir = TempDir::new().unwrap();
             let db_path = temp_dir.path().join("test.db");
             let database = Arc::new(Database::create(db_path).unwrap());
@@ -224,8 +227,7 @@ proptest! {
             1..5
         ),
     ) {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
+        RUNTIME.block_on(async {
             let temp_dir = TempDir::new().unwrap();
             let db_path = temp_dir.path().join("test.db");
             let database = Arc::new(Database::create(db_path).unwrap());
@@ -305,8 +307,7 @@ proptest! {
         ),
         task_requirements in (1u32..8, 512u64..8192, 5u64..100),
     ) {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
+        RUNTIME.block_on(async {
             let (req_cpu, req_mem, req_disk) = task_requirements;
             
             // Run scheduling twice with same setup
@@ -370,8 +371,7 @@ proptest! {
             1..20
         ),
     ) {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
+        RUNTIME.block_on(async {
             let temp_dir = TempDir::new().unwrap();
             let db_path = temp_dir.path().join("test.db");
             let database = Arc::new(Database::create(db_path).unwrap());

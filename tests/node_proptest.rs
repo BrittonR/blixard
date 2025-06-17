@@ -4,6 +4,7 @@ use proptest::prelude::*;
 use proptest::test_runner::TestCaseError;
 use tokio::time::Duration;
 use tempfile::TempDir;
+use once_cell::sync::Lazy;
 use blixard::{
     node::Node,
     types::{NodeConfig, VmConfig, VmCommand, VmStatus},
@@ -11,6 +12,11 @@ use blixard::{
 };
 
 mod common;
+
+// Shared runtime to prevent resource exhaustion from creating too many runtimes
+static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+    tokio::runtime::Runtime::new().unwrap()
+});
 
 // Strategy for generating valid node IDs
 fn node_id_strategy() -> impl Strategy<Value = u64> {
@@ -51,8 +57,7 @@ proptest! {
         port in test_port_strategy(),
         use_tailscale in any::<bool>()
     ) {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
+        RUNTIME.block_on(async {
             let config = NodeConfig {
                 id,
                 data_dir: String::new(), // Will be replaced by create_test_node_with_config
@@ -84,8 +89,7 @@ proptest! {
         id in node_id_strategy(),
         port in test_port_strategy()
     ) {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
+        RUNTIME.block_on(async {
             let config = NodeConfig {
                 id,
                 data_dir: String::new(), // Will be replaced by create_test_node_with_config
@@ -125,8 +129,7 @@ proptest! {
             VmStatus::Failed,
         ])
     ) {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
+        RUNTIME.block_on(async {
             let temp_config = NodeConfig {
                 id: node_id,
                 data_dir: String::new(), // Will be replaced by create_test_node_with_config
@@ -169,8 +172,7 @@ proptest! {
         id in node_id_strategy(),
         port in test_port_strategy()
     ) {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
+        RUNTIME.block_on(async {
             let config = NodeConfig {
                 id,
                 data_dir: String::new(), // Will be replaced by create_test_node_with_config
@@ -216,8 +218,7 @@ proptest! {
         port in test_port_strategy(),
         peer_port in test_port_strategy()
     ) {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let _ = rt.block_on(async {
+        let _ = RUNTIME.block_on(async {
             let config = NodeConfig {
                 id,
                 data_dir: String::new(), // Will be replaced by create_test_node_with_config
@@ -253,8 +254,7 @@ proptest! {
         port in test_port_strategy(),
         iterations in 1usize..=5usize
     ) {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
+        RUNTIME.block_on(async {
             let config = NodeConfig {
                 id,
                 data_dir: String::new(), // Will be replaced by create_test_node_with_config
@@ -293,8 +293,7 @@ proptest! {
         port in test_port_strategy(),
         vm_name in vm_name_strategy()
     ) {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
+        RUNTIME.block_on(async {
             let config = NodeConfig {
                 id,
                 data_dir: String::new(), // Will be replaced by create_test_node_with_config
@@ -341,8 +340,7 @@ proptest! {
         port in test_port_strategy(),
         start_node in any::<bool>()
     ) {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
+        RUNTIME.block_on(async {
             let config = NodeConfig {
                 id,
                 data_dir: String::new(), // Will be replaced by create_test_node_with_config
