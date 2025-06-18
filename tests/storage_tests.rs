@@ -36,13 +36,13 @@ fn create_test_vm_state(name: &str, node_id: u64) -> VmState {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_database_creation() {
     let (_database, _temp_dir) = create_test_database().await;
     // Database creation should succeed without errors
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_vm_state_persistence() {
     let (database, _temp_dir) = create_test_database().await;
     let vm_state = create_test_vm_state("test-vm", 1);
@@ -67,7 +67,7 @@ async fn test_vm_state_persistence() {
     assert_eq!(restored_state.status, vm_state.status);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_multiple_vm_states() {
     let (database, _temp_dir) = create_test_database().await;
     
@@ -100,7 +100,7 @@ async fn test_multiple_vm_states() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_vm_state_update() {
     let (database, _temp_dir) = create_test_database().await;
     let mut vm_state = create_test_vm_state("update-vm", 1);
@@ -137,7 +137,7 @@ async fn test_vm_state_update() {
     assert!(restored_state.updated_at >= vm_state.updated_at);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_vm_state_deletion() {
     let (database, _temp_dir) = create_test_database().await;
     let vm_state = create_test_vm_state("delete-vm", 1);
@@ -172,7 +172,7 @@ async fn test_vm_state_deletion() {
     assert!(table.get("delete-vm").unwrap().is_none());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_transaction_commit_vs_no_commit() {
     let (database, _temp_dir) = create_test_database().await;
     let vm_state = create_test_vm_state("rollback-vm", 1);
@@ -198,7 +198,7 @@ async fn test_transaction_commit_vs_no_commit() {
     assert!(table.get("rollback-vm").unwrap().is_none());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_concurrent_reads() {
     let (database, _temp_dir) = create_test_database().await;
     let vm_state = create_test_vm_state("concurrent-vm", 1);
@@ -235,7 +235,7 @@ async fn test_concurrent_reads() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_serialization_errors() {
     use serde::{Serialize, Deserialize};
     
@@ -264,7 +264,7 @@ async fn test_serialization_errors() {
     assert!(result.is_err());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_database_persistence_across_connections() {
     let temp_dir = TempDir::new().unwrap();
     let db_path = temp_dir.path().join("persistent.db");

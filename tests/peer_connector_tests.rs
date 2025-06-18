@@ -329,7 +329,7 @@ mod tests {
     use raft::prelude::*;
 
     /// Test basic connection lifecycle: connect -> send -> disconnect
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_connection_lifecycle() {
         let harness = TestHarness::new(1).await;
         
@@ -367,7 +367,7 @@ mod tests {
     }
 
     /// Test connection failure handling
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_connection_failure() {
         let harness = TestHarness::new(1).await;
         
@@ -388,7 +388,7 @@ mod tests {
     }
 
     /// Test duplicate connection attempts
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_duplicate_connection_attempts() {
         let harness = TestHarness::new(1).await;
         
@@ -421,7 +421,7 @@ mod tests {
     }
 
     /// Test message buffering when peer is disconnected
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_message_buffering() {
         let harness = TestHarness::new(1).await;
         
@@ -450,7 +450,7 @@ mod tests {
     }
 
     /// Test buffer overflow protection
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_buffer_overflow_protection() {
         let harness = TestHarness::new(1).await;
         
@@ -472,7 +472,7 @@ mod tests {
     }
 
     /// Test concurrent message sending
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_concurrent_message_sending() {
         let harness = TestHarness::new(1).await;
         
@@ -515,7 +515,7 @@ mod tests {
     }
 
     /// Test automatic reconnection on send failure
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_automatic_reconnection() {
         let harness = TestHarness::new(1).await;
         
@@ -558,12 +558,12 @@ mod tests {
     }
 
     /// Test connection maintenance background task
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_connection_maintenance() {
         let harness = TestHarness::new(1).await;
         
         // Start maintenance task
-        harness.peer_connector.clone().start_connection_maintenance();
+        harness.peer_connector.clone().start_connection_maintenance().await;
         
         // Get a port but don't start a server
         let peer_addr = get_available_addr().await;
@@ -590,7 +590,7 @@ mod tests {
     }
 
     /// Test exponential backoff on connection failures
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_exponential_backoff() {
         let harness = TestHarness::new(1).await;
         
@@ -622,7 +622,7 @@ mod tests {
     }
     
     /// Test backoff reset on successful connection
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_backoff_reset_on_success() {
         let harness = TestHarness::new(1).await;
         
@@ -657,7 +657,7 @@ mod tests {
     }
     
     /// Test connection health checking
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_connection_health_check() {
         let harness = TestHarness::new(1).await;
         
@@ -688,7 +688,7 @@ mod tests {
     }
     
     /// Test automatic disconnection of unhealthy connections
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_unhealthy_connection_disconnection() {
         let harness = TestHarness::new(1).await;
         
@@ -701,7 +701,7 @@ mod tests {
         harness.peer_connector.connect_to_peer(&peer).await.unwrap();
         
         // Start maintenance (includes health checking)
-        harness.peer_connector.clone().start_connection_maintenance();
+        harness.peer_connector.clone().start_connection_maintenance().await;
         
         // Verify connected
         assert!(harness.shared_state.get_peer(2).await.unwrap().is_connected);
@@ -728,7 +728,7 @@ mod tests {
     }
     
     /// Test circuit breaker pattern
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_circuit_breaker() {
         let harness = TestHarness::new(1).await;
         
@@ -763,7 +763,7 @@ mod tests {
     }
     
     /// Test circuit breaker half-open state
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_circuit_breaker_half_open() {
         let harness = TestHarness::new(1).await;
         
@@ -801,7 +801,7 @@ mod tests {
     }
     
     /// Test connection pool limits
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_connection_pool_limits() {
         let harness = TestHarness::new(1).await;
         
@@ -842,7 +842,7 @@ mod tests {
     }
     
     /// Test connection pool with failed connections
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_connection_pool_cleanup() {
         let harness = TestHarness::new(1).await;
         

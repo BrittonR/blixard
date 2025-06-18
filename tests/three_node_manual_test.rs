@@ -12,7 +12,7 @@ use blixard::{
 };
 
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_three_node_cluster_manual_approach() {
     // Step 1: Create bootstrap node
     let node1 = TestNode::builder()

@@ -5,7 +5,7 @@ mod tests {
     use tokio::time::timeout;
     use tokio::process::Command;
     
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_cluster_status_command() {
         // Start a test node with dynamic port
         let port = PortAllocator::next_port();
@@ -44,7 +44,7 @@ mod tests {
         node.shutdown().await;
     }
     
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_cluster_join_command() {
         // Start two test nodes with dynamic ports
         let port1 = PortAllocator::next_port();
@@ -102,7 +102,7 @@ mod tests {
         node1.shutdown().await;
     }
     
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_cli_help() {
         // Test that cluster commands show up in help
         let result = timeout(

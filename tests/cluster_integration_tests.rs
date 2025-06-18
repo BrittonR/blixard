@@ -47,7 +47,7 @@ async fn create_test_node(id: u64) -> (Node, TempDir, u16) {
     (node, temp_dir, port)
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_single_node_grpc_health_check() {
     let (node, _temp_dir, _node_port) = create_test_node(1).await;
     let node_shared = node.shared();
@@ -90,7 +90,7 @@ async fn test_single_node_grpc_health_check() {
     server_handle.abort();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_cluster_formation_via_grpc() {
     // Create three nodes with dynamic ports
     let (mut node1, _temp1, _port1) = create_test_node(1).await;
@@ -163,7 +163,7 @@ async fn test_cluster_formation_via_grpc() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_task_submission_via_grpc() {
     // Use TestNode from test_helpers for better setup
     use blixard::test_helpers::TestNode;
@@ -234,7 +234,7 @@ async fn test_task_submission_via_grpc() {
     test_node.shutdown().await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_vm_operations_via_grpc() {
     let (mut node, _temp_dir, _node_port) = create_test_node(1).await;
     node.start().await.unwrap();
@@ -290,7 +290,7 @@ async fn test_vm_operations_via_grpc() {
     server_handle.abort();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_concurrent_task_submissions() {
     let (mut node, _temp_dir, _node_port) = create_test_node(1).await;
     node.start().await.unwrap();
@@ -371,7 +371,7 @@ async fn test_concurrent_task_submissions() {
     server_handle.abort();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_cluster_state_persistence() {
     let temp_dir = TempDir::new().unwrap();
     let data_dir = temp_dir.path().to_str().unwrap().to_string();
@@ -440,7 +440,7 @@ async fn test_cluster_state_persistence() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_grpc_error_handling() {
     let (mut node, _temp_dir, _node_port) = create_test_node(1).await;
     node.start().await.unwrap();

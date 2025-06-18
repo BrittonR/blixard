@@ -7,7 +7,7 @@ use tokio::time::sleep;
 use blixard::test_helpers::{TestNode, TestCluster};
 
 /// Test that TestNode properly cleans up all resources
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_node_cleanup_releases_resources() {
     // Create and shutdown multiple nodes
     let mut ports = Vec::new();
@@ -40,7 +40,7 @@ async fn test_node_cleanup_releases_resources() {
 }
 
 /// Test that background tasks are properly terminated
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_background_tasks_cleanup() {
     // Get initial task count (approximate)
     let initial_tasks = tokio::runtime::Handle::current().metrics().num_alive_tasks();
@@ -74,7 +74,7 @@ async fn test_background_tasks_cleanup() {
 }
 
 /// Test that multiple nodes can use the same ports after cleanup
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_port_reuse_after_cleanup() {
     // Use a specific high port to avoid conflicts
     let test_port = 50000;
@@ -116,7 +116,7 @@ async fn test_port_reuse_after_cleanup() {
 }
 
 /// Test that database files are properly closed
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_database_cleanup() {
     use tempfile::TempDir;
     
@@ -165,7 +165,7 @@ async fn test_database_cleanup() {
 }
 
 /// Test that TestCluster properly cleans up all nodes
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_cluster_cleanup() {
     // Create a 3-node cluster
     let cluster = TestCluster::builder()
@@ -190,7 +190,7 @@ async fn test_cluster_cleanup() {
 }
 
 /// Test rapid node creation and destruction
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_rapid_node_lifecycle() {
     // Rapidly create and destroy nodes to test for resource leaks
     for i in 1..=10 {
@@ -215,7 +215,7 @@ async fn test_rapid_node_lifecycle() {
 }
 
 /// Test that peer connector background tasks are terminated
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_peer_connector_task_cleanup() {
     // Create a node - this will start peer connector background tasks
     let node = TestNode::builder()

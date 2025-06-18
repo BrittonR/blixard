@@ -4,7 +4,7 @@ use tokio::sync::{mpsc, RwLock, oneshot};
 use tokio::time::{interval, Duration};
 use raft::{Config, RawNode, StateRole, GetEntriesContext};
 use raft::prelude::*;
-use slog::{Logger, o, info, warn, Drain};
+use slog::{Logger, o, info, warn, error, Drain};
 use redb::{Database, WriteTransaction, ReadableTable};
 use chrono::Utc;
 use serde::{Serialize, Deserialize};
@@ -446,6 +446,8 @@ impl RaftManager {
     }
 
     pub async fn run(mut self) -> BlixardResult<()> {
+        info!(self.logger, "[RAFT-RUN] Starting RaftManager::run() method");
+        
         // Check if we should bootstrap as a single-node cluster
         let should_bootstrap = {
             let peers = self.peers.read().await;
@@ -462,7 +464,13 @@ impl RaftManager {
         if should_bootstrap {
             // No peers and no join address, bootstrap as single node
             info!(self.logger, "No peers configured and no join address, bootstrapping as single-node cluster");
-            self.bootstrap_single_node().await?;
+            match self.bootstrap_single_node().await {
+                Ok(_) => info!(self.logger, "[RAFT-RUN] Bootstrap succeeded"),
+                Err(e) => {
+                    error!(self.logger, "[RAFT-RUN] Bootstrap failed, exiting run()"; "error" => %e);
+                    return Err(e);
+                }
+            }
         } else {
             // Either we have peers or a join address - don't bootstrap
             let peer_ids: Vec<u64> = self.peers.read().await.keys().cloned().collect();
@@ -477,6 +485,7 @@ impl RaftManager {
         let mut tick_timer = interval(Duration::from_millis(100));
         
         let mut tick_count = 0u64;
+        info!(self.logger, "[RAFT-RUN] Entering main run loop");
         loop {
             tokio::select! {
                 _ = tick_timer.tick() => {
@@ -484,27 +493,51 @@ impl RaftManager {
                     if tick_count % 50 == 0 {  // Log every 5 seconds
                         info!(self.logger, "[RAFT-TICK] Tick #{}", tick_count);
                     }
-                    self.tick().await?;
+                    if let Err(e) = self.tick().await {
+                        error!(self.logger, "[RAFT-RUN] tick() failed, exiting run()"; "error" => %e);
+                        return Err(e);
+                    }
                 }
                 Some(proposal) = self.proposal_rx.recv() => {
                     info!(self.logger, "[RAFT-LOOP] Received proposal");
-                    self.handle_proposal(proposal).await?;
+                    if let Err(e) = self.handle_proposal(proposal).await {
+                        error!(self.logger, "[RAFT-RUN] handle_proposal() failed, exiting run()"; "error" => %e);
+                        return Err(e);
+                    }
                 }
                 Some((from, msg)) = self.message_rx.recv() => {
                     info!(self.logger, "[RAFT-LOOP] Received message from {}", from);
-                    self.handle_raft_message(from, msg).await?;
+                    if let Err(e) = self.handle_raft_message(from, msg).await {
+                        error!(self.logger, "[RAFT-RUN] handle_raft_message() failed, exiting run()"; "error" => %e);
+                        return Err(e);
+                    }
                 }
                 Some(conf_change) = self.conf_change_rx.recv() => {
                     info!(self.logger, "[RAFT-LOOP] Received conf change");
-                    self.handle_conf_change(conf_change).await?;
+                    if let Err(e) = self.handle_conf_change(conf_change).await {
+                        error!(self.logger, "[RAFT-RUN] handle_conf_change() failed, exiting run()"; "error" => %e);
+                        return Err(e);
+                    }
+                }
+                else => {
+                    // None of the channels have data, all closed
+                    error!(self.logger, "[RAFT-RUN] All channels closed, exiting run()");
+                    return Err(BlixardError::Internal {
+                        message: "All RaftManager channels closed".to_string(),
+                    });
                 }
             }
             
             // Process ready state after any event
             // Keep processing until there are no more ready states
             loop {
-                if !self.on_ready().await? {
-                    break;
+                match self.on_ready().await {
+                    Ok(false) => break,
+                    Ok(true) => continue,
+                    Err(e) => {
+                        error!(self.logger, "[RAFT-RUN] on_ready() failed, exiting run()"; "error" => %e);
+                        return Err(e);
+                    }
                 }
             }
             
@@ -526,10 +559,14 @@ impl RaftManager {
                     // Process any new ready states
                     let mut ready_count = 0;
                     loop {
-                        if !self.on_ready().await? {
-                            break;
+                        match self.on_ready().await {
+                            Ok(false) => break,
+                            Ok(true) => ready_count += 1,
+                            Err(e) => {
+                                error!(self.logger, "[RAFT-RUN] on_ready() failed during unapplied commits processing, exiting run()"; "error" => %e);
+                                return Err(e);
+                            }
                         }
-                        ready_count += 1;
                     }
                     
                     if ready_count == 0 {
@@ -563,10 +600,19 @@ impl RaftManager {
             {
                 let mut node = self.raft_node.write().await;
                 if node.raft.state == raft::StateRole::Leader {
-                    self.check_and_send_snapshots(&mut node).await?;
+                    if let Err(e) = self.check_and_send_snapshots(&mut node).await {
+                        error!(self.logger, "[RAFT-RUN] check_and_send_snapshots() failed, exiting run()"; "error" => %e);
+                        return Err(e);
+                    }
                 }
             }
         }
+        
+        // This should never be reached as the loop above is infinite
+        error!(self.logger, "[RAFT-RUN] Unexpectedly exited main run loop");
+        Err(BlixardError::Internal {
+            message: "RaftManager run() loop unexpectedly terminated".to_string(),
+        })
     }
 
     async fn tick(&self) -> BlixardResult<()> {
@@ -757,6 +803,28 @@ impl RaftManager {
         
         info!(self.logger, "[RAFT-CONF] Handling configuration change"; "type" => ?conf_change.change_type, "node_id" => conf_change.node_id, "address" => ?conf_change.address);
         
+        // Log current Raft state before handling
+        {
+            let node = self.raft_node.read().await;
+            info!(self.logger, "[RAFT-CONF] Current Raft state before conf change";
+                "state" => ?node.raft.state,
+                "term" => node.raft.term,
+                "commit" => node.raft.raft_log.committed,
+                "applied" => node.raft.raft_log.applied,
+                "last_index" => node.raft.raft_log.last_index()
+            );
+            
+            // Log current voters from stored conf state
+            let voters: Vec<u64> = match self.storage.load_conf_state() {
+                Ok(conf_state) => conf_state.voters,
+                Err(e) => {
+                    warn!(self.logger, "[RAFT-CONF] Failed to load conf state"; "error" => ?e);
+                    Vec::new()
+                }
+            };
+            info!(self.logger, "[RAFT-CONF] Current voters from conf state"; "voters" => ?voters);
+        }
+        
         let change_type = match conf_change.change_type {
             ConfChangeType::AddNode => RaftConfChangeType::AddNode,
             ConfChangeType::RemoveNode => RaftConfChangeType::RemoveNode,
@@ -778,25 +846,57 @@ impl RaftManager {
         // Store the response channel if provided
         let cc_id = uuid::Uuid::new_v4().as_bytes().to_vec();
         if let Some(response_tx) = conf_change.response_tx {
+            info!(self.logger, "[RAFT-CONF] Storing response channel for conf change"; 
+                "cc_id_len" => cc_id.len(),
+                "cc_id_bytes" => ?&cc_id[..std::cmp::min(16, cc_id.len())]
+            );
             let mut pending = self.pending_proposals.write().await;
             pending.insert(cc_id.clone(), response_tx);
+            info!(self.logger, "[RAFT-CONF] Response channel stored successfully");
         }
         
         // Propose the configuration change
         let mut node = self.raft_node.write().await;
-        info!(self.logger, "[RAFT-CONF] Proposing conf change to Raft"; "cc_id" => ?cc_id, "node_id" => conf_change.node_id);
         
-        // Check if we're leader and single-node
+        // Check if we're leader
         let is_leader = node.raft.state == StateRole::Leader;
+        if !is_leader {
+            error!(self.logger, "[RAFT-CONF] Not the leader, cannot propose conf change"; "state" => ?node.raft.state);
+            // Send error response if we have a channel
+            if let Some(response_tx) = self.pending_proposals.write().await.remove(&cc_id) {
+                let _ = response_tx.send(Err(BlixardError::ClusterError(
+                    "Not the leader - cannot propose configuration changes".to_string()
+                )));
+            }
+            return Err(BlixardError::ClusterError(
+                "Not the leader - cannot propose configuration changes".to_string()
+            ));
+        }
+        
         let is_single_node = self.peers.read().await.is_empty();
         info!(self.logger, "[RAFT-CONF] Node state"; "is_leader" => is_leader, "is_single_node" => is_single_node);
         
-        node.propose_conf_change(cc_id.clone(), cc.clone())
-            .map_err(|e| BlixardError::Raft {
-                operation: "propose conf change".to_string(),
-                source: Box::new(e),
-            })?;
-        info!(self.logger, "[RAFT-CONF] Conf change proposed successfully"; "node_id" => conf_change.node_id);
+        info!(self.logger, "[RAFT-CONF] Proposing conf change to Raft"; "cc_id" => ?cc_id, "node_id" => conf_change.node_id, "change_type" => ?change_type);
+        
+        match node.propose_conf_change(cc_id.clone(), cc.clone()) {
+            Ok(_) => {
+                info!(self.logger, "[RAFT-CONF] Conf change proposed successfully"; "node_id" => conf_change.node_id);
+            }
+            Err(e) => {
+                error!(self.logger, "[RAFT-CONF] Failed to propose conf change"; "error" => %e);
+                let error_msg = format!("{}", e);
+                // Send error response if we have a channel
+                if let Some(response_tx) = self.pending_proposals.write().await.remove(&cc_id) {
+                    let _ = response_tx.send(Err(BlixardError::Internal {
+                        message: format!("Failed to propose conf change: {}", error_msg),
+                    }));
+                }
+                return Err(BlixardError::Raft {
+                    operation: "propose conf change".to_string(),
+                    source: Box::new(e),
+                });
+            }
+        }
         
         // For single-node clusters, check if we can apply the conf change immediately
         if is_leader && is_single_node {
@@ -1108,22 +1208,71 @@ impl RaftManager {
                         }
                     }
                     EntryType::EntryConfChange => {
+                        info!(self.logger, "[RAFT-CONF] Processing EntryConfChange entry"; 
+                            "entry_index" => entry.index,
+                            "entry_context_len" => entry.context.len(),
+                            "entry_data_len" => entry.data.len()
+                        );
+                        
                         // Handle configuration change
                         // The entry data contains the serialized ConfChange
                         use protobuf::Message as ProtobufMessage;
                         let mut cc = ConfChange::default();
                         if let Err(e) = cc.merge_from_bytes(&entry.data) {
-                            warn!(self.logger, "Failed to parse ConfChange from entry data"; "error" => ?e);
+                            error!(self.logger, "[RAFT-CONF] Failed to parse ConfChange from entry data"; 
+                                "error" => %e,
+                                "data_len" => entry.data.len()
+                            );
+                            // Send error response if we have a pending proposal
+                            if !entry.context.is_empty() {
+                                let mut pending = self.pending_proposals.write().await;
+                                if let Some(response_tx) = pending.remove(&entry.context) {
+                                    let _ = response_tx.send(Err(BlixardError::Internal {
+                                        message: format!("Failed to parse ConfChange: {:?}", e),
+                                    }));
+                                }
+                            }
                         } else {
                             // Always apply configuration changes from committed entries
                             // The Raft library handles deduplication internally
                             
+                            info!(self.logger, "[RAFT-CONF] Successfully parsed ConfChange";
+                                "node_id" => cc.node_id,
+                                "change_type" => cc.change_type,
+                                "context_len" => cc.context.len()
+                            );
+                            
                             // Log the current voters before applying the change
-                            let current_voters: Vec<u64> = node.raft.prs().votes().keys().cloned().collect();
-                            info!(self.logger, "[RAFT-CONF] Current voters before conf change"; "voters" => ?current_voters);
+                            let current_voters: Vec<u64> = match self.storage.load_conf_state() {
+                                Ok(conf_state) => conf_state.voters,
+                                Err(e) => {
+                                    warn!(self.logger, "[RAFT-CONF] Failed to load conf state"; "error" => ?e);
+                                    Vec::new()
+                                }
+                            };
+                            info!(self.logger, "[RAFT-CONF] Current voters before conf change from conf state"; "voters" => ?current_voters);
                             
                             info!(self.logger, "[RAFT-CONF] Applying committed configuration change"; "node_id" => cc.node_id, "type" => cc.change_type, "entry_index" => entry.index);
-                            let cs = node.apply_conf_change(&cc)?;
+                            let cs = match node.apply_conf_change(&cc) {
+                                Ok(cs) => {
+                                    info!(self.logger, "[RAFT-CONF] Successfully applied conf change");
+                                    cs
+                                }
+                                Err(e) => {
+                                    error!(self.logger, "[RAFT-CONF] Failed to apply conf change"; "error" => %e);
+                                    // Send error response if we have a pending proposal
+                                    if !entry.context.is_empty() {
+                                        let mut pending = self.pending_proposals.write().await;
+                                        if let Some(response_tx) = pending.remove(&entry.context) {
+                                            let _ = response_tx.send(Err(BlixardError::Raft {
+                                                operation: "apply conf change".to_string(),
+                                                source: Box::new(e),
+                                            }));
+                                        }
+                                    }
+                                    continue;
+                                }
+                            };
                             
                             // Log what the returned ConfState contains
                             info!(self.logger, "[RAFT-CONF] apply_conf_change returned ConfState"; 
@@ -1174,9 +1323,9 @@ impl RaftManager {
                             self.storage.save_conf_state(&corrected_cs)?;
                             info!(self.logger, "[RAFT-CONF] Saved new configuration state to storage"; "voters" => ?corrected_cs.voters);
                             
-                            // Verify the actual voters after applying the change
-                            let new_voters: Vec<u64> = node.raft.prs().votes().keys().cloned().collect();
-                            info!(self.logger, "[RAFT-CONF] Actual voters after conf change"; "voters" => ?new_voters);
+                            // Verify the actual voters after applying the change from conf state
+                            let new_voters: Vec<u64> = corrected_cs.voters.clone();
+                            info!(self.logger, "[RAFT-CONF] Actual voters after conf change from conf state"; "voters" => ?new_voters);
                             
                             // Update peer list based on the change type
                             use raft::prelude::ConfChangeType as RaftConfChangeType;
@@ -1245,6 +1394,31 @@ impl RaftManager {
                                     peers.remove(&cc.node_id);
                                     info!(self.logger, "[RAFT-CONF] Removed peer from local list"; "node_id" => cc.node_id);
                                     
+                                    // Remove worker from the worker registry
+                                    match self.storage.database.begin_write() {
+                                        Ok(write_txn) => {
+                                            let node_id_bytes = cc.node_id.to_le_bytes();
+                                            {
+                                                // Scope for table access
+                                                if let Ok(mut worker_table) = write_txn.open_table(crate::storage::WORKER_TABLE) {
+                                                    let _ = worker_table.remove(node_id_bytes.as_slice());
+                                                }
+                                                if let Ok(mut status_table) = write_txn.open_table(crate::storage::WORKER_STATUS_TABLE) {
+                                                    let _ = status_table.remove(node_id_bytes.as_slice());
+                                                }
+                                            } // Tables are dropped here
+                                            
+                                            if let Ok(_) = write_txn.commit() {
+                                                info!(self.logger, "[RAFT-CONF] Removed worker from registry"; "node_id" => cc.node_id);
+                                            } else {
+                                                warn!(self.logger, "[RAFT-CONF] Failed to commit worker removal"; "node_id" => cc.node_id);
+                                            }
+                                        }
+                                        Err(e) => {
+                                            warn!(self.logger, "[RAFT-CONF] Failed to begin write transaction for worker removal"; "error" => %e);
+                                        }
+                                    }
+                                    
                                     // Also update SharedNodeState peers
                                     if let Some(shared) = self.shared_state.upgrade() {
                                         let _ = shared.remove_peer(cc.node_id).await;
@@ -1256,10 +1430,47 @@ impl RaftManager {
                             
                             // Send response to waiting conf change if any
                             if !entry.context.is_empty() {
+                                info!(self.logger, "[RAFT-CONF] Looking for pending conf change response channel";
+                                    "context_len" => entry.context.len(),
+                                    "context_bytes" => ?&entry.context[..std::cmp::min(16, entry.context.len())]
+                                );
+                                
+                                // Log all pending proposals for debugging
+                                {
+                                    let pending_read = pending_proposals.read().await;
+                                    info!(self.logger, "[RAFT-CONF] Current pending proposals";
+                                        "count" => pending_read.len()
+                                    );
+                                    for (id, _) in pending_read.iter() {
+                                        info!(self.logger, "[RAFT-CONF] Pending proposal";
+                                            "id_bytes" => ?&id[..std::cmp::min(16, id.len())],
+                                            "matches" => (id == &entry.context)
+                                        );
+                                    }
+                                }
+                                
                                 let mut pending = pending_proposals.write().await;
                                 if let Some(response_tx) = pending.remove(&entry.context) {
-                                    let _ = response_tx.send(Ok(()));
+                                    info!(self.logger, "[RAFT-CONF] Found pending conf change, sending success response");
+                                    if let Err(_) = response_tx.send(Ok(())) {
+                                        warn!(self.logger, "[RAFT-CONF] Failed to send conf change response - receiver dropped");
+                                    } else {
+                                        info!(self.logger, "[RAFT-CONF] Successfully sent conf change response");
+                                    }
+                                } else {
+                                    warn!(self.logger, "[RAFT-CONF] No pending conf change found for context";
+                                        "context_len" => entry.context.len(),
+                                        "pending_count" => pending.len()
+                                    );
+                                    
+                                    // For RemoveNode, we might not have a pending response channel
+                                    // This is OK if the remove was initiated from a different source
+                                    if cc.change_type() == RaftConfChangeType::RemoveNode {
+                                        info!(self.logger, "[RAFT-CONF] RemoveNode completed without pending response (likely from different source)");
+                                    }
                                 }
+                            } else {
+                                info!(self.logger, "[RAFT-CONF] Entry has no context, no response to send");
                             }
                             
                             // IMPORTANT: After adding a new node, we need to trigger replication

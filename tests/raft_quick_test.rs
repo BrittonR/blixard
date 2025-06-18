@@ -10,7 +10,7 @@ use blixard::{
     test_helpers::PortAllocator,
 };
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_raft_starts_and_stops() {
     let temp_dir = TempDir::new().unwrap();
     let port = PortAllocator::next_port();

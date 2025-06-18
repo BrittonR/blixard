@@ -12,7 +12,7 @@ fn test_shared_node_state_is_send_sync() {
     assert_send_sync::<Arc<SharedNodeState>>();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_node_can_be_shared_via_arc() {
     let config = NodeConfig {
         id: 1,

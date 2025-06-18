@@ -29,13 +29,13 @@ async fn create_test_node(id: u64) -> (Node, TempDir) {
     (Node::new(config), temp_dir)
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_node_creation() {
     let (node, _temp_dir) = create_test_node(1).await;
     assert!(!node.is_running().await);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_node_initialization() {
     let (mut node, _temp_dir) = create_test_node(1).await;
     
@@ -44,7 +44,7 @@ async fn test_node_initialization() {
     assert!(result.is_ok(), "Node initialization failed: {:?}", result);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_node_lifecycle_with_initialization() {
     let (mut node, _temp_dir) = create_test_node(1).await;
     
@@ -66,7 +66,7 @@ async fn test_node_lifecycle_with_initialization() {
     assert!(!node.is_running().await);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_vm_command_send() {
     let (mut node, _temp_dir) = create_test_node(1).await;
     
@@ -90,7 +90,7 @@ async fn test_vm_command_send() {
     assert!(result.is_ok());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_vm_command_send_without_initialization() {
     let (node, _temp_dir) = create_test_node(1).await;
     
@@ -111,7 +111,7 @@ async fn test_vm_command_send_without_initialization() {
     assert!(matches!(result, Err(BlixardError::Internal { .. })));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_cluster_operations_uninitialized() {
     let (mut node, _temp_dir) = create_test_node(1).await;
     
@@ -128,7 +128,7 @@ async fn test_cluster_operations_uninitialized() {
     assert!(result.is_err(), "Expected error for get_cluster_status on uninitialized node, got {:?}", result);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_node_stop_without_start() {
     let (mut node, _temp_dir) = create_test_node(1).await;
     
@@ -138,7 +138,7 @@ async fn test_node_stop_without_start() {
     assert!(!node.is_running().await);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_node_multiple_starts() {
     let (mut node, _temp_dir) = create_test_node(1).await;
     
@@ -155,7 +155,7 @@ async fn test_node_multiple_starts() {
     node.stop().await.unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_node_with_different_configs() {
     // Test with different node IDs
     let (node1, _temp1) = create_test_node(1).await;
@@ -178,7 +178,7 @@ async fn test_node_with_different_configs() {
     assert!(!node3.is_running().await);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_node_start_timeout() {
     let (mut node, _temp_dir) = create_test_node(1).await;
     
@@ -192,7 +192,7 @@ async fn test_node_start_timeout() {
     node.stop().await.unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_vm_status_update_command() {
     let (mut node, _temp_dir) = create_test_node(1).await;
     
@@ -212,7 +212,7 @@ async fn test_vm_status_update_command() {
 
 // ===== Database Tests =====
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_database_initialization() {
     let temp_dir = TempDir::new().unwrap();
     
@@ -253,7 +253,7 @@ async fn test_database_initialization() {
     assert!(read_txn.open_table(WORKER_STATUS_TABLE).is_ok());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_database_persistence_across_restarts() {
     let temp_dir = TempDir::new().unwrap();
     let data_dir = temp_dir.path().join("node1");
@@ -349,7 +349,7 @@ async fn test_database_persistence_across_restarts() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_database_concurrent_access() {
     let (mut node, _temp_dir) = create_test_node(1).await;
     node.initialize().await.unwrap();
@@ -397,7 +397,7 @@ async fn test_database_concurrent_access() {
 
 // ===== Raft Integration Tests =====
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_raft_manager_initialization() {
     let (mut node, _temp_dir) = create_test_node(1).await;
     
@@ -422,7 +422,7 @@ async fn test_raft_manager_initialization() {
     assert!(result.is_ok());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "Requires full Raft cluster setup"]
 async fn test_task_submission() {
     let (mut node, _temp_dir) = create_test_node(1).await;
@@ -477,7 +477,7 @@ async fn test_task_submission() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "Requires full Raft cluster setup"]
 async fn test_task_status_retrieval() {
     let (mut node, _temp_dir) = create_test_node(1).await;
@@ -520,7 +520,7 @@ async fn test_task_status_retrieval() {
 
 // ===== Cluster Membership Tests =====
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_bootstrap_mode_registration() {
     let (mut node, temp_dir) = create_test_node(1).await;
     node.initialize().await.unwrap();
@@ -539,7 +539,7 @@ async fn test_bootstrap_mode_registration() {
     assert!(worker_data.is_some(), "Worker should be registered in database");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "Requires full Raft cluster setup"]
 async fn test_cluster_status_after_join() {
     let (mut node, _temp_dir) = create_test_node(1).await;
@@ -565,7 +565,7 @@ async fn test_cluster_status_after_join() {
     assert!(term > 0); // Should have started terms
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "Requires full Raft cluster setup"]
 async fn test_leave_cluster() {
     let (mut node, _temp_dir) = create_test_node(1).await;
@@ -592,7 +592,7 @@ async fn test_leave_cluster() {
 
 // ===== Error Handling Tests =====
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_database_initialization_failure() {
     let config = NodeConfig {
         id: 1,
@@ -607,7 +607,7 @@ async fn test_database_initialization_failure() {
     assert!(matches!(result, Err(BlixardError::Storage { .. })));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_vm_command_channel_closed() {
     let (mut node, _temp_dir) = create_test_node(1).await;
     node.initialize().await.unwrap();
@@ -630,7 +630,7 @@ async fn test_vm_command_channel_closed() {
     assert!(result.is_err(), "Expected error after stop clears VM manager");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_concurrent_start_stop() {
     let (mut node, _temp_dir) = create_test_node(1).await;
     node.initialize().await.unwrap();
@@ -659,7 +659,7 @@ async fn test_concurrent_start_stop() {
 
 // ===== VM Management Tests =====
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_vm_lifecycle_operations() {
     let (mut node, _temp_dir) = create_test_node(1).await;
     node.initialize().await.unwrap();
@@ -726,7 +726,7 @@ async fn test_vm_lifecycle_operations() {
     }).await.unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_multiple_vm_operations() {
     let (mut node, _temp_dir) = create_test_node(1).await;
     node.initialize().await.unwrap();

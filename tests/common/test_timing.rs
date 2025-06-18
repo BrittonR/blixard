@@ -155,7 +155,7 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
     
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_wait_for_condition_immediate() {
         let result = wait_for_condition(
             || async { true },
@@ -167,7 +167,7 @@ mod tests {
         assert!(result.is_ok());
     }
     
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_wait_for_condition_delayed() {
         let start = Instant::now();
         let count = Arc::new(Mutex::new(0));
@@ -191,7 +191,7 @@ mod tests {
         assert!(start.elapsed() < Duration::from_secs(1));
     }
     
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_wait_for_condition_timeout() {
         let result = wait_for_condition(
             || async { false },
@@ -203,7 +203,7 @@ mod tests {
         assert!(result.is_err());
     }
     
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_exponential_backoff() {
         let attempts = Arc::new(Mutex::new(0));
         let attempts_clone = attempts.clone();

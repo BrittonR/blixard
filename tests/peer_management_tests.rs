@@ -17,7 +17,7 @@ fn create_test_node_state(id: u64) -> SharedNodeState {
     SharedNodeState::new(config)
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_add_peer_success() {
     let node = create_test_node_state(1);
     
@@ -35,7 +35,7 @@ async fn test_add_peer_success() {
     assert!(!peers[0].is_connected);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_add_duplicate_peer_fails() {
     let node = create_test_node_state(1);
     
@@ -51,7 +51,7 @@ async fn test_add_duplicate_peer_fails() {
     assert!(result2.unwrap_err().to_string().contains("already exists"));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_remove_peer_success() {
     let node = create_test_node_state(1);
     
@@ -68,7 +68,7 @@ async fn test_remove_peer_success() {
     assert_eq!(peers.len(), 0);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_remove_non_existent_peer_fails() {
     let node = create_test_node_state(1);
     
@@ -78,7 +78,7 @@ async fn test_remove_non_existent_peer_fails() {
     assert!(result.unwrap_err().to_string().contains("not found"));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_get_specific_peer() {
     let node = create_test_node_state(1);
     
@@ -95,7 +95,7 @@ async fn test_get_specific_peer() {
     assert!(peer4.is_none());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_update_peer_connection_status() {
     let node = create_test_node_state(1);
     
@@ -120,7 +120,7 @@ async fn test_update_peer_connection_status() {
     assert!(!peer.is_connected);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_update_connection_for_non_existent_peer_fails() {
     let node = create_test_node_state(1);
     
@@ -129,7 +129,7 @@ async fn test_update_connection_for_non_existent_peer_fails() {
     assert!(result.unwrap_err().to_string().contains("not found"));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_multiple_peers_management() {
     let node = create_test_node_state(1);
     
@@ -158,7 +158,7 @@ async fn test_multiple_peers_management() {
     assert_eq!(connected_count, 2);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_peer_info_clone() {
     let port = PortAllocator::next_port();
     let peer = PeerInfo {
@@ -173,7 +173,7 @@ async fn test_peer_info_clone() {
     assert_eq!(peer.is_connected, cloned.is_connected);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_concurrent_peer_operations() {
     let node = Arc::new(create_test_node_state(1));
     
@@ -199,7 +199,7 @@ async fn test_concurrent_peer_operations() {
     assert!(peers.len() >= 5); // At least some should succeed
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_raft_status_tracking() {
     let node = create_test_node_state(1);
     

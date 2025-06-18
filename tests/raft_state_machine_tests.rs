@@ -33,7 +33,7 @@ fn create_entry(proposal: ProposalData) -> Entry {
     entry
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_apply_assign_task() {
     let (_temp_dir, db) = create_test_db();
     let state_machine = RaftStateMachine::new(db.clone());
@@ -70,7 +70,7 @@ async fn test_apply_assign_task() {
     assert_eq!(node_id, 1);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_apply_complete_task() {
     let (_temp_dir, db) = create_test_db();
     let state_machine = RaftStateMachine::new(db.clone());
@@ -119,7 +119,7 @@ async fn test_apply_complete_task() {
     assert!(assignment_table.get("task-1").unwrap().is_none());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_apply_register_worker() {
     let (_temp_dir, db) = create_test_db();
     let state_machine = RaftStateMachine::new(db.clone());
@@ -149,7 +149,7 @@ async fn test_apply_register_worker() {
     assert_eq!(status_bytes.value()[0], WorkerStatus::Online as u8);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_apply_update_worker_status() {
     let (_temp_dir, db) = create_test_db();
     let state_machine = RaftStateMachine::new(db.clone());
@@ -185,7 +185,7 @@ async fn test_apply_update_worker_status() {
     assert_eq!(status_bytes.value()[0], WorkerStatus::Busy as u8);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_apply_vm_command_create() {
     let (_temp_dir, db) = create_test_db();
     let state_machine = RaftStateMachine::new(db.clone());
@@ -206,7 +206,7 @@ async fn test_apply_vm_command_create() {
     state_machine.apply_entry(&entry).await.unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_apply_empty_entry() {
     let (_temp_dir, db) = create_test_db();
     let state_machine = RaftStateMachine::new(db.clone());
@@ -216,7 +216,7 @@ async fn test_apply_empty_entry() {
     state_machine.apply_entry(&entry).await.unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_complete_nonexistent_task() {
     let (_temp_dir, db) = create_test_db();
     let state_machine = RaftStateMachine::new(db.clone());
@@ -243,7 +243,7 @@ async fn test_complete_nonexistent_task() {
     assert!(result_table.get("nonexistent").unwrap().is_some());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_update_nonexistent_worker_status() {
     let (_temp_dir, db) = create_test_db();
     let state_machine = RaftStateMachine::new(db.clone());
@@ -265,7 +265,7 @@ async fn test_update_nonexistent_worker_status() {
     assert_eq!(status_bytes.value()[0], WorkerStatus::Failed as u8);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_idempotent_task_assignment() {
     let (_temp_dir, db) = create_test_db();
     let state_machine = RaftStateMachine::new(db.clone());
@@ -303,7 +303,7 @@ async fn test_idempotent_task_assignment() {
     assert!(assignment_table.get("task-1").unwrap().is_some());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_worker_registration_overwrites() {
     let (_temp_dir, db) = create_test_db();
     let state_machine = RaftStateMachine::new(db.clone());
@@ -352,7 +352,7 @@ async fn test_worker_registration_overwrites() {
     assert_eq!(capabilities.features, vec!["gpu"]);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_task_result_overwrites() {
     let (_temp_dir, db) = create_test_db();
     let state_machine = RaftStateMachine::new(db.clone());
@@ -396,7 +396,7 @@ async fn test_task_result_overwrites() {
     assert_eq!(result.error, None);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_multiple_vm_operations() {
     let (_temp_dir, db) = create_test_db();
     let state_machine = RaftStateMachine::new(db.clone());

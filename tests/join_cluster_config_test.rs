@@ -9,7 +9,7 @@ use blixard::proto::{cluster_service_client::ClusterServiceClient, HealthCheckRe
 mod common;
 use common::test_timing::wait_for_condition;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_join_cluster_configuration_update() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("join_cluster_config_test=info,blixard=info,raft=info")

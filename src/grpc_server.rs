@@ -239,9 +239,11 @@ impl ClusterService for BlixardGrpcService {
         request: Request<LeaveRequest>,
     ) -> Result<Response<LeaveResponse>, Status> {
         let req = request.into_inner();
+        tracing::info!("[LEAVE] Received leave request for node {}", req.node_id);
         
         // Validate the request
         if req.node_id == 0 {
+            tracing::warn!("[LEAVE] Invalid node ID: 0");
             return Ok(Response::new(LeaveResponse {
                 success: false,
                 message: "Invalid node ID: must be non-zero".to_string(),
@@ -249,51 +251,106 @@ impl ClusterService for BlixardGrpcService {
         }
         
         // Check if trying to remove self
-        if req.node_id == self.node.get_id() {
+        let self_id = self.node.get_id();
+        if req.node_id == self_id {
+            tracing::warn!("[LEAVE] Attempted to remove self (node {})", self_id);
             return Ok(Response::new(LeaveResponse {
                 success: false,
                 message: "Cannot remove self from cluster. Use shutdown instead.".to_string(),
             }));
         }
         
-        // Check if node exists
-        if self.node.get_peer(req.node_id).await.is_none() {
-            return Ok(Response::new(LeaveResponse {
-                success: false,
-                message: format!("Node {} not found in cluster", req.node_id),
-            }));
-        }
+        // Check current cluster state before attempting configuration change
+        let is_leader = self.node.is_leader().await;
+        tracing::info!("[LEAVE] Current node {} is_leader: {}", self_id, is_leader);
         
-        // Get peer address before removal
-        let peer_address = self.node.get_peer(req.node_id).await
-            .map(|p| p.address)
-            .unwrap_or_default();
-        
-        // Propose configuration change through Raft
-        tracing::info!("[LEAVE] Proposing configuration change to remove node {}", req.node_id);
-        match self.node.propose_conf_change(
-            crate::raft_manager::ConfChangeType::RemoveNode,
-            req.node_id,
-            peer_address
-        ).await {
-            Ok(_) => {
-                // Remove peer from local tracking
-                match self.node.remove_peer(req.node_id).await {
-                    Ok(_) => {
-                        Ok(Response::new(LeaveResponse {
-                            success: true,
-                            message: format!("Node {} successfully removed from cluster", req.node_id),
-                        }))
-                    }
-                    Err(e) => {
-                        Ok(Response::new(LeaveResponse {
-                            success: false,
-                            message: format!("Failed to remove peer from tracking: {}", e),
-                        }))
-                    }
+        // Get and log current cluster status
+        match self.node.get_cluster_status().await {
+            Ok((leader_id, nodes, term)) => {
+                tracing::info!("[LEAVE] Current cluster state: leader_id={:?}, term={}, nodes={:?}", 
+                    leader_id, term, nodes);
+                
+                if !nodes.contains(&req.node_id) {
+                    tracing::warn!("[LEAVE] Node {} not found in cluster configuration", req.node_id);
+                    return Ok(Response::new(LeaveResponse {
+                        success: false,
+                        message: format!("Node {} not found in cluster configuration", req.node_id),
+                    }));
                 }
             }
             Err(e) => {
+                tracing::error!("[LEAVE] Failed to get cluster status: {}", e);
+                return Err(Self::error_to_status(e));
+            }
+        }
+        
+        // Get peer address if available (it's okay if we don't have it)
+        let peer_address = match self.node.get_peer(req.node_id).await {
+            Some(peer) => {
+                tracing::info!("[LEAVE] Found peer {} at address {}", req.node_id, peer.address);
+                peer.address
+            }
+            None => {
+                let addr = format!("unknown-{}", req.node_id);
+                tracing::warn!("[LEAVE] Peer {} not found in local tracking, using address: {}", req.node_id, addr);
+                addr
+            }
+        };
+        
+        // Log current Raft status before configuration change
+        match self.node.get_raft_status().await {
+            Ok(status) => {
+                tracing::info!("[LEAVE] Raft status before conf change: is_leader={}, node_id={}, leader_id={:?}, term={}, state={}", 
+                    status.is_leader, status.node_id, status.leader_id, status.term, status.state);
+            }
+            Err(e) => {
+                tracing::warn!("[LEAVE] Failed to get Raft status: {}", e);
+            }
+        }
+        
+        // Propose configuration change through Raft
+        tracing::info!("[LEAVE] Proposing configuration change to remove node {} with address {}", 
+            req.node_id, peer_address);
+        match self.node.propose_conf_change(
+            crate::raft_manager::ConfChangeType::RemoveNode,
+            req.node_id,
+            peer_address.clone()
+        ).await {
+            Ok(_) => {
+                tracing::info!("[LEAVE] Configuration change successfully proposed for node {}", req.node_id);
+                
+                // Log cluster state after configuration change
+                match self.node.get_cluster_status().await {
+                    Ok((leader_id, nodes, term)) => {
+                        tracing::info!("[LEAVE] Cluster state after conf change: leader_id={:?}, term={}, nodes={:?}", 
+                            leader_id, term, nodes);
+                    }
+                    Err(e) => {
+                        tracing::warn!("[LEAVE] Failed to get cluster status after conf change: {}", e);
+                    }
+                }
+                
+                // The Raft manager will remove the peer when applying the configuration change,
+                // so we don't need to do it here. Just return success.
+                tracing::info!("[LEAVE] Configuration change applied, node {} will be removed by Raft manager", req.node_id);
+                Ok(Response::new(LeaveResponse {
+                    success: true,
+                    message: format!("Node {} successfully removed from cluster", req.node_id),
+                }))
+            }
+            Err(e) => {
+                tracing::error!("[LEAVE] Failed to propose configuration change for node {}: {}", req.node_id, e);
+                // Try to get more context about the error
+                match self.node.get_raft_status().await {
+                    Ok(status) => {
+                        tracing::error!("[LEAVE] Raft status after error: is_leader={}, node_id={}, leader_id={:?}, term={}, state={}", 
+                            status.is_leader, status.node_id, status.leader_id, status.term, status.state);
+                    }
+                    Err(raft_err) => {
+                        tracing::error!("[LEAVE] Also failed to get Raft status: {}", raft_err);
+                    }
+                }
+                
                 Ok(Response::new(LeaveResponse {
                     success: false,
                     message: format!("Failed to remove node from cluster: {}", e),
@@ -669,9 +726,14 @@ pub async fn start_grpc_server(
     {
         Ok(()) => (),
         Err(e) => {
+            let error_msg = if e.to_string().contains("Address already in use") {
+                format!("gRPC server error: Address {} already in use", bind_address)
+            } else {
+                format!("gRPC server error: transport error")
+            };
             tracing::error!("Failed to start gRPC server on {}: {:?}", bind_address, e);
             return Err(BlixardError::Internal { 
-                message: format!("gRPC server error: {}", e) 
+                message: error_msg 
             });
         }
     }

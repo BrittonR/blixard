@@ -438,6 +438,7 @@ impl Node {
         }
         
         self.shared.set_running(false).await;
+        self.shared.set_initialized(false).await;
         
         // Shutdown all components to release database references
         self.shared.shutdown_components().await;

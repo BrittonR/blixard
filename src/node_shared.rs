@@ -247,13 +247,69 @@ impl SharedNodeState {
     pub async fn submit_task(&self, task_id: &str, task: TaskSpec) -> BlixardResult<u64> {
         tracing::info!("submit_task called for task_id: {}", task_id);
         
-        let proposal_tx = self.raft_proposal_tx.lock().await;
-        
-        let database = self.database.read().await;
-        if let (Some(tx), Some(db)) = (proposal_tx.as_ref(), database.as_ref()) {
-            tracing::info!("Checking if we can schedule the task...");
-            // Check if we can schedule the task
-            let assigned_node = crate::raft_manager::schedule_task(db.clone(), task_id, &task).await?
+        // Check if we're the leader
+        let raft_status = self.get_raft_status().await?;
+        if !raft_status.is_leader {
+            // Forward to leader if we know who it is
+            if let Some(leader_id) = raft_status.leader_id {
+                tracing::info!("Forwarding task submission to leader node {}", leader_id);
+                
+                // Get leader address
+                let peers = self.get_peers().await;
+                let leader_addr = peers.iter()
+                    .find(|p| p.id == leader_id)
+                    .map(|p| p.address.clone())
+                    .ok_or_else(|| BlixardError::ClusterError(
+                        format!("Leader node {} address not found", leader_id)
+                    ))?;
+                
+                // Forward the request to the leader
+                use crate::proto::cluster_service_client::ClusterServiceClient;
+                use crate::proto::TaskRequest;
+                
+                let mut client = ClusterServiceClient::connect(format!("http://{}", leader_addr))
+                    .await
+                    .map_err(|e| BlixardError::Internal {
+                        message: format!("Failed to connect to leader: {}", e),
+                    })?;
+                
+                let request = TaskRequest {
+                    task_id: task_id.to_string(),
+                    command: task.command,
+                    args: task.args,
+                    cpu_cores: task.resources.cpu_cores as u32,
+                    memory_mb: task.resources.memory_mb,
+                    disk_gb: task.resources.disk_gb,
+                    required_features: task.resources.required_features,
+                    timeout_secs: task.timeout_secs,
+                };
+                
+                let response = client.submit_task(request)
+                    .await
+                    .map_err(|e| BlixardError::Internal {
+                        message: format!("Failed to forward task to leader: {}", e),
+                    })?;
+                
+                let response = response.into_inner();
+                if response.accepted {
+                    Ok(response.assigned_node)
+                } else {
+                    Err(BlixardError::ClusterError(response.message))
+                }
+            } else {
+                Err(BlixardError::ClusterError("No leader elected yet".to_string()))
+            }
+        } else {
+            // We are the leader, process locally
+            tracing::info!("Processing task submission locally as leader");
+            
+            let proposal_tx = self.raft_proposal_tx.lock().await;
+            
+            let database = self.database.read().await;
+            if let (Some(tx), Some(db)) = (proposal_tx.as_ref(), database.as_ref()) {
+                tracing::info!("Checking if we can schedule the task...");
+                // Check if we can schedule the task
+                let assigned_node = crate::raft_manager::schedule_task(db.clone(), task_id, &task).await?
                 .ok_or_else(|| {
                     tracing::error!("No suitable worker available for task {}", task_id);
                     BlixardError::ClusterError("No suitable worker available".to_string())
@@ -279,9 +335,17 @@ impl SharedNodeState {
             };
             
             tracing::info!("Sending proposal to Raft manager");
-            tx.send(proposal).map_err(|_| BlixardError::Internal {
-                message: "Failed to send task proposal".to_string(),
-            })?;
+            match tx.send(proposal) {
+                Ok(_) => {
+                    tracing::info!("Successfully sent proposal to Raft channel");
+                }
+                Err(e) => {
+                    tracing::error!("Failed to send proposal: channel closed or full. Error: {:?}", e);
+                    return Err(BlixardError::Internal {
+                        message: "Failed to send task proposal - Raft channel closed".to_string(),
+                    });
+                }
+            }
             
             tracing::info!("Waiting for proposal response...");
             // Wait for response with a timeout
@@ -304,11 +368,12 @@ impl SharedNodeState {
                 }
             }
             
-            Ok(assigned_node)
-        } else {
-            Err(BlixardError::Internal {
-                message: "Raft manager or database not initialized".to_string(),
-            })
+                Ok(assigned_node)
+            } else {
+                Err(BlixardError::Internal {
+                    message: "Raft manager or database not initialized".to_string(),
+                })
+            }
         }
     }
     
@@ -460,43 +525,84 @@ impl SharedNodeState {
     /// Propose a configuration change through Raft
     pub async fn propose_conf_change(&self, change_type: ConfChangeType, node_id: u64, address: String) -> BlixardResult<()> {
         tracing::info!("[NODE-SHARED] Proposing conf change: {:?} for node {} at {}", change_type, node_id, address);
+        
+        // Check if we're initialized
+        if !self.is_initialized().await {
+            tracing::error!("[NODE-SHARED] Cannot propose conf change - node not initialized");
+            return Err(BlixardError::Internal {
+                message: "Node not initialized".to_string(),
+            });
+        }
+        
+        // Check if we're the leader (only leaders can propose conf changes)
+        let is_leader = self.is_leader().await;
+        if !is_leader {
+            let raft_status = self.raft_status.read().await;
+            let leader_id = raft_status.leader_id;
+            tracing::error!("[NODE-SHARED] Cannot propose conf change - not the leader. Current leader: {:?}", leader_id);
+            return Err(BlixardError::ClusterError(
+                format!("Only the leader can propose configuration changes. Current leader: {:?}", leader_id)
+            ));
+        }
+        
         let tx = self.raft_conf_change_tx.lock().await;
         if let Some(sender) = tx.as_ref() {
             let (response_tx, response_rx) = oneshot::channel();
             let conf_change = RaftConfChange {
                 change_type,
                 node_id,
-                address,
+                address: address.clone(),
                 response_tx: Some(response_tx),
             };
             
-            sender.send(conf_change)
-                .map_err(|_| BlixardError::Internal {
-                    message: "Failed to send configuration change".to_string(),
-                })?;
+            tracing::info!("[NODE-SHARED] Sending conf change to Raft manager channel");
+            match sender.send(conf_change) {
+                Ok(_) => {
+                    tracing::info!("[NODE-SHARED] Conf change sent successfully, waiting for response");
+                }
+                Err(e) => {
+                    tracing::error!("[NODE-SHARED] Failed to send conf change to channel: {}", e);
+                    return Err(BlixardError::Internal {
+                        message: format!("Failed to send configuration change: {}", e),
+                    });
+                }
+            }
             
-            tracing::info!("[NODE-SHARED] Waiting for conf change response from Raft");
+            tracing::info!("[NODE-SHARED] Waiting for conf change response from Raft (timeout: 5s)");
             // Wait for the configuration change to be committed
             // Use a timeout to prevent indefinite blocking
             match tokio::time::timeout(tokio::time::Duration::from_secs(5), response_rx).await {
                 Ok(Ok(result)) => {
-                    tracing::info!("[NODE-SHARED] Conf change completed successfully");
+                    match &result {
+                        Ok(_) => {
+                            tracing::info!("[NODE-SHARED] Conf change completed successfully");
+                        }
+                        Err(e) => {
+                            tracing::error!("[NODE-SHARED] Conf change failed: {}", e);
+                        }
+                    }
                     result
                 }
-                Ok(Err(_)) => {
-                    tracing::warn!("[NODE-SHARED] Conf change response channel closed");
+                Ok(Err(e)) => {
+                    tracing::error!("[NODE-SHARED] Conf change response channel closed: {}", e);
                     Err(BlixardError::Internal {
-                        message: "Configuration change response channel closed".to_string(),
+                        message: format!("Configuration change response channel closed: {}", e),
                     })
                 }
                 Err(_) => {
-                    tracing::warn!("[NODE-SHARED] Conf change timed out after 5 seconds");
+                    tracing::error!("[NODE-SHARED] Conf change timed out after 5 seconds");
+                    // Get current Raft status for debugging
+                    let raft_status = self.raft_status.read().await;
+                    tracing::error!("[NODE-SHARED] Current Raft status: is_leader={}, node_id={}, leader_id={:?}, term={}, state={}", 
+                        raft_status.is_leader, raft_status.node_id, raft_status.leader_id, raft_status.term, raft_status.state);
+                    
                     Err(BlixardError::Internal {
                         message: "Configuration change timed out".to_string(),
                     })
                 }
             }
         } else {
+            tracing::error!("[NODE-SHARED] Raft manager not initialized - no conf change channel");
             Err(BlixardError::Internal {
                 message: "Raft manager not initialized".to_string(),
             })

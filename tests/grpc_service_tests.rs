@@ -68,7 +68,7 @@ async fn create_client(addr: SocketAddr) -> (BlixardServiceClient<Channel>, Clus
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_grpc_server_starts_successfully() {
     let (_state, addr, handle) = setup_test_server().await;
     
@@ -86,7 +86,7 @@ async fn test_grpc_server_starts_successfully() {
     handle.abort();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_get_raft_status_default_state() {
     let (_state, addr, handle) = setup_test_server().await;
     
@@ -107,7 +107,7 @@ async fn test_get_raft_status_default_state() {
     handle.abort();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_get_raft_status_after_update() {
     let (state, addr, handle) = setup_test_server().await;
     
@@ -138,7 +138,7 @@ async fn test_get_raft_status_after_update() {
     handle.abort();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_propose_task_without_raft_manager() {
     let (_state, addr, handle) = setup_test_server().await;
     
@@ -166,7 +166,7 @@ async fn test_propose_task_without_raft_manager() {
     handle.abort();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_propose_task_validation() {
     let (_state, addr, handle) = setup_test_server().await;
     
@@ -204,7 +204,7 @@ async fn test_propose_task_validation() {
     handle.abort();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_both_services_accessible() {
     let (_state, addr, handle) = setup_test_server().await;
     
@@ -222,7 +222,7 @@ async fn test_both_services_accessible() {
     handle.abort();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_concurrent_requests() {
     let (_state, addr, handle) = setup_test_server().await;
     
@@ -258,7 +258,7 @@ async fn test_concurrent_requests() {
     handle.abort();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_task_proposal_with_various_configs() {
     let (_state, addr, handle) = setup_test_server().await;
     
@@ -296,7 +296,7 @@ async fn test_task_proposal_with_various_configs() {
     handle.abort();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_server_shutdown_gracefully() {
     let (_state, addr, handle) = setup_test_server().await;
     
@@ -318,7 +318,7 @@ async fn test_server_shutdown_gracefully() {
     assert!(connect_result.is_err());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_error_handling_for_invalid_raft_state() {
     let (state, addr, handle) = setup_test_server().await;
     

@@ -22,7 +22,7 @@ use crate::{
     types::NodeConfig,
     grpc_server::start_grpc_server,
     error::{BlixardError, BlixardResult},
-    proto::{cluster_service_client::ClusterServiceClient, HealthCheckRequest},
+    proto::{cluster_service_client::ClusterServiceClient, HealthCheckRequest, LeaveRequest},
 };
 
 /// Global port allocator for tests
@@ -55,7 +55,9 @@ pub mod timing {
     
     /// Apply the timeout multiplier to a duration
     pub fn scaled_timeout(base: Duration) -> Duration {
-        base * timeout_multiplier() as u32
+        let multiplier = timeout_multiplier();
+        // Use saturating mul to avoid overflow
+        base.saturating_mul(multiplier as u32)
     }
     
     /// Wait for a condition to become true with exponential backoff
@@ -89,20 +91,41 @@ pub mod timing {
     
     /// Robust sleep that accounts for CI environments
     pub async fn robust_sleep(base_duration: Duration) {
-        sleep(scaled_timeout(base_duration)).await;
+        // Just sleep for the scaled duration without further manipulation
+        // to avoid potential overflow in tokio's deadline calculation
+        let scaled = scaled_timeout(base_duration);
+        sleep(scaled).await;
     }
 }
 
 impl PortAllocator {
     /// Get the next available port
     pub fn next_port() -> u16 {
-        // Increment and wrap around if we go too high
-        let port = PORT_ALLOCATOR.fetch_add(1, Ordering::SeqCst);
-        if port > 30000 {
-            PORT_ALLOCATOR.store(20000, Ordering::SeqCst);
-            20000
-        } else {
-            port
+        // Initialize with process ID offset on first use to reduce conflicts
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| {
+            let offset = (std::process::id() % 1000) as u16;
+            PORT_ALLOCATOR.store(20000 + offset, Ordering::SeqCst);
+        });
+        
+        // Use a loop to handle the wraparound case atomically
+        loop {
+            let current = PORT_ALLOCATOR.load(Ordering::SeqCst);
+            if current > 30000 {
+                // Try to reset to 20000 + offset
+                let offset = (std::process::id() % 1000) as u16;
+                let new_base = 20000 + offset;
+                if PORT_ALLOCATOR.compare_exchange(current, new_base, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+                    return new_base;
+                }
+                // If someone else reset it, continue the loop
+            } else {
+                // Try to increment
+                if let Ok(port) = PORT_ALLOCATOR.compare_exchange(current, current + 1, Ordering::SeqCst, Ordering::SeqCst) {
+                    return port;
+                }
+                // If someone else incremented, continue the loop
+            }
         }
     }
     
@@ -166,8 +189,8 @@ impl TestNode {
         // Abort the gRPC server handle if it hasn't been already
         if let Some(handle) = self.server_handle.take() {
             handle.abort();
-            // Give the server time to fully shut down
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            // Give the server more time to fully shut down and release the port
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
         
         // Temp dir will be cleaned up on drop
@@ -225,7 +248,11 @@ impl TestNodeBuilder {
             "Node ID is required".to_string()
         ))?;
         
-        let port = self.port.unwrap_or_else(PortAllocator::next_port);
+        let port = self.port.unwrap_or_else(|| {
+            let p = PortAllocator::next_port();
+            tracing::info!("Allocated port {} for node {}", p, id);
+            p
+        });
         
         // Create temp directory if not provided
         let (temp_dir, data_dir) = if let Some(dir) = self.data_dir {
@@ -262,9 +289,23 @@ impl TestNodeBuilder {
         // Start gRPC server BEFORE initializing node
         // This ensures the server is ready when join requests are sent
         let state_clone = shared_state.clone();
+        let addr_for_spawn = addr.clone();
         let server_handle = tokio::spawn(async move {
-            start_grpc_server(state_clone, addr).await.unwrap();
+            if let Err(e) = start_grpc_server(state_clone, addr_for_spawn).await {
+                tracing::error!("gRPC server task failed on {}: {}", addr_for_spawn, e);
+                // Don't panic - let the wait_for_server_ready detect the failure
+            }
         });
+        
+        // Give the server task a moment to start
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        
+        // Check if the server task already failed
+        if server_handle.is_finished() {
+            return Err(BlixardError::Internal {
+                message: format!("gRPC server failed to start on {}", addr),
+            });
+        }
         
         // Wait for server to be ready
         wait_for_server_ready(addr).await?;
@@ -291,6 +332,7 @@ impl TestNodeBuilder {
 pub struct TestCluster {
     nodes: HashMap<u64, TestNode>,
     client_cache: Arc<Mutex<HashMap<u64, ClusterServiceClient<Channel>>>>,
+    next_node_id: u64,
 }
 
 impl TestCluster {
@@ -423,14 +465,15 @@ impl TestCluster {
     
     /// Add a new node to the cluster
     pub async fn add_node(&mut self) -> BlixardResult<u64> {
-        let id = self.nodes.len() as u64 + 1;
+        let id = self.next_node_id;
+        self.next_node_id += 1;
         
-        // Get leader address
+        // Get leader address - find any existing node to join through
         let leader_addr = self.nodes.values()
-            .find(|n| n.id == 1)
+            .next()
             .map(|n| n.addr.to_string())
             .ok_or_else(|| BlixardError::NodeError(
-                "Bootstrap node not found".to_string()
+                "No nodes available to join through".to_string()
             ))?;
         
         let node = TestNode::builder()
@@ -449,12 +492,30 @@ impl TestCluster {
     
     /// Remove a node from the cluster
     pub async fn remove_node(&mut self, id: u64) -> BlixardResult<()> {
+        // First, send a leave request to the cluster to remove this node
+        // This must be done from a different node (preferably the leader)
+        let leader_client = self.leader_client().await?;
+        
+        let leave_request = crate::proto::LeaveRequest {
+            node_id: id,
+        };
+        
+        let response = leader_client.clone().leave_cluster(leave_request).await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to send leave request: {}", e),
+            })?;
+        
+        if !response.into_inner().success {
+            return Err(BlixardError::ClusterError(
+                format!("Failed to remove node {} from cluster", id)
+            ));
+        }
+        
+        // Now remove and shutdown the node
         let node = self.nodes.remove(&id)
             .ok_or_else(|| BlixardError::NodeError(
                 format!("Node {} not found", id)
             ))?;
-        
-        // TODO: Send leave request before shutdown
         
         node.shutdown().await;
         Ok(())
@@ -463,9 +524,16 @@ impl TestCluster {
     /// Shutdown all nodes in the cluster
     pub async fn shutdown(mut self) {
         let nodes = std::mem::take(&mut self.nodes);
-        for (_, node) in nodes {
+        // Shutdown nodes in reverse order to avoid issues with leader election
+        let mut node_vec: Vec<_> = nodes.into_iter().collect();
+        node_vec.sort_by_key(|(id, _)| std::cmp::Reverse(*id));
+        
+        for (_, node) in node_vec {
             node.shutdown().await;
         }
+        
+        // Give extra time for all server tasks to fully terminate
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
     
     /// Dump diagnostic information for all nodes
@@ -483,6 +551,11 @@ impl TestCluster {
     /// Get reference to all nodes
     pub fn nodes(&self) -> &HashMap<u64, TestNode> {
         &self.nodes
+    }
+    
+    /// Get mutable reference to nodes (for testing)
+    pub fn nodes_mut(&mut self) -> &mut HashMap<u64, TestNode> {
+        &mut self.nodes
     }
 }
 
@@ -569,6 +642,7 @@ impl TestClusterBuilder {
         let cluster = TestCluster {
             nodes,
             client_cache: Arc::new(Mutex::new(HashMap::new())),
+            next_node_id: (node_count as u64) + 1,
         };
         
         // Wait for all nodes to at least see the expected cluster size
