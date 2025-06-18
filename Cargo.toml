@@ -125,6 +125,22 @@ path = "src/main.rs"
 name = "three_node_cluster_example"
 required-features = ["test-helpers"]
 
+[[test]]
+name = "raft_state_machine_tests"
+required-features = ["test-helpers"]
+
+[[test]]
+name = "three_node_cluster_tests"
+required-features = ["test-helpers"]
+
+[[test]]
+name = "node_lifecycle_integration_tests"
+required-features = ["test-helpers"]
+
+[[test]]
+name = "cluster_integration_tests"
+required-features = ["test-helpers"]
+
 [profile.release]
 lto = true
 codegen-units = 1
