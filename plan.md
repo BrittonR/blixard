@@ -1,138 +1,176 @@
-# Blixard Development Plan
+# PeerConnector Testing & Implementation Plan
 
-## Current Project Status
+## Overview
+The `PeerConnector` is a critical component managing gRPC connections to cluster peers. It handles connection pooling, automatic reconnection, and message buffering. Currently, it has no dedicated tests despite being essential for cluster communication.
 
-Blixard is a distributed microVM orchestration platform built in Rust. The core distributed infrastructure is implemented and working:
+## Critical Test Areas for PeerConnector
 
-### ✅ Completed
-- Raft consensus with full state machine
-- Multi-node cluster formation 
-- Peer management with automatic reconnection
-- gRPC communication layer
-- Persistent storage with redb
-- Task scheduling and worker management
-- Comprehensive test infrastructure (unit, property, deterministic simulation)
-- CLI with node management commands
+### 1. Connection Lifecycle Testing
+- **Happy path**: Connect → Send messages → Disconnect
+- **Connection failures**: Invalid addresses, unreachable hosts, network timeouts
+- **Duplicate connection attempts**: Multiple concurrent calls to `connect_to_peer` for same peer
+- **Connection state tracking**: Verify `is_connected` status updates correctly
+- **Clean disconnect**: Ensure resources are freed when disconnecting
 
-### ❌ Not Implemented
-- **MicroVM integration** - Only stubs exist, no actual VM lifecycle management
-- **Tailscale integration** - CLI flag exists but no implementation
-- **CLI cluster commands** - gRPC endpoints exist but no CLI commands
-- **Raft log compaction** - Snapshots exist but no automatic compaction
-- **Metrics & observability** - Dependencies exist but no implementation
-- **Configuration files** - Only CLI flags supported
-- **Production features** - No auth, TLS, rate limiting, backups
+### 2. Message Buffering Edge Cases
+- **Buffer overflow**: Test the 100-message limit per peer
+- **Message ordering**: Ensure FIFO order is maintained
+- **Buffer cleanup**: Messages cleared after successful connection
+- **Memory pressure**: Large messages or many peers with full buffers
+- **Orphaned buffers**: Messages for peers that never connect
 
-## Test Coverage Analysis
+### 3. Concurrent Access Scenarios
+- **Race conditions**: Multiple threads sending to same peer simultaneously
+- **Connection state races**: Connect/disconnect happening concurrently
+- **Buffer access**: Concurrent buffering and sending
+- **Connection reuse**: Multiple senders using same connection
 
-### Coverage Matrix
+### 4. Reconnection Behavior
+- **Automatic reconnection**: Failed sends trigger reconnection
+- **Reconnection backoff**: Currently missing - should add exponential backoff
+- **Connection flapping**: Rapid connect/disconnect cycles
+- **Stale connection detection**: Currently missing - connections might go stale
 
-| Component | Unit Tests | PropTest | MadSim | Critical Gaps |
-|-----------|------------|----------|---------|---------------|
-| CLI | ✅ Yes | ❌ No | ❌ No | ~~Integration with node startup~~ ✅ Fixed |
-| gRPC Server | ✅ Partial | ❌ No | ✅ Yes | Many endpoints untested |
-| Node | ✅ Yes | ✅ Yes | ✅ Yes | Recovery scenarios |
-| SharedNodeState | ✅ Yes | ✅ Yes | ❌ No | ~~Concurrent mutations~~ ✅ Fixed |
-| Raft Manager | ✅ Partial | ✅ Yes | ✅ Yes | Snapshot/compaction |
-| Peer Connector | ✅ Yes | ❌ No | ❌ No | Retry logic, buffering |
-| Storage | ✅ Yes | ❌ No | ❌ No | Corruption, concurrency |
-| VM Manager | ✅ Partial | ❌ No | ❌ No | Only stubs tested |
-| **Raft Codec** | **✅ Yes** | **✅ Yes** | **❌ No** | ~~**ZERO TESTS!**~~ **✅ FIXED** |
+### 5. Error Handling & Resilience
+- **Partial failures**: Some peers reachable, others not
+- **Network partitions**: Simulate split-brain scenarios
+- **Resource exhaustion**: Too many connections, file descriptor limits
+- **Malformed messages**: Invalid Raft message serialization
 
-### Critical Test Gaps
-1. ~~**Raft Codec** - Message serialization completely untested~~ ✅ FIXED - Added comprehensive tests
-2. ~~**Integration tests** - No end-to-end workflows~~ ✅ FIXED - Added lifecycle integration tests
-3. **Failure recovery** - Limited crash/corruption testing
-4. ~~**Concurrent operations** - Race condition testing missing~~ ✅ FIXED - Added PropTest for SharedNodeState
-5. **Performance/load** - No scalability tests
+## Recommended Implementation Additions
 
-## Development Priorities
+### 1. Connection Health Checking
+```rust
+// Add periodic health checks to detect stale connections
+async fn check_connection_health(&self, peer_id: u64) -> bool {
+    // Send a lightweight ping/health check
+    // Mark connection as unhealthy if it fails
+}
+```
 
-### ~~Priority 1: Test Coverage for Critical Infrastructure~~ ✅ COMPLETED
-~~Before adding new features, we should ensure existing critical components are properly tested:~~
+### 2. Exponential Backoff for Reconnections
+```rust
+struct ConnectionState {
+    last_attempt: Instant,
+    attempt_count: u32,
+    backoff_ms: u64,
+}
 
-1. ~~**Add tests for `raft_codec.rs`** (CRITICAL)~~ ✅ DONE
-   - ~~Message serialization/deserialization~~ ✅
-   - ~~Error handling for malformed data~~ ✅
-   - ~~Performance with large messages~~ ✅
+// Implement exponential backoff to avoid overwhelming failed peers
+fn should_attempt_reconnection(&self, peer_id: u64) -> bool {
+    // Check if enough time has passed based on backoff
+}
+```
 
-2. ~~**Expand PropTest coverage**~~ ✅ PARTIALLY DONE
-   - ~~SharedNodeState concurrent operations~~ ✅
-   - Peer Connector retry logic ❌ TODO
-   - Storage concurrent transactions ❌ TODO
-   - gRPC server request handling ❌ TODO
+### 3. Connection Pool Limits
+```rust
+const MAX_CONNECTIONS: usize = 100;
+// Prevent resource exhaustion by limiting total connections
+```
 
-3. ~~**Add integration tests**~~ ✅ DONE
-   - ~~Full node lifecycle (start → join → tasks → leave → stop)~~ ✅
-   - Multi-node task distribution 🔧 Partial
-   - Failure and recovery scenarios 🔧 Partial
+### 4. Message Priority & Expiration
+```rust
+struct BufferedMessage {
+    to: u64,
+    message: raft::prelude::Message,
+    attempts: u32,
+    priority: MessagePriority,  // Add priority for critical messages
+    expires_at: Instant,        // Add TTL to prevent stale messages
+}
+```
 
-### Priority 2: MicroVM Integration
-This is the core purpose of Blixard. Without it, the platform cannot manage VMs.
+### 5. Metrics & Observability
+- Connection success/failure rates per peer
+- Message buffer depths
+- Reconnection attempt counts
+- Message send latencies
 
-**Implementation tasks:**
-1. Research microvm.nix integration patterns
-2. Design VM lifecycle state machine
-3. Implement VM process management
-4. Add network configuration for VMs
-5. Handle VM storage allocation
-6. Implement console/serial access
-7. Add comprehensive tests
+### 6. Circuit Breaker Pattern
+```rust
+// After N consecutive failures, stop attempting connections
+// for a cooldown period to prevent resource waste
+struct CircuitBreaker {
+    failure_count: u32,
+    last_failure: Instant,
+    state: CircuitState,
+}
+```
 
-### ~~Priority 3: CLI Cluster Management Commands~~ ✅ COMPLETED
-~~Already marked "In Progress" in todo.md. Would significantly improve usability.~~
+## Test Implementation Strategy
 
-**Commands implemented:**
-- ✅ `blixard cluster join --peer <addr> --local-addr <addr>`
-- ✅ `blixard cluster leave --local-addr <addr>`
-- ✅ `blixard cluster status --addr <addr>`
+### Unit Tests
+- Mock the `SharedNodeState` and `ClusterServiceClient`
+- Test each method in isolation
+- Use `tokio::test` for async testing
+- Inject controllable failures
 
-### Priority 4: Raft Log Compaction
-Essential for production use to prevent unbounded log growth.
+### Integration Tests
+- Create real gRPC endpoints for testing
+- Simulate network conditions (delays, failures)
+- Test multi-peer scenarios
+- Verify message delivery guarantees
 
-**Implementation tasks:**
-1. Add compaction thresholds configuration
-2. Implement periodic compaction trigger
-3. Clean up old logs after snapshots
-4. Add tests for compaction scenarios
+### Property-Based Tests
+- Connection state invariants (can't be both connecting and connected)
+- Buffer size limits are respected
+- Message ordering is preserved
+- No resource leaks under random operations
 
-### Priority 5: Tailscale Integration
-Prominently featured in README but completely unimplemented.
+### Stress Tests
+- Many concurrent connections
+- High message throughput
+- Rapid connect/disconnect cycles
+- Memory usage under load
 
-**Implementation tasks:**
-1. Research Tailscale API integration
-2. Implement device authentication
-3. Add peer discovery via Tailscale
-4. Configure secure networking for VMs
-5. Add tests with mock Tailscale
+## Implementation Priority
 
-## Next Immediate Steps
+### Phase 1: Core Functionality Tests (High Priority)
+1. Basic connection lifecycle tests
+2. Message send/receive tests
+3. Connection state tracking tests
+4. Basic error handling tests
 
-1. ~~**Fix test coverage gaps** (1-2 days)~~ ✅ COMPLETED
-   - ~~Write comprehensive tests for `raft_codec.rs`~~ ✅
-   - ~~Add property tests for SharedNodeState~~ ✅
-   - ~~Create integration test framework~~ ✅
+### Phase 2: Resilience Features (Medium Priority)
+1. Implement exponential backoff
+2. Add connection health checking
+3. Implement circuit breaker pattern
+4. Add connection pool limits
 
-2. **Research MicroVM integration** (1 day) 🔜 NEXT
-   - Study microvm.nix documentation
-   - Create proof-of-concept VM creation
-   - Design integration architecture
+### Phase 3: Advanced Features (Lower Priority)
+1. Message priority system
+2. Message expiration/TTL
+3. Advanced metrics collection
+4. Performance optimizations
 
-3. **Implement basic MicroVM operations** (3-5 days)
-   - Start with create/delete VM
-   - Add start/stop functionality
-   - Implement status monitoring
-   - Add comprehensive tests
+## Success Criteria
 
-4. ~~**Add CLI cluster commands** (1 day)~~ ✅ COMPLETED
-   - ~~Implement the three missing commands~~ ✅
-   - ~~Add integration tests~~ ✅
-   - ~~Update documentation~~ ✅
+- **Test Coverage**: >90% line coverage for PeerConnector
+- **Reliability**: No connection leaks under stress testing
+- **Performance**: <10ms overhead for message sending
+- **Resilience**: Graceful handling of all failure scenarios
+- **Observability**: Clear metrics for debugging production issues
 
-## Success Metrics
+## Next Steps
 
-- All components have >80% test coverage
-- Zero untested critical paths (like raft_codec)
-- Can create, start, stop, and delete VMs reliably
-- Three-node clusters form and operate consistently
-- All tests pass deterministically with MadSim
+1. **Create test infrastructure** (1 day)
+   - Set up mock gRPC server for testing
+   - Create test utilities for simulating network conditions
+   - Add test fixtures for common scenarios
+
+2. **Implement core tests** (2-3 days)
+   - Connection lifecycle tests
+   - Message buffering tests
+   - Concurrent access tests
+   - Error handling tests
+
+3. **Add resilience features** (2-3 days)
+   - Exponential backoff implementation
+   - Connection health checking
+   - Circuit breaker pattern
+   - Resource limit enforcement
+
+4. **Performance testing** (1 day)
+   - Load testing framework
+   - Benchmark message throughput
+   - Memory usage profiling
+   - Connection pool optimization

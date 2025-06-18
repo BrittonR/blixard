@@ -4,18 +4,127 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::{RwLock, Mutex};
 use tonic::transport::Channel;
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::proto::cluster_service_client::ClusterServiceClient;
+use crate::proto::{HealthCheckRequest};
 use crate::node_shared::{SharedNodeState, PeerInfo};
+
+/// Maximum number of concurrent connections
+const MAX_CONNECTIONS: usize = 100;
 
 /// Buffered message for delayed sending
 struct BufferedMessage {
-    to: u64,
+    _to: u64,
     message: raft::prelude::Message,
-    attempts: u32,
+    _attempts: u32,
+}
+
+/// Circuit breaker states
+#[derive(Debug, Clone, PartialEq)]
+enum CircuitState {
+    Closed,     // Normal operation
+    Open,       // Failing, reject all attempts
+    HalfOpen,   // Testing if service has recovered
+}
+
+/// Connection state with backoff and circuit breaker
+#[derive(Debug, Clone)]
+struct ConnectionState {
+    last_attempt: Option<Instant>,
+    attempt_count: u32,
+    backoff_ms: u64,
+    circuit_state: CircuitState,
+    consecutive_failures: u32,
+    last_success: Option<Instant>,
+    circuit_opened_at: Option<Instant>,
+}
+
+impl ConnectionState {
+    fn new() -> Self {
+        Self {
+            last_attempt: None,
+            attempt_count: 0,
+            backoff_ms: 100, // Start with 100ms
+            circuit_state: CircuitState::Closed,
+            consecutive_failures: 0,
+            last_success: None,
+            circuit_opened_at: None,
+        }
+    }
+
+    fn should_retry(&self) -> bool {
+        match self.circuit_state {
+            CircuitState::Open => {
+                // Check if we should transition to half-open
+                if let Some(opened_at) = self.circuit_opened_at {
+                    // After 30 seconds, try half-open
+                    if opened_at.elapsed() >= Duration::from_secs(30) {
+                        return true;
+                    }
+                }
+                false
+            }
+            CircuitState::HalfOpen => {
+                // Allow one attempt in half-open state
+                true
+            }
+            CircuitState::Closed => {
+                // Normal backoff logic
+                match self.last_attempt {
+                    None => true,
+                    Some(last) => {
+                        let elapsed = last.elapsed();
+                        elapsed >= Duration::from_millis(self.backoff_ms)
+                    }
+                }
+            }
+        }
+    }
+
+    fn record_failure(&mut self) {
+        self.last_attempt = Some(Instant::now());
+        self.attempt_count += 1;
+        self.consecutive_failures += 1;
+        
+        // Check if we should open the circuit
+        const FAILURE_THRESHOLD: u32 = 5;
+        if self.consecutive_failures >= FAILURE_THRESHOLD {
+            if self.circuit_state != CircuitState::Open {
+                tracing::warn!("Opening circuit breaker after {} consecutive failures", 
+                    self.consecutive_failures);
+                self.circuit_state = CircuitState::Open;
+                self.circuit_opened_at = Some(Instant::now());
+            }
+        }
+        
+        // Exponential backoff: double the delay up to 30 seconds
+        self.backoff_ms = (self.backoff_ms * 2).min(30_000);
+    }
+
+    fn record_success(&mut self) {
+        self.consecutive_failures = 0;
+        self.attempt_count = 0;
+        self.backoff_ms = 100;
+        self.last_attempt = None;
+        self.last_success = Some(Instant::now());
+        
+        if self.circuit_state == CircuitState::HalfOpen {
+            tracing::info!("Circuit breaker transitioning from half-open to closed");
+        }
+        self.circuit_state = CircuitState::Closed;
+        self.circuit_opened_at = None;
+    }
+
+    fn transition_to_half_open(&mut self) {
+        if self.circuit_state == CircuitState::Open {
+            tracing::info!("Circuit breaker transitioning from open to half-open");
+            self.circuit_state = CircuitState::HalfOpen;
+        }
+    }
 }
 
 /// Manages connections to peer nodes
@@ -26,6 +135,10 @@ pub struct PeerConnector {
     message_buffer: Mutex<HashMap<u64, VecDeque<BufferedMessage>>>,
     /// Track connection attempts in progress
     connecting: Mutex<HashMap<u64, bool>>,
+    /// Connection state with backoff tracking
+    connection_states: RwLock<HashMap<u64, ConnectionState>>,
+    /// Track total connection count for pool limiting
+    connection_count: Arc<Mutex<usize>>,
 }
 
 impl PeerConnector {
@@ -35,11 +148,64 @@ impl PeerConnector {
             connections: RwLock::new(HashMap::new()),
             message_buffer: Mutex::new(HashMap::new()),
             connecting: Mutex::new(HashMap::new()),
+            connection_states: RwLock::new(HashMap::new()),
+            connection_count: Arc::new(Mutex::new(0)),
         }
     }
     
     /// Establish connection to a peer
     pub async fn connect_to_peer(&self, peer: &PeerInfo) -> BlixardResult<()> {
+        // Check if we already have a connection
+        {
+            let connections = self.connections.read().await;
+            if connections.contains_key(&peer.id) {
+                tracing::debug!("Already connected to peer {}", peer.id);
+                return Ok(());
+            }
+        }
+        
+        // Check connection pool limit
+        {
+            let count = self.connection_count.lock().await;
+            if *count >= MAX_CONNECTIONS {
+                tracing::warn!("Connection pool limit reached ({}/{}), cannot connect to peer {}", 
+                    count, MAX_CONNECTIONS, peer.id);
+                return Err(BlixardError::ClusterError(
+                    format!("Connection pool limit reached ({})", MAX_CONNECTIONS)
+                ));
+            }
+        }
+        
+        // Check circuit breaker and backoff before attempting
+        {
+            let mut states = self.connection_states.write().await;
+            let state = states.entry(peer.id).or_insert_with(ConnectionState::new);
+            
+            if !state.should_retry() {
+                match state.circuit_state {
+                    CircuitState::Open => {
+                        tracing::debug!("Circuit breaker OPEN for peer {} (failures: {})", 
+                            peer.id, state.consecutive_failures);
+                        return Err(BlixardError::ClusterError(
+                            format!("Circuit breaker open for peer {}", peer.id)
+                        ));
+                    }
+                    _ => {
+                        tracing::debug!("Skipping connection to peer {} due to backoff (attempt #{}, wait {}ms)", 
+                            peer.id, state.attempt_count, state.backoff_ms);
+                        return Err(BlixardError::ClusterError(
+                            format!("Connection to peer {} in backoff period", peer.id)
+                        ));
+                    }
+                }
+            }
+            
+            // Transition to half-open if appropriate
+            if state.circuit_state == CircuitState::Open && state.should_retry() {
+                state.transition_to_half_open();
+            }
+        }
+
         // Mark that we're connecting to prevent duplicate attempts
         {
             let mut connecting = self.connecting.lock().await;
@@ -62,10 +228,25 @@ impl PeerConnector {
                         let mut connections = self.connections.write().await;
                         connections.insert(peer.id, client.clone());
                         
+                        // Increment connection count
+                        {
+                            let mut count = self.connection_count.lock().await;
+                            *count += 1;
+                            tracing::debug!("[PEER-CONN] Connection count: {}/{}", count, MAX_CONNECTIONS);
+                        }
+                        
                         // Update peer connection status
                         self.node.update_peer_connection(peer.id, true).await?;
                         
                         tracing::info!("Connected to peer {} at {}", peer.id, peer.address);
+                        
+                        // Record successful connection
+                        {
+                            let mut states = self.connection_states.write().await;
+                            if let Some(state) = states.get_mut(&peer.id) {
+                                state.record_success();
+                            }
+                        }
                         
                         // Send any buffered messages
                         self.send_buffered_messages(peer.id, client).await;
@@ -75,6 +256,15 @@ impl PeerConnector {
                     Err(e) => {
                         tracing::warn!("Failed to connect to peer {} at {}: {}", peer.id, peer.address, e);
                         self.node.update_peer_connection(peer.id, false).await?;
+                        
+                        // Record failed attempt
+                        {
+                            let mut states = self.connection_states.write().await;
+                            if let Some(state) = states.get_mut(&peer.id) {
+                                state.record_failure();
+                            }
+                        }
+                        
                         Err(BlixardError::ClusterError(format!(
                             "Failed to connect to peer {}: {}", peer.id, e
                         )))
@@ -82,6 +272,14 @@ impl PeerConnector {
                 }
             }
             Err(e) => {
+                // Record failed attempt
+                {
+                    let mut states = self.connection_states.write().await;
+                    if let Some(state) = states.get_mut(&peer.id) {
+                        state.record_failure();
+                    }
+                }
+                
                 Err(BlixardError::ClusterError(format!(
                     "Invalid peer address {}: {}", peer.address, e
                 )))
@@ -100,7 +298,14 @@ impl PeerConnector {
     /// Disconnect from a peer
     pub async fn disconnect_from_peer(&self, peer_id: u64) -> BlixardResult<()> {
         let mut connections = self.connections.write().await;
-        connections.remove(&peer_id);
+        if connections.remove(&peer_id).is_some() {
+            // Decrement connection count
+            let mut count = self.connection_count.lock().await;
+            if *count > 0 {
+                *count -= 1;
+                tracing::debug!("[PEER-CONN] Connection count: {}/{}", count, MAX_CONNECTIONS);
+            }
+        }
         
         self.node.update_peer_connection(peer_id, false).await?;
         
@@ -166,7 +371,18 @@ impl PeerConnector {
                     }
                 }
                 Err(e) => {
-                    // Connection failed, mark as disconnected and buffer the message
+                    // Connection failed, disconnect and buffer the message
+                    {
+                        let mut connections = self.connections.write().await;
+                        if connections.remove(&to).is_some() {
+                            // Decrement connection count
+                            let mut count = self.connection_count.lock().await;
+                            if *count > 0 {
+                                *count -= 1;
+                            }
+                        }
+                    }
+                    
                     self.node.update_peer_connection(to, false).await?;
                     self.buffer_message(to, message).await;
                     
@@ -226,30 +442,80 @@ impl PeerConnector {
         }
         
         queue.push_back(BufferedMessage {
-            to,
+            _to: to,
             message,
-            attempts: 0,
+            _attempts: 0,
         });
         
         tracing::debug!("[PEER-CONN] Buffered message for node {}, buffer size: {}", to, queue.len());
     }
     
+    /// Check health of a specific connection
+    pub async fn check_connection_health(&self, peer_id: u64) -> bool {
+        if let Some(mut client) = self.get_connection(peer_id).await {
+            // Send health check request
+            let request = HealthCheckRequest {};
+            match client.health_check(request).await {
+                Ok(response) => {
+                    let resp = response.into_inner();
+                    if resp.healthy {
+                        true
+                    } else {
+                        tracing::warn!("[PEER-CONN] Peer {} reported unhealthy: {}", peer_id, resp.message);
+                        false
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("[PEER-CONN] Health check failed for peer {}: {}", peer_id, e);
+                    false
+                }
+            }
+        } else {
+            false
+        }
+    }
+    
     /// Start background task to maintain connections
     pub fn start_connection_maintenance(self: Arc<Self>) {
+        // Connection establishment task
+        let self_clone = self.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+            let mut interval = tokio::time::interval(Duration::from_secs(5));
             
             loop {
                 interval.tick().await;
                 
                 // Get all peers
-                let peers = self.node.get_peers().await;
+                let peers = self_clone.node.get_peers().await;
                 
                 // Check each peer connection
                 for peer in peers {
                     if !peer.is_connected {
                         // Try to connect
-                        let _ = self.connect_to_peer(&peer).await;
+                        let _ = self_clone.connect_to_peer(&peer).await;
+                    }
+                }
+            }
+        });
+        
+        // Health check task
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(10));
+            
+            loop {
+                interval.tick().await;
+                
+                // Get all connected peers
+                let peers = self.node.get_peers().await;
+                
+                for peer in peers {
+                    if peer.is_connected {
+                        // Check connection health
+                        if !self.check_connection_health(peer.id).await {
+                            // Connection is unhealthy, disconnect and let maintenance reconnect
+                            tracing::info!("[PEER-CONN] Disconnecting unhealthy peer {}", peer.id);
+                            let _ = self.disconnect_from_peer(peer.id).await;
+                        }
                     }
                 }
             }
