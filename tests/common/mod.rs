@@ -9,6 +9,9 @@ use blixard::{
 // Re-export timing utilities for easier access
 pub mod test_timing;
 
+// Raft-specific test utilities
+pub mod raft_test_utils;
+
 /// Test configuration constants
 pub const TEST_TIMEOUT: Duration = Duration::from_secs(30);
 pub const TEST_PORT_BASE: u16 = 7000;
