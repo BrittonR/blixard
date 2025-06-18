@@ -60,6 +60,27 @@ cargo test --features simulation    # Run with madsim deterministic simulation
 cargo test --features failpoints    # Run with failpoint injection
 cargo test --features all-tests     # Run all testing frameworks
 cargo run -- --help       # Show CLI help
+
+# Cargo Nextest - improved test runner with better parallelization and retry capabilities
+cargo nextest run          # Run all tests with nextest (faster, better isolation)
+cargo nextest run --profile ci  # Run with CI profile (more retries, JUnit output)
+cargo nt                   # Short alias for nextest run
+cargo nt-all              # Run all tests with test-helpers feature
+cargo nt-ci               # Run with CI profile
+cargo nt-stress           # Run stress test profile (no retries, find real failure rate)
+cargo nt-retry            # Run with retries enabled, no fail-fast
+cargo nt-verbose          # Run with output capture disabled
+```
+
+### Nextest Configuration
+Cargo nextest is configured in `.config/nextest.toml` with:
+- **Test groups**: Limits concurrent execution for resource-intensive tests
+- **Per-test retries**: Automatic retries for known flaky tests (e.g., three_node_cluster)
+- **Profiles**: `default` (local dev), `ci` (CI/CD), `stress` (reliability testing)
+
+To install nextest:
+```bash
+cargo install cargo-nextest --locked
 ```
 
 ### Testing Frameworks

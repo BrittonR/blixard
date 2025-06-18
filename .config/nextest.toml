@@ -1,0 +1,49 @@
+# .config/nextest.toml
+
+[profile.default]
+# Basic retry for local development
+retries = 1
+fail-fast = true
+failure-output = "immediate-final"
+success-output = "never"
+
+[profile.ci]
+# More aggressive retries for CI
+retries = { backoff = "exponential", count = 3, delay = "1s", jitter = true, max-delay = "10s" }
+failure-output = "final"
+success-output = "final"
+fail-fast = false
+# Generate reports
+junit = { path = "target/nextest/junit.xml" }
+
+[profile.stress]
+# No retries to find actual failure rate
+retries = 0
+fail-fast = false
+
+# Test group definitions
+[test-groups]
+cluster-tests = { max-threads = 2 }
+database-tests = { max-threads = 1 }
+consensus-tests = { max-threads = 4 }
+
+# Per-test overrides
+[[profile.default.overrides]]
+filter = "test(three_node_cluster)"
+retries = { count = 5, delay = "2s", backoff = "exponential" }
+test-group = "cluster-tests"
+slow-timeout = { period = "60s", terminate-after = 2 }
+
+[[profile.default.overrides]]
+filter = "test(raft_) | test(consensus)"
+retries = 2
+test-group = "consensus-tests"
+
+[[profile.default.overrides]]
+filter = "test(database_persistence) | test(storage_)"
+test-group = "database-tests"
+
+# Property tests need more time
+[[profile.default.overrides]]
+filter = "test(proptest) | test(prop_)"
+slow-timeout = { period = "120s" }

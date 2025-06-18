@@ -22,9 +22,14 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR/../simulation"
 cargo build --release --tests
 
-# Run the tests
-echo "🚀 Running tests..."
-cargo test --release -- --nocapture
+# Check if cargo-nextest is installed
+if command -v cargo-nextest &> /dev/null; then
+    echo "🚀 Running tests with nextest..."
+    cargo nextest run --release --no-capture
+else
+    echo "🚀 Running tests..."
+    cargo test --release -- --nocapture
+fi
 
 echo
 echo "✅ Simulation tests completed!"

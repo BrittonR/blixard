@@ -138,12 +138,22 @@ echo "=================================="
 echo
 
 echo -e "${YELLOW}🧪 Running proptest suite...${NC}"
-cargo test --test proptest_example > "$RESULTS_DIR/proptest.log" 2>&1
-proptest_passed=$(grep -c "test result: ok" "$RESULTS_DIR/proptest.log" || echo "0")
+if command -v cargo-nextest &> /dev/null; then
+    cargo nextest run --test proptest_example > "$RESULTS_DIR/proptest.log" 2>&1
+    proptest_passed=$(grep -c "passed" "$RESULTS_DIR/proptest.log" || echo "0")
+else
+    cargo test --test proptest_example > "$RESULTS_DIR/proptest.log" 2>&1
+    proptest_passed=$(grep -c "test result: ok" "$RESULTS_DIR/proptest.log" || echo "0")
+fi
 
 echo -e "${YELLOW}🧪 Running stateright suite...${NC}"
-cargo test --test stateright_simple_test > "$RESULTS_DIR/stateright.log" 2>&1
-stateright_passed=$(grep -c "test result: ok" "$RESULTS_DIR/stateright.log" || echo "0")
+if command -v cargo-nextest &> /dev/null; then
+    cargo nextest run --test stateright_simple_test > "$RESULTS_DIR/stateright.log" 2>&1
+    stateright_passed=$(grep -c "passed" "$RESULTS_DIR/stateright.log" || echo "0")
+else
+    cargo test --test stateright_simple_test > "$RESULTS_DIR/stateright.log" 2>&1
+    stateright_passed=$(grep -c "test result: ok" "$RESULTS_DIR/stateright.log" || echo "0")
+fi
 
 echo
 echo -e "${BOLD}📊 COMPREHENSIVE DETERMINISM REPORT${NC}"
