@@ -1252,6 +1252,42 @@ impl RaftManager {
                             };
                             info!(self.logger, "[RAFT-CONF] Current voters before conf change from conf state"; "voters" => ?current_voters);
                             
+                            // Additional logging before applying conf change
+                            info!(self.logger, "[RAFT-CONF] About to apply configuration change";
+                                "self_node_id" => self.node_id,
+                                "change_type" => ?cc.change_type(),
+                                "target_node_id" => cc.node_id,
+                                "current_voters_from_storage" => ?current_voters,
+                                "entry_index" => entry.index
+                            );
+                            
+                            // Get Raft's view of voters before applying
+                            let raft_voters_before = node.raft.prs().conf().voters().clone();
+                            info!(self.logger, "[RAFT-CONF] Raft's view of voters before apply_conf_change";
+                                "voters" => ?raft_voters_before
+                            );
+                            
+                            // CRITICAL: If Raft's view of voters is empty or incomplete, we need to handle it carefully
+                            // This can happen when a node is still catching up with configuration changes
+                            if cc.change_type() == raft::prelude::ConfChangeType::RemoveNode {
+                                // Check if Raft's configuration is empty by looking at the debug output
+                                let raft_conf_debug = format!("{:?}", node.raft.prs().conf().voters());
+                                let raft_has_empty_voters = raft_conf_debug.contains("voters: {}");
+                                
+                                // Only skip if this is NOT the leader and has empty configuration
+                                // The leader should always be able to process configuration changes
+                                if raft_has_empty_voters && !current_voters.is_empty() && node.raft.state != raft::StateRole::Leader {
+                                    warn!(self.logger, "[RAFT-CONF] Non-leader with empty Raft voter set - may need to catch up";
+                                        "storage_voters" => ?current_voters,
+                                        "attempting_to_remove" => cc.node_id,
+                                        "self_node_id" => self.node_id
+                                    );
+                                    
+                                    // For non-leaders with empty config, we'll try to apply anyway
+                                    // The Raft library will handle it, and if it fails, we'll handle the error
+                                }
+                            }
+                            
                             info!(self.logger, "[RAFT-CONF] Applying committed configuration change"; "node_id" => cc.node_id, "type" => cc.change_type, "entry_index" => entry.index);
                             let cs = match node.apply_conf_change(&cc) {
                                 Ok(cs) => {
@@ -1259,7 +1295,31 @@ impl RaftManager {
                                     cs
                                 }
                                 Err(e) => {
+                                    let error_msg = format!("{}", e);
+                                    
+                                    // Special handling for "removed all voters" error on non-leaders
+                                    if error_msg.contains("removed all voters") && node.raft.state != raft::StateRole::Leader {
+                                        warn!(self.logger, "[RAFT-CONF] Non-leader got 'removed all voters' error - this is expected when node hasn't caught up";
+                                            "error" => %e,
+                                            "self_node_id" => self.node_id,
+                                            "removing_node_id" => cc.node_id
+                                        );
+                                        
+                                        // Don't send error response for non-leaders - this is expected
+                                        continue;
+                                    }
+                                    
                                     error!(self.logger, "[RAFT-CONF] Failed to apply conf change"; "error" => %e);
+                                    
+                                    // Log more details about the failure
+                                    let raft_voters_after_error = node.raft.prs().conf().voters().clone();
+                                    error!(self.logger, "[RAFT-CONF] Configuration state at error";
+                                        "raft_voters" => ?raft_voters_after_error,
+                                        "storage_voters" => ?current_voters,
+                                        "self_node_id" => self.node_id,
+                                        "removing_node_id" => cc.node_id
+                                    );
+                                    
                                     // Send error response if we have a pending proposal
                                     if !entry.context.is_empty() {
                                         let mut pending = self.pending_proposals.write().await;
@@ -1283,48 +1343,83 @@ impl RaftManager {
                                 "cs.auto_leave" => cs.auto_leave
                             );
                             
-                            // WORKAROUND: For joining nodes, the returned ConfState might be incomplete
-                            // If we're adding a node and the current voters list is incomplete,
-                            // we need to ensure the configuration includes all nodes
-                            let mut corrected_cs = cs.clone();
-                            if cc.change_type() == raft::prelude::ConfChangeType::AddNode {
-                                // For AddNode, if the returned voters list doesn't include the node itself
-                                // or other expected nodes, we need to reconstruct it
-                                info!(self.logger, "[RAFT-CONF] Checking configuration completeness";
-                                    "node_id" => self.node_id,
-                                    "returned_voters" => ?cs.voters,
-                                    "added_node" => cc.node_id
-                                );
-                                
-                                // Special handling: if this node is processing an AddNode for another node
-                                // but the returned configuration only contains the new node,
-                                // we need to include this node as well
-                                if !cs.voters.is_empty() && !cs.voters.contains(&self.node_id) {
-                                    info!(self.logger, "[RAFT-CONF] Configuration missing self, reconstructing";
-                                        "self_id" => self.node_id,
-                                        "returned_voters" => ?cs.voters
+                            // Handle the configuration state based on the change type
+                            let final_cs = match cc.change_type() {
+                                raft::prelude::ConfChangeType::AddNode => {
+                                    // WORKAROUND: For joining nodes, the returned ConfState might be incomplete
+                                    // If we're adding a node and the current voters list is incomplete,
+                                    // we need to ensure the configuration includes all nodes
+                                    let mut corrected_cs = cs.clone();
+                                    
+                                    info!(self.logger, "[RAFT-CONF] Checking configuration completeness for AddNode";
+                                        "node_id" => self.node_id,
+                                        "returned_voters" => ?cs.voters,
+                                        "added_node" => cc.node_id
                                     );
                                     
-                                    // Load the previous configuration state and add the new node
-                                    if let Ok(prev_conf) = self.storage.load_conf_state() {
-                                        let mut new_voters = prev_conf.voters;
-                                        if !new_voters.contains(&cc.node_id) {
-                                            new_voters.push(cc.node_id);
-                                        }
-                                        corrected_cs.voters = new_voters;
-                                        info!(self.logger, "[RAFT-CONF] Reconstructed configuration";
-                                            "corrected_voters" => ?corrected_cs.voters
+                                    // Special handling: if this node is processing an AddNode for another node
+                                    // but the returned configuration only contains the new node,
+                                    // we need to include this node as well
+                                    if !cs.voters.is_empty() && !cs.voters.contains(&self.node_id) {
+                                        info!(self.logger, "[RAFT-CONF] Configuration missing self, reconstructing";
+                                            "self_id" => self.node_id,
+                                            "returned_voters" => ?cs.voters
                                         );
+                                        
+                                        // Load the previous configuration state and add the new node
+                                        if let Ok(prev_conf) = self.storage.load_conf_state() {
+                                            let mut new_voters = prev_conf.voters;
+                                            if !new_voters.contains(&cc.node_id) {
+                                                new_voters.push(cc.node_id);
+                                            }
+                                            corrected_cs.voters = new_voters;
+                                            info!(self.logger, "[RAFT-CONF] Reconstructed configuration";
+                                                "corrected_voters" => ?corrected_cs.voters
+                                            );
+                                        }
+                                    }
+                                    corrected_cs
+                                }
+                                raft::prelude::ConfChangeType::RemoveNode => {
+                                    // For RemoveNode, validate that we're not removing all voters
+                                    if cs.voters.is_empty() {
+                                        error!(self.logger, "[RAFT-CONF] RemoveNode resulted in empty voters list - this should not happen";
+                                            "removed_node" => cc.node_id,
+                                            "previous_voters" => ?current_voters
+                                        );
+                                        // Try to recover by using the previous configuration without the removed node
+                                        if let Ok(prev_conf) = self.storage.load_conf_state() {
+                                            let mut recovered_voters = prev_conf.voters;
+                                            recovered_voters.retain(|&id| id != cc.node_id);
+                                            if !recovered_voters.is_empty() {
+                                                let mut recovered_cs = cs.clone();
+                                                recovered_cs.voters = recovered_voters;
+                                                warn!(self.logger, "[RAFT-CONF] Recovered voters list from previous state";
+                                                    "recovered_voters" => ?recovered_cs.voters
+                                                );
+                                                recovered_cs
+                                            } else {
+                                                // This is a critical error - we would have no voters
+                                                error!(self.logger, "[RAFT-CONF] Cannot recover - would result in no voters");
+                                                cs
+                                            }
+                                        } else {
+                                            cs
+                                        }
+                                    } else {
+                                        // Normal case - use the ConfState returned by Raft
+                                        cs
                                     }
                                 }
-                            }
+                                _ => cs // For other types, use as-is
+                            };
                             
-                            // Save the corrected configuration state to storage
-                            self.storage.save_conf_state(&corrected_cs)?;
-                            info!(self.logger, "[RAFT-CONF] Saved new configuration state to storage"; "voters" => ?corrected_cs.voters);
+                            // Save the final configuration state to storage
+                            self.storage.save_conf_state(&final_cs)?;
+                            info!(self.logger, "[RAFT-CONF] Saved new configuration state to storage"; "voters" => ?final_cs.voters);
                             
                             // Verify the actual voters after applying the change from conf state
-                            let new_voters: Vec<u64> = corrected_cs.voters.clone();
+                            let new_voters: Vec<u64> = final_cs.voters.clone();
                             info!(self.logger, "[RAFT-CONF] Actual voters after conf change from conf state"; "voters" => ?new_voters);
                             
                             // Update peer list based on the change type

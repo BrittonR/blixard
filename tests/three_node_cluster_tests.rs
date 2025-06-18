@@ -361,11 +361,22 @@ async fn test_three_node_cluster_membership_changes() {
         .await
         .expect("Failed to create 3-node cluster");
     
-    // Add a 4th node
+    // Add a 4th node - join through the current leader to ensure proper configuration propagation
+    let leader_status = cluster.leader_client().await
+        .expect("No leader found")
+        .get_cluster_status(ClusterStatusRequest {})
+        .await
+        .unwrap()
+        .into_inner();
+    
+    let leader_addr = cluster.nodes().get(&leader_status.leader_id)
+        .expect("Leader node not found")
+        .addr;
+    
     let node4 = TestNode::builder()
         .with_id(4)
         .with_auto_port()
-        .with_join_addr(Some(cluster.nodes().values().next().unwrap().addr))
+        .with_join_addr(Some(leader_addr))
         .build()
         .await
         .expect("Failed to create 4th node");
@@ -391,6 +402,10 @@ async fn test_three_node_cluster_membership_changes() {
     )
     .await
     .expect("Cluster should have 4 nodes");
+    
+    // Give the cluster a moment to stabilize after adding node 4
+    eprintln!("Waiting for cluster to stabilize after adding node 4...");
+    timing::robust_sleep(Duration::from_secs(2)).await;
     
     // Remove original node 2
     cluster.remove_node(2).await

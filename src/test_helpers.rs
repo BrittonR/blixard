@@ -496,7 +496,7 @@ impl TestCluster {
         // This must be done from a different node (preferably the leader)
         let leader_client = self.leader_client().await?;
         
-        let leave_request = crate::proto::LeaveRequest {
+        let leave_request = LeaveRequest {
             node_id: id,
         };
         

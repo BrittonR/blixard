@@ -277,6 +277,21 @@ impl ClusterService for BlixardGrpcService {
                         message: format!("Node {} not found in cluster configuration", req.node_id),
                     }));
                 }
+                
+                // Validate that removing this node won't leave us with too few voters
+                let remaining_voters = nodes.len() - 1;
+                if remaining_voters == 0 {
+                    tracing::error!("[LEAVE] Cannot remove node {} - would leave cluster with no voters", req.node_id);
+                    return Ok(Response::new(LeaveResponse {
+                        success: false,
+                        message: format!("Cannot remove node {} - would leave cluster with no voters", req.node_id),
+                    }));
+                }
+                
+                // Warn if we're going down to a single node
+                if remaining_voters == 1 {
+                    tracing::warn!("[LEAVE] Removing node {} will leave cluster with only 1 voter - consensus may be affected", req.node_id);
+                }
             }
             Err(e) => {
                 tracing::error!("[LEAVE] Failed to get cluster status: {}", e);
