@@ -1,7 +1,8 @@
+#![cfg(feature = "test-helpers")]
+
 use std::time::Duration;
 use tempfile::TempDir;
-use std::net::{TcpListener, SocketAddr};
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::net::SocketAddr;
 
 use blixard::{
     node::Node,
@@ -12,30 +13,15 @@ use blixard::{
         TaskRequest, HealthCheckRequest, ClusterStatusRequest,
         CreateVmRequest, ListVmsRequest,
     },
+    test_helpers::PortAllocator,
 };
 
 mod common;
 use common::test_timing::*;
 
-// Global port counter to ensure unique ports across tests
-static PORT_COUNTER: AtomicU16 = AtomicU16::new(9000);
-
 // Helper to get a free port
 fn get_free_port() -> u16 {
-    loop {
-        let port = PORT_COUNTER.fetch_add(1, Ordering::SeqCst);
-        if port > 60000 {
-            // Reset if we get too high
-            PORT_COUNTER.store(9000, Ordering::SeqCst);
-            continue;
-        }
-        
-        // Check if port is actually free
-        if let Ok(listener) = TcpListener::bind(("127.0.0.1", port)) {
-            drop(listener);
-            return port;
-        }
-    }
+    PortAllocator::next_port()
 }
 
 // Helper to create test node configuration with temp directory and dynamic port
@@ -179,44 +165,48 @@ async fn test_cluster_formation_via_grpc() {
 
 #[tokio::test]
 async fn test_task_submission_via_grpc() {
-    let (mut node, _temp_dir, _node_port) = create_test_node(1).await;
-    node.start().await.unwrap();
+    // Use TestNode from test_helpers for better setup
+    use blixard::test_helpers::TestNode;
     
-    // Register the node as a worker
-    node.join_cluster(None).await.unwrap();
+    // Create a properly initialized single-node cluster
+    let test_node = TestNode::builder()
+        .with_id(1)
+        .with_auto_port()
+        .build()
+        .await
+        .expect("Failed to create test node");
     
-    let node_shared = node.shared();
+    // The TestNode builder already:
+    // 1. Initializes the node (which registers it as a worker in bootstrap mode)
+    // 2. Starts the gRPC server 
+    // 3. Sets up proper state management
     
-    // Start gRPC server with dynamic port
-    let grpc_port = get_free_port();
-    let grpc_addr: SocketAddr = format!("127.0.0.1:{}", grpc_port).parse().unwrap();
-    let server_handle = tokio::spawn(start_grpc_server(node_shared.clone(), grpc_addr));
-    
-    // Wait for Raft leader election with proper timeout
+    // Wait for the node to become leader (single-node should auto-elect)
     wait_for_condition(
         || async {
-            // In single-node mode, the node should quickly become leader
-            let raft_status = node_shared.get_raft_status().await.ok();
+            let raft_status = test_node.shared_state.get_raft_status().await.ok();
             match raft_status {
-                Some(status) => status.is_leader,
-                None => false
+                Some(status) => {
+                    if !status.is_leader {
+                        eprintln!("Node not yet leader, state: {:?}", status.state);
+                    }
+                    status.is_leader
+                },
+                None => {
+                    eprintln!("No raft status available yet");
+                    false
+                }
             }
         },
-        scaled_timeout(Duration::from_secs(3)),
+        scaled_timeout(Duration::from_secs(10)),  // More time for bootstrap
         Duration::from_millis(100),
     )
     .await
-    .unwrap_or_else(|_| {
-        tracing::warn!("Raft leader election timeout - continuing anyway");
-    });
+    .expect("Single node should become leader");
     
-    // Connect client with retry
-    let mut client = connect_with_retry(
-        || ClusterServiceClient::connect(format!("http://127.0.0.1:{}", grpc_port)),
-        "gRPC client",
-    )
-    .await
-    .unwrap();
+    // Get a client connected to this node
+    let mut client = test_node.client().await
+        .expect("Failed to get client");
     
     // Submit a task
     let task_request = TaskRequest {
@@ -241,7 +231,7 @@ async fn test_task_submission_via_grpc() {
     assert_eq!(task_resp.assigned_node, 1);
     
     // Cleanup
-    server_handle.abort();
+    test_node.shutdown().await;
 }
 
 #[tokio::test]

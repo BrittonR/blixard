@@ -65,28 +65,9 @@ where
     ))
 }
 
-/// Simulation test utilities
-pub mod simulation {
-    use super::*;
-    
-    /// Setup a simulated test environment
-    pub fn setup_simulation() -> BlixardResult<()> {
-        // Initialize simulation environment
-        Ok(())
-    }
-    
-    /// Create a test cluster configuration for simulation
-    pub fn test_cluster_config(node_count: usize) -> Vec<NodeConfig> {
-        (0..node_count)
-            .map(|i| test_node_config(i as u64 + 1, TEST_PORT_BASE + i as u16))
-            .collect()
-    }
-}
-
 /// Property testing utilities
 pub mod proptest_utils {
     use proptest::prelude::*;
-    use super::*;
     
     /// Strategy for generating valid node IDs
     pub fn node_id_strategy() -> impl Strategy<Value = u64> {
@@ -103,28 +84,5 @@ pub mod proptest_utils {
         "[a-z][a-z0-9-]*".prop_filter("Must be valid VM name", |s| {
             s.len() >= 2 && s.len() <= 32
         })
-    }
-}
-
-/// Failpoint testing utilities
-pub mod failpoints {
-    use super::*;
-    
-    /// Configure failpoints for testing
-    pub fn setup_failpoints() {
-        #[cfg(feature = "failpoints")]
-        {
-            // Setup common failpoints for testing
-            fail::cfg("network_partition", "return").unwrap();
-            fail::cfg("storage_corruption", "return").unwrap();
-        }
-    }
-    
-    /// Cleanup failpoints after testing
-    pub fn cleanup_failpoints() {
-        #[cfg(feature = "failpoints")]
-        {
-            fail::teardown();
-        }
     }
 }

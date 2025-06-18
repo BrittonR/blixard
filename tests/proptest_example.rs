@@ -1,7 +1,7 @@
 // Property-based testing examples using proptest
 
 use proptest::prelude::*;
-use blixard::types::{NodeConfig, VmConfig};
+use blixard::types::NodeConfig;
 
 mod common;
 use common::proptest_utils::*;
@@ -94,7 +94,9 @@ proptest! {
 proptest! {
     #[test]
     fn test_cluster_size_properties(node_count in 1usize..10usize) {
-        let cluster_config = common::simulation::test_cluster_config(node_count);
+        let cluster_config: Vec<NodeConfig> = (0..node_count)
+            .map(|i| common::test_node_config(i as u64 + 1, 7000 + i as u16))
+            .collect();
         
         // Cluster properties
         prop_assert_eq!(cluster_config.len(), node_count);

@@ -147,6 +147,10 @@ impl SharedNodeState {
         // Clear VM manager to release its database reference
         *self.vm_manager.write().await = None;
         
+        // Shutdown peer connector and its background tasks
+        if let Some(pc) = self.peer_connector.read().await.as_ref() {
+            pc.shutdown().await;
+        }
         // Clear peer connector
         *self.peer_connector.write().await = None;
         

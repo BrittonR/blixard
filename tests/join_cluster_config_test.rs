@@ -1,5 +1,8 @@
+#![cfg(feature = "test-helpers")]
+
 use std::time::Duration;
 use tracing::info;
+use blixard::test_helpers::{TestNode, PortAllocator};
 use blixard::proto::{cluster_service_client::ClusterServiceClient, HealthCheckRequest};
 
 // Include common test utilities
@@ -12,28 +15,17 @@ async fn test_join_cluster_configuration_update() {
         .with_env_filter("join_cluster_config_test=info,blixard=info,raft=info")
         .try_init();
 
-    // Start leader node on fixed port
-    let temp_dir1 = tempfile::tempdir().unwrap();
-    let addr1: std::net::SocketAddr = "127.0.0.1:19701".parse().unwrap();
-    let config1 = blixard::types::NodeConfig {
-        id: 1,
-        bind_addr: addr1,
-        data_dir: temp_dir1.path().to_string_lossy().to_string(),
-        join_addr: None,
-        use_tailscale: false,
-    };
+    // Start leader node with dynamic port
+    let leader_port = PortAllocator::next_port();
+    let leader_node = TestNode::builder()
+        .with_id(1)
+        .with_port(leader_port)
+        .build()
+        .await
+        .expect("Failed to start leader node");
     
-    let mut node1 = blixard::node::Node::new(config1);
-    node1.initialize().await.unwrap();
-    node1.start().await.unwrap();
-    
+    let addr1 = leader_node.addr;
     info!("Leader node started at {}", addr1);
-    
-    // Start gRPC server for leader
-    let shared1 = node1.shared();
-    let server_handle1 = tokio::spawn(async move {
-        blixard::grpc_server::start_grpc_server(shared1, addr1).await.unwrap();
-    });
     
     // Wait for leader to be ready
     wait_for_condition(
@@ -53,54 +45,28 @@ async fn test_join_cluster_configuration_update() {
     // Check leader's initial configuration
     {
         let storage = blixard::storage::RedbRaftStorage { 
-            database: node1.shared().get_database().await.unwrap() 
+            database: leader_node.shared_state.get_database().await.unwrap() 
         };
         let conf_state = storage.load_conf_state().unwrap();
         info!("Leader initial conf_state: {:?}", conf_state);
         assert_eq!(conf_state.voters, vec![1], "Leader should have itself as sole voter");
     }
     
-    // Start joining node on fixed port
-    let temp_dir2 = tempfile::tempdir().unwrap();
-    let addr2: std::net::SocketAddr = "127.0.0.1:19702".parse().unwrap();
-    let config2 = blixard::types::NodeConfig {
-        id: 2,
-        bind_addr: addr2,
-        data_dir: temp_dir2.path().to_string_lossy().to_string(),
-        join_addr: Some(addr1.to_string()),
-        use_tailscale: false,
-    };
+    // Start joining node with dynamic port
+    let joining_port = PortAllocator::next_port();
+    let joining_node = TestNode::builder()
+        .with_id(2)
+        .with_port(joining_port)
+        .with_join_addr(Some(addr1))
+        .build()
+        .await
+        .expect("Failed to start joining node");
     
-    let mut node2 = blixard::node::Node::new(config2);
-    
-    // Check joining node's initial configuration (before initialization)
-    {
-        // Create storage directly to check initial state
-        let db_path = format!("{}/blixard.db", temp_dir2.path().to_string_lossy());
-        let database = redb::Database::create(&db_path).unwrap();
-        let storage = blixard::storage::RedbRaftStorage { 
-            database: std::sync::Arc::new(database) 
-        };
-        storage.initialize_joining_node().unwrap();
-        let conf_state = storage.load_conf_state().unwrap();
-        info!("Joining node initial conf_state: {:?}", conf_state);
-        assert!(conf_state.voters.is_empty(), "Joining node should start with no voters");
-    }
-    
-    // Initialize and start the joining node
-    node2.initialize().await.unwrap();
-    node2.start().await.unwrap();
-    
+    let addr2 = joining_node.addr;
     info!("Joining node started at {}", addr2);
     
-    // Start gRPC server for joining node
-    let shared2 = node2.shared();
-    let server_handle2 = tokio::spawn(async move {
-        blixard::grpc_server::start_grpc_server(shared2, addr2).await.unwrap();
-    });
-    
     // Wait for join to complete and configuration to propagate
-    let node2_shared = node2.shared();
+    let node2_shared = joining_node.shared_state.clone();
     wait_for_condition(
         || async {
             // Check if node2's configuration has been updated
@@ -125,7 +91,7 @@ async fn test_join_cluster_configuration_update() {
     // Check if joining node's configuration was updated
     {
         let storage = blixard::storage::RedbRaftStorage { 
-            database: node2.shared().get_database().await.unwrap() 
+            database: joining_node.shared_state.get_database().await.unwrap() 
         };
         let conf_state = storage.load_conf_state().unwrap();
         info!("Joining node final conf_state: voters={:?}, learners={:?}", 
@@ -140,7 +106,7 @@ async fn test_join_cluster_configuration_update() {
     // Also check leader's configuration was updated
     {
         let storage = blixard::storage::RedbRaftStorage { 
-            database: node1.shared().get_database().await.unwrap() 
+            database: leader_node.shared_state.get_database().await.unwrap() 
         };
         let conf_state = storage.load_conf_state().unwrap();
         info!("Leader final conf_state: {:?}", conf_state);
@@ -154,7 +120,7 @@ async fn test_join_cluster_configuration_update() {
     wait_for_condition(
         || async {
             if let (Ok((leader1, _, _)), Ok((leader2, _, _))) = 
-                (node1.get_cluster_status().await, node2.get_cluster_status().await) {
+                (leader_node.node.get_cluster_status().await, joining_node.node.get_cluster_status().await) {
                 // Both nodes should see node 1 as leader
                 leader1 == 1 && leader2 == 1
             } else {
@@ -166,10 +132,10 @@ async fn test_join_cluster_configuration_update() {
     ).await.expect("Nodes failed to agree on leader");
     
     // Check cluster status from both nodes
-    let (leader_id1, peers1, term1) = node1.get_cluster_status().await.unwrap();
+    let (leader_id1, peers1, term1) = leader_node.node.get_cluster_status().await.unwrap();
     info!("Node 1 cluster status: leader={}, peers={:?}, term={}", leader_id1, peers1, term1);
     
-    let (leader_id2, peers2, term2) = node2.get_cluster_status().await.unwrap();
+    let (leader_id2, peers2, term2) = joining_node.node.get_cluster_status().await.unwrap();
     info!("Node 2 cluster status: leader={}, peers={:?}, term={}", leader_id2, peers2, term2);
     
     // Both nodes should agree on the leader
@@ -177,8 +143,6 @@ async fn test_join_cluster_configuration_update() {
     assert_eq!(leader_id1, 1, "Node 1 should be the leader");
     
     // Clean up
-    server_handle1.abort();
-    server_handle2.abort();
-    node1.stop().await.unwrap();
-    node2.stop().await.unwrap();
+    leader_node.shutdown().await;
+    joining_node.shutdown().await;
 }

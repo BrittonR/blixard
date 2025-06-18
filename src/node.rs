@@ -140,7 +140,7 @@ impl Node {
         self.shared.set_peer_connector(peer_connector.clone()).await;
         
         // Start peer connection maintenance
-        peer_connector.clone().start_connection_maintenance();
+        peer_connector.clone().start_connection_maintenance().await;
         
         // Start task to handle outgoing Raft messages
         let peer_connector_clone = peer_connector.clone();

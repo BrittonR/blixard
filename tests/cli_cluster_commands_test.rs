@@ -1,15 +1,17 @@
 #[cfg(feature = "test-helpers")]
 mod tests {
-    use std::process::Command;
     use std::time::Duration;
-    use blixard::test_helpers::TestNode;
+    use blixard::test_helpers::{TestNode, PortAllocator};
+    use tokio::time::timeout;
+    use tokio::process::Command;
     
     #[tokio::test]
     async fn test_cluster_status_command() {
-        // Start a test node
+        // Start a test node with dynamic port
+        let port = PortAllocator::next_port();
         let node = TestNode::builder()
             .with_id(1)
-            .with_port(8001)
+            .with_port(port)
             .build()
             .await
             .expect("Failed to create node");
@@ -17,11 +19,19 @@ mod tests {
         // Wait for node to be ready
         tokio::time::sleep(Duration::from_millis(500)).await;
         
-        // Run cluster status command
-        let output = Command::new("cargo")
-            .args(&["run", "--bin", "blixard", "--", "cluster", "status", "--addr", "127.0.0.1:8001"])
-            .output()
-            .expect("Failed to execute command");
+        // Run cluster status command with timeout
+        let result = timeout(
+            Duration::from_secs(10),
+            Command::new("cargo")
+                .args(&["run", "--bin", "blixard", "--", "cluster", "status", "--addr", &format!("127.0.0.1:{}", port)])
+                .output()
+        ).await;
+        
+        let output = match result {
+            Ok(Ok(output)) => output,
+            Ok(Err(e)) => panic!("Failed to execute command: {}", e),
+            Err(_) => panic!("Command timed out after 10 seconds"),
+        };
         
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -36,17 +46,20 @@ mod tests {
     
     #[tokio::test]
     async fn test_cluster_join_command() {
-        // Start two test nodes
+        // Start two test nodes with dynamic ports
+        let port1 = PortAllocator::next_port();
+        let port2 = PortAllocator::next_port();
+        
         let node1 = TestNode::builder()
             .with_id(1)
-            .with_port(8101)
+            .with_port(port1)
             .build()
             .await
             .expect("Failed to create node 1");
         
         let node2 = TestNode::builder()
             .with_id(2)
-            .with_port(8102)
+            .with_port(port2)
             .build()
             .await
             .expect("Failed to create node 2");
@@ -54,16 +67,24 @@ mod tests {
         // Wait for nodes to be ready
         tokio::time::sleep(Duration::from_millis(500)).await;
         
-        // Run join command from node2 to join node1's cluster
-        let output = Command::new("cargo")
-            .args(&[
-                "run", "--bin", "blixard", "--", 
-                "cluster", "join", 
-                "--peer", "2@127.0.0.1:8101",
-                "--local-addr", "127.0.0.1:8102"
-            ])
-            .output()
-            .expect("Failed to execute command");
+        // Run join command from node2 to join node1's cluster with timeout
+        let result = timeout(
+            Duration::from_secs(10),
+            Command::new("cargo")
+                .args(&[
+                    "run", "--bin", "blixard", "--", 
+                    "cluster", "join", 
+                    "--peer", &format!("2@127.0.0.1:{}", port1),
+                    "--local-addr", &format!("127.0.0.1:{}", port2)
+                ])
+                .output()
+        ).await;
+        
+        let output = match result {
+            Ok(Ok(output)) => output,
+            Ok(Err(e)) => panic!("Failed to execute command: {}", e),
+            Err(_) => panic!("Command timed out after 10 seconds"),
+        };
         
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -84,10 +105,18 @@ mod tests {
     #[tokio::test]
     async fn test_cli_help() {
         // Test that cluster commands show up in help
-        let output = Command::new("cargo")
-            .args(&["run", "--bin", "blixard", "--", "cluster", "--help"])
-            .output()
-            .expect("Failed to execute command");
+        let result = timeout(
+            Duration::from_secs(10),
+            Command::new("cargo")
+                .args(&["run", "--bin", "blixard", "--", "cluster", "--help"])
+                .output()
+        ).await;
+        
+        let output = match result {
+            Ok(Ok(output)) => output,
+            Ok(Err(e)) => panic!("Failed to execute command: {}", e),
+            Err(_) => panic!("Command timed out after 10 seconds"),
+        };
         
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);

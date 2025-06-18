@@ -5,7 +5,8 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{RwLock, Mutex};
+use tokio::sync::{RwLock, Mutex, watch};
+use tokio::task::JoinHandle;
 use tonic::transport::Channel;
 
 use crate::error::{BlixardError, BlixardResult};
@@ -139,10 +140,16 @@ pub struct PeerConnector {
     connection_states: RwLock<HashMap<u64, ConnectionState>>,
     /// Track total connection count for pool limiting
     connection_count: Arc<Mutex<usize>>,
+    /// Shutdown signal for background tasks
+    shutdown_tx: watch::Sender<bool>,
+    shutdown_rx: watch::Receiver<bool>,
+    /// JoinHandles for background tasks
+    background_tasks: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl PeerConnector {
     pub fn new(node: Arc<SharedNodeState>) -> Self {
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
         Self {
             node,
             connections: RwLock::new(HashMap::new()),
@@ -150,6 +157,9 @@ impl PeerConnector {
             connecting: Mutex::new(HashMap::new()),
             connection_states: RwLock::new(HashMap::new()),
             connection_count: Arc::new(Mutex::new(0)),
+            shutdown_tx,
+            shutdown_rx,
+            background_tasks: Mutex::new(Vec::new()),
         }
     }
     
@@ -476,49 +486,99 @@ impl PeerConnector {
     }
     
     /// Start background task to maintain connections
-    pub fn start_connection_maintenance(self: Arc<Self>) {
+    pub async fn start_connection_maintenance(self: Arc<Self>) {
         // Connection establishment task
         let self_clone = self.clone();
-        tokio::spawn(async move {
+        let mut shutdown_rx = self.shutdown_rx.clone();
+        let connection_task = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(5));
             
             loop {
-                interval.tick().await;
-                
-                // Get all peers
-                let peers = self_clone.node.get_peers().await;
-                
-                // Check each peer connection
-                for peer in peers {
-                    if !peer.is_connected {
-                        // Try to connect
-                        let _ = self_clone.connect_to_peer(&peer).await;
+                tokio::select! {
+                    _ = shutdown_rx.changed() => {
+                        if *shutdown_rx.borrow() {
+                            tracing::info!("[PEER-CONN] Connection maintenance task shutting down");
+                            break;
+                        }
+                    }
+                    _ = interval.tick() => {
+                        // Get all peers
+                        let peers = self_clone.node.get_peers().await;
+                        
+                        // Check each peer connection
+                        for peer in peers {
+                            if !peer.is_connected {
+                                // Try to connect
+                                let _ = self_clone.connect_to_peer(&peer).await;
+                            }
+                        }
                     }
                 }
             }
         });
         
         // Health check task
-        tokio::spawn(async move {
+        let self_clone = self.clone();
+        let mut shutdown_rx = self.shutdown_rx.clone();
+        let health_task = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(10));
             
             loop {
-                interval.tick().await;
-                
-                // Get all connected peers
-                let peers = self.node.get_peers().await;
-                
-                for peer in peers {
-                    if peer.is_connected {
-                        // Check connection health
-                        if !self.check_connection_health(peer.id).await {
-                            // Connection is unhealthy, disconnect and let maintenance reconnect
-                            tracing::info!("[PEER-CONN] Disconnecting unhealthy peer {}", peer.id);
-                            let _ = self.disconnect_from_peer(peer.id).await;
+                tokio::select! {
+                    _ = shutdown_rx.changed() => {
+                        if *shutdown_rx.borrow() {
+                            tracing::info!("[PEER-CONN] Health check task shutting down");
+                            break;
+                        }
+                    }
+                    _ = interval.tick() => {
+                        // Get all connected peers
+                        let peers = self_clone.node.get_peers().await;
+                        
+                        for peer in peers {
+                            if peer.is_connected {
+                                // Check connection health
+                                if !self_clone.check_connection_health(peer.id).await {
+                                    // Connection is unhealthy, disconnect and let maintenance reconnect
+                                    tracing::info!("[PEER-CONN] Disconnecting unhealthy peer {}", peer.id);
+                                    let _ = self_clone.disconnect_from_peer(peer.id).await;
+                                }
+                            }
                         }
                     }
                 }
             }
         });
+        
+        // Store task handles
+        let mut tasks = self.background_tasks.lock().await;
+        tasks.push(connection_task);
+        tasks.push(health_task);
+    }
+    
+    /// Shutdown the peer connector and all background tasks
+    pub async fn shutdown(&self) {
+        tracing::info!("[PEER-CONN] Shutting down peer connector");
+        
+        // Signal all tasks to stop
+        let _ = self.shutdown_tx.send(true);
+        
+        // Wait for all background tasks to complete
+        let mut tasks = self.background_tasks.lock().await;
+        for task in tasks.drain(..) {
+            // Ignore errors from task abortion
+            let _ = task.await;
+        }
+        
+        // Disconnect all peers
+        let connections = self.connections.read().await;
+        let peer_ids: Vec<u64> = connections.keys().copied().collect();
+        drop(connections);
+        
+        for peer_id in peer_ids {
+            let _ = self.disconnect_from_peer(peer_id).await;
+        }
+        
+        tracing::info!("[PEER-CONN] Peer connector shutdown complete");
     }
 }

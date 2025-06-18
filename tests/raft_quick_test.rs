@@ -1,3 +1,5 @@
+#![cfg(feature = "test-helpers")]
+
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::time::sleep;
@@ -5,15 +7,17 @@ use tokio::time::sleep;
 use blixard::{
     node::Node,
     types::NodeConfig,
+    test_helpers::PortAllocator,
 };
 
 #[tokio::test]
 async fn test_raft_starts_and_stops() {
     let temp_dir = TempDir::new().unwrap();
+    let port = PortAllocator::next_port();
     let config = NodeConfig {
         id: 99,
         data_dir: temp_dir.path().to_str().unwrap().to_string(),
-        bind_addr: "127.0.0.1:39999".parse().unwrap(),
+        bind_addr: format!("127.0.0.1:{}", port).parse().unwrap(),
         join_addr: None,
         use_tailscale: false,
     };

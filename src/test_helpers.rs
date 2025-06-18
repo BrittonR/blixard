@@ -155,16 +155,20 @@ impl TestNode {
     
     /// Shutdown the test node
     pub async fn shutdown(mut self) {
-        // Set running to false
-        self.shared_state.set_running(false).await;
+        // Stop the node properly - this handles all cleanup including:
+        // - Sending shutdown signal
+        // - Aborting Raft handle
+        // - Setting running to false
+        // - Calling shutdown_components() to release database references
+        // - Stopping PeerConnector background tasks
+        self.node.stop().await.expect("Failed to stop node");
         
-        // Abort server
+        // Abort the gRPC server handle if it hasn't been already
         if let Some(handle) = self.server_handle.take() {
             handle.abort();
+            // Give the server time to fully shut down
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        
-        // Clear database
-        self.shared_state.clear_database().await;
         
         // Temp dir will be cleaned up on drop
     }

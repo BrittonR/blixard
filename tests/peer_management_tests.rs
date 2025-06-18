@@ -1,11 +1,15 @@
+#![cfg(feature = "test-helpers")]
+
 use std::sync::Arc;
 use blixard::node_shared::{SharedNodeState, PeerInfo};
 use blixard::types::NodeConfig;
+use blixard::test_helpers::PortAllocator;
 
 fn create_test_node_state(id: u64) -> SharedNodeState {
+    let port = PortAllocator::next_port();
     let config = NodeConfig {
         id,
-        bind_addr: format!("127.0.0.1:700{}", id).parse().unwrap(),
+        bind_addr: format!("127.0.0.1:{}", port).parse().unwrap(),
         data_dir: format!("/tmp/test-node-{}", id),
         join_addr: None,
         use_tailscale: false,
@@ -17,15 +21,17 @@ fn create_test_node_state(id: u64) -> SharedNodeState {
 async fn test_add_peer_success() {
     let node = create_test_node_state(1);
     
-    // Add a peer
-    let result = node.add_peer(2, "127.0.0.1:7002".to_string()).await;
+    // Add a peer with dynamic port
+    let peer_port = PortAllocator::next_port();
+    let peer_addr = format!("127.0.0.1:{}", peer_port);
+    let result = node.add_peer(2, peer_addr.clone()).await;
     assert!(result.is_ok());
     
     // Verify peer was added
     let peers = node.get_peers().await;
     assert_eq!(peers.len(), 1);
     assert_eq!(peers[0].id, 2);
-    assert_eq!(peers[0].address, "127.0.0.1:7002");
+    assert_eq!(peers[0].address, peer_addr);
     assert!(!peers[0].is_connected);
 }
 
@@ -33,12 +39,14 @@ async fn test_add_peer_success() {
 async fn test_add_duplicate_peer_fails() {
     let node = create_test_node_state(1);
     
-    // Add a peer
-    let result1 = node.add_peer(2, "127.0.0.1:7002".to_string()).await;
+    // Add a peer with dynamic port
+    let peer_port1 = PortAllocator::next_port();
+    let result1 = node.add_peer(2, format!("127.0.0.1:{}", peer_port1)).await;
     assert!(result1.is_ok());
     
-    // Try to add same peer again
-    let result2 = node.add_peer(2, "127.0.0.1:7003".to_string()).await;
+    // Try to add same peer again with different port
+    let peer_port2 = PortAllocator::next_port();
+    let result2 = node.add_peer(2, format!("127.0.0.1:{}", peer_port2)).await;
     assert!(result2.is_err());
     assert!(result2.unwrap_err().to_string().contains("already exists"));
 }
@@ -47,8 +55,9 @@ async fn test_add_duplicate_peer_fails() {
 async fn test_remove_peer_success() {
     let node = create_test_node_state(1);
     
-    // Add a peer
-    node.add_peer(2, "127.0.0.1:7002".to_string()).await.unwrap();
+    // Add a peer with dynamic port
+    let peer_port = PortAllocator::next_port();
+    node.add_peer(2, format!("127.0.0.1:{}", peer_port)).await.unwrap();
     
     // Remove the peer
     let result = node.remove_peer(2).await;
@@ -90,8 +99,9 @@ async fn test_get_specific_peer() {
 async fn test_update_peer_connection_status() {
     let node = create_test_node_state(1);
     
-    // Add a peer
-    node.add_peer(2, "127.0.0.1:7002".to_string()).await.unwrap();
+    // Add a peer with dynamic port
+    let peer_port = PortAllocator::next_port();
+    node.add_peer(2, format!("127.0.0.1:{}", peer_port)).await.unwrap();
     
     // Initially not connected
     let peer = node.get_peer(2).await.unwrap();
@@ -123,9 +133,10 @@ async fn test_update_connection_for_non_existent_peer_fails() {
 async fn test_multiple_peers_management() {
     let node = create_test_node_state(1);
     
-    // Add multiple peers
+    // Add multiple peers with dynamic ports
     for i in 2..=5 {
-        node.add_peer(i, format!("127.0.0.1:700{}", i)).await.unwrap();
+        let port = PortAllocator::next_port();
+        node.add_peer(i, format!("127.0.0.1:{}", port)).await.unwrap();
     }
     
     // Verify all peers added
@@ -149,9 +160,10 @@ async fn test_multiple_peers_management() {
 
 #[tokio::test]
 async fn test_peer_info_clone() {
+    let port = PortAllocator::next_port();
     let peer = PeerInfo {
         id: 1,
-        address: "127.0.0.1:7001".to_string(),
+        address: format!("127.0.0.1:{}", port),
         is_connected: true,
     };
     

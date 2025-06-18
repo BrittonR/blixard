@@ -210,7 +210,7 @@ mod tests {
     #[tokio::test]
     async fn test_concurrent_lifecycle_operations() {
         // Use TestCluster for this test as it's designed for multi-node scenarios
-        let mut cluster = TestCluster::builder()
+        let cluster = TestCluster::builder()
             .with_nodes(3)
             .build()
             .await
@@ -303,25 +303,23 @@ mod tests {
             .await
             .unwrap();
         
-        // Test: Invalid join should fail  
-        let node2 = TestNode::builder()
-            .with_id(2)
-            .with_auto_port()
-            .build()
-            .await
-            .unwrap();
-        
-        // Trying to join non-existent cluster should fail eventually
-        // (Note: the join might succeed initially but fail during Raft config)
+        // Wait for node1 to be ready
+        tokio::time::sleep(Duration::from_millis(500)).await;
         
         // Test: Operations after stop should fail
         // Save shared state reference before shutdown
         let node1_state = node1.shared_state.clone();
+        
+        // Verify node is running before shutdown
+        assert!(node1_state.is_running().await);
+        
         node1.shutdown().await;
+        
+        // After shutdown, get_cluster_status should fail because node is not initialized
         assert!(node1_state.get_cluster_status().await.is_err());
         
-        // Cleanup
-        node2.shutdown().await;
+        // Note: submit_task doesn't check is_initialized so it would hang
+        // This is a known issue in the implementation
     }
 
     /// Test lifecycle with network partitions (simulated)
