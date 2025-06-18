@@ -1020,7 +1020,7 @@ impl RaftManager {
         }
         
         // Apply committed entries to state machine
-        let mut committed_entries = ready.take_committed_entries();
+        let committed_entries = ready.take_committed_entries();
         info!(self.logger, "[RAFT-READY] Committed entries count: {}", committed_entries.len());
         
         // IMPORTANT: Check if we're behind on applying entries

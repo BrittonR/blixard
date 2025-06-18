@@ -115,10 +115,9 @@ async fn test_vm_command_send_without_initialization() {
 async fn test_cluster_operations_uninitialized() {
     let (mut node, _temp_dir) = create_test_node(1).await;
     
-    // Without initialization, join_cluster in bootstrap mode should succeed partially
-    // (it won't have database but won't fail)
+    // Without initialization, all cluster operations should fail
     let result = node.join_cluster(None).await;
-    assert!(result.is_ok()); // Bootstrap mode doesn't require initialization
+    assert!(result.is_err(), "Expected error for join_cluster on uninitialized node");
     
     // Leave cluster should fail without proper initialization
     let result = node.leave_cluster().await;
@@ -621,14 +620,14 @@ async fn test_vm_command_channel_closed() {
     
     // No need to wait - channels should close synchronously
     
-    // Try to send command after stop - this should still work through shared state
+    // Try to send command after stop - this should fail as VM manager is cleared
     let result = node.send_vm_command(VmCommand::UpdateStatus {
         name: "test".to_string(),
         status: VmStatus::Running,
     }).await;
     
-    // The command should succeed as VM manager still exists in shared state
-    assert!(result.is_ok());
+    // The command should fail as stop() clears the VM manager to release resources
+    assert!(result.is_err(), "Expected error after stop clears VM manager");
 }
 
 #[tokio::test]

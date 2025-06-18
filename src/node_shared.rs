@@ -44,6 +44,9 @@ pub struct SharedNodeState {
     // Track running state
     is_running: RwLock<bool>,
     
+    // Track initialization state
+    is_initialized: RwLock<bool>,
+    
     // Raft status
     raft_status: RwLock<RaftStatus>,
     
@@ -72,6 +75,7 @@ impl SharedNodeState {
             raft_conf_change_tx: Mutex::new(None),
             vm_manager: RwLock::new(None),
             is_running: RwLock::new(false),
+            is_initialized: RwLock::new(false),
             raft_status: RwLock::new(RaftStatus {
                 is_leader: false,
                 node_id,
@@ -342,6 +346,13 @@ impl SharedNodeState {
     
     /// Get cluster status
     pub async fn get_cluster_status(&self) -> BlixardResult<(u64, Vec<u64>, u64)> {
+        // Check if initialized
+        if !self.is_initialized().await {
+            return Err(BlixardError::Internal {
+                message: "Node not initialized".to_string(),
+            });
+        }
+        
         // Get Raft peers (nodes in the cluster)
         let peers = self.peers.read().await;
         let mut node_ids: Vec<u64> = peers.keys().cloned().collect();
@@ -368,6 +379,16 @@ impl SharedNodeState {
     /// Set running state
     pub async fn set_running(&self, running: bool) {
         *self.is_running.write().await = running;
+    }
+    
+    /// Check if node is initialized
+    pub async fn is_initialized(&self) -> bool {
+        *self.is_initialized.read().await
+    }
+    
+    /// Set initialized state
+    pub async fn set_initialized(&self, initialized: bool) {
+        *self.is_initialized.write().await = initialized;
     }
     
     /// Get Raft status

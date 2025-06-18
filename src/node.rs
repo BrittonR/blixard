@@ -177,6 +177,9 @@ impl Node {
             }
         }
         
+        // Mark node as initialized
+        self.shared.set_initialized(true).await;
+        
         Ok(())
     }
 
@@ -283,6 +286,13 @@ impl Node {
 
     /// Join a cluster
     pub async fn join_cluster(&mut self, peer_addr: Option<std::net::SocketAddr>) -> BlixardResult<()> {
+        // Check if initialized
+        if !self.shared.is_initialized().await {
+            return Err(BlixardError::Internal {
+                message: "Node not initialized".to_string(),
+            });
+        }
+        
         let node_id = self.shared.get_id();
         let address = self.shared.get_bind_addr().to_string();
         let capabilities = crate::raft_manager::WorkerCapabilities {
@@ -349,6 +359,13 @@ impl Node {
 
     /// Leave the cluster
     pub async fn leave_cluster(&mut self) -> BlixardResult<()> {
+        // Check if initialized
+        if !self.shared.is_initialized().await {
+            return Err(BlixardError::Internal {
+                message: "Node not initialized".to_string(),
+            });
+        }
+        
         {
             let proposal_data = ProposalData::RemoveWorker {
                 node_id: self.shared.get_id(),

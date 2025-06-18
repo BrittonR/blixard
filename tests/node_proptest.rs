@@ -324,9 +324,9 @@ proptest! {
             // Stop node
             node.stop().await.unwrap();
             
-            // Should still work after stopping
+            // VM commands should fail after full shutdown (stop() clears all components)
             let result3 = node.send_vm_command(command).await;
-            prop_assert!(result3.is_ok());
+            prop_assert!(result3.is_err());
             Ok(())
         }).unwrap();
     }

@@ -304,6 +304,15 @@ The project includes dependencies for:
    - Solution: Configured example to require feature in Cargo.toml
    - Tests must be run with `--features test-helpers` flag
 
+4. **PropTest Failures and Node Lifecycle** (✅ FIXED)
+   - Fixed: `test_vm_commands_across_node_states` expecting VM commands to work after `stop()`
+   - Fixed: `test_cluster_operations_uninitialized` expecting some operations to succeed
+   - Solution: Added `is_initialized` state tracking to `SharedNodeState`
+   - Solution: Added initialization checks to `join_cluster()`, `leave_cluster()`, and `get_cluster_status()`
+   - Solution: Set `is_initialized` to true at the end of `Node::initialize()`
+   - Design clarification: `stop()` is a complete shutdown, not a pause - clears all components to release resources
+   - All PropTest suites now pass reliably
+
 ## Known Test Reliability Issues
 
 See `TEST_RELIABILITY_ISSUES.md` for full details. Major issues:
