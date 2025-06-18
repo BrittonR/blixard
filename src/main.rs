@@ -42,6 +42,11 @@ enum Commands {
         #[command(subcommand)]
         command: VmCommands,
     },
+    /// Cluster management operations
+    Cluster {
+        #[command(subcommand)]
+        command: ClusterCommands,
+    },
 }
 
 #[derive(clap::Subcommand)]
@@ -53,6 +58,32 @@ enum VmCommands {
     },
     /// List all VMs
     List,
+}
+
+#[derive(clap::Subcommand)]
+enum ClusterCommands {
+    /// Join a cluster by connecting to a peer
+    Join {
+        /// Address of a cluster peer to join through (e.g., 127.0.0.1:7001)
+        #[arg(long)]
+        peer: String,
+        
+        /// Local node configuration file or address
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        local_addr: String,
+    },
+    /// Leave the current cluster
+    Leave {
+        /// Local node address
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        local_addr: String,
+    },
+    /// Get cluster status
+    Status {
+        /// Node address to query
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        addr: String,
+    },
 }
 
 #[tokio::main]
@@ -145,7 +176,136 @@ async fn main() -> BlixardResult<()> {
                 std::process::exit(1);
             }
         },
+        Commands::Cluster { command } => {
+            handle_cluster_command(command).await?;
+        }
     }
 
     Ok(())
+}
+
+#[cfg(not(madsim))]
+async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
+    use blixard::proto::{
+        cluster_service_client::ClusterServiceClient,
+        JoinRequest, LeaveRequest, ClusterStatusRequest,
+    };
+    
+    match command {
+        ClusterCommands::Join { peer, local_addr } => {
+            // Connect to the local node
+            let mut client = ClusterServiceClient::connect(format!("http://{}", local_addr))
+                .await
+                .map_err(|e| blixard::error::BlixardError::Internal { 
+                    message: format!("Failed to connect to local node: {}", e)
+                })?;
+            
+            // Parse peer address to get node ID (assuming format nodeID@address)
+            let (node_id, bind_address) = if peer.contains('@') {
+                let parts: Vec<&str> = peer.split('@').collect();
+                let id = parts[0].parse::<u64>().unwrap_or(0);
+                (id, parts[1].to_string())
+            } else {
+                // Default node ID if not specified
+                (0, peer.clone())
+            };
+            
+            // Send join request
+            let request = tonic::Request::new(JoinRequest {
+                node_id,
+                bind_address,
+            });
+            
+            match client.join_cluster(request).await {
+                Ok(response) => {
+                    let resp = response.into_inner();
+                    if resp.success {
+                        println!("Successfully joined cluster through peer: {}", peer);
+                        println!("Message: {}", resp.message);
+                    } else {
+                        eprintln!("Failed to join cluster: {}", resp.message);
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error joining cluster: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        ClusterCommands::Leave { local_addr } => {
+            // Connect to the local node
+            let mut client = ClusterServiceClient::connect(format!("http://{}", local_addr))
+                .await
+                .map_err(|e| blixard::error::BlixardError::Internal { 
+                    message: format!("Failed to connect to local node: {}", e)
+                })?;
+            
+            // Send leave request (need to get node ID from somewhere, using 0 for now)
+            let request = tonic::Request::new(LeaveRequest {
+                node_id: 0, // TODO: Get actual node ID
+            });
+            
+            match client.leave_cluster(request).await {
+                Ok(response) => {
+                    let resp = response.into_inner();
+                    if resp.success {
+                        println!("Successfully left the cluster");
+                        println!("Message: {}", resp.message);
+                    } else {
+                        eprintln!("Failed to leave cluster: {}", resp.message);
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error leaving cluster: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        ClusterCommands::Status { addr } => {
+            // Connect to the node
+            let mut client = ClusterServiceClient::connect(format!("http://{}", addr))
+                .await
+                .map_err(|e| blixard::error::BlixardError::Internal { 
+                    message: format!("Failed to connect to node: {}", e)
+                })?;
+            
+            // Get cluster status
+            let request = tonic::Request::new(ClusterStatusRequest {});
+            
+            match client.get_cluster_status(request).await {
+                Ok(response) => {
+                    let status = response.into_inner();
+                    println!("Cluster Status:");
+                    println!("  Leader ID: {}", status.leader_id);
+                    println!("  Term: {}", status.term);
+                    println!("  Nodes in cluster:");
+                    for node in &status.nodes {
+                        println!("    - Node {}: {} ({})", node.id, node.address, 
+                            match node.state {
+                                0 => "Unknown",
+                                1 => "Follower",
+                                2 => "Candidate",
+                                3 => "Leader",
+                                _ => "Invalid",
+                            }
+                        );
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error getting cluster status: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+#[cfg(madsim)]
+async fn handle_cluster_command(_command: ClusterCommands) -> BlixardResult<()> {
+    eprintln!("Cluster commands are not available in simulation mode");
+    std::process::exit(1);
 }

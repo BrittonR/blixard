@@ -5,3 +5,9 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc af8762f0dacf3a179c1af07c45124be6a68120770b34ed1e2be4ab22cbf8499b # shrinks to id = 66, port = 7585
+cc 77c020e91225d1dd0f664859f28f6d6f7a09885e578bcb96107deb5ce5c925f2 # shrinks to id = 1, port = 7000
+cc ddd6988991bba59ee2007a8e3c3b67422be0f80588afbc2cc5b75fbd281bf255 # shrinks to node_id = 5, port = 7000, vm_name = "aa", (vcpus, memory) = (1, 128), command_type = 0, status = Creating
+cc 747704bf198454e135b2c89b26c85a850ed67560813f4d007a959abea1bbe20b # shrinks to id = 1, port = 7000
+cc 468239ee9455ba952b91fbc63ffc214e3f4a002ad9d1b888dac31cbe7d92dfe5 # shrinks to id = 1, port = 7000
+cc c9855016974fe25f3a99337be130e159a1ca11074403e4337ab4ec83bfa74a2b # shrinks to node_id = 1, port = 7037, vm_name = "aa", (vcpus, memory) = (1, 128), command_type = 0, status = Creating
+cc 53d498848b96632db151b4df9226312d70cf098601e903be14ce7683ce26cbc6 # shrinks to id = 1, port = 7000, start_node = true

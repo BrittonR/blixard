@@ -60,10 +60,23 @@ cargo test --test vm_cli_test
 cargo run -- node --id 1 --bind 127.0.0.1:7001
 
 # Node 2
-cargo run -- node --id 2 --bind 127.0.0.1:7002 --peer 1:127.0.0.1:7001
+cargo run -- node --id 2 --bind 127.0.0.1:7002 --peers 127.0.0.1:7001
 
 # Node 3
-cargo run -- node --id 3 --bind 127.0.0.1:7003 --peer 1:127.0.0.1:7001 --peer 2:127.0.0.1:7002
+cargo run -- node --id 3 --bind 127.0.0.1:7003 --peers 127.0.0.1:7001
+```
+
+### Cluster Management
+
+```bash
+# Check cluster status
+cargo run -- cluster status --addr 127.0.0.1:7001
+
+# Join a cluster (connects local node to a peer)
+cargo run -- cluster join --peer 2@127.0.0.1:7001 --local-addr 127.0.0.1:7002
+
+# Leave a cluster
+cargo run -- cluster leave --local-addr 127.0.0.1:7002
 ```
 
 ### VM Management

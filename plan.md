@@ -1,143 +1,138 @@
 # Blixard Development Plan
 
-## Current State Summary
+## Current Project Status
 
-### ✅ What's Working Well:
-1. **Raft Consensus**: Basic three-node cluster formation works reliably
-2. **ReDB Integration**: Database persistence and locking issues have been resolved
-3. **Snapshot Support**: Raft snapshots are implemented for state transfer
-4. **Peer Management**: Dynamic peer connections with automatic reconnection
-5. **Configuration Changes**: Nodes can join/leave clusters successfully
+Blixard is a distributed microVM orchestration platform built in Rust. The core distributed infrastructure is implemented and working:
 
-### ❌ What's Not Working:
-1. **Task/Worker System**: Completely unimplemented - all task operations panic with "Not implemented"
-2. **Test Reliability**: 25+ hardcoded `sleep()` calls causing flaky tests
-3. **Membership Edge Cases**: Node ID conflicts in some test scenarios
-4. **Raft Proposal Pipeline**: Task proposals hang indefinitely waiting for responses
-5. **Worker Tables**: Not initialized in database, causing scheduling failures
+### ✅ Completed
+- Raft consensus with full state machine
+- Multi-node cluster formation 
+- Peer management with automatic reconnection
+- gRPC communication layer
+- Persistent storage with redb
+- Task scheduling and worker management
+- Comprehensive test infrastructure (unit, property, deterministic simulation)
+- CLI with node management commands
 
-## Recommended Plan
+### ❌ Not Implemented
+- **MicroVM integration** - Only stubs exist, no actual VM lifecycle management
+- **Tailscale integration** - CLI flag exists but no implementation
+- **CLI cluster commands** - gRPC endpoints exist but no CLI commands
+- **Raft log compaction** - Snapshots exist but no automatic compaction
+- **Metrics & observability** - Dependencies exist but no implementation
+- **Configuration files** - Only CLI flags supported
+- **Production features** - No auth, TLS, rate limiting, backups
 
-### Phase 1: Stabilize Current Foundation (Priority: HIGH)
-1. **Fix Test Infrastructure**
-   - Replace all 25+ hardcoded `sleep()` calls with `wait_for_condition()` using the existing timing utilities
-   - Fix the `wait_for_condition` function that currently always returns `true`
-   - Add proper state verification in tests instead of time-based waiting
-   - Create `TEST_RELIABILITY_ISSUES.md` to track ongoing issues
+## Test Coverage Analysis
 
-2. **Fix Membership Management Bug**
-   - Investigate why Node 4 is reported as already existing in membership change tests
-   - Ensure proper cleanup between test phases
-   - Add validation to prevent duplicate node IDs
+### Coverage Matrix
 
-3. **Complete Raft Proposal Pipeline**
-   - Fix the hanging task submission proposals
-   - Ensure proposals get proper responses
-   - Add timeout handling for proposals
+| Component | Unit Tests | PropTest | MadSim | Critical Gaps |
+|-----------|------------|----------|---------|---------------|
+| CLI | ✅ Yes | ❌ No | ❌ No | ~~Integration with node startup~~ ✅ Fixed |
+| gRPC Server | ✅ Partial | ❌ No | ✅ Yes | Many endpoints untested |
+| Node | ✅ Yes | ✅ Yes | ✅ Yes | Recovery scenarios |
+| SharedNodeState | ✅ Yes | ✅ Yes | ❌ No | ~~Concurrent mutations~~ ✅ Fixed |
+| Raft Manager | ✅ Partial | ✅ Yes | ✅ Yes | Snapshot/compaction |
+| Peer Connector | ✅ Yes | ❌ No | ❌ No | Retry logic, buffering |
+| Storage | ✅ Yes | ❌ No | ❌ No | Corruption, concurrency |
+| VM Manager | ✅ Partial | ❌ No | ❌ No | Only stubs tested |
+| **Raft Codec** | **✅ Yes** | **✅ Yes** | **❌ No** | ~~**ZERO TESTS!**~~ **✅ FIXED** |
 
-### Phase 2: Implement Core Missing Features (Priority: HIGH)
-1. **Worker Registration System**
-   - Create worker tables in database initialization
-   - Implement worker registration on node startup
-   - Add worker health monitoring with heartbeats
-   - Track worker capacity and availability
+### Critical Test Gaps
+1. ~~**Raft Codec** - Message serialization completely untested~~ ✅ FIXED - Added comprehensive tests
+2. ~~**Integration tests** - No end-to-end workflows~~ ✅ FIXED - Added lifecycle integration tests
+3. **Failure recovery** - Limited crash/corruption testing
+4. ~~**Concurrent operations** - Race condition testing missing~~ ✅ FIXED - Added PropTest for SharedNodeState
+5. **Performance/load** - No scalability tests
 
-2. **Task Execution Engine**
-   - Implement `WorkerExecutor` background service
-   - Create `TaskRunner` for actual process execution
-   - Add resource monitoring and enforcement
-   - Implement task completion flow through Raft
+## Development Priorities
 
-3. **Task Scheduling Logic**
-   - Complete the `schedule_task` function
-   - Implement worker selection algorithm
-   - Handle task assignment and reassignment
-   - Add failure handling and retries
+### ~~Priority 1: Test Coverage for Critical Infrastructure~~ ✅ COMPLETED
+~~Before adding new features, we should ensure existing critical components are properly tested:~~
 
-### Phase 3: Production Readiness (Priority: MEDIUM)
-1. **Enhanced Testing**
-   - Add integration tests for full task lifecycle
-   - Create chaos tests for network partitions
-   - Add performance benchmarks
-   - Implement deterministic simulation tests with MadSim
+1. ~~**Add tests for `raft_codec.rs`** (CRITICAL)~~ ✅ DONE
+   - ~~Message serialization/deserialization~~ ✅
+   - ~~Error handling for malformed data~~ ✅
+   - ~~Performance with large messages~~ ✅
 
-2. **Observability**
-   - Add comprehensive logging for debugging
-   - Implement metrics collection
-   - Create health check endpoints
-   - Add distributed tracing support
+2. ~~**Expand PropTest coverage**~~ ✅ PARTIALLY DONE
+   - ~~SharedNodeState concurrent operations~~ ✅
+   - Peer Connector retry logic ❌ TODO
+   - Storage concurrent transactions ❌ TODO
+   - gRPC server request handling ❌ TODO
 
-3. **Error Handling**
-   - Review all `todo!()` and `unimplemented!()` calls
-   - Add proper error recovery mechanisms
-   - Implement graceful degradation
-   - Add circuit breakers for external dependencies
+3. ~~**Add integration tests**~~ ✅ DONE
+   - ~~Full node lifecycle (start → join → tasks → leave → stop)~~ ✅
+   - Multi-node task distribution 🔧 Partial
+   - Failure and recovery scenarios 🔧 Partial
 
-### Phase 4: VM Integration (Priority: LOW - After Core is Stable)
-1. **MicroVM Integration**
-   - Integrate with microvm.nix
-   - Implement VM lifecycle management
-   - Add resource allocation for VMs
-   - Create VM health monitoring
+### Priority 2: MicroVM Integration
+This is the core purpose of Blixard. Without it, the platform cannot manage VMs.
 
-2. **Advanced Features**
-   - Log compaction using snapshot infrastructure
-   - Dynamic cluster reconfiguration
-   - Multi-region support
-   - Advanced scheduling policies
+**Implementation tasks:**
+1. Research microvm.nix integration patterns
+2. Design VM lifecycle state machine
+3. Implement VM process management
+4. Add network configuration for VMs
+5. Handle VM storage allocation
+6. Implement console/serial access
+7. Add comprehensive tests
 
-## Immediate Next Steps (Do These First)
+### ~~Priority 3: CLI Cluster Management Commands~~ ✅ COMPLETED
+~~Already marked "In Progress" in todo.md. Would significantly improve usability.~~
 
-1. **Fix the test infrastructure** - This will give us confidence that our fixes actually work
-2. **Implement worker registration** - This unblocks all task-related functionality
-3. **Complete the Raft proposal pipeline** - This fixes the hanging tests
-4. **Add proper database table initialization** - Ensures worker tables exist
+**Commands implemented:**
+- ✅ `blixard cluster join --peer <addr> --local-addr <addr>`
+- ✅ `blixard cluster leave --local-addr <addr>`
+- ✅ `blixard cluster status --addr <addr>`
+
+### Priority 4: Raft Log Compaction
+Essential for production use to prevent unbounded log growth.
+
+**Implementation tasks:**
+1. Add compaction thresholds configuration
+2. Implement periodic compaction trigger
+3. Clean up old logs after snapshots
+4. Add tests for compaction scenarios
+
+### Priority 5: Tailscale Integration
+Prominently featured in README but completely unimplemented.
+
+**Implementation tasks:**
+1. Research Tailscale API integration
+2. Implement device authentication
+3. Add peer discovery via Tailscale
+4. Configure secure networking for VMs
+5. Add tests with mock Tailscale
+
+## Next Immediate Steps
+
+1. ~~**Fix test coverage gaps** (1-2 days)~~ ✅ COMPLETED
+   - ~~Write comprehensive tests for `raft_codec.rs`~~ ✅
+   - ~~Add property tests for SharedNodeState~~ ✅
+   - ~~Create integration test framework~~ ✅
+
+2. **Research MicroVM integration** (1 day) 🔜 NEXT
+   - Study microvm.nix documentation
+   - Create proof-of-concept VM creation
+   - Design integration architecture
+
+3. **Implement basic MicroVM operations** (3-5 days)
+   - Start with create/delete VM
+   - Add start/stop functionality
+   - Implement status monitoring
+   - Add comprehensive tests
+
+4. ~~**Add CLI cluster commands** (1 day)~~ ✅ COMPLETED
+   - ~~Implement the three missing commands~~ ✅
+   - ~~Add integration tests~~ ✅
+   - ~~Update documentation~~ ✅
 
 ## Success Metrics
 
-- All tests pass reliably (no flaky tests)
-- Task submission and execution works end-to-end
-- Three-node clusters can handle node failures gracefully
-- No hardcoded sleeps in test code
-- Clear documentation of remaining limitations
-
-## Technical Details
-
-### Worker Registration Implementation
-- Add `WORKER_TABLE` and `WORKER_STATUS_TABLE` creation in `Storage::new()`
-- Register worker on node startup with capacity and capabilities
-- Background task for periodic health updates
-- Clean up stale workers on timeout
-
-### Task Execution Implementation
-- Create `src/task_executor.rs` for task execution logic
-- Use tokio::process for command execution
-- Capture stdout/stderr and exit codes
-- Submit results through Raft consensus
-- Handle task timeouts and resource limits
-
-### Test Infrastructure Fixes
-- Update `tests/common/test_timing.rs` to properly check conditions
-- Create helper functions for common test scenarios
-- Add deterministic waiting for Raft state changes
-- Remove all direct `tokio::time::sleep` calls
-
-### Database Schema Updates
-```rust
-// Worker table schema
-struct Worker {
-    node_id: u64,
-    capacity: u32,
-    available_capacity: u32,
-    last_heartbeat: u64,
-    status: WorkerStatus,
-}
-
-// Worker status table schema  
-struct WorkerStatus {
-    node_id: u64,
-    cpu_usage: f32,
-    memory_usage: f32,
-    task_count: u32,
-}
-```
+- All components have >80% test coverage
+- Zero untested critical paths (like raft_codec)
+- Can create, start, stop, and delete VMs reliably
+- Three-node clusters form and operate consistently
+- All tests pass deterministically with MadSim
