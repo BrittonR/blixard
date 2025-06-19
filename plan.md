@@ -273,3 +273,20 @@ All three phases have been successfully implemented:
 4. **Maintained Performance**: ReDB's memory-mapped files provide sufficient caching
 
 The system now correctly ensures that all distributed state changes flow through Raft consensus, preventing inconsistencies across the cluster.
+
+## Additional Fixes
+
+### Non-Leader Configuration Updates (COMPLETED)
+After the initial implementation, we discovered that non-leader nodes weren't properly updating their configuration state after RemoveNode operations. This was causing test failures where nodes reported incorrect cluster membership.
+
+**Root Causes:**
+1. Non-leader nodes have incomplete Raft configuration views (empty voters set)
+2. The gRPC server's `get_cluster_status` was returning membership from the local peers HashMap instead of Raft state
+3. When non-leaders tried to apply RemoveNode, they got "removed all voters" errors
+
+**Solutions Implemented:**
+1. **RaftManager fix**: Non-leaders now detect empty Raft configuration and update their conf state directly from the log entry
+2. **gRPC server fix**: `get_cluster_status` now uses the authoritative Raft configuration via `get_current_voters()`
+3. **SharedNodeState fix**: `get_cluster_status` now reads from Raft storage instead of the local peers map
+
+With these fixes, all nodes now report consistent cluster membership after configuration changes, and all tests pass reliably.

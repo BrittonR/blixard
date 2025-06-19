@@ -346,6 +346,14 @@ The project includes dependencies for:
    - Solution: Added comprehensive documentation about local vs distributed state
    - See `plan.md` for detailed analysis and implementation
 
+6. **Non-Leader Configuration State Updates** (✅ FIXED)
+   - Fixed: Non-leader nodes weren't properly updating configuration after RemoveNode
+   - Fixed: gRPC server was returning cluster membership from local routing table
+   - Solution: Non-leaders now update conf state directly from log entries
+   - Solution: `get_cluster_status` now uses authoritative Raft configuration
+   - Solution: All nodes now report consistent cluster membership
+   - See `RAFT_CONSENSUS_ENFORCEMENT.md` for details
+
 ## Known Test Reliability Issues
 
 See `TEST_RELIABILITY_ISSUES.md` for full details. Major issues:
