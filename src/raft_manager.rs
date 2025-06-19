@@ -774,6 +774,19 @@ impl RaftManager {
         }
         
         let mut node = self.raft_node.write().await;
+        
+        // Check if the sender is still in the configuration before processing the message
+        // This prevents crashes when messages arrive from recently removed nodes
+        let current_voters = node.raft.prs().conf().voters().clone();
+        if !current_voters.contains(from) {
+            warn!(self.logger, "[RAFT-MSG] Discarding message from node not in configuration";
+                "from" => from,
+                "current_voters" => ?current_voters,
+                "msg_type" => ?msg.msg_type()
+            );
+            return Ok(());
+        }
+        
         node.step(msg)
             .map_err(|e| BlixardError::Raft {
                 operation: "step message".to_string(),

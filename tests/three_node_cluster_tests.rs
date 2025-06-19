@@ -490,3 +490,130 @@ async fn test_three_node_cluster_stress() {
     
     cluster.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore] // Manual test - run with: cargo test test_removed_node_message_handling -- --ignored --nocapture
+async fn test_removed_node_message_handling() {
+    use blixard::proto::{TaskRequest, LeaveRequest};
+    
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("info")
+        .try_init();
+    
+    // Create three-node cluster
+    let cluster = TestCluster::builder()
+        .with_nodes(3)
+        .with_convergence_timeout(Duration::from_secs(30))
+        .build()
+        .await
+        .expect("Failed to create cluster");
+    
+    eprintln!("Cluster formed with leader");
+    
+    // Get leader client
+    let mut leader_client = cluster.leader_client().await
+        .expect("No leader found");
+    
+    // Submit a task to ensure cluster is working
+    let result = leader_client.submit_task(TaskRequest {
+        task_id: "test-initial".to_string(),
+        command: "echo".to_string(),
+        args: vec!["initial".to_string()],
+        cpu_cores: 1,
+        memory_mb: 128,
+        disk_gb: 1,
+        required_features: vec![],
+        timeout_secs: 10,
+    }).await;
+    assert!(result.is_ok(), "Initial task submission should succeed");
+    
+    // Find the leader ID
+    let status = leader_client.get_cluster_status(ClusterStatusRequest {}).await
+        .expect("Failed to get status").into_inner();
+    let leader_id = status.leader_id as u64;
+    
+    // Get node to remove (not the leader)
+    let node_to_remove = if leader_id == 1 { 2 } else { 1 };
+    eprintln!("Will remove node {}", node_to_remove);
+    
+    // Start a background task that sends messages from node to be removed
+    let node_client = cluster.client(node_to_remove).await
+        .expect("Failed to get client");
+    let mut node_client_clone = node_client.clone();
+    let message_sender = tokio::spawn(async move {
+        for i in 0..20 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            
+            // Try to submit a task which will generate Raft messages
+            let _ = node_client_clone.submit_task(TaskRequest {
+                task_id: format!("msg-{}", i),
+                command: "echo".to_string(),
+                args: vec![format!("msg-{}", i)],
+                cpu_cores: 1,
+                memory_mb: 128,
+                disk_gb: 1,
+                required_features: vec![],
+                timeout_secs: 10,
+            }).await;
+            eprintln!("Node {} sent message {}", node_to_remove, i);
+        }
+    });
+    
+    // Wait a bit for messages to start flowing
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    
+    // Remove node from the cluster
+    eprintln!("Removing node {} from cluster", node_to_remove);
+    let result = leader_client.leave_cluster(LeaveRequest {
+        node_id: node_to_remove,
+    }).await;
+    
+    // Handle the response
+    match &result {
+        Err(e) if e.to_string().contains("removed all voters") => {
+            eprintln!("Got expected 'removed all voters' error, waiting for recovery");
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        Err(e) => panic!("Unexpected error during leave_cluster: {}", e),
+        Ok(resp) => {
+            let inner = resp.get_ref();
+            if inner.success {
+                eprintln!("Node {} removed successfully", node_to_remove);
+            } else {
+                eprintln!("Node removal failed: {}", inner.message);
+            }
+        }
+    }
+    
+    // Let the message sender continue for a bit
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    
+    // Now submit tasks from the leader - this should succeed despite messages from removed node
+    eprintln!("Submitting tasks after node removal");
+    for i in 0..10 {
+        let result = leader_client.submit_task(TaskRequest {
+            task_id: format!("after-remove-{}", i),
+            command: "echo".to_string(),
+            args: vec![format!("after-remove-{}", i)],
+            cpu_cores: 1,
+            memory_mb: 128,
+            disk_gb: 1,
+            required_features: vec![],
+            timeout_secs: 10,
+        }).await;
+        match result {
+            Ok(_) => eprintln!("Task {} submitted successfully", i),
+            Err(e) => {
+                // This is the bug we're fixing - messages from removed nodes shouldn't crash the Raft manager
+                panic!("Task submission failed after node removal: {}. This indicates messages from removed nodes are crashing the Raft manager.", e);
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    
+    eprintln!("All tasks submitted successfully - removed node messages handled gracefully!");
+    
+    // Clean up
+    message_sender.abort();
+    cluster.shutdown().await;
+}

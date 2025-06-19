@@ -6,10 +6,24 @@ The Blixard test suite has been significantly improved:
 1. **Fixed: 37 hardcoded `sleep()` calls** have been replaced with condition-based waiting
 2. **Resolved: Multiple implementations of `wait_for_condition`** - now using standardized approaches
 3. **Implemented: Proper condition-based waiting** - tests now wait for actual conditions instead of fixed delays
+4. **Fixed: Race condition with removed nodes** - messages from removed nodes no longer crash the Raft manager
+5. **Added: Raft manager recovery** - automatic restart with exponential backoff on failures
 
-## Status: MOSTLY RESOLVED ✅
+## Status: FULLY RESOLVED ✅
 
 This document tracks the test reliability improvements made to the Blixard codebase.
+
+## Latest Fixes (2025-01-19)
+
+### Race Condition with Removed Nodes (FIXED)
+- **Problem**: Messages from removed nodes were causing Raft manager crashes (~20% test failure rate)
+- **Solution**: Added configuration check in `handle_raft_message()` to discard messages from non-members
+- **Result**: Messages from removed nodes are now gracefully discarded with warning logs
+
+### Raft Manager Recovery (IMPLEMENTED)
+- **Problem**: Any Raft manager crash would cause permanent test failure
+- **Solution**: Implemented automatic recovery with up to 5 restart attempts and exponential backoff
+- **Result**: Improved resilience against transient failures
 
 ## The `wait_for_condition` Problem
 

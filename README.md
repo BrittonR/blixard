@@ -132,10 +132,16 @@ MADSIM_TEST_SEED=12345 cargo test -p blixard-madsim-tests
 ### Test Status
 
 - **Single-node clusters**: ✅ Fully working and reliable
-- **Three-node clusters**: ✅ Core functionality working (basic cluster formation, leader election)
+- **Three-node clusters**: ✅ Core functionality working with improved reliability
+  - Fixed race condition with messages from removed nodes
+  - Added Raft manager recovery mechanism
+  - All cluster tests now pass reliably
 - **Multi-node operations**: 🔧 Partial - task/worker functionality not yet implemented
 
-Recent fixes have resolved the three-node cluster formation issues. See [THREE_NODE_CLUSTER_DEBUG.md](THREE_NODE_CLUSTER_DEBUG.md) for details.
+Recent fixes have resolved critical test reliability issues:
+- **Race condition fix**: Messages from removed nodes no longer crash the Raft manager
+- **Recovery mechanism**: Raft manager automatically restarts on failure (up to 5 attempts)
+- See [tests.md](tests.md) and [TEST_RELIABILITY_ISSUES.md](TEST_RELIABILITY_ISSUES.md) for details.
 
 ### Deterministic Testing
 

@@ -154,9 +154,104 @@ impl Node {
             Ok::<(), BlixardError>(())
         });
         
-        // Start Raft manager in background
+        // Start Raft manager with automatic recovery
+        let shared_weak = Arc::downgrade(&self.shared);
         let raft_handle = tokio::spawn(async move {
-            raft_manager.run().await
+            let mut restart_count = 0;
+            const MAX_RESTARTS: u32 = 5;
+            const RESTART_DELAY_MS: u64 = 1000;
+            
+            // Run the initial Raft manager
+            match raft_manager.run().await {
+                Ok(_) => {
+                    tracing::info!("Raft manager exited normally");
+                    return Ok(());
+                }
+                Err(e) => {
+                    tracing::error!("Raft manager crashed: {}", e);
+                    restart_count = 1;
+                }
+            }
+            
+            // Recovery loop
+            while restart_count < MAX_RESTARTS {
+                tracing::info!("Restarting Raft manager (attempt #{})", restart_count + 1);
+                
+                // Get strong reference to shared state
+                let shared = match shared_weak.upgrade() {
+                    Some(s) => s,
+                    None => {
+                        tracing::error!("Shared state dropped, cannot restart Raft manager");
+                        break;
+                    }
+                };
+                
+                // Wait before restarting with exponential backoff
+                tokio::time::sleep(tokio::time::Duration::from_millis(RESTART_DELAY_MS * restart_count as u64)).await;
+                
+                // Get database and peers
+                let db = match shared.get_database().await {
+                    Some(db) => db,
+                    None => {
+                        tracing::error!("Database not available, cannot restart Raft manager");
+                        break;
+                    }
+                };
+                
+                let peer_infos = shared.get_peers().await;
+                let peers: Vec<(u64, String)> = peer_infos.into_iter()
+                    .map(|p| (p.id, p.address))
+                    .collect();
+                let node_id = shared.get_id();
+                
+                // Create new Raft manager
+                match RaftManager::new(
+                    node_id,
+                    db.clone(),
+                    peers,
+                    Arc::downgrade(&shared),
+                ) {
+                    Ok((new_raft_manager, proposal_tx, message_tx, conf_change_tx, outgoing_rx)) => {
+                        // Update shared state with new channels
+                        shared.set_raft_proposal_tx(proposal_tx).await;
+                        shared.set_raft_message_tx(message_tx).await;
+                        shared.set_raft_conf_change_tx(conf_change_tx).await;
+                        
+                        // Start handling outgoing messages
+                        if let Some(peer_connector) = shared.get_peer_connector().await {
+                            let peer_connector_clone = peer_connector.clone();
+                            tokio::spawn(async move {
+                                let mut outgoing_rx = outgoing_rx;
+                                while let Some((to, msg)) = outgoing_rx.recv().await {
+                                    if let Err(e) = peer_connector_clone.send_raft_message(to, msg).await {
+                                        tracing::warn!("Failed to send Raft message to {}: {}", to, e);
+                                    }
+                                }
+                            });
+                        }
+                        
+                        // Run the new Raft manager
+                        match new_raft_manager.run().await {
+                            Ok(_) => {
+                                tracing::info!("Restarted Raft manager exited normally");
+                                return Ok(());
+                            }
+                            Err(e) => {
+                                tracing::error!("Restarted Raft manager crashed: {}", e);
+                                restart_count += 1;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to recreate Raft manager: {}", e);
+                        return Err(e);
+                    }
+                }
+            }
+            
+            Err(BlixardError::Internal {
+                message: format!("Raft manager failed after {} restart attempts", MAX_RESTARTS),
+            })
         });
         self.raft_handle = Some(raft_handle);
         
