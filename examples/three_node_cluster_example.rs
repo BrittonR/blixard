@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create bootstrap node first
     let node1 = TestNode::builder()
         .with_id(1)
-        .with_auto_port()
+        .with_auto_port().await
         .build()
         .await?;
     
@@ -29,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create node 2 that will join node 1
     let node2 = TestNode::builder()
         .with_id(2)
-        .with_auto_port()
+        .with_auto_port().await
         .with_join_addr(Some(node1.addr))
         .build()
         .await?;
@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create node 3 that will also join node 1
     let node3 = TestNode::builder()
         .with_id(3)
-        .with_auto_port()
+        .with_auto_port().await
         .with_join_addr(Some(node1.addr))
         .build()
         .await?;

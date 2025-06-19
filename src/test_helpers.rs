@@ -5,7 +5,7 @@
 //! and better wait conditions.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 use std::net::SocketAddr;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -27,6 +27,11 @@ use crate::{
 
 /// Global port allocator for tests
 static PORT_ALLOCATOR: AtomicU16 = AtomicU16::new(20000);
+
+/// Diagnostic counters for port allocation
+static PORT_ALLOCATION_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+static PORT_ALLOCATION_FAILURES: AtomicU64 = AtomicU64::new(0);
+static PORT_ALLOCATION_SUCCESSES: AtomicU64 = AtomicU64::new(0);
 
 /// Port allocator for automatic port assignment
 pub struct PortAllocator;
@@ -129,9 +134,103 @@ impl PortAllocator {
         }
     }
     
+    /// Get the next available port that can actually be bound to
+    /// This method tries to bind to the port before returning it,
+    /// eliminating race conditions
+    pub async fn next_available_port() -> u16 {
+        let max_attempts = 100;
+        let mut attempts = 0;
+        let debug_enabled = env::var("BLIXARD_PORT_DEBUG").is_ok();
+        let start_time = Instant::now();
+        
+        loop {
+            let port = Self::next_port();
+            PORT_ALLOCATION_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
+            
+            // Try to bind to the port
+            match tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port)).await {
+                Ok(listener) => {
+                    // Successfully bound - immediately close it
+                    drop(listener);
+                    
+                    PORT_ALLOCATION_SUCCESSES.fetch_add(1, Ordering::Relaxed);
+                    let elapsed = start_time.elapsed();
+                    
+                    if debug_enabled {
+                        eprintln!(
+                            "PortAllocator: Successfully allocated port {} after {} attempts in {:?}",
+                            port, attempts + 1, elapsed
+                        );
+                    }
+                    
+                    // Log if this was particularly difficult
+                    if attempts > 5 {
+                        tracing::warn!(
+                            "Port allocation required {} attempts ({:?}) - consider increasing port range",
+                            attempts + 1, elapsed
+                        );
+                    }
+                    
+                    return port;
+                }
+                Err(e) => {
+                    attempts += 1;
+                    PORT_ALLOCATION_FAILURES.fetch_add(1, Ordering::Relaxed);
+                    
+                    if debug_enabled {
+                        eprintln!("PortAllocator: Port {} unavailable: {}", port, e);
+                    }
+                    
+                    if attempts >= max_attempts {
+                        let stats = Self::get_stats();
+                        panic!(
+                            "Failed to find available port after {} attempts. Stats: {}",
+                            max_attempts, stats
+                        );
+                    }
+                    
+                    // Add a small delay with exponential backoff
+                    let delay = Duration::from_millis(10 * (attempts.min(5) as u64));
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
+    }
+    
     /// Reset port allocator (useful between test runs)
     pub fn reset() {
         PORT_ALLOCATOR.store(20000, Ordering::SeqCst);
+        PORT_ALLOCATION_ATTEMPTS.store(0, Ordering::SeqCst);
+        PORT_ALLOCATION_FAILURES.store(0, Ordering::SeqCst);
+        PORT_ALLOCATION_SUCCESSES.store(0, Ordering::SeqCst);
+    }
+    
+    /// Get port allocation statistics
+    pub fn get_stats() -> String {
+        let attempts = PORT_ALLOCATION_ATTEMPTS.load(Ordering::Relaxed);
+        let failures = PORT_ALLOCATION_FAILURES.load(Ordering::Relaxed);
+        let successes = PORT_ALLOCATION_SUCCESSES.load(Ordering::Relaxed);
+        let current = PORT_ALLOCATOR.load(Ordering::Relaxed);
+        
+        format!(
+            "attempts: {}, successes: {}, failures: {}, current_port: {}, failure_rate: {:.2}%",
+            attempts,
+            successes,
+            failures,
+            current,
+            if attempts > 0 {
+                (failures as f64 / attempts as f64) * 100.0
+            } else {
+                0.0
+            }
+        )
+    }
+    
+    /// Print port allocation statistics (useful for debugging)
+    pub fn print_stats() {
+        if env::var("BLIXARD_PORT_DEBUG").is_ok() {
+            eprintln!("PortAllocator Stats: {}", Self::get_stats());
+        }
     }
 }
 
@@ -228,8 +327,8 @@ impl TestNodeBuilder {
         self
     }
     
-    pub fn with_auto_port(mut self) -> Self {
-        self.port = Some(PortAllocator::next_port());
+    pub async fn with_auto_port(mut self) -> Self {
+        self.port = Some(PortAllocator::next_available_port().await);
         self
     }
     
@@ -478,7 +577,7 @@ impl TestCluster {
         
         let node = TestNode::builder()
             .with_id(id)
-            .with_auto_port()
+            .with_auto_port().await
             .with_join_addr(Some(leader_addr.parse().unwrap()))
             .build()
             .await?;
@@ -618,7 +717,7 @@ impl TestClusterBuilder {
         // Create bootstrap node
         let bootstrap_node = TestNode::builder()
             .with_id(1)
-            .with_auto_port()
+            .with_auto_port().await
             .build()
             .await?;
         
@@ -629,7 +728,7 @@ impl TestClusterBuilder {
         for id in 2..=node_count as u64 {
             let node = TestNode::builder()
                 .with_id(id)
-                .with_auto_port()
+                .with_auto_port().await
                 .with_join_addr(Some(bootstrap_addr))
                 .build()
                 .await?;
@@ -767,7 +866,7 @@ mod tests {
     async fn test_single_node() {
         let node = TestNode::builder()
             .with_id(1)
-            .with_auto_port()
+            .with_auto_port().await
             .build()
             .await
             .unwrap();

@@ -10,7 +10,7 @@ mod tests {
         // Phase 1: Create and start node
         let node = TestNode::builder()
             .with_id(1)
-            .with_auto_port()
+            .with_auto_port().await
             .build()
             .await
             .unwrap();
@@ -78,7 +78,7 @@ mod tests {
         // Phase 1: Create and bootstrap first node
         let node1 = TestNode::builder()
             .with_id(1)
-            .with_auto_port()
+            .with_auto_port().await
             .build()
             .await
             .unwrap();
@@ -101,7 +101,7 @@ mod tests {
         // Phase 2: Add second node and join cluster
         let node2 = TestNode::builder()
             .with_id(2)
-            .with_auto_port()
+            .with_auto_port().await
             .with_join_addr(Some(node1.addr))
             .build()
             .await
@@ -129,7 +129,7 @@ mod tests {
         // Phase 3: Add third node
         let node3 = TestNode::builder()
             .with_id(3)
-            .with_auto_port()
+            .with_auto_port().await
             .with_join_addr(Some(node1.addr))
             .build()
             .await
@@ -209,7 +209,7 @@ mod tests {
         
         let mut node = TestNode::builder()
             .with_id(1)
-            .with_auto_port()
+            .with_auto_port().await
             .with_data_dir(data_dir.clone())
             .build()
             .await
@@ -252,7 +252,7 @@ mod tests {
         // Restart the node with same data directory
         node = TestNode::builder()
             .with_id(1)
-            .with_auto_port()
+            .with_auto_port().await
             .with_data_dir(data_dir)
             .build()
             .await
@@ -372,7 +372,7 @@ mod tests {
         // Now create a proper node to test other error conditions
         let node1 = TestNode::builder()
             .with_id(1)
-            .with_auto_port()
+            .with_auto_port().await
             .build()
             .await
             .unwrap();

@@ -278,7 +278,7 @@ async fn test_three_node_cluster_fault_tolerance() {
     
     let new_node = TestNode::builder()
         .with_id(4)
-        .with_auto_port()
+        .with_auto_port().await
         .with_join_addr(Some(leader_addr))
         .build()
         .await
@@ -398,7 +398,7 @@ async fn test_three_node_cluster_membership_changes() {
     
     let node4 = TestNode::builder()
         .with_id(4)
-        .with_auto_port()
+        .with_auto_port().await
         .with_join_addr(Some(leader_addr))
         .build()
         .await

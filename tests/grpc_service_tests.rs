@@ -1,46 +1,18 @@
-use std::sync::Arc;
+#![cfg(feature = "test-helpers")]
+
 use std::net::SocketAddr;
 use tokio::time::{sleep, Duration};
 use tonic::transport::Channel;
 
 use blixard::{
-    node_shared::SharedNodeState,
-    types::NodeConfig,
     proto::{
         blixard_service_client::BlixardServiceClient,
         cluster_service_client::ClusterServiceClient,
         GetRaftStatusRequest, ProposeTaskRequest, Task,
         HealthCheckRequest,
     },
-    grpc_server::start_grpc_server,
+    test_helpers::TestNode,
 };
-
-async fn setup_test_server() -> (Arc<SharedNodeState>, SocketAddr, tokio::task::JoinHandle<()>) {
-    let node_config = NodeConfig {
-        id: 1,
-        bind_addr: "127.0.0.1:0".parse().unwrap(),
-        data_dir: tempfile::tempdir().unwrap().path().to_string_lossy().to_string(),
-        join_addr: None,
-        use_tailscale: false,
-    };
-    
-    let shared_state = Arc::new(SharedNodeState::new(node_config));
-    
-    // Find an available port
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-    drop(listener);
-    
-    let state_clone = shared_state.clone();
-    let handle = tokio::spawn(async move {
-        start_grpc_server(state_clone, addr).await.unwrap();
-    });
-    
-    // Give the server time to start
-    sleep(Duration::from_millis(100)).await;
-    
-    (shared_state, addr, handle)
-}
 
 async fn create_client(addr: SocketAddr) -> (BlixardServiceClient<Channel>, ClusterServiceClient<Channel>) {
     let endpoint = format!("http://{}", addr);
@@ -70,10 +42,15 @@ async fn create_client(addr: SocketAddr) -> (BlixardServiceClient<Channel>, Clus
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_grpc_server_starts_successfully() {
-    let (_state, addr, handle) = setup_test_server().await;
+    let node = TestNode::builder()
+        .with_id(1)
+        .with_auto_port().await
+        .build()
+        .await
+        .unwrap();
     
     // Try to connect to the server
-    let (_blixard_client, mut cluster_client) = create_client(addr).await;
+    let (_blixard_client, mut cluster_client) = create_client(node.addr).await;
     
     // Test health check
     let response = cluster_client.health_check(HealthCheckRequest {}).await;
@@ -83,14 +60,19 @@ async fn test_grpc_server_starts_successfully() {
     assert!(health.message.contains("Node 1 is healthy"));
     
     // Cleanup
-    handle.abort();
+    node.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_get_raft_status_default_state() {
-    let (_state, addr, handle) = setup_test_server().await;
+    let node = TestNode::builder()
+        .with_id(1)
+        .with_auto_port().await
+        .build()
+        .await
+        .unwrap();
     
-    let (mut blixard_client, _cluster_client) = create_client(addr).await;
+    let (mut blixard_client, _cluster_client) = create_client(node.addr).await;
     
     // Get Raft status
     let response = blixard_client.get_raft_status(GetRaftStatusRequest {}).await;
@@ -104,12 +86,17 @@ async fn test_get_raft_status_default_state() {
     assert_eq!(status.state, "follower");
     
     // Cleanup
-    handle.abort();
+    node.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_get_raft_status_after_update() {
-    let (state, addr, handle) = setup_test_server().await;
+    let node = TestNode::builder()
+        .with_id(1)
+        .with_auto_port().await
+        .build()
+        .await
+        .unwrap();
     
     // Update Raft status
     let status = blixard::node_shared::RaftStatus {
@@ -119,9 +106,9 @@ async fn test_get_raft_status_after_update() {
         term: 5,
         state: "leader".to_string(),
     };
-    state.update_raft_status(status).await;
+    node.shared_state.update_raft_status(status).await;
     
-    let (mut blixard_client, _cluster_client) = create_client(addr).await;
+    let (mut blixard_client, _cluster_client) = create_client(node.addr).await;
     
     // Get Raft status
     let response = blixard_client.get_raft_status(GetRaftStatusRequest {}).await;
@@ -135,14 +122,19 @@ async fn test_get_raft_status_after_update() {
     assert_eq!(status.state, "leader");
     
     // Cleanup
-    handle.abort();
+    node.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_propose_task_without_raft_manager() {
-    let (_state, addr, handle) = setup_test_server().await;
+    let node = TestNode::builder()
+        .with_id(1)
+        .with_auto_port().await
+        .build()
+        .await
+        .unwrap();
     
-    let (mut blixard_client, _cluster_client) = create_client(addr).await;
+    let (mut blixard_client, _cluster_client) = create_client(node.addr).await;
     
     // Propose a task (will fail without Raft manager)
     let task = Task {
@@ -163,14 +155,19 @@ async fn test_propose_task_without_raft_manager() {
     assert!(result.message.contains("Failed to propose task"));
     
     // Cleanup
-    handle.abort();
+    node.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_propose_task_validation() {
-    let (_state, addr, handle) = setup_test_server().await;
+    let node = TestNode::builder()
+        .with_id(1)
+        .with_auto_port().await
+        .build()
+        .await
+        .unwrap();
     
-    let (mut blixard_client, _cluster_client) = create_client(addr).await;
+    let (mut blixard_client, _cluster_client) = create_client(node.addr).await;
     
     // Test with missing task
     let response = blixard_client.propose_task(ProposeTaskRequest {
@@ -201,14 +198,19 @@ async fn test_propose_task_validation() {
     assert_eq!(result.message, "Task ID cannot be empty");
     
     // Cleanup
-    handle.abort();
+    node.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_both_services_accessible() {
-    let (_state, addr, handle) = setup_test_server().await;
+    let node = TestNode::builder()
+        .with_id(1)
+        .with_auto_port().await
+        .build()
+        .await
+        .unwrap();
     
-    let (mut blixard_client, mut cluster_client) = create_client(addr).await;
+    let (mut blixard_client, mut cluster_client) = create_client(node.addr).await;
     
     // Test BlixardService
     let raft_response = blixard_client.get_raft_status(GetRaftStatusRequest {}).await;
@@ -219,14 +221,19 @@ async fn test_both_services_accessible() {
     assert!(health_response.is_ok());
     
     // Cleanup
-    handle.abort();
+    node.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_concurrent_requests() {
-    let (_state, addr, handle) = setup_test_server().await;
+    let node = TestNode::builder()
+        .with_id(1)
+        .with_auto_port().await
+        .build()
+        .await
+        .unwrap();
     
-    let (blixard_client, cluster_client) = create_client(addr).await;
+    let (blixard_client, cluster_client) = create_client(node.addr).await;
     
     // Spawn multiple concurrent requests
     let mut handles = vec![];
@@ -255,14 +262,19 @@ async fn test_concurrent_requests() {
     }
     
     // Cleanup
-    handle.abort();
+    node.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_task_proposal_with_various_configs() {
-    let (_state, addr, handle) = setup_test_server().await;
+    let node = TestNode::builder()
+        .with_id(1)
+        .with_auto_port().await
+        .build()
+        .await
+        .unwrap();
     
-    let (mut blixard_client, _cluster_client) = create_client(addr).await;
+    let (mut blixard_client, _cluster_client) = create_client(node.addr).await;
     
     // Test various task configurations
     let test_cases = vec![
@@ -293,21 +305,27 @@ async fn test_task_proposal_with_various_configs() {
     }
     
     // Cleanup
-    handle.abort();
+    node.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_server_shutdown_gracefully() {
-    let (_state, addr, handle) = setup_test_server().await;
+    let node = TestNode::builder()
+        .with_id(1)
+        .with_auto_port().await
+        .build()
+        .await
+        .unwrap();
     
+    let addr = node.addr;
     let (mut blixard_client, _cluster_client) = create_client(addr).await;
     
     // Verify server is running
     let response = blixard_client.get_raft_status(GetRaftStatusRequest {}).await;
     assert!(response.is_ok());
     
-    // Abort the server
-    handle.abort();
+    // Shutdown the node
+    node.shutdown().await;
     
     // Give it time to shut down
     sleep(Duration::from_millis(500)).await;
@@ -320,7 +338,12 @@ async fn test_server_shutdown_gracefully() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_error_handling_for_invalid_raft_state() {
-    let (state, addr, handle) = setup_test_server().await;
+    let node = TestNode::builder()
+        .with_id(1)
+        .with_auto_port().await
+        .build()
+        .await
+        .unwrap();
     
     // Set some edge case values
     let status = blixard::node_shared::RaftStatus {
@@ -330,9 +353,9 @@ async fn test_error_handling_for_invalid_raft_state() {
         term: u64::MAX,
         state: "unknown".to_string(),
     };
-    state.update_raft_status(status).await;
+    node.shared_state.update_raft_status(status).await;
     
-    let (mut blixard_client, _cluster_client) = create_client(addr).await;
+    let (mut blixard_client, _cluster_client) = create_client(node.addr).await;
     
     // Should still return valid response
     let response = blixard_client.get_raft_status(GetRaftStatusRequest {}).await;
@@ -345,5 +368,5 @@ async fn test_error_handling_for_invalid_raft_state() {
     assert_eq!(status.state, "unknown");
     
     // Cleanup
-    handle.abort();
+    node.shutdown().await;
 }

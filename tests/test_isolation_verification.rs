@@ -15,7 +15,7 @@ async fn test_node_cleanup_releases_resources() {
     for i in 1..=3 {
         let node = TestNode::builder()
             .with_id(i)
-            .with_auto_port()
+            .with_auto_port().await
             .build()
             .await
             .expect("Failed to create node");
@@ -48,7 +48,7 @@ async fn test_background_tasks_cleanup() {
     // Create a node with peer connector
     let node = TestNode::builder()
         .with_id(1)
-        .with_auto_port()
+        .with_auto_port().await
         .build()
         .await
         .expect("Failed to create node");
@@ -128,7 +128,7 @@ async fn test_database_cleanup() {
     {
         let node1 = TestNode::builder()
             .with_id(1)
-            .with_auto_port()
+            .with_auto_port().await
             .with_data_dir(data_dir.to_string_lossy().to_string())
             .build()
             .await
@@ -150,7 +150,7 @@ async fn test_database_cleanup() {
     {
         let node2 = TestNode::builder()
             .with_id(2)
-            .with_auto_port()
+            .with_auto_port().await
             .with_data_dir(data_dir.to_string_lossy().to_string())
             .build()
             .await
@@ -196,7 +196,7 @@ async fn test_rapid_node_lifecycle() {
     for i in 1..=10 {
         let node = TestNode::builder()
             .with_id(i)
-            .with_auto_port()
+            .with_auto_port().await
             .build()
             .await
             .expect(&format!("Failed to create node {}", i));
@@ -220,7 +220,7 @@ async fn test_peer_connector_task_cleanup() {
     // Create a node - this will start peer connector background tasks
     let node = TestNode::builder()
         .with_id(1)
-        .with_auto_port()
+        .with_auto_port().await
         .build()
         .await
         .expect("Failed to create node");

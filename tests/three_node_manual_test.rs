@@ -17,7 +17,7 @@ async fn test_three_node_cluster_manual_approach() {
     // Step 1: Create bootstrap node
     let node1 = TestNode::builder()
         .with_id(1)
-        .with_auto_port()
+        .with_auto_port().await
         .build()
         .await
         .expect("Failed to create node 1");
@@ -48,7 +48,7 @@ async fn test_three_node_cluster_manual_approach() {
     // Step 2: Create and join node 2
     let node2 = TestNode::builder()
         .with_id(2)
-        .with_auto_port()
+        .with_auto_port().await
         .with_join_addr(Some(node1.addr))
         .build()
         .await
@@ -77,7 +77,7 @@ async fn test_three_node_cluster_manual_approach() {
     // Step 3: Create and join node 3
     let node3 = TestNode::builder()
         .with_id(3)
-        .with_auto_port()
+        .with_auto_port().await
         .with_join_addr(Some(node1.addr))
         .build()
         .await
