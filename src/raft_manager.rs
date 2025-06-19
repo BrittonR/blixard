@@ -587,6 +587,13 @@ impl RaftManager {
         let logger = slog::Logger::root(drain, o!("node_id" => node_id));
 
         // Create Raft node with a clone of storage
+        let mut raft_node = RawNode::new(&cfg, storage.clone(), &logger)
+            .map_err(|e| BlixardError::Raft {
+                operation: "create raft node".to_string(),
+                source: Box::new(e),
+            })?;
+        
+        // Create Raft node with a clone of storage
         let raft_node = RawNode::new(&cfg, storage.clone(), &logger)
             .map_err(|e| BlixardError::Raft {
                 operation: "create raft node".to_string(),
@@ -1639,58 +1646,75 @@ impl RaftManager {
                             // Handle the configuration state based on the change type
                             let final_cs = match cc.change_type() {
                                 raft::prelude::ConfChangeType::AddNode => {
-                                    // WORKAROUND: For joining nodes, the returned ConfState might be incomplete
-                                    // If we're adding a node and the current voters list is incomplete,
-                                    // we need to ensure the configuration includes all nodes
-                                    let mut corrected_cs = cs.clone();
-                                    
-                                    info!(self.logger, "[RAFT-CONF] Checking configuration completeness for AddNode";
+                                    info!(self.logger, "[RAFT-CONF] Processing AddNode configuration";
                                         "node_id" => self.node_id,
                                         "returned_voters" => ?cs.voters,
                                         "added_node" => cc.node_id
                                     );
                                     
-                                    // Special handling: For AddNode operations, the Raft library sometimes returns
-                                    // incomplete configurations. We need to ensure all nodes are included.
-                                    // This can happen when:
-                                    // 1. A node is processing its own AddNode (returns only the new node)
-                                    // 2. The configuration is missing existing voters
-                                    if cs.voters.len() <= 1 {
-                                        info!(self.logger, "[RAFT-CONF] Configuration appears incomplete, reconstructing";
-                                            "self_id" => self.node_id,
-                                            "returned_voters" => ?cs.voters,
-                                            "added_node" => cc.node_id
-                                        );
-                                        
-                                        // Load the previous configuration state and add the new node
-                                        if let Ok(prev_conf) = self.storage.load_conf_state() {
-                                            let mut new_voters = prev_conf.voters;
-                                            // Add the new node if not already present
-                                            if !new_voters.contains(&cc.node_id) {
-                                                new_voters.push(cc.node_id);
-                                            }
-                                            // Also ensure self is included (important for joining nodes)
-                                            if !new_voters.contains(&self.node_id) && self.node_id == cc.node_id {
-                                                // This is the joining node processing its own AddNode
-                                                new_voters.push(self.node_id);
-                                            }
-                                            corrected_cs.voters = new_voters;
-                                            info!(self.logger, "[RAFT-CONF] Reconstructed configuration";
-                                                "corrected_voters" => ?corrected_cs.voters
-                                            );
-                                        } else if cs.voters.len() == 1 && cs.voters[0] == cc.node_id {
-                                            // No previous configuration and only the new node in voters
-                                            // This might be the second node joining a single-node cluster
-                                            // Try to include node 1 (the bootstrap node)
-                                            if cc.node_id != 1 {
-                                                corrected_cs.voters = vec![1, cc.node_id];
-                                                info!(self.logger, "[RAFT-CONF] Assumed bootstrap configuration with node 1";
-                                                    "corrected_voters" => ?corrected_cs.voters
+                                    // For joining nodes that already have a saved configuration from the join response,
+                                    // trust that configuration rather than trying to reconstruct
+                                    if self.node_id == cc.node_id {
+                                        // This is the joining node processing its own AddNode
+                                        if let Ok(saved_conf) = self.storage.load_conf_state() {
+                                            if !saved_conf.voters.is_empty() {
+                                                info!(self.logger, "[RAFT-CONF] Joining node using saved configuration from join response";
+                                                    "saved_voters" => ?saved_conf.voters,
+                                                    "raft_returned_voters" => ?cs.voters
                                                 );
+                                                // Use the saved configuration which should be complete
+                                                let mut final_conf = saved_conf.clone();
+                                                // Ensure it includes self
+                                                if !final_conf.voters.contains(&self.node_id) {
+                                                    final_conf.voters.push(self.node_id);
+                                                    final_conf.voters.sort();
+                                                }
+                                                final_conf
+                                            } else {
+                                                // No saved configuration, use what Raft returned
+                                                cs
                                             }
+                                        } else {
+                                            // Failed to load saved configuration, use what Raft returned
+                                            cs
+                                        }
+                                    } else {
+                                        // For other nodes processing AddNode of a different node,
+                                        // we need to be careful about trusting Raft's returned configuration
+                                        // because it may not have the complete history
+                                        
+                                        // For non-leaders, always merge with existing configuration
+                                        if node.raft.state != raft::StateRole::Leader {
+                                            info!(self.logger, "[RAFT-CONF] Non-leader processing AddNode, merging with stored configuration";
+                                                "new_node" => cc.node_id,
+                                                "raft_returned" => ?cs.voters,
+                                                "is_leader" => false
+                                            );
+                                            
+                                            if let Ok(existing_conf) = self.storage.load_conf_state() {
+                                                let mut merged_conf = cs.clone();
+                                                merged_conf.voters = existing_conf.voters.clone();
+                                                if !merged_conf.voters.contains(&cc.node_id) {
+                                                    merged_conf.voters.push(cc.node_id);
+                                                    merged_conf.voters.sort();
+                                                }
+                                                info!(self.logger, "[RAFT-CONF] Merged configuration for non-leader";
+                                                    "merged_voters" => ?merged_conf.voters
+                                                );
+                                                merged_conf
+                                            } else {
+                                                // Can't load existing configuration, use what Raft returned
+                                                error!(self.logger, "[RAFT-CONF] Failed to load existing configuration for merge");
+                                                cs
+                                            }
+                                        } else {
+                                            // Leader should have complete configuration
+                                            info!(self.logger, "[RAFT-CONF] Leader using Raft's returned configuration";
+                                                "voters" => ?cs.voters
+                                            );
+                                            cs
                                         }
                                     }
-                                    corrected_cs
                                 }
                                 raft::prelude::ConfChangeType::RemoveNode => {
                                     // For RemoveNode, validate that we're not removing all voters
@@ -1747,8 +1771,34 @@ impl RaftManager {
                                             
                                             // Also update SharedNodeState peers
                                             if let Some(shared) = self.shared_state.upgrade() {
-                                                let _ = shared.add_peer(cc.node_id, address.clone()).await;
-                                                info!(self.logger, "[RAFT-CONF] Added peer to SharedNodeState"; "node_id" => cc.node_id);
+                                                // Check if peer already exists to avoid duplicate add
+                                                if shared.get_peer(cc.node_id).await.is_none() {
+                                                    let _ = shared.add_peer(cc.node_id, address.clone()).await;
+                                                    info!(self.logger, "[RAFT-CONF] Added peer to SharedNodeState"; "node_id" => cc.node_id);
+                                                } else {
+                                                    info!(self.logger, "[RAFT-CONF] Peer already exists in SharedNodeState"; "node_id" => cc.node_id);
+                                                }
+                                                
+                                                // CRITICAL FIX: Ensure all existing peers know about each other
+                                                // When a new node joins, we need to share peer information
+                                                if self.node_id == 1 || node.raft.state == raft::StateRole::Leader {
+                                                    // If we're the leader or bootstrap node, we should have all peer info
+                                                    let all_peers = shared.get_peers().await;
+                                                    info!(self.logger, "[RAFT-CONF] Ensuring peer information consistency";
+                                                        "total_peers" => all_peers.len(),
+                                                        "new_node" => cc.node_id
+                                                    );
+                                                    
+                                                    // Make sure all peers are in our local list and SharedNodeState
+                                                    for peer in all_peers {
+                                                        if peer.id != self.node_id && peer.id != cc.node_id {
+                                                            // This peer should also know about the new node
+                                                            // The peer will learn about it when processing this same log entry
+                                                            info!(self.logger, "[RAFT-CONF] Peer {} will learn about new node {} from log",
+                                                                peer.id, cc.node_id);
+                                                        }
+                                                    }
+                                                }
                                                 
                                                 // Proactively connect to the new peer
                                                 if let Some(peer_connector) = shared.get_peer_connector().await {
@@ -1765,7 +1815,16 @@ impl RaftManager {
                                                     }
                                                 }
                                             }
+                                        } else {
+                                            error!(self.logger, "[RAFT-CONF] Failed to deserialize peer address from context";
+                                                "node_id" => cc.node_id,
+                                                "context_len" => cc.context.len()
+                                            );
                                         }
+                                    } else {
+                                        error!(self.logger, "[RAFT-CONF] No address in conf change context for AddNode";
+                                            "node_id" => cc.node_id
+                                        );
                                     }
                                     
                                     // Set flag to trigger replication after adding node

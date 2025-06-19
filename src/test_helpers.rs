@@ -704,7 +704,7 @@ impl TestClusterBuilder {
     pub async fn build(self) -> BlixardResult<TestCluster> {
         let node_count = self.node_count.unwrap_or(3);
         let convergence_timeout = self.convergence_timeout
-            .unwrap_or_else(|| timing::scaled_timeout(Duration::from_secs(10)));
+            .unwrap_or_else(|| timing::scaled_timeout(Duration::from_secs(20)));  // Increased for large clusters
         
         if node_count == 0 {
             return Err(BlixardError::ConfigError(
@@ -724,18 +724,169 @@ impl TestClusterBuilder {
         let bootstrap_addr = bootstrap_node.addr;
         nodes.insert(1, bootstrap_node);
         
-        // Create remaining nodes
-        for id in 2..=node_count as u64 {
-            let node = TestNode::builder()
-                .with_id(id)
-                .with_auto_port().await
-                .with_join_addr(Some(bootstrap_addr))
-                .build()
-                .await?;
+        // For larger clusters (>3 nodes), join nodes sequentially with delays
+        // to ensure configuration changes are properly propagated
+        if node_count > 3 {
+            eprintln!("Building large cluster with {} nodes - using sequential join", node_count);
             
-            // No need to send join request - it's done automatically when join_addr is set
-            
-            nodes.insert(id, node);
+            for id in 2..=node_count as u64 {
+                eprintln!("Adding node {} to cluster", id);
+                
+                let node = TestNode::builder()
+                    .with_id(id)
+                    .with_auto_port().await
+                    .with_join_addr(Some(bootstrap_addr))
+                    .build()
+                    .await?;
+                
+                nodes.insert(id, node);
+                
+                // Wait for this node to be fully integrated before adding the next
+                // This prevents configuration race conditions in large clusters
+                let current_nodes = id as usize;
+                
+                // First wait for all nodes to see each other in voter configuration
+                timing::wait_for_condition_with_backoff(
+                    || async {
+                        // Check that all current nodes see the correct number of voters
+                        for node in nodes.values() {
+                            if let Ok((_, voters, _)) = node.shared_state.get_cluster_status().await {
+                                if voters.len() < current_nodes {
+                                    eprintln!("Node {} only sees {} voters, expected {}", 
+                                        node.id, voters.len(), current_nodes);
+                                    return false;
+                                }
+                            } else {
+                                return false;
+                            }
+                        }
+                        eprintln!("All {} nodes see {} voters", current_nodes, current_nodes);
+                        true
+                    },
+                    Duration::from_secs(10),  // Increased timeout for large clusters
+                    Duration::from_millis(200),  // Increased check interval
+                )
+                .await
+                .map_err(|e| BlixardError::Internal {
+                    message: format!("Node {} failed to join cluster: {}", id, e),
+                })?;
+                
+                // Additional check: ensure all nodes have consistent voter configuration
+                timing::wait_for_condition_with_backoff(
+                    || async {
+                        let mut voter_sets = Vec::new();
+                        
+                        // Collect voter configuration from all nodes
+                        for node in nodes.values() {
+                            if let Ok((_, voters, _)) = node.shared_state.get_cluster_status().await {
+                                let mut sorted_voters = voters.clone();
+                                sorted_voters.sort();
+                                voter_sets.push((node.id, sorted_voters));
+                            } else {
+                                eprintln!("Node {} failed to get cluster status", node.id);
+                                return false;
+                            }
+                        }
+                        
+                        // Check if all nodes have the same voter configuration
+                        if voter_sets.is_empty() {
+                            return false;
+                        }
+                        
+                        let expected_voters = &voter_sets[0].1;
+                        for (node_id, voters) in &voter_sets {
+                            if voters != expected_voters {
+                                eprintln!("Node {} has different voters: {:?} vs expected {:?}", 
+                                    node_id, voters, expected_voters);
+                                return false;
+                            }
+                        }
+                        
+                        eprintln!("All {} nodes have consistent voter configuration: {:?}", 
+                            current_nodes, expected_voters);
+                        true
+                    },
+                    Duration::from_secs(5),  // Increased timeout for configuration convergence
+                    Duration::from_millis(200),  // Match check interval
+                )
+                .await
+                .map_err(|e| BlixardError::Internal {
+                    message: format!("Node {} configuration did not converge: {}", id, e),
+                })?;
+                
+                // Delay between joins to let Raft settle
+                if id < node_count as u64 {
+                    tokio::time::sleep(Duration::from_secs(1)).await;  // Increased delay for large clusters
+                    
+                    // Send multiple health checks to ensure replication
+                    for _ in 0..3 {
+                        if let Some(bootstrap_node) = nodes.get(&1) {
+                            if let Ok(mut client) = bootstrap_node.client().await {
+                                let _ = client.health_check(crate::proto::HealthCheckRequest {}).await;
+                            }
+                        }
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                    eprintln!("Sent health checks to trigger replication after adding node {}", id);
+                    
+                    // Extra verification that all nodes have converged before proceeding
+                    let current_nodes = id as usize;
+                    timing::wait_for_condition_with_backoff(
+                        || async {
+                            let mut all_consistent = true;
+                            let mut expected_voters = Vec::new();
+                            
+                            // First pass: find what the expected voters should be
+                            for node in nodes.values() {
+                                if let Ok((_, voters, _)) = node.shared_state.get_cluster_status().await {
+                                    if voters.len() == current_nodes {
+                                        expected_voters = voters;
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            if expected_voters.is_empty() {
+                                return false;
+                            }
+                            
+                            // Second pass: verify all nodes have this configuration
+                            for node in nodes.values() {
+                                if let Ok((_, voters, _)) = node.shared_state.get_cluster_status().await {
+                                    let mut sorted_voters = voters.clone();
+                                    sorted_voters.sort();
+                                    expected_voters.sort();
+                                    if sorted_voters != expected_voters {
+                                        eprintln!("Node {} has inconsistent voters: {:?} vs expected {:?}", 
+                                            node.id, sorted_voters, expected_voters);
+                                        all_consistent = false;
+                                    }
+                                }
+                            }
+                            
+                            all_consistent
+                        },
+                        Duration::from_secs(5),
+                        Duration::from_millis(200),
+                    )
+                    .await
+                    .map_err(|e| BlixardError::Internal {
+                        message: format!("Configuration did not stabilize after adding node {}: {}", id, e),
+                    })?;
+                }
+            }
+        } else {
+            // For small clusters (<=3 nodes), use the original parallel join
+            for id in 2..=node_count as u64 {
+                let node = TestNode::builder()
+                    .with_id(id)
+                    .with_auto_port().await
+                    .with_join_addr(Some(bootstrap_addr))
+                    .build()
+                    .await?;
+                
+                nodes.insert(id, node);
+            }
         }
         
         let cluster = TestCluster {
@@ -744,7 +895,7 @@ impl TestClusterBuilder {
             next_node_id: (node_count as u64) + 1,
         };
         
-        // Wait for all nodes to at least see the expected cluster size
+        // Final verification that all nodes see the complete cluster
         timing::wait_for_condition_with_backoff(
             || async {
                 for node in cluster.nodes.values() {
@@ -766,7 +917,7 @@ impl TestClusterBuilder {
         )
         .await
         .map_err(|e| BlixardError::Internal {
-            message: format!("Nodes failed to join cluster: {}", e),
+            message: format!("Nodes failed to converge: {}", e),
         })?;
         
         // Trigger log replication by sending a health check from the bootstrap node

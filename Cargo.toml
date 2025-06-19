@@ -149,3 +149,9 @@ panic = "abort"
 [profile.dev]
 debug = true
 
+[[bin]]
+name = "debug_5node_test"
+path = "debug_5node_test.rs"
+required-features = ["test-helpers"]
+
+

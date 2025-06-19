@@ -290,3 +290,31 @@ After the initial implementation, we discovered that non-leader nodes weren't pr
 3. **SharedNodeState fix**: `get_cluster_status` now reads from Raft storage instead of the local peers map
 
 With these fixes, all nodes now report consistent cluster membership after configuration changes, and all tests pass reliably.
+
+## Five-Node Cluster Formation Fix (COMPLETED)
+
+### Problem
+The `test_split_brain_prevention` test was failing because nodes in 5-node clusters had incorrect voter configurations:
+- Node 2 had voters: [4, 3] instead of [1, 2, 3, 4, 5]
+- Node 3 had voters: [4, 5] instead of [1, 2, 3, 4, 5]
+- Nodes rejected messages from the leader (node 1) because it wasn't in their voter list
+
+### Root Cause
+Raft's `apply_conf_change` method has inconsistent behavior. When adding a node to the cluster:
+- Sometimes it returns the complete voter list (e.g., [1, 2] when adding node 2)
+- Sometimes it returns only the changed node (e.g., [2] when adding node 2)
+- This behavior appears to depend on Raft's internal state and timing
+
+### Solution
+Modified `raft_manager.rs` to handle AddNode configuration changes differently for non-leaders:
+- Non-leaders now always merge with their existing stored configuration
+- When Raft returns an incomplete voter list, we combine it with the stored configuration
+- This ensures all nodes maintain the complete voter list
+
+### Additional Changes
+1. Modified `test_helpers.rs` to use sequential joins for clusters > 3 nodes
+2. Added configuration consistency verification between joins
+3. Fixed property test `prop_cluster_status_consistency` to properly initialize database
+
+### Result
+The `test_split_brain_prevention` test now passes consistently. All 5-node cluster tests work correctly with proper voter configurations across all nodes.
