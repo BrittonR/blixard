@@ -49,6 +49,7 @@ Recent progress:
 - ✅ **Raft proposal pipeline** - Fixed hanging task submissions
 - ✅ **State machine snapshot application** - Implemented missing `apply_snapshot()` method
 - ✅ **Snapshot testing** - Comprehensive test coverage for snapshot functionality
+- ✅ **Raft consensus enforcement** - Fixed VM manager and worker registration to use Raft
 - 🔧 VM lifecycle management (stubs only)
 
 ## Development Commands
@@ -335,6 +336,15 @@ The project includes dependencies for:
    - Solution: Set `is_initialized` to true at the end of `Node::initialize()`
    - Design clarification: `stop()` is a complete shutdown, not a pause - clears all components to release resources
    - All PropTest suites now pass reliably
+
+5. **Raft Consensus Bypass Issues** (✅ FIXED)
+   - Fixed: VM Manager was bypassing Raft consensus with direct database writes
+   - Fixed: Worker registration was writing directly to database in non-bootstrap scenarios
+   - Solution: Removed VM state cache and all direct DB writes from VM Manager
+   - Solution: Added `register_worker_through_raft()` method for proper consensus
+   - Solution: VM Manager is now a stateless executor that only runs VM operations
+   - Solution: Added comprehensive documentation about local vs distributed state
+   - See `plan.md` for detailed analysis and implementation
 
 ## Known Test Reliability Issues
 

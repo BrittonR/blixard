@@ -95,7 +95,7 @@ proptest! {
             let temp_dir = TempDir::new().unwrap();
             let db_path = temp_dir.path().join("test.db");
             let database = Arc::new(Database::create(db_path).unwrap());
-            let state_machine = RaftStateMachine::new(database.clone());
+            let state_machine = RaftStateMachine::new(database.clone(), std::sync::Weak::new());
             
             // Store task results
             let mut expected_results = HashMap::new();
@@ -156,7 +156,7 @@ proptest! {
             let temp_dir = TempDir::new().unwrap();
             let db_path = temp_dir.path().join("test.db");
             let database = Arc::new(Database::create(db_path).unwrap());
-            let state_machine = RaftStateMachine::new(database.clone());
+            let state_machine = RaftStateMachine::new(database.clone(), std::sync::Weak::new());
             
             // Register workers
             for node_id in &node_ids {
@@ -231,7 +231,7 @@ proptest! {
             let temp_dir = TempDir::new().unwrap();
             let db_path = temp_dir.path().join("test.db");
             let database = Arc::new(Database::create(db_path).unwrap());
-            let state_machine = RaftStateMachine::new(database.clone());
+            let state_machine = RaftStateMachine::new(database.clone(), std::sync::Weak::new());
             
             // Track expected VM states
             let mut vm_states = HashMap::new();

@@ -107,7 +107,7 @@ async fn test_state_machine_apply_snapshot() -> BlixardResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let db_path = temp_dir.path().join("test.db");
     let database = std::sync::Arc::new(redb::Database::create(&db_path)?);
-    let state_machine = RaftStateMachine::new(database.clone());
+    let state_machine = RaftStateMachine::new(database.clone(), std::sync::Weak::new());
     
     // Create test snapshot data
     let snapshot = SnapshotData {
@@ -156,7 +156,7 @@ async fn test_snapshot_clears_previous_state() -> BlixardResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let db_path = temp_dir.path().join("test.db");
     let database = std::sync::Arc::new(redb::Database::create(&db_path)?);
-    let state_machine = RaftStateMachine::new(database.clone());
+    let state_machine = RaftStateMachine::new(database.clone(), std::sync::Weak::new());
     
     // Add initial data
     {

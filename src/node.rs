@@ -72,9 +72,6 @@ impl Node {
         let (vm_manager, vm_command_rx) = VmManager::new(db_arc.clone());
         let command_tx = vm_manager.command_tx.clone();
         
-        // Load existing VMs from database
-        vm_manager.load_from_database().await?;
-        
         vm_manager.start_processor(vm_command_rx);
         self.shared.set_vm_manager(vm_manager, command_tx).await;
 
@@ -104,7 +101,9 @@ impl Node {
                 features: vec!["microvm".to_string()],
             };
             
-            // Directly register in database since we're bootstrapping
+            // Bootstrap Exception: Direct database writes are allowed during initial bootstrap
+            // of a single-node cluster. After bootstrap completes, all state changes must
+            // go through Raft consensus to ensure consistency across the cluster.
             let write_txn = db_arc.begin_write()?;
             {
                 let mut worker_table = write_txn.open_table(crate::storage::WORKER_TABLE)?;
@@ -404,7 +403,9 @@ impl Node {
         };
         
         if peer_addr.is_none() {
-            // Bootstrap mode - check if already registered during initialization
+            // Bootstrap mode: When starting as a single-node cluster, we can write
+            // directly to the database. This is the ONLY exception to the rule that
+            // all state must go through Raft consensus.
             if let Some(db) = self.shared.get_database().await {
                 let read_txn = db.begin_read()?;
                 let worker_table = read_txn.open_table(crate::storage::WORKER_TABLE)?;
@@ -431,28 +432,8 @@ impl Node {
                 }
             }
         } else {
-            // Join existing cluster via Raft proposal
-            let proposal_data = ProposalData::RegisterWorker {
-                node_id,
-                address,
-                capabilities,
-            };
-            
-            let (response_tx, response_rx) = oneshot::channel();
-            let proposal = RaftProposal {
-                id: uuid::Uuid::new_v4().as_bytes().to_vec(),
-                data: proposal_data,
-                response_tx: Some(response_tx),
-            };
-            
-            self.shared.send_raft_proposal(proposal).await?;
-            
-            // Wait for response
-            response_rx.await.map_err(|_| BlixardError::Internal {
-                message: "Join proposal response channel closed".to_string(),
-            })??;
-            
-            // TODO: Send join request to the peer via gRPC
+            // Join existing cluster via Raft proposal - use the new method
+            self.shared.register_worker_through_raft(node_id, address, capabilities).await?;
         }
         
         Ok(())

@@ -124,11 +124,12 @@ impl TryFrom<u8> for WorkerStatus {
 // State machine that applies Raft log entries to redb
 pub struct RaftStateMachine {
     database: Arc<Database>,
+    shared_state: Weak<crate::node_shared::SharedNodeState>,
 }
 
 impl RaftStateMachine {
-    pub fn new(database: Arc<Database>) -> Self {
-        Self { database }
+    pub fn new(database: Arc<Database>, shared_state: Weak<crate::node_shared::SharedNodeState>) -> Self {
+        Self { database, shared_state }
     }
 
     pub async fn apply_entry(&self, entry: &Entry) -> BlixardResult<()> {
@@ -276,13 +277,95 @@ impl RaftStateMachine {
                         table.insert(name.as_str(), data.as_slice())?;
                     }
                 }
-                _ => {
-                    // Handle other VM commands
+                VmCommand::Start { name } => {
+                    // Update status to Starting
+                    let serialized = {
+                        let vm_state_data = table.get(name.as_str())?;
+                        if let Some(data) = vm_state_data {
+                            let mut vm_state: crate::types::VmState = bincode::deserialize(data.value()).unwrap();
+                            vm_state.status = VmStatus::Starting;
+                            vm_state.updated_at = Utc::now();
+                            Some(bincode::serialize(&vm_state).unwrap())
+                        } else {
+                            None
+                        }
+                    };
+                    
+                    if let Some(data) = serialized {
+                        table.insert(name.as_str(), data.as_slice())?;
+                    }
+                }
+                VmCommand::Stop { name } => {
+                    // Update status to Stopping
+                    let serialized = {
+                        let vm_state_data = table.get(name.as_str())?;
+                        if let Some(data) = vm_state_data {
+                            let mut vm_state: crate::types::VmState = bincode::deserialize(data.value()).unwrap();
+                            vm_state.status = VmStatus::Stopping;
+                            vm_state.updated_at = Utc::now();
+                            Some(bincode::serialize(&vm_state).unwrap())
+                        } else {
+                            None
+                        }
+                    };
+                    
+                    if let Some(data) = serialized {
+                        table.insert(name.as_str(), data.as_slice())?;
+                    }
+                }
+                VmCommand::Delete { name } => {
+                    // Remove VM from database
+                    table.remove(name.as_str())?;
                 }
             }
         }
         
         txn.commit()?;
+        
+        // Forward command to VM manager for actual execution (only on the target node)
+        if let Some(shared) = self.shared_state.upgrade() {
+            // Check if this command is for this node
+            let should_execute = match command {
+                VmCommand::Create { node_id, .. } => *node_id == shared.get_id(),
+                _ => {
+                    // For other commands, check if VM is assigned to this node
+                    if let Ok(read_txn) = self.database.begin_read() {
+                        if let Ok(table) = read_txn.open_table(VM_STATE_TABLE) {
+                            match command {
+                                VmCommand::Start { name } | VmCommand::Stop { name } | VmCommand::Delete { name } => {
+                                    if let Ok(Some(data)) = table.get(name.as_str()) {
+                                        if let Ok(vm_state) = bincode::deserialize::<crate::types::VmState>(data.value()) {
+                                            vm_state.node_id == shared.get_id()
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    }
+                                }
+                                _ => false,
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                }
+            };
+            
+            if should_execute {
+                // Use tokio::spawn to send the command asynchronously
+                let command_clone = command.clone();
+                let shared_clone = shared.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = shared_clone.send_vm_command(command_clone).await {
+                        tracing::error!("Failed to forward VM command to VM manager: {}", e);
+                    }
+                });
+            }
+        }
+        
         Ok(())
     }
 
@@ -511,7 +594,7 @@ impl RaftManager {
             })?;
 
         // Create state machine
-        let state_machine = Arc::new(RaftStateMachine::new(database));
+        let state_machine = Arc::new(RaftStateMachine::new(database, shared_state.clone()));
 
         // Create channels
         let (proposal_tx, proposal_rx) = mpsc::unbounded_channel();

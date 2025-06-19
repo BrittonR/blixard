@@ -8,6 +8,47 @@ use crate::types::{NodeConfig, VmCommand, VmConfig, VmStatus};
 use crate::vm_manager::VmManager;
 use crate::raft_manager::{RaftProposal, TaskSpec, TaskResult, RaftConfChange, ConfChangeType};
 
+/// # State Management in Blixard
+/// 
+/// ## Distributed State (Authoritative - MUST go through Raft)
+/// 
+/// All state that needs to be consistent across the cluster MUST be persisted
+/// through Raft consensus. This includes:
+/// 
+/// - **VM State**: All VM configurations, status, and assignments
+/// - **Worker Registrations**: Node capabilities and availability
+/// - **Task Assignments**: Which tasks are assigned to which workers
+/// - **Cluster Configuration**: Membership changes and node roles
+/// 
+/// These operations use the Raft proposal mechanism via methods like:
+/// - `create_vm_through_raft()`
+/// - `register_worker_through_raft()`
+/// - `submit_task()`
+/// - `propose_conf_change()`
+/// 
+/// ## Local State (Non-authoritative - managed locally)
+/// 
+/// Some state is maintained locally for operational purposes and does NOT
+/// go through Raft consensus:
+/// 
+/// - **Peer Addresses**: Used for routing messages between nodes
+/// - **Active Connections**: gRPC connection pools and health status
+/// - **Runtime Handles**: Tokio task handles and channels
+/// - **Raft Status Cache**: Leader ID, term, and role information
+/// 
+/// This local state is used for:
+/// - Message routing and delivery
+/// - Connection management
+/// - Health monitoring
+/// - Performance optimization
+/// 
+/// ## Important Guidelines
+/// 
+/// 1. **Never write directly to the database** except during bootstrap
+/// 2. **Always use Raft proposals** for any state that must be consistent
+/// 3. **Local caches are for routing only**, not authoritative data
+/// 4. **When in doubt, use Raft** - consistency is more important than speed
+
 /// Raft status information
 #[derive(Debug, Clone)]
 pub struct RaftStatus {
@@ -27,7 +68,27 @@ pub struct PeerInfo {
 }
 
 /// Shared node state that is Send + Sync
-/// This can be safely wrapped in Arc and shared across threads
+/// 
+/// This struct contains all the state that needs to be accessed from multiple
+/// async tasks and must be Send + Sync. It serves as the central coordination
+/// point for all node operations.
+/// 
+/// ## State Categories
+/// 
+/// ### Distributed State (via Raft)
+/// - VM configurations and status (accessed through database after Raft consensus)
+/// - Worker registrations and capabilities (stored in WORKER_TABLE)
+/// - Task assignments (stored in TASK_TABLE)
+/// 
+/// ### Local State
+/// - `peers`: HashMap of peer addresses for message routing
+/// - `raft_status`: Cached information about Raft state
+/// - `is_running` / `is_initialized`: Local node lifecycle state
+/// - Various mpsc channels for internal communication
+/// 
+/// ## Thread Safety
+/// All fields use appropriate synchronization primitives (RwLock, Mutex) to
+/// ensure thread-safe access from concurrent tasks.
 pub struct SharedNodeState {
     pub config: NodeConfig,
     database: RwLock<Option<Arc<Database>>>,
@@ -239,6 +300,261 @@ impl SharedNodeState {
             manager.inner.get_vm_status(name).await
         } else {
             Ok(None)
+        }
+    }
+    
+    /// Create a VM through Raft consensus
+    pub async fn create_vm_through_raft(&self, command: VmCommand) -> BlixardResult<()> {
+        tracing::info!("create_vm_through_raft called");
+        
+        // Check if we're the leader
+        let raft_status = self.get_raft_status().await?;
+        if !raft_status.is_leader {
+            // Forward to leader if we know who it is
+            if let Some(leader_id) = raft_status.leader_id {
+                tracing::info!("Forwarding VM creation to leader node {}", leader_id);
+                
+                // Get leader address
+                let peers = self.get_peers().await;
+                let leader_addr = peers.iter()
+                    .find(|p| p.id == leader_id)
+                    .map(|p| p.address.clone())
+                    .ok_or_else(|| BlixardError::ClusterError(
+                        format!("Leader node {} address not found", leader_id)
+                    ))?;
+                
+                // Forward the request to the leader
+                use crate::proto::cluster_service_client::ClusterServiceClient;
+                use crate::proto::CreateVmRequest;
+                
+                let mut client = ClusterServiceClient::connect(format!("http://{}", leader_addr))
+                    .await
+                    .map_err(|e| BlixardError::Internal {
+                        message: format!("Failed to connect to leader: {}", e),
+                    })?;
+                
+                // Extract VM config from command
+                let (vm_config, _node_id) = match &command {
+                    VmCommand::Create { config, node_id } => (config, node_id),
+                    _ => return Err(BlixardError::Internal {
+                        message: "Expected Create command".to_string(),
+                    }),
+                };
+                
+                let request = CreateVmRequest {
+                    name: vm_config.name.clone(),
+                    config_path: vm_config.config_path.clone(),
+                    vcpus: vm_config.vcpus,
+                    memory_mb: vm_config.memory,
+                };
+                
+                let response = client.create_vm(request)
+                    .await
+                    .map_err(|e| BlixardError::Internal {
+                        message: format!("Failed to forward VM creation to leader: {}", e),
+                    })?;
+                
+                let response = response.into_inner();
+                if response.success {
+                    Ok(())
+                } else {
+                    Err(BlixardError::ClusterError(response.message))
+                }
+            } else {
+                Err(BlixardError::ClusterError("No leader elected yet".to_string()))
+            }
+        } else {
+            // We are the leader, process through Raft
+            tracing::info!("Processing VM creation locally as leader");
+            
+            let proposal_tx = self.raft_proposal_tx.lock().await;
+            if let Some(tx) = proposal_tx.as_ref() {
+                // Create the proposal
+                let proposal_data = crate::raft_manager::ProposalData::CreateVm(command);
+                
+                let (response_tx, response_rx) = oneshot::channel();
+                let proposal_id = uuid::Uuid::new_v4().as_bytes().to_vec();
+                tracing::info!("Creating VM proposal with id length: {}", proposal_id.len());
+                
+                let proposal = RaftProposal {
+                    id: proposal_id.clone(),
+                    data: proposal_data,
+                    response_tx: Some(response_tx),
+                };
+                
+                tracing::info!("Sending VM creation proposal to Raft manager");
+                match tx.send(proposal) {
+                    Ok(_) => {
+                        tracing::info!("Successfully sent VM proposal to Raft channel");
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to send VM proposal: channel closed or full. Error: {:?}", e);
+                        return Err(BlixardError::Internal {
+                            message: "Failed to send VM proposal - Raft channel closed".to_string(),
+                        });
+                    }
+                }
+                
+                tracing::info!("Waiting for VM proposal response...");
+                // Wait for response with a timeout
+                match tokio::time::timeout(tokio::time::Duration::from_secs(10), response_rx).await {
+                    Ok(Ok(result)) => {
+                        tracing::info!("Received VM proposal response: {:?}", result.is_ok());
+                        result?;
+                        Ok(())
+                    }
+                    Ok(Err(_)) => {
+                        tracing::error!("VM proposal response channel closed");
+                        Err(BlixardError::Internal {
+                            message: "VM proposal response channel closed".to_string(),
+                        })
+                    }
+                    Err(_) => {
+                        tracing::error!("VM proposal timed out after 10 seconds");
+                        Err(BlixardError::Internal {
+                            message: "VM proposal timed out".to_string(),
+                        })
+                    }
+                }
+            } else {
+                Err(BlixardError::Internal {
+                    message: "Raft proposal sender not initialized".to_string(),
+                })
+            }
+        }
+    }
+    
+    /// Send VM operation through Raft consensus
+    pub async fn send_vm_operation_through_raft(&self, command: VmCommand) -> BlixardResult<()> {
+        tracing::info!("send_vm_operation_through_raft called");
+        
+        // Check if we're the leader
+        let raft_status = self.get_raft_status().await?;
+        if !raft_status.is_leader {
+            // Forward to leader if we know who it is
+            if let Some(leader_id) = raft_status.leader_id {
+                tracing::info!("Forwarding VM operation to leader node {}", leader_id);
+                
+                // Get leader address
+                let peers = self.get_peers().await;
+                let leader_addr = peers.iter()
+                    .find(|p| p.id == leader_id)
+                    .map(|p| p.address.clone())
+                    .ok_or_else(|| BlixardError::ClusterError(
+                        format!("Leader node {} address not found", leader_id)
+                    ))?;
+                
+                // Forward the request to the leader based on command type
+                use crate::proto::cluster_service_client::ClusterServiceClient;
+                use crate::proto::{StartVmRequest, StopVmRequest};
+                
+                let mut client = ClusterServiceClient::connect(format!("http://{}", leader_addr))
+                    .await
+                    .map_err(|e| BlixardError::Internal {
+                        message: format!("Failed to connect to leader: {}", e),
+                    })?;
+                
+                match &command {
+                    VmCommand::Start { name } => {
+                        let request = StartVmRequest {
+                            name: name.clone(),
+                        };
+                        
+                        let response = client.start_vm(request)
+                            .await
+                            .map_err(|e| BlixardError::Internal {
+                                message: format!("Failed to forward VM start to leader: {}", e),
+                            })?;
+                        
+                        let response = response.into_inner();
+                        if response.success {
+                            Ok(())
+                        } else {
+                            Err(BlixardError::ClusterError(response.message))
+                        }
+                    }
+                    VmCommand::Stop { name } => {
+                        let request = StopVmRequest {
+                            name: name.clone(),
+                        };
+                        
+                        let response = client.stop_vm(request)
+                            .await
+                            .map_err(|e| BlixardError::Internal {
+                                message: format!("Failed to forward VM stop to leader: {}", e),
+                            })?;
+                        
+                        let response = response.into_inner();
+                        if response.success {
+                            Ok(())
+                        } else {
+                            Err(BlixardError::ClusterError(response.message))
+                        }
+                    }
+                    _ => Err(BlixardError::Internal {
+                        message: "Unsupported VM command for forwarding".to_string(),
+                    })
+                }
+            } else {
+                Err(BlixardError::ClusterError("No leader elected yet".to_string()))
+            }
+        } else {
+            // We are the leader, process through Raft
+            tracing::info!("Processing VM operation locally as leader");
+            
+            // For now, use UpdateVmStatus proposal for start/stop operations
+            let (vm_name, new_status) = match &command {
+                VmCommand::Start { name } => (name.clone(), VmStatus::Starting),
+                VmCommand::Stop { name } => (name.clone(), VmStatus::Stopping),
+                VmCommand::Delete { name } => (name.clone(), VmStatus::Stopped), // Delete after stopping
+                _ => return Err(BlixardError::Internal {
+                    message: "Unsupported VM command".to_string(),
+                }),
+            };
+            
+            let proposal_data = crate::raft_manager::ProposalData::UpdateVmStatus {
+                vm_name,
+                status: new_status,
+                node_id: self.get_id(),
+            };
+            
+            let (response_tx, response_rx) = oneshot::channel();
+            let proposal_id = uuid::Uuid::new_v4().as_bytes().to_vec();
+            
+            let proposal = RaftProposal {
+                id: proposal_id,
+                data: proposal_data,
+                response_tx: Some(response_tx),
+            };
+            
+            // Send proposal
+            match self.send_raft_proposal(proposal).await {
+                Ok(_) => {
+                    tracing::info!("Successfully sent VM operation proposal");
+                }
+                Err(e) => {
+                    tracing::error!("Failed to send VM operation proposal: {}", e);
+                    return Err(e);
+                }
+            }
+            
+            // Wait for response
+            match tokio::time::timeout(tokio::time::Duration::from_secs(10), response_rx).await {
+                Ok(Ok(result)) => {
+                    result?;
+                    Ok(())
+                }
+                Ok(Err(_)) => {
+                    Err(BlixardError::Internal {
+                        message: "VM operation response channel closed".to_string(),
+                    })
+                }
+                Err(_) => {
+                    Err(BlixardError::Internal {
+                        message: "VM operation timed out".to_string(),
+                    })
+                }
+            }
         }
     }
     
@@ -620,6 +936,82 @@ impl SharedNodeState {
         } else {
             Err(BlixardError::Internal {
                 message: "Database not initialized".to_string(),
+            })
+        }
+    }
+    
+    /// Register a worker through Raft consensus
+    /// This ensures worker information is replicated across all nodes
+    pub async fn register_worker_through_raft(
+        &self,
+        node_id: u64,
+        address: String,
+        capabilities: crate::raft_manager::WorkerCapabilities,
+    ) -> BlixardResult<()> {
+        use crate::raft_manager::{ProposalData, RaftProposal};
+        use tokio::sync::oneshot;
+        
+        tracing::info!("[NODE-SHARED] Registering worker {} through Raft", node_id);
+        
+        // Create the proposal
+        let proposal_data = ProposalData::RegisterWorker {
+            node_id,
+            address,
+            capabilities,
+        };
+        
+        let (response_tx, response_rx) = oneshot::channel();
+        let proposal = RaftProposal {
+            id: uuid::Uuid::new_v4().as_bytes().to_vec(),
+            data: proposal_data,
+            response_tx: Some(response_tx),
+        };
+        
+        // Submit the proposal
+        let tx = self.raft_proposal_tx.lock().await;
+        if let Some(sender) = tx.as_ref() {
+            match sender.send(proposal) {
+                Ok(_) => {
+                    tracing::info!("[NODE-SHARED] Worker registration proposal sent");
+                }
+                Err(e) => {
+                    tracing::error!("[NODE-SHARED] Failed to send worker registration proposal: {}", e);
+                    return Err(BlixardError::Internal {
+                        message: format!("Failed to send worker registration proposal: {}", e),
+                    });
+                }
+            }
+            
+            // Wait for the proposal to be committed
+            match tokio::time::timeout(tokio::time::Duration::from_secs(10), response_rx).await {
+                Ok(Ok(result)) => {
+                    match result {
+                        Ok(_) => {
+                            tracing::info!("[NODE-SHARED] Worker {} registered successfully", node_id);
+                            Ok(())
+                        }
+                        Err(e) => {
+                            tracing::error!("[NODE-SHARED] Worker registration failed: {}", e);
+                            Err(e)
+                        }
+                    }
+                }
+                Ok(Err(_)) => {
+                    tracing::error!("[NODE-SHARED] Worker registration response channel closed");
+                    Err(BlixardError::Internal {
+                        message: "Worker registration response channel closed".to_string(),
+                    })
+                }
+                Err(_) => {
+                    tracing::error!("[NODE-SHARED] Worker registration timed out after 10 seconds");
+                    Err(BlixardError::Internal {
+                        message: "Worker registration timed out".to_string(),
+                    })
+                }
+            }
+        } else {
+            Err(BlixardError::Internal {
+                message: "Raft proposal sender not initialized".to_string(),
             })
         }
     }

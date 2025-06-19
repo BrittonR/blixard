@@ -36,7 +36,7 @@ fn create_entry(proposal: ProposalData) -> Entry {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_apply_assign_task() {
     let (_temp_dir, db) = create_test_db();
-    let state_machine = RaftStateMachine::new(db.clone());
+    let state_machine = RaftStateMachine::new(db.clone(), std::sync::Weak::new());
     
     // Create a task assignment proposal
     let proposal = ProposalData::AssignTask {
@@ -73,7 +73,7 @@ async fn test_apply_assign_task() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_apply_complete_task() {
     let (_temp_dir, db) = create_test_db();
-    let state_machine = RaftStateMachine::new(db.clone());
+    let state_machine = RaftStateMachine::new(db.clone(), std::sync::Weak::new());
     
     // First assign a task
     let assign_proposal = ProposalData::AssignTask {
@@ -122,7 +122,7 @@ async fn test_apply_complete_task() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_apply_register_worker() {
     let (_temp_dir, db) = create_test_db();
-    let state_machine = RaftStateMachine::new(db.clone());
+    let state_machine = RaftStateMachine::new(db.clone(), std::sync::Weak::new());
     
     let proposal = ProposalData::RegisterWorker {
         node_id: 1,
@@ -152,7 +152,7 @@ async fn test_apply_register_worker() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_apply_update_worker_status() {
     let (_temp_dir, db) = create_test_db();
-    let state_machine = RaftStateMachine::new(db.clone());
+    let state_machine = RaftStateMachine::new(db.clone(), std::sync::Weak::new());
     
     // First register a worker
     let register_proposal = ProposalData::RegisterWorker {
@@ -188,7 +188,7 @@ async fn test_apply_update_worker_status() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_apply_vm_command_create() {
     let (_temp_dir, db) = create_test_db();
-    let state_machine = RaftStateMachine::new(db.clone());
+    let state_machine = RaftStateMachine::new(db.clone(), std::sync::Weak::new());
     
     let proposal = ProposalData::CreateVm(VmCommand::Create {
         config: VmConfig {
@@ -209,7 +209,7 @@ async fn test_apply_vm_command_create() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_apply_empty_entry() {
     let (_temp_dir, db) = create_test_db();
-    let state_machine = RaftStateMachine::new(db.clone());
+    let state_machine = RaftStateMachine::new(db.clone(), std::sync::Weak::new());
     
     // Empty entries should be no-ops
     let entry = Entry::default();
@@ -219,7 +219,7 @@ async fn test_apply_empty_entry() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_complete_nonexistent_task() {
     let (_temp_dir, db) = create_test_db();
-    let state_machine = RaftStateMachine::new(db.clone());
+    let state_machine = RaftStateMachine::new(db.clone(), std::sync::Weak::new());
     
     // Try to complete a task that was never assigned
     let complete_proposal = ProposalData::CompleteTask {
@@ -246,7 +246,7 @@ async fn test_complete_nonexistent_task() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_update_nonexistent_worker_status() {
     let (_temp_dir, db) = create_test_db();
-    let state_machine = RaftStateMachine::new(db.clone());
+    let state_machine = RaftStateMachine::new(db.clone(), std::sync::Weak::new());
     
     // Try to update status of non-existent worker
     let update_proposal = ProposalData::UpdateWorkerStatus {
@@ -268,7 +268,7 @@ async fn test_update_nonexistent_worker_status() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_idempotent_task_assignment() {
     let (_temp_dir, db) = create_test_db();
-    let state_machine = RaftStateMachine::new(db.clone());
+    let state_machine = RaftStateMachine::new(db.clone(), std::sync::Weak::new());
     
     let task = TaskSpec {
         command: "test".to_string(),
@@ -306,7 +306,7 @@ async fn test_idempotent_task_assignment() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_worker_registration_overwrites() {
     let (_temp_dir, db) = create_test_db();
-    let state_machine = RaftStateMachine::new(db.clone());
+    let state_machine = RaftStateMachine::new(db.clone(), std::sync::Weak::new());
     
     // Register worker with initial capabilities
     let proposal1 = ProposalData::RegisterWorker {
@@ -355,7 +355,7 @@ async fn test_worker_registration_overwrites() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_task_result_overwrites() {
     let (_temp_dir, db) = create_test_db();
-    let state_machine = RaftStateMachine::new(db.clone());
+    let state_machine = RaftStateMachine::new(db.clone(), std::sync::Weak::new());
     
     // First result - failure
     let result1 = ProposalData::CompleteTask {
@@ -399,7 +399,7 @@ async fn test_task_result_overwrites() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_multiple_vm_operations() {
     let (_temp_dir, db) = create_test_db();
-    let state_machine = RaftStateMachine::new(db.clone());
+    let state_machine = RaftStateMachine::new(db.clone(), std::sync::Weak::new());
     
     // Create VM
     let create = ProposalData::CreateVm(VmCommand::Create {

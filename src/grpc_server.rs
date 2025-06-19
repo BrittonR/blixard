@@ -441,7 +441,7 @@ impl ClusterService for BlixardGrpcService {
             }));
         }
 
-        // Send create command to node
+        // Create VM through Raft consensus
         let vm_config = crate::types::VmConfig {
             name: req.name.clone(),
             config_path: req.config_path,
@@ -454,7 +454,7 @@ impl ClusterService for BlixardGrpcService {
             node_id: self.node.get_id(),
         };
 
-        match self.node.send_vm_command(command).await {
+        match self.node.create_vm_through_raft(command).await {
             Ok(_) => Ok(Response::new(CreateVmResponse {
                 success: true,
                 message: format!("VM '{}' created successfully", req.name),
@@ -478,7 +478,7 @@ impl ClusterService for BlixardGrpcService {
             name: req.name.clone(),
         };
 
-        match self.node.send_vm_command(command).await {
+        match self.node.send_vm_operation_through_raft(command).await {
             Ok(_) => Ok(Response::new(StartVmResponse {
                 success: true,
                 message: format!("VM '{}' start command sent", req.name),
@@ -500,7 +500,7 @@ impl ClusterService for BlixardGrpcService {
             name: req.name.clone(),
         };
 
-        match self.node.send_vm_command(command).await {
+        match self.node.send_vm_operation_through_raft(command).await {
             Ok(_) => Ok(Response::new(StopVmResponse {
                 success: true,
                 message: format!("VM '{}' stop command sent", req.name),
