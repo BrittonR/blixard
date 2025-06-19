@@ -47,6 +47,8 @@ Recent progress:
 - ✅ **Test reliability improvements** - Replaced 37 sleep() calls with condition-based waiting
 - ✅ **Worker registration system** - Automatic registration and capacity tracking
 - ✅ **Raft proposal pipeline** - Fixed hanging task submissions
+- ✅ **State machine snapshot application** - Implemented missing `apply_snapshot()` method
+- ✅ **Snapshot testing** - Comprehensive test coverage for snapshot functionality
 - 🔧 VM lifecycle management (stubs only)
 
 ## Development Commands

@@ -10,7 +10,8 @@ use chrono::Utc;
 use serde::{Serialize, Deserialize};
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::storage::RedbRaftStorage;
+use crate::storage::{RedbRaftStorage, SnapshotData, VM_STATE_TABLE, CLUSTER_STATE_TABLE, 
+    TASK_TABLE, TASK_ASSIGNMENT_TABLE, TASK_RESULT_TABLE, WORKER_TABLE, WORKER_STATUS_TABLE};
 use crate::types::{VmCommand, VmStatus};
 
 // Raft message types for cluster communication
@@ -309,6 +310,134 @@ impl RaftStateMachine {
         }
         
         txn.commit()?;
+        Ok(())
+    }
+
+    /// Apply a snapshot to the state machine
+    /// This is called when the Raft layer receives a snapshot from the leader
+    pub fn apply_snapshot(&self, snapshot_data: &[u8]) -> BlixardResult<()> {
+        // Deserialize the snapshot data
+        let snapshot: SnapshotData = bincode::deserialize(snapshot_data)
+            .map_err(|e| BlixardError::Serialization {
+                operation: "deserialize snapshot".to_string(),
+                source: Box::new(e),
+            })?;
+
+        // Apply the snapshot within a single transaction for atomicity
+        let write_txn = self.database.begin_write()
+            .map_err(|e| BlixardError::Storage {
+                operation: "begin snapshot transaction".to_string(),
+                source: Box::new(e),
+            })?;
+
+        // Clear and restore VM states
+        {
+            let mut table = write_txn.open_table(VM_STATE_TABLE)?;
+            // Clear existing entries
+            let keys_to_remove: Vec<String> = table.iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(key.as_str())?;
+            }
+            // Apply new entries
+            for (key, value) in &snapshot.vm_states {
+                table.insert(key.as_str(), value.as_slice())?;
+            }
+        }
+
+        // Clear and restore cluster state
+        {
+            let mut table = write_txn.open_table(CLUSTER_STATE_TABLE)?;
+            let keys_to_remove: Vec<String> = table.iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(key.as_str())?;
+            }
+            for (key, value) in &snapshot.cluster_state {
+                table.insert(key.as_str(), value.as_slice())?;
+            }
+        }
+
+        // Clear and restore tasks
+        {
+            let mut table = write_txn.open_table(TASK_TABLE)?;
+            let keys_to_remove: Vec<String> = table.iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(key.as_str())?;
+            }
+            for (key, value) in &snapshot.tasks {
+                table.insert(key.as_str(), value.as_slice())?;
+            }
+        }
+
+        // Clear and restore task assignments
+        {
+            let mut table = write_txn.open_table(TASK_ASSIGNMENT_TABLE)?;
+            let keys_to_remove: Vec<String> = table.iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(key.as_str())?;
+            }
+            for (key, value) in &snapshot.task_assignments {
+                table.insert(key.as_str(), value.as_slice())?;
+            }
+        }
+
+        // Clear and restore task results
+        {
+            let mut table = write_txn.open_table(TASK_RESULT_TABLE)?;
+            let keys_to_remove: Vec<String> = table.iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(key.as_str())?;
+            }
+            for (key, value) in &snapshot.task_results {
+                table.insert(key.as_str(), value.as_slice())?;
+            }
+        }
+
+        // Clear and restore workers
+        {
+            let mut table = write_txn.open_table(WORKER_TABLE)?;
+            let keys_to_remove: Vec<Vec<u8>> = table.iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_vec()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(key.as_slice())?;
+            }
+            for (key, value) in &snapshot.workers {
+                table.insert(key.as_slice(), value.as_slice())?;
+            }
+        }
+
+        // Clear and restore worker status
+        {
+            let mut table = write_txn.open_table(WORKER_STATUS_TABLE)?;
+            let keys_to_remove: Vec<Vec<u8>> = table.iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_vec()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(key.as_slice())?;
+            }
+            for (key, value) in &snapshot.worker_status {
+                table.insert(key.as_slice(), value.as_slice())?;
+            }
+        }
+
+        // Commit all changes atomically
+        write_txn.commit()
+            .map_err(|e| BlixardError::Storage {
+                operation: "commit snapshot transaction".to_string(),
+                source: Box::new(e),
+            })?;
+
+        tracing::info!("Applied snapshot to state machine");
         Ok(())
     }
 }
@@ -1113,6 +1242,12 @@ impl RaftManager {
             
             // Apply the snapshot to storage
             self.storage.apply_snapshot(snapshot)?;
+            
+            // Apply the snapshot to the state machine
+            let snapshot_data = snapshot.get_data();
+            if !snapshot_data.is_empty() {
+                self.state_machine.apply_snapshot(snapshot_data)?;
+            }
             
             // The Raft library will handle updating its internal state
             // We just need to ensure our storage reflects the snapshot

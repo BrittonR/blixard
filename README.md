@@ -7,6 +7,7 @@ A distributed microVM orchestration platform built in Rust, providing enterprise
 - **Raft Consensus**: Production-grade distributed consensus using tikv/raft-rs (✅ Implemented)
 - **Multi-Node Clustering**: Dynamic cluster formation with join/leave operations (✅ Implemented)
 - **Raft Snapshots**: Full snapshot support for state transfer and log compaction (✅ Implemented)
+- **State Machine Snapshots**: Complete state machine snapshot application (✅ Implemented)
 - **MicroVM Integration**: Seamless integration with microvm.nix for lightweight virtualization
 - **Tailscale Discovery**: Automatic node discovery via Tailscale networking
 - **Persistent Storage**: Durable state management with redb (✅ Implemented)
