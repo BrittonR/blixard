@@ -311,8 +311,14 @@ impl Node {
                                                 conf_state.voters = resp.voters.clone();
                                                 if let Err(e) = storage.save_conf_state(&conf_state) {
                                                     tracing::warn!("Failed to save initial configuration state: {}", e);
+                                                } else {
+                                                    tracing::info!("Successfully saved initial configuration state with voters: {:?}", resp.voters);
                                                 }
+                                            } else {
+                                                tracing::warn!("No database available to save configuration state");
                                             }
+                                        } else {
+                                            tracing::warn!("Join response contained empty voters list!");
                                         }
                                         
                                         // Add peers from response

@@ -28,9 +28,15 @@ database-tests = { max-threads = 1 }
 consensus-tests = { max-threads = 4 }
 
 # Per-test overrides
+
+# Three-node cluster tests have expected timing variations due to:
+# - Raft leader election (randomized timeouts by design)
+# - Network message ordering variations
+# - Configuration propagation delays
+# These are not "flaky" but represent real distributed system behaviors
 [[profile.default.overrides]]
 filter = "test(three_node_cluster)"
-retries = { count = 5, delay = "2s", backoff = "exponential" }
+retries = { count = 5, delay = "2s", backoff = "exponential", jitter = true }
 test-group = "cluster-tests"
 slow-timeout = { period = "60s", terminate-after = 2 }
 

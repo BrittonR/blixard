@@ -135,22 +135,45 @@ async fn test_three_node_cluster_manual_approach() {
     assert!(cluster_sizes.iter().all(|&size| size == 3), 
             "Not all nodes see 3 peers: {:?}", cluster_sizes);
     
-    // Check all nodes agree on leader
-    let mut leader_ids = vec![];
-    for (id, node) in [(1, &node1), (2, &node2), (3, &node3)] {
-        let status = node.shared_state.get_raft_status().await.unwrap();
-        eprintln!("Node {} state: {}, leader: {:?}", id, status.state, status.leader_id);
-        if let Some(leader_id) = status.leader_id {
-            leader_ids.push(leader_id);
+    // Check all nodes agree on leader - wait for convergence
+    let mut retries = 0;
+    let mut final_leader_id = None;
+    loop {
+        let mut leader_ids = vec![];
+        let mut all_know_leader = true;
+        
+        for (id, node) in [(1, &node1), (2, &node2), (3, &node3)] {
+            let status = node.shared_state.get_raft_status().await.unwrap();
+            eprintln!("Node {} state: {}, leader: {:?}", id, status.state, status.leader_id);
+            match status.leader_id {
+                Some(leader_id) => leader_ids.push(leader_id),
+                None => all_know_leader = false,
+            }
         }
+        
+        // Check if all nodes know a leader and agree
+        if all_know_leader && !leader_ids.is_empty() && 
+           leader_ids.iter().all(|&id| id == leader_ids[0]) {
+            final_leader_id = Some(leader_ids[0]);
+            break;
+        }
+        
+        retries += 1;
+        if retries > 50 {
+            panic!("Nodes did not converge on leader after {} retries. Leader IDs: {:?}", 
+                   retries, leader_ids);
+        }
+        
+        // Trigger log replication to help convergence
+        if retries % 10 == 5 {
+            let _ = client1.health_check(HealthCheckRequest {}).await;
+        }
+        
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
     
-    // All nodes should agree on the same leader
-    assert!(!leader_ids.is_empty(), "No leader found");
-    assert!(leader_ids.iter().all(|&id| id == leader_ids[0]), 
-            "Nodes disagree on leader: {:?}", leader_ids);
-    
-    eprintln!("✓ All nodes agree on leader: {}", leader_ids[0]);
+    assert!(final_leader_id.is_some(), "No leader found");
+    eprintln!("✓ All nodes agree on leader: {}", final_leader_id.unwrap());
     
     // Clean up
     node3.shutdown().await;

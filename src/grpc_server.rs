@@ -210,8 +210,18 @@ impl ClusterService for BlixardGrpcService {
                     peer_infos.len(), req.node_id);
                 
                 // Get current configuration state to include in response
-                let voters = self.node.get_current_voters().await.unwrap_or_default();
-                tracing::info!("[JOIN] Current cluster voters: {:?}", voters);
+                let voters = match self.node.get_current_voters().await {
+                    Ok(v) => {
+                        tracing::info!("[JOIN] Retrieved current voters: {:?}", v);
+                        v
+                    }
+                    Err(e) => {
+                        tracing::warn!("[JOIN] Failed to get current voters: {}, using leader_id as fallback", e);
+                        // If we can't get voters from storage, at least include the leader
+                        vec![self.node.get_id()]
+                    }
+                };
+                tracing::info!("[JOIN] Current cluster voters in response: {:?}", voters);
                 
                 Ok(Response::new(JoinResponse {
                     success: true,

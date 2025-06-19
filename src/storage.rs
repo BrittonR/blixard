@@ -68,15 +68,27 @@ impl raft::Storage for RedbRaftStorage {
         // Load conf state
         let conf_state = if let Ok(table) = read_txn.open_table(RAFT_CONF_STATE_TABLE) {
             if let Ok(Some(data)) = table.get("conf_state") {
-                raft_codec::deserialize_conf_state(data.value())
-                    .unwrap_or_else(|_| raft::prelude::ConfState::default())
+                match raft_codec::deserialize_conf_state(data.value()) {
+                    Ok(cs) => {
+                        tracing::info!("[STORAGE] Loaded conf state from storage: voters={:?}", cs.voters);
+                        cs
+                    }
+                    Err(e) => {
+                        tracing::warn!("[STORAGE] Failed to deserialize conf state: {}", e);
+                        raft::prelude::ConfState::default()
+                    }
+                }
             } else {
+                tracing::info!("[STORAGE] No conf state found in storage, using default");
                 raft::prelude::ConfState::default()
             }
         } else {
+            tracing::info!("[STORAGE] RAFT_CONF_STATE_TABLE not found, using default conf state");
             raft::prelude::ConfState::default()
         };
         
+        tracing::info!("[STORAGE] Returning initial state - hard_state: term={}, vote={}, commit={}, conf_state: voters={:?}", 
+            hard_state.term, hard_state.vote, hard_state.commit, conf_state.voters);
         Ok(raft::RaftState::new(hard_state, conf_state))
     }
 
@@ -241,6 +253,7 @@ impl RedbRaftStorage {
     
     /// Save configuration state
     pub fn save_conf_state(&self, conf_state: &raft::prelude::ConfState) -> BlixardResult<()> {
+        tracing::info!("[STORAGE] Saving conf state to storage: voters={:?}", conf_state.voters);
         let write_txn = self.database.begin_write()?;
         
         {
@@ -250,6 +263,7 @@ impl RedbRaftStorage {
         }
         
         write_txn.commit()?;
+        tracing::info!("[STORAGE] Successfully saved conf state");
         Ok(())
     }
     

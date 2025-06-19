@@ -2,6 +2,27 @@
 //!
 //! This test suite addresses the known issues with 3-node cluster formation
 //! documented in TEST_RELIABILITY_ISSUES.md
+//!
+//! # Expected Timing Variations
+//! 
+//! These tests interact with a real Raft consensus implementation and may experience
+//! timing variations that are NOT bugs but expected behaviors:
+//!
+//! 1. **Leader Election**: Raft uses randomized election timeouts (150-300ms) to prevent
+//!    split votes. This means leader election timing varies by design.
+//!
+//! 2. **Configuration Changes**: When nodes join/leave, configuration changes must propagate
+//!    through the Raft log, which takes variable time based on current cluster state.
+//!
+//! 3. **Message Ordering**: Network messages between nodes can arrive in different orders,
+//!    affecting convergence timing.
+//!
+//! 4. **Log Replication**: The time for entries to replicate depends on heartbeat intervals
+//!    and network latency simulation.
+//!
+//! These variations are handled by the nextest retry configuration (up to 5 retries with
+//! exponential backoff). A test requiring multiple retries is not necessarily broken -
+//! it may just be experiencing legitimate distributed system timing variations.
 
 #![cfg(feature = "test-helpers")]
 
@@ -98,9 +119,9 @@ async fn test_three_node_cluster_task_submission() {
         assert!(resp.accepted, "Task {} should be accepted", i);
     }
     
-    // Give time for replication using a simple delay
-    // Note: In a real implementation, we would check the actual Raft log/commit index
-    // For now, we use a conservative wait to ensure replication has time to occur
+    // Wait for tasks to be replicated across the cluster
+    // In a production system, we would check commit indices or task status
+    // For testing, a brief delay ensures replication completes
     timing::robust_sleep(Duration::from_secs(2)).await;
     
     cluster.shutdown().await;
@@ -176,8 +197,9 @@ async fn test_three_node_cluster_fault_tolerance() {
     .await
     .expect("Cluster should maintain leader with 2 nodes");
     
-    // Give the cluster a bit more time to fully stabilize after configuration change
-    eprintln!("Waiting for cluster to fully stabilize after node removal...");
+    // Allow cluster to stabilize after configuration change
+    // Configuration changes require log entry propagation and commitment
+    eprintln!("Waiting for cluster to stabilize after node removal...");
     timing::robust_sleep(Duration::from_secs(1)).await;
     
     // Verify cluster still works with 2 nodes
@@ -329,6 +351,7 @@ async fn test_three_node_cluster_concurrent_operations() {
                 }
                 
                 // Small delay between submissions
+                // Brief delay between requests to create realistic concurrent load
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
             
@@ -403,7 +426,8 @@ async fn test_three_node_cluster_membership_changes() {
     .await
     .expect("Cluster should have 4 nodes");
     
-    // Give the cluster a moment to stabilize after adding node 4
+    // Wait for new node to be fully integrated
+    // New nodes need to receive configuration, establish connections, and sync logs
     eprintln!("Waiting for cluster to stabilize after adding node 4...");
     timing::robust_sleep(Duration::from_secs(2)).await;
     

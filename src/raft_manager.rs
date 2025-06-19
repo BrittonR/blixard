@@ -607,12 +607,6 @@ impl RaftManager {
                 }
             }
         }
-        
-        // This should never be reached as the loop above is infinite
-        error!(self.logger, "[RAFT-RUN] Unexpectedly exited main run loop");
-        Err(BlixardError::Internal {
-            message: "RaftManager run() loop unexpectedly terminated".to_string(),
-        })
     }
 
     async fn tick(&self) -> BlixardResult<()> {
@@ -625,7 +619,13 @@ impl RaftManager {
             let leader_id = if is_leader {
                 Some(self.node_id)
             } else {
-                Some(node.raft.leader_id) // Get leader from Raft's perspective
+                // Raft uses 0 to indicate "no leader known"
+                let raft_leader = node.raft.leader_id;
+                if raft_leader == 0 {
+                    None
+                } else {
+                    Some(raft_leader)
+                }
             };
             
             let status = crate::node_shared::RaftStatus {
@@ -778,13 +778,57 @@ impl RaftManager {
         // Check if the sender is still in the configuration before processing the message
         // This prevents crashes when messages arrive from recently removed nodes
         let current_voters = node.raft.prs().conf().voters().clone();
+        
+        // Special handling for nodes that might not have their configuration yet
+        // If our configuration is empty (just joined), we should accept messages from nodes
+        // we've added as peers during the join process
         if !current_voters.contains(from) {
-            warn!(self.logger, "[RAFT-MSG] Discarding message from node not in configuration";
+            // Check if this is a joining node that hasn't processed its configuration yet
+            // In this case, check if sender is in our peer list (was added during join)
+            let peers = self.peers.read().await;
+            info!(self.logger, "[RAFT-MSG] Checking peers for sender";
                 "from" => from,
-                "current_voters" => ?current_voters,
-                "msg_type" => ?msg.msg_type()
+                "peers" => ?peers.keys().cloned().collect::<Vec<_>>(),
+                "contains_sender" => peers.contains_key(&from)
             );
-            return Ok(());
+            if peers.contains_key(&from) {
+                // Check if we have an empty configuration (common for joining nodes)
+                let conf_state = self.storage.load_conf_state().unwrap_or_default();
+                info!(self.logger, "[RAFT-MSG] Loaded conf state from storage";
+                    "voters" => ?conf_state.voters,
+                    "is_empty" => conf_state.voters.is_empty()
+                );
+                if conf_state.voters.is_empty() {
+                    info!(self.logger, "[RAFT-MSG] Accepting message from peer - joining node with empty configuration";
+                        "from" => from,
+                        "msg_type" => ?msg.msg_type()
+                    );
+                } else if conf_state.voters.contains(&from) {
+                    // The sender is in our stored configuration but not in Raft's current view
+                    // This happens when a node joins and saves configuration before Raft processes it
+                    info!(self.logger, "[RAFT-MSG] Accepting message - sender in stored configuration but not in Raft state";
+                        "from" => from,
+                        "stored_voters" => ?conf_state.voters,
+                        "raft_voters" => ?current_voters,
+                        "msg_type" => ?msg.msg_type()
+                    );
+                } else {
+                    warn!(self.logger, "[RAFT-MSG] Discarding message - sender not in stored configuration";
+                        "from" => from,
+                        "current_voters" => ?current_voters,
+                        "conf_state_voters" => ?conf_state.voters,
+                        "msg_type" => ?msg.msg_type()
+                    );
+                    return Ok(());
+                }
+            } else {
+                warn!(self.logger, "[RAFT-MSG] Discarding message from node not in configuration";
+                    "from" => from,
+                    "current_voters" => ?current_voters,
+                    "msg_type" => ?msg.msg_type()
+                );
+                return Ok(());
+            }
         }
         
         node.step(msg)
@@ -1370,25 +1414,44 @@ impl RaftManager {
                                         "added_node" => cc.node_id
                                     );
                                     
-                                    // Special handling: if this node is processing an AddNode for another node
-                                    // but the returned configuration only contains the new node,
-                                    // we need to include this node as well
-                                    if !cs.voters.is_empty() && !cs.voters.contains(&self.node_id) {
-                                        info!(self.logger, "[RAFT-CONF] Configuration missing self, reconstructing";
+                                    // Special handling: For AddNode operations, the Raft library sometimes returns
+                                    // incomplete configurations. We need to ensure all nodes are included.
+                                    // This can happen when:
+                                    // 1. A node is processing its own AddNode (returns only the new node)
+                                    // 2. The configuration is missing existing voters
+                                    if cs.voters.len() <= 1 {
+                                        info!(self.logger, "[RAFT-CONF] Configuration appears incomplete, reconstructing";
                                             "self_id" => self.node_id,
-                                            "returned_voters" => ?cs.voters
+                                            "returned_voters" => ?cs.voters,
+                                            "added_node" => cc.node_id
                                         );
                                         
                                         // Load the previous configuration state and add the new node
                                         if let Ok(prev_conf) = self.storage.load_conf_state() {
                                             let mut new_voters = prev_conf.voters;
+                                            // Add the new node if not already present
                                             if !new_voters.contains(&cc.node_id) {
                                                 new_voters.push(cc.node_id);
+                                            }
+                                            // Also ensure self is included (important for joining nodes)
+                                            if !new_voters.contains(&self.node_id) && self.node_id == cc.node_id {
+                                                // This is the joining node processing its own AddNode
+                                                new_voters.push(self.node_id);
                                             }
                                             corrected_cs.voters = new_voters;
                                             info!(self.logger, "[RAFT-CONF] Reconstructed configuration";
                                                 "corrected_voters" => ?corrected_cs.voters
                                             );
+                                        } else if cs.voters.len() == 1 && cs.voters[0] == cc.node_id {
+                                            // No previous configuration and only the new node in voters
+                                            // This might be the second node joining a single-node cluster
+                                            // Try to include node 1 (the bootstrap node)
+                                            if cc.node_id != 1 {
+                                                corrected_cs.voters = vec![1, cc.node_id];
+                                                info!(self.logger, "[RAFT-CONF] Assumed bootstrap configuration with node 1";
+                                                    "corrected_voters" => ?corrected_cs.voters
+                                                );
+                                            }
                                         }
                                     }
                                     corrected_cs

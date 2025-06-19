@@ -1,14 +1,12 @@
 // Property-based testing for node functionality
 
 use proptest::prelude::*;
-use proptest::test_runner::TestCaseError;
 use tokio::time::Duration;
 use tempfile::TempDir;
 use once_cell::sync::Lazy;
 use blixard::{
     node::Node,
     types::{NodeConfig, VmConfig, VmCommand, VmStatus},
-    error::BlixardError,
 };
 
 mod common;
@@ -54,7 +52,7 @@ proptest! {
     #[test]
     fn test_node_creation_properties(
         id in node_id_strategy(),
-        port in test_port_strategy(),
+        _port in test_port_strategy(),
         use_tailscale in any::<bool>()
     ) {
         RUNTIME.block_on(async {
@@ -87,7 +85,7 @@ proptest! {
     #[test]
     fn test_node_initialization_properties(
         id in node_id_strategy(),
-        port in test_port_strategy()
+        _port in test_port_strategy()
     ) {
         RUNTIME.block_on(async {
             let config = NodeConfig {
@@ -170,7 +168,7 @@ proptest! {
     #[test]
     fn test_node_lifecycle_properties(
         id in node_id_strategy(),
-        port in test_port_strategy()
+        _port in test_port_strategy()
     ) {
         RUNTIME.block_on(async {
             let config = NodeConfig {
@@ -215,7 +213,7 @@ proptest! {
     #[test]
     fn test_cluster_operations_uninitialized(
         id in node_id_strategy(),
-        port in test_port_strategy(),
+        _port in test_port_strategy(),
         peer_port in test_port_strategy()
     ) {
         let _ = RUNTIME.block_on(async {
@@ -251,7 +249,7 @@ proptest! {
     #[test]
     fn test_node_multiple_starts_stops(
         id in node_id_strategy(),
-        port in test_port_strategy(),
+        _port in test_port_strategy(),
         iterations in 1usize..=5usize
     ) {
         RUNTIME.block_on(async {
@@ -290,7 +288,7 @@ proptest! {
     #[test]
     fn test_vm_commands_across_node_states(
         id in node_id_strategy(),
-        port in test_port_strategy(),
+        _port in test_port_strategy(),
         vm_name in vm_name_strategy()
     ) {
         RUNTIME.block_on(async {
@@ -337,7 +335,7 @@ proptest! {
     #[test]
     fn test_stop_always_succeeds(
         id in node_id_strategy(),
-        port in test_port_strategy(),
+        _port in test_port_strategy(),
         start_node in any::<bool>()
     ) {
         RUNTIME.block_on(async {

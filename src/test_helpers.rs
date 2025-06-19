@@ -143,7 +143,7 @@ pub struct TestNode {
     pub addr: SocketAddr,
     pub shutdown_tx: Option<oneshot::Sender<()>>,
     pub server_handle: Option<JoinHandle<()>>,
-    temp_dir: Option<tempfile::TempDir>,
+    _temp_dir: Option<tempfile::TempDir>,
 }
 
 impl TestNode {
@@ -323,7 +323,7 @@ impl TestNodeBuilder {
             addr,
             shutdown_tx: None,
             server_handle: Some(server_handle),
-            temp_dir,
+            _temp_dir: temp_dir,
         })
     }
 }
@@ -780,6 +780,14 @@ mod tests {
         node.shutdown().await;
     }
     
+    /// Test cluster formation with expected timing variations
+    ///
+    /// This test may require retries due to legitimate timing variations:
+    /// - Leader election uses randomized timeouts
+    /// - Node discovery and connection establishment timing
+    /// - Initial configuration propagation
+    ///
+    /// These variations represent real distributed system behaviors
     #[tokio::test]
     async fn test_cluster_formation() {
         let cluster = TestCluster::builder()
