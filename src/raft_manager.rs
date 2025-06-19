@@ -1549,17 +1549,33 @@ impl RaftManager {
                                 let raft_conf_debug = format!("{:?}", node.raft.prs().conf().voters());
                                 let raft_has_empty_voters = raft_conf_debug.contains("voters: {}");
                                 
-                                // Only skip if this is NOT the leader and has empty configuration
-                                // The leader should always be able to process configuration changes
+                                // For non-leaders with empty Raft configuration, we should trust the log entry
+                                // and update our configuration state without going through apply_conf_change
                                 if raft_has_empty_voters && !current_voters.is_empty() && node.raft.state != raft::StateRole::Leader {
-                                    warn!(self.logger, "[RAFT-CONF] Non-leader with empty Raft voter set - may need to catch up";
+                                    warn!(self.logger, "[RAFT-CONF] Non-leader with empty Raft voter set - updating conf state from log entry";
                                         "storage_voters" => ?current_voters,
                                         "attempting_to_remove" => cc.node_id,
                                         "self_node_id" => self.node_id
                                     );
                                     
-                                    // For non-leaders with empty config, we'll try to apply anyway
-                                    // The Raft library will handle it, and if it fails, we'll handle the error
+                                    // Calculate the new configuration based on the log entry
+                                    let mut new_voters = current_voters.clone();
+                                    new_voters.retain(|&id| id != cc.node_id);
+                                    
+                                    if !new_voters.is_empty() {
+                                        let mut new_cs = ConfState::default();
+                                        new_cs.voters = new_voters.clone();
+                                        
+                                        // Save this configuration state
+                                        self.storage.save_conf_state(&new_cs)?;
+                                        info!(self.logger, "[RAFT-CONF] Non-leader updated conf state from log entry";
+                                            "voters" => ?new_cs.voters,
+                                            "removed_node" => cc.node_id
+                                        );
+                                        
+                                        // Skip the apply_conf_change call since we've already updated the state
+                                        continue;
+                                    }
                                 }
                             }
                             
@@ -1580,26 +1596,8 @@ impl RaftManager {
                                             "removing_node_id" => cc.node_id
                                         );
                                         
-                                        // For non-leaders, we should still update our conf state to match what the leader decided
-                                        // The leader has already written the new configuration to the log entry
-                                        if cc.change_type() == raft::prelude::ConfChangeType::RemoveNode {
-                                            // Calculate what the configuration should be after removing the node
-                                            let mut new_voters = current_voters.clone();
-                                            new_voters.retain(|&id| id != cc.node_id);
-                                            
-                                            if !new_voters.is_empty() {
-                                                let mut new_cs = ConfState::default();
-                                                new_cs.voters = new_voters.clone();
-                                                
-                                                // Save this configuration state
-                                                self.storage.save_conf_state(&new_cs)?;
-                                                info!(self.logger, "[RAFT-CONF] Non-leader saved RemoveNode configuration";
-                                                    "voters" => ?new_cs.voters,
-                                                    "removed_node" => cc.node_id
-                                                );
-                                            }
-                                        }
-                                        
+                                        // We should have already handled this case before apply_conf_change
+                                        // If we still got here, it means something unexpected happened
                                         // Don't send error response for non-leaders - this is expected
                                         continue;
                                     }

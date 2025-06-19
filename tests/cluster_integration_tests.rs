@@ -146,7 +146,6 @@ async fn test_vm_operations_on_cluster() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "Known issue: Non-leader nodes don't properly update conf state after RemoveNode - see RAFT_CONSENSUS_ENFORCEMENT.md"]
 async fn test_node_failure_handling() {
     // Use TestCluster for multi-node testing
     let mut cluster = TestCluster::builder()

@@ -388,39 +388,53 @@ impl ClusterService for BlixardGrpcService {
         &self,
         _request: Request<ClusterStatusRequest>,
     ) -> Result<Response<ClusterStatusResponse>, Status> {
-        // Get Raft status
+        // Get cluster status from Raft configuration (authoritative source)
+        let (leader_id, node_ids, term) = self.node.get_cluster_status().await
+            .map_err(|e| Self::error_to_status(e))?;
+        
+        // Get Raft status for state information
         let raft_status = self.node.get_raft_status().await
             .map_err(|e| Self::error_to_status(e))?;
         
-        // Get all peers
+        // Get peers for address information
         let peers = self.node.get_peers().await;
         
-        // Build node list - include self and all peers
-        let mut nodes = vec![NodeInfo {
-            id: self.node.get_id(),
-            address: self.node.get_bind_addr().to_string(),
-            state: if raft_status.is_leader {
-                NodeState::Leader.into()
-            } else if raft_status.state == "candidate" {
-                NodeState::Candidate.into()
-            } else {
-                NodeState::Follower.into()
-            },
-        }];
+        // Build node list from the authoritative Raft configuration
+        let mut nodes = Vec::new();
         
-        // Add peers
-        for peer in peers {
+        for node_id in node_ids {
+            let (address, state) = if node_id == self.node.get_id() {
+                // Self
+                let state = if raft_status.is_leader {
+                    NodeState::Leader
+                } else if raft_status.state == "candidate" {
+                    NodeState::Candidate
+                } else {
+                    NodeState::Follower
+                };
+                (self.node.get_bind_addr().to_string(), state)
+            } else {
+                // Peer - get address from peers list
+                let peer_addr = peers.iter()
+                    .find(|p| p.id == node_id)
+                    .map(|p| p.address.clone())
+                    .unwrap_or_else(|| format!("unknown-{}", node_id));
+                    
+                // TODO: Track actual peer states
+                (peer_addr, NodeState::Follower)
+            };
+            
             nodes.push(NodeInfo {
-                id: peer.id,
-                address: peer.address,
-                state: NodeState::Follower.into(), // TODO: Track actual peer states
+                id: node_id,
+                address,
+                state: state.into(),
             });
         }
         
         let response = ClusterStatusResponse {
-            leader_id: raft_status.leader_id.unwrap_or(0),
+            leader_id,
             nodes,
-            term: raft_status.term,
+            term,
         };
 
         Ok(Response::new(response))
