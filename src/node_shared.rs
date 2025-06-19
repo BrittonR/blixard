@@ -738,15 +738,9 @@ impl SharedNodeState {
             });
         }
         
-        // Get Raft peers (nodes in the cluster)
-        let peers = self.peers.read().await;
-        let mut node_ids: Vec<u64> = peers.keys().cloned().collect();
-        
-        // Include self in the node list
-        if !node_ids.contains(&self.config.id) {
-            node_ids.push(self.config.id);
-        }
-        node_ids.sort();
+        // Get the actual Raft configuration state from storage
+        // This is the authoritative source of cluster membership
+        let node_ids = self.get_current_voters().await?;
         
         // Get Raft status for leader and term info
         let raft_status = self.raft_status.read().await;

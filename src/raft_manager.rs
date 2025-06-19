@@ -1580,6 +1580,26 @@ impl RaftManager {
                                             "removing_node_id" => cc.node_id
                                         );
                                         
+                                        // For non-leaders, we should still update our conf state to match what the leader decided
+                                        // The leader has already written the new configuration to the log entry
+                                        if cc.change_type() == raft::prelude::ConfChangeType::RemoveNode {
+                                            // Calculate what the configuration should be after removing the node
+                                            let mut new_voters = current_voters.clone();
+                                            new_voters.retain(|&id| id != cc.node_id);
+                                            
+                                            if !new_voters.is_empty() {
+                                                let mut new_cs = ConfState::default();
+                                                new_cs.voters = new_voters.clone();
+                                                
+                                                // Save this configuration state
+                                                self.storage.save_conf_state(&new_cs)?;
+                                                info!(self.logger, "[RAFT-CONF] Non-leader saved RemoveNode configuration";
+                                                    "voters" => ?new_cs.voters,
+                                                    "removed_node" => cc.node_id
+                                                );
+                                            }
+                                        }
+                                        
                                         // Don't send error response for non-leaders - this is expected
                                         continue;
                                     }
