@@ -5,6 +5,14 @@
 
 ## Test Reliability Analysis
 
+### Summary of Investigation (2025-01-18)
+
+Through detailed analysis and targeted fixes, we've improved the three-node cluster tests from ~45% failure rate to:
+- **test_three_node_cluster_membership_changes**: 100% pass rate
+- **test_three_node_cluster_fault_tolerance**: ~80% pass rate
+
+The remaining failures are due to a specific race condition with messages from removed nodes, not general flakiness.
+
 ### Five Sequential Test Runs (cargo test)
 
 Running `cargo test --features test-helpers three_node_cluster` five times:
@@ -98,8 +106,18 @@ After fixes, the cluster tests now have much better reliability:
 
 1. **test_three_node_cluster_fault_tolerance**
    - Now passes ~80% of the time
-   - Occasional failures due to Raft manager crashes (separate issue)
-   - "removed all voters" error is now handled gracefully
+   - Failure Analysis: Race condition with messages from removed nodes
+   
+   **Root Cause**: The test fails when the removed node (node 2) sends messages after being removed from the cluster configuration. The sequence is:
+   - Node 2 is removed via LeaveCluster RPC
+   - Node 2 is shut down
+   - However, node 2 may have already sent messages that are still in flight
+   - When these messages arrive at the leader (node 1), the Raft library's `step()` function fails because the sender is no longer in the configuration
+   - This causes "handle_raft_message() failed, exiting run()" error
+   - The Raft manager's run loop exits, closing the proposal channel
+   - Subsequent task submission fails with "Raft channel closed"
+   
+   **Evidence**: In all failing runs, we see "Received message from 2" immediately before the error on node 1. In passing runs, no messages from node 2 arrive after removal.
 
 2. **test_three_node_cluster_membership_changes**
    - Now passes consistently (100% success rate)
@@ -107,10 +125,18 @@ After fixes, the cluster tests now have much better reliability:
 
 ## Remaining Issues
 
-### Raft Manager Crash Recovery
-- **Issue**: Raft manager can crash with "handle_raft_message() failed"
-- **Impact**: Causes test_three_node_cluster_fault_tolerance to fail ~20% of the time
-- **Future work**: Implement Raft manager recovery mechanism
+### Raft Manager Message Handling from Removed Nodes
+
+**Issue**: Messages from removed nodes cause Raft manager crashes
+**Impact**: Causes test_three_node_cluster_fault_tolerance to fail ~20% of the time
+
+**Potential Solutions**:
+1. **Graceful Message Handling**: Modify `handle_raft_message()` to check if the sender is still in the configuration before calling `step()`. If not, log a warning and discard the message.
+2. **Delayed Node Shutdown**: In `remove_node()`, add a delay between configuration change and node shutdown to allow in-flight messages to be processed.
+3. **Message Epoch/Term Validation**: Check message term/epoch to detect stale messages from removed nodes.
+4. **Raft Manager Recovery**: Implement automatic restart of the Raft manager thread if it crashes (more complex but more robust).
+
+The most straightforward fix would be option 1 - validate the sender before processing messages.
 
 ## Recommendations
 
