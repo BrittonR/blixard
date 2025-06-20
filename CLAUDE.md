@@ -104,15 +104,20 @@ cargo install cargo-nextest --locked
 ```
 
 ### Testing Frameworks
+
+The test suite is organized into two distinct categories:
+
+#### Unit Tests (`tests/` directory - 84 tests)
+Fast, reliable unit tests for individual components:
 ```bash
-# Comprehensive test suite - run all tests
-cargo test                          # All unit and integration tests
-cargo test --all-targets           # Include all test types
+# Run all unit tests
+cargo test --features test-helpers      # All unit and component tests
+cargo nt-all                           # Using nextest for better output
 
 # Specific test categories
 cargo test --test cli_tests         # CLI command parsing tests
 cargo test --test error_tests       # Error handling tests  
-cargo test --test node_tests        # Node functionality tests
+cargo test --test node_tests        # Single node functionality tests
 cargo test --test types_tests       # Type serialization tests
 cargo test --test storage_tests     # Database persistence tests
 
@@ -120,31 +125,50 @@ cargo test --test storage_tests     # Database persistence tests
 cargo test --test error_proptest    # Error property validation
 cargo test --test types_proptest    # Type constraint properties
 cargo test --test node_proptest     # Node behavior properties
-cargo test --test proptest_example  # Original domain properties (7 tests)
+cargo test --test proptest_example  # Original domain properties
 
-# Model checking with stateright (WORKING - 2 tests)  
+# Model checking with stateright
 cargo test --test stateright_simple_test
+```
 
+#### Distributed System Tests (`simulation/tests/` directory - ~3000 lines)
+Deterministic simulation tests for distributed behaviors:
+```bash
 # MadSim deterministic simulation (FULLY DETERMINISTIC)
 ./scripts/sim-test.sh  # Run all simulation tests
 MADSIM_TEST_SEED=12345 ./scripts/sim-test.sh  # Reproduce specific run
 
+# Specific simulation test suites
+cd simulation && cargo test three_node_cluster  # 3-node cluster tests
+cd simulation && cargo test distributed_storage # Storage consistency
+cd simulation && cargo test raft_comprehensive  # Comprehensive Raft testing
+
 # Determinism verification tools
 ./scripts/verify-determinism.sh  # Comprehensive determinism audit
 ./scripts/demo-determinism.sh    # Simple determinism demonstration
-
-# Note: For MadSim API reference, always check https://docs.rs/madsim/latest/madsim/
-# ✅ FIXED: MadSim now properly implemented with modern API
-# Working: node creation, network control, packet loss config, partitions
-
-# Failpoint injection (PREPARED)
-# - Dependencies added to Cargo.toml
-# - Example test file created
-# - Needs error type updates to compile
 ```
 
+**Recently Moved to Simulation** (for deterministic execution):
+- `three_node_cluster_tests.rs` - Multi-node cluster formation
+- `distributed_storage_consistency_tests.rs` - Replication consistency
+- `cluster_integration_tests.rs` - Cluster-wide operations
+- `node_lifecycle_integration_tests.rs` - Task distribution
+- `join_cluster_config_test.rs` - Dynamic membership
+- `three_node_manual_test.rs` - Manual cluster testing
+- `raft_quick_test.rs` - Basic Raft consensus
+- `raft_proptest.rs` - Raft property testing
+
+These tests benefit from:
+- **Deterministic execution** - Same seed produces identical results
+- **Controlled timing** - No wall-clock dependencies
+- **Network simulation** - Partitions, delays, Byzantine failures
+- **Faster execution** - Simulated time runs instantly
+
 ### Test Infrastructure Status
-- **✅ Comprehensive Unit Tests**: 51 traditional unit tests covering core functionality
+- **✅ Clean Separation**: Tests now properly separated by type
+  - **Unit Tests** (84 tests): Fast, reliable tests in `tests/`
+  - **Distributed Tests** (~3000 lines): Moved to deterministic `simulation/tests/`
+- **✅ Comprehensive Unit Tests**: Core functionality coverage
   - CLI command parsing and validation (`tests/cli_tests.rs`)
   - Error handling and type conversions (`tests/error_tests.rs`)
   - Node lifecycle and VM management (`tests/node_tests.rs`)

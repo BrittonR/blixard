@@ -129,17 +129,6 @@ required-features = ["test-helpers"]
 name = "raft_state_machine_tests"
 required-features = ["test-helpers"]
 
-[[test]]
-name = "three_node_cluster_tests"
-required-features = ["test-helpers"]
-
-[[test]]
-name = "node_lifecycle_integration_tests"
-required-features = ["test-helpers"]
-
-[[test]]
-name = "cluster_integration_tests"
-required-features = ["test-helpers"]
 
 [profile.release]
 lto = true
