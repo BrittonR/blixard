@@ -457,6 +457,33 @@ Based on the current foundation, the following areas need implementation:
 5. **Network Partition Handling** - Production-grade fault tolerance
 6. **Dynamic Membership** - Safe cluster reconfiguration
 
+### Network Partition Testing - Future Work Required
+
+**IMPORTANT**: The current network partition tests use clean node removal via `leave_cluster()` rather than true network partition simulation. This leads to test design flaws:
+
+- **Current Issue**: Tests simulate "partitions" by cleanly removing nodes from cluster configuration
+- **Problem**: After clean removal, remaining cluster is legitimate and can process writes
+- **Result**: Isolated nodes forward requests to legitimate leader, which correctly accepts them
+- **NOT a Split-Brain**: This is proper distributed system behavior, not a safety violation
+
+**Required Implementation**:
+1. **Real Network Partition Simulation** - Tests need to simulate actual connection failures, not clean removals
+2. **MadSim Network Controls** - Use MadSim's network partition features to isolate nodes while keeping them in cluster configuration
+3. **Split-Brain Prevention Tests** - Verify that truly partitioned nodes cannot both accept writes simultaneously
+4. **Partition Detection** - Test node behavior when they lose contact with majority but remain configured
+
+**Files Affected**: 
+- `tests/network_partition_storage_tests.rs` - Contains proper partition healing tests but needs true partition simulation
+- Test infrastructure needs enhancement to distinguish between clean removal and network isolation
+
+**Test Design Pattern Needed**:
+```rust
+// Instead of: create_partition() via leave_cluster()
+// Need: network_partition() via connection blocking
+madsim::net::partition(&[node1, node2], &[node3, node4, node5]);
+// Verify both sides cannot make progress simultaneously
+```
+
 ## AI Development Guidelines
 
 ### What to Build On

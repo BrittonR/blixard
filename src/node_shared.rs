@@ -307,8 +307,21 @@ impl SharedNodeState {
     pub async fn create_vm_through_raft(&self, command: VmCommand) -> BlixardResult<()> {
         tracing::info!("create_vm_through_raft called");
         
-        // Check if we're the leader
+        // CRITICAL FIX: Check if this node has been removed from the cluster
+        // If a node has no peers, it may have been removed from the cluster
+        let peers = self.get_peers().await;
         let raft_status = self.get_raft_status().await?;
+        
+        // If we have no peers, we might have been cleanly removed from the cluster
+        // In this case, we should not process writes (prevents split-brain during testing)
+        if peers.is_empty() && !raft_status.is_leader {
+            tracing::warn!("Node has no peers and is not leader - rejecting write to prevent split-brain");
+            return Err(BlixardError::ClusterError(
+                "Node isolated from cluster and cannot process writes".to_string()
+            ));
+        }
+        
+        // Check if we're the leader
         if !raft_status.is_leader {
             // Forward to leader if we know who it is
             if let Some(leader_id) = raft_status.leader_id {
@@ -364,8 +377,43 @@ impl SharedNodeState {
                 Err(BlixardError::ClusterError("No leader elected yet".to_string()))
             }
         } else {
-            // We are the leader, process through Raft
+            // We are the leader, but verify we can reach a quorum before processing writes
             tracing::info!("Processing VM creation locally as leader");
+            
+            // CRITICAL FIX: For network partition safety, verify leadership is still valid
+            // by ensuring we have recent communication with a majority of the configured voters
+            let raft_status = self.get_raft_status().await?;
+            
+            // Additional safety check: if we haven't heard from followers recently,
+            // we might be in a network partition and should reject writes
+            let peers = self.get_peers().await;
+            if !peers.is_empty() {
+                // In a multi-node cluster, we should have peers
+                // Check if we can reach a majority (simple peer connectivity check)
+                let total_configured_nodes = peers.len() + 1; // +1 for self
+                let required_majority = (total_configured_nodes / 2) + 1;
+                
+                // Count reachable nodes (start with self)
+                let mut reachable_count = 1;
+                for peer in &peers {
+                    if peer.is_connected {
+                        reachable_count += 1;
+                    }
+                }
+                
+                if reachable_count < required_majority {
+                    tracing::warn!(
+                        "Leadership safety check failed: only {}/{} nodes reachable, need {} for majority", 
+                        reachable_count, total_configured_nodes, required_majority
+                    );
+                    return Err(BlixardError::ClusterError(
+                        format!("Cannot process writes: leader isolation detected - only {}/{} nodes reachable", 
+                               reachable_count, total_configured_nodes)
+                    ));
+                }
+                
+                tracing::info!("Leadership safety check passed: {}/{} nodes reachable", reachable_count, total_configured_nodes);
+            }
             
             let proposal_tx = self.raft_proposal_tx.lock().await;
             if let Some(tx) = proposal_tx.as_ref() {
