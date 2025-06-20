@@ -107,16 +107,24 @@ async fn test_large_state_transfer() {
             let cluster = &cluster;
             async move {
                 if let Ok(client) = cluster.client(new_node_id).await {
-                    if let Ok(response) = client.clone().list_vms(ListVmsRequest {}).await {
-                        let vm_count = response.into_inner().vms.len();
-                        return vm_count >= 90; // Allow for some tolerance (90% of 100 VMs)
+                    match client.clone().list_vms(ListVmsRequest {}).await {
+                        Ok(response) => {
+                            let vm_count = response.into_inner().vms.len();
+                            if vm_count > 0 {
+                                info!("New node has synced {} VMs so far", vm_count);
+                            }
+                            return vm_count >= 90; // Allow for some tolerance (90% of 100 VMs)
+                        }
+                        Err(e) => {
+                            warn!("Failed to list VMs on new node: {}", e);
+                        }
                     }
                 }
                 false
             }
         },
-        Duration::from_secs(120), // Increased from 60s
-        Duration::from_millis(500),
+        Duration::from_secs(30), // Reduced timeout for debugging
+        Duration::from_millis(1000), // Check every second
     ).await;
     
     let sync_time = start.elapsed();

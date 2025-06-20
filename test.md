@@ -1,290 +1,117 @@
-# Blixard Test Suite Report
+# Test Infrastructure Documentation
 
-Generated: January 19, 2025
-Updated: January 20, 2025
+## Current Test Status
 
-## Summary
+As of June 20, 2025:
+- **Total Tests**: ~190 tests across 31 test binaries
+- **Pass Rate**: 100% (all active tests passing)
+- **Ignored Tests**: 11 explicitly ignored + 4 in disabled file
 
-- **Total Tests**: 295 (11 skipped)
-- **Passing Tests**: 294
-- **Failing Tests**: 1
-- **Success Rate**: 99.7%
+## Ignored Tests Analysis
 
-## Update: Fixes Applied
+### 1. Network Partition & Distributed Systems Tests (3 tests)
 
-Most issues have been resolved. The following fixes were successfully applied:
+#### `test_partition_healing_reconciliation` 
+- **File**: `tests/network_partition_storage_tests.rs`
+- **Reason**: 5-node cluster formation has timing issues
+- **Status**: Needs investigation of timing issues in large clusters
 
-### ✅ Fixed Tests
-1. **peer_connector_proptest::test_concurrent_operations** - Fixed by adding uniqueness filter for peer IDs
-2. **storage_performance_benchmarks::benchmark_snapshot_transfer** - Fixed by adding cluster stabilization and retry logic
+#### `test_eventual_consistency_timing`
+- **File**: `tests/distributed_storage_consistency_tests.rs`
+- **Reason**: Flaky after consensus enforcement changes
+- **Status**: May need timing adjustments for new Raft-based architecture
 
-### ✅ Fixed Warnings
-1. **src/node.rs:159** - Fixed unused variable `restart_count` 
-2. **src/raft_manager.rs:590** - Fixed duplicate `raft_node` creation
-3. **tests/three_node_manual_test.rs:140** - Fixed unused assignment `final_leader_id`
-4. **Test utilities** - Added `#[allow(dead_code)]` to suppress warnings for future-use helpers
+#### `test_network_partition_behavior`
+- **File**: `tests/distributed_storage_consistency_tests.rs`
+- **Reason**: Requires network partition simulation infrastructure
+- **Status**: Placeholder - waiting for partition simulation framework
 
-## Remaining Issues
+### 2. Tests Needing TestCluster Migration (2 tests)
 
-### 1. storage_edge_case_tests::test_large_state_transfer
+These tests bypass Raft consensus and directly manipulate nodes, which is no longer valid:
 
-**Status**: Still failing
+#### `test_database_concurrent_access`
+- **File**: `tests/node_tests.rs`
+- **Current**: Uses direct Node operations
+- **Needed**: Convert to use TestCluster for proper Raft consensus
 
-**Error**: `Failed to add node: ClusterJoin { reason: "Node 4 already exists in cluster" }`
+#### `test_vm_lifecycle_operations`
+- **File**: `tests/node_tests.rs`
+- **Current**: Tests VM lifecycle with direct Node operations
+- **Needed**: Convert to use TestCluster and gRPC clients
 
-**Root Cause**: The test infrastructure appears to have an issue with node ID allocation when adding the 4th node to a cluster under extreme load conditions (100 VMs, 50 tasks). This is likely a test harness issue rather than a production code issue.
+### 3. Tests Requiring Full Raft Setup (5 tests)
 
-**Impact**: Low - This is an edge case test that creates extreme conditions not typically seen in production
+All in `tests/node_tests.rs`, these need proper cluster setup:
+- `test_raft_manager_initialization`
+- `test_task_submission`
+- `test_task_status_retrieval`
+- `test_cluster_status_after_join`
+- `test_leave_cluster`
 
-**Potential Fix**: The TestCluster infrastructure may need to be updated to handle dynamic node ID allocation better, or the test may need to be restructured to avoid this specific scenario.
+### 4. Manual/Stress Tests (2 tests)
 
-### Minor Warnings Still Present
+Appropriately ignored for normal test runs:
 
-1. **Unused assignment warning**:
-   - `restart_count` in src/node.rs:159 - The variable is assigned but the compiler still warns about the initial assignment
-   
-2. **Unused test utilities**:
-   - Various helper functions in tests/common/ that are intended for future use
-   - Already suppressed with `#[allow(dead_code)]` where appropriate
+#### `test_three_node_cluster_stress`
+- **File**: `tests/three_node_cluster_tests.rs`
+- **Purpose**: 30-second stress test with rapid operations
+- **Usage**: `cargo test test_three_node_cluster_stress -- --ignored --nocapture`
 
-3. **Unused imports**:
-   - `cluster_service_client::ClusterServiceClient` in tests/cluster_integration_tests.rs
-   - Minor import cleanup needed
+#### `test_removed_node_message_handling`
+- **File**: `tests/three_node_cluster_tests.rs`
+- **Purpose**: Debug test for removed node message handling
+- **Usage**: `cargo test test_removed_node_message_handling -- --ignored --nocapture`
 
-### Performance Considerations
+### 5. Disabled Test File
 
-Some tests are slow but passing:
-- `peer_connector_proptest::test_message_buffer_limits` - Takes over 10 minutes
-- Various property-based tests take 60-80 seconds each
-- Consider adding timeout limits or reducing iteration counts for CI environments
-
-## Original Failing Tests Analysis (Now Fixed)
-
-### 1. peer_connector_proptest::test_concurrent_operations (✅ FIXED)
-
-**Error**: `called Result::unwrap() on an Err value: ClusterError("Peer 776 already exists")`
-
-**Root Cause**: The PropTest generator is creating duplicate peer IDs. When the test adds peers concurrently, it's possible for the same peer ID (776) to appear multiple times in the generated vector.
-
-**Fix**: Modify the peer generation strategy to ensure unique peer IDs:
-
-```rust
-// In tests/peer_connector_proptest.rs, update the test:
-#[test]
-fn test_concurrent_operations(
-    peers in prop::collection::vec(peer_info_strategy(), 2..=5)
-        .prop_filter("unique peer ids", |peers| {
-            let mut ids = std::collections::HashSet::new();
-            peers.iter().all(|p| ids.insert(p.id))
-        })
-) {
-    // ... rest of the test
-}
-```
-
-Alternative fix in the peer_info_strategy itself:
-```rust
-pub fn peer_info_strategy() -> impl Strategy<Value = PeerInfo> {
-    (1u64..10000u64, "127.0.0.1:[0-9]{4,5}").prop_map(|(id, addr)| {
-        PeerInfo {
-            id,
-            address: addr.parse().unwrap_or_else(|_| "127.0.0.1:7000".parse().unwrap()),
-            is_connected: false,
-        }
-    })
-}
-```
-
-### 2. storage_edge_case_tests::test_large_state_transfer
-
-**Error**: Panic during test execution when creating 1000 VMs and 500 tasks
-
-**Root Cause**: The test is creating an extremely large state (1000 VMs + 500 tasks) which is overwhelming the system. The panic occurs when trying to add a new node to replicate this large state, likely due to:
-- Memory constraints
-- Snapshot size limits
-- Timeout during state transfer
-- Raft log becoming too large
-
-**Fix**: Implement the following improvements:
-
-1. **Reduce test scale for reliability**:
-```rust
-// Reduce to more reasonable numbers that still test large state
-const LARGE_VM_COUNT: usize = 100;  // was 1000
-const LARGE_TASK_COUNT: usize = 50; // was 500
-```
-
-2. **Add proper resource limits and chunking**:
-```rust
-// Add batching for VM creation
-for chunk in (0..LARGE_VM_COUNT).collect::<Vec<_>>().chunks(10) {
-    for &i in chunk {
-        // Create VM
-    }
-    // Allow Raft to process entries
-    sleep(Duration::from_millis(200)).await;
-}
-```
-
-3. **Increase timeouts for large state operations**:
-```rust
-// When waiting for new node to catch up
-timing::wait_for_condition_with_backoff(
-    || { /* ... */ },
-    Duration::from_secs(120), // Increase from 30s
-    Duration::from_millis(500), // Increase backoff
-).await;
-```
-
-### 3. storage_performance_benchmarks::benchmark_snapshot_transfer
-
-**Error**: `Failed to add node` with underlying error "Failed to propose task"
-
-**Root Cause**: The benchmark is failing when trying to add a new node after creating state. The "Failed to propose task" error indicates the Raft proposal is being rejected, likely because:
-- The cluster isn't fully stabilized after VM/task creation
-- The leader node is overwhelmed processing previous proposals
-- Configuration change proposals are being rejected due to pending operations
-
-**Fix**: Implement proper synchronization and error handling:
-
-1. **Wait for cluster stabilization**:
-```rust
-// After creating VMs and tasks, ensure they're all committed
-let wait_result = timing::wait_for_condition_with_backoff(
-    || {
-        let leader_client = leader_client.clone();
-        async move {
-            // Check that all VMs are actually created
-            if let Ok(response) = leader_client.list_vms(ListVmsRequest {}).await {
-                response.into_inner().vms.len() >= vm_count
-            } else {
-                false
-            }
-        }
-    },
-    Duration::from_secs(10),
-    Duration::from_millis(100),
-).await;
-
-if wait_result.is_err() {
-    warn!("State not fully replicated before adding node");
-}
-```
-
-2. **Add retry logic for node addition**:
-```rust
-let mut new_node_id = None;
-for attempt in 0..3 {
-    match cluster.add_node().await {
-        Ok(id) => {
-            new_node_id = Some(id);
-            break;
-        }
-        Err(e) => {
-            warn!("Failed to add node (attempt {}): {}", attempt + 1, e);
-            sleep(Duration::from_secs(2)).await;
-        }
-    }
-}
-let new_node_id = new_node_id.expect("Failed to add node after retries");
-```
-
-3. **Consider making this test conditional**:
-```rust
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[cfg_attr(not(feature = "expensive-tests"), ignore)]
-async fn benchmark_snapshot_transfer() {
-    // ... test implementation
-}
-```
-
-## Test Categories Breakdown
-
-### Unit Tests
-- **CLI Tests**: All passing (parsing, validation, edge cases)
-- **Error Tests**: All passing (error handling, conversions, formatting)
-- **Type Tests**: All passing (serialization, validation, constraints)
-- **Storage Tests**: All passing (database operations, persistence)
-
-### Property-Based Tests (PropTest)
-- **Error Properties**: All passing
-- **Type Properties**: All passing
-- **Node Properties**: All passing
-- **Peer Connector Properties**: 1 failing (concurrent operations)
-
-### Integration Tests
-- **Cluster Formation**: All passing
-- **Node Lifecycle**: All passing
-- **Distributed Storage**: All passing
-- **Network Partitions**: All passing (some ignored)
-- **gRPC Services**: All passing
-
-### Performance Tests
-- **Storage Performance**: 1 failing (snapshot transfer benchmark)
-- **Storage Edge Cases**: 1 failing (large state transfer)
-
-## Warnings to Address
-
-1. **Unused Variables/Assignments**:
-   - `restart_count` in src/node.rs:159
-   - `raft_node` in src/raft_manager.rs:590
-   - `final_leader_id` in tests/three_node_manual_test.rs:140
-
-2. **Dead Code in Test Utilities**:
-   - Several helper functions in tests/common/mod.rs
-   - Test strategy generators not being used
+#### `simulation/tests/grpc_tests.rs.disabled`
+Contains 4 MadSim tests that were disabled during framework updates:
+- `test_grpc_server_startup`
+- `test_vm_operations`
+- `test_cluster_operations`
+- `test_concurrent_clients`
 
 ## Recommendations
 
-1. **Immediate Actions**:
-   - Apply the fixes for the 3 failing tests
-   - Address the compiler warnings
-   - Consider adding feature flags for expensive tests
+### High Priority (Should Address)
+1. **TestCluster Migration** (2 tests) - Important functionality lacking coverage
+2. **Raft Setup Tests** (5 tests) - Core functionality that should be tested
 
-2. **Medium-term Improvements**:
-   - Add more granular timeout configuration for large-scale tests
-   - Implement better progress reporting for long-running tests
-   - Add test categories to nextest configuration for selective running
+### Medium Priority (Future Work)
+1. **5-node Cluster Timing** - Investigate timing issues for larger clusters
+2. **Eventual Consistency Test** - Adjust timing for Raft architecture
 
-3. **Long-term Considerations**:
-   - Set up continuous benchmarking to track performance regressions
-   - Add chaos testing for distributed scenarios
-   - Implement deterministic simulation tests for edge cases
+### Low Priority (Can Remain Ignored)
+1. **Network Partition Tests** - Require significant infrastructure investment
+2. **Manual/Stress Tests** - Appropriately ignored for CI
+3. **Disabled MadSim Tests** - Can be addressed when updating simulation tests
 
-## Test Infrastructure
+## Test Infrastructure Improvements
 
-The test suite uses:
-- **cargo nextest** for improved test execution and isolation
-- **PropTest** for property-based testing
-- **Test helpers** feature flag for integration test utilities
-- **Comprehensive timing utilities** for reliable async testing
-- **TestCluster** abstraction for multi-node testing
+### Recent Fixes (June 2025)
+- Fixed TestCluster node ID allocation for extreme scenarios
+- Fixed duplicate join request handling
+- Fixed leader selection in add_node operations
+- Achieved 100% pass rate for active tests
 
-## Running Tests
+### Testing Best Practices
+1. Use `TestCluster` for all multi-node tests
+2. Use `timing::wait_for_condition_with_backoff()` instead of sleep()
+3. Tests requiring Raft consensus must use TestCluster, not direct Node operations
+4. Run stress tests manually with `--ignored` flag when needed
 
+### Running Tests
 ```bash
-# Run all tests
-cargo nt-all
+# All active tests
+cargo test --all-features
 
-# Run without fail-fast
-cargo nt-all --no-fail-fast
+# Include ignored tests
+cargo test --all-features -- --ignored
 
-# Run specific test category
-cargo test --test storage_tests
+# Specific ignored test
+cargo test test_name -- --ignored --nocapture
 
-# Run with verbose output
-cargo nt-verbose
-
-# Run stress tests (no retries)
-cargo nt-stress
+# With nextest (recommended)
+cargo nextest run --all-features
 ```
-
-## Conclusion
-
-The test suite is now in excellent condition with a 99.7% success rate (294/295 tests passing). The single remaining failure is an edge case test that appears to have a test infrastructure issue rather than a production code problem. All critical functionality tests are passing, and the codebase is ready for production use.
-
-### Next Steps
-1. Fix the TestCluster node ID allocation issue for extreme scenarios
-2. Clean up remaining minor warnings (unused imports)
-3. Consider optimizing slow property-based tests for CI environments
-4. Monitor test performance and adjust timeouts as needed

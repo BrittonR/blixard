@@ -104,14 +104,16 @@ impl ClusterService for BlixardGrpcService {
             }));
         }
         
-        // Check if node already exists
-        if let Some(_) = self.node.get_peer(req.node_id).await {
-            return Ok(Response::new(JoinResponse {
-                success: false,
-                message: format!("Node {} already exists in cluster", req.node_id),
-                peers: vec![],
-                voters: vec![],
-            }));
+        // Check if node already exists in Raft configuration
+        if let Ok(voters) = self.node.get_current_voters().await {
+            if voters.contains(&req.node_id) {
+                return Ok(Response::new(JoinResponse {
+                    success: false,
+                    message: format!("Node {} already exists in cluster", req.node_id),
+                    peers: vec![],
+                    voters: vec![],
+                }));
+            }
         }
         
         // Add peer to local tracking BEFORE proposing to Raft

@@ -567,23 +567,28 @@ impl TestCluster {
         let id = self.next_node_id;
         self.next_node_id += 1;
         
-        // Get leader address - find any existing node to join through
-        let leader_addr = self.nodes.values()
-            .next()
-            .map(|n| n.addr.to_string())
-            .ok_or_else(|| BlixardError::NodeError(
-                "No nodes available to join through".to_string()
-            ))?;
+        // Find the current leader to join through
+        let mut leader_addr = None;
+        for node in self.nodes.values() {
+            let state = node.shared_state.get_raft_status().await.unwrap();
+            if state.is_leader {
+                leader_addr = Some(node.addr);
+                break;
+            }
+        }
+        
+        let leader_addr = leader_addr.ok_or_else(|| BlixardError::ClusterError(
+            "No cluster leader found to join through".to_string()
+        ))?;
         
         let node = TestNode::builder()
             .with_id(id)
             .with_auto_port().await
-            .with_join_addr(Some(leader_addr.parse().unwrap()))
+            .with_join_addr(Some(leader_addr))
             .build()
             .await?;
         
-        // Send join request
-        node.node.send_join_request().await?;
+        // Note: join request is sent automatically during node.initialize() in build()
         
         self.nodes.insert(id, node);
         Ok(id)

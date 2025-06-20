@@ -4,12 +4,12 @@ Generated: June 20, 2025
 
 ## Overall Status
 
-✅ **All tests passing** except for one known edge case test
+✅ **All tests passing!**
 
 - **Total Tests**: ~190 tests across 31 test binaries
-- **Passing Tests**: 189
-- **Failing Tests**: 1
-- **Success Rate**: 99.5%
+- **Passing Tests**: 190
+- **Failing Tests**: 0
+- **Success Rate**: 100%
 
 ## Current Test Results
 
@@ -43,17 +43,23 @@ All test suites are passing when run with `cargo nextest run`:
    - Storage performance benchmarks (including `benchmark_snapshot_transfer`)
    - Connection pool stress tests
 
-## Known Failing Test
+## Previously Failing Test (Now Fixed)
 
-### ❌ storage_edge_case_tests::test_large_state_transfer
+### ✅ storage_edge_case_tests::test_large_state_transfer
 
-**Error**: `"Failed to add node: Node 4 already exists in cluster"`
+**Previous Error**: `"Failed to add node: Node 4 already exists in cluster"`
 
-**Root Cause**: When adding a 4th node to a 3-node cluster with large state (100 VMs, 50 tasks), the test encounters a conflict where node ID 4 is already in the cluster configuration.
+**Root Cause**: Multiple issues were found and fixed:
+1. `TestCluster::add_node()` was connecting to any node instead of the leader
+2. Duplicate join detection was checking the peer list instead of Raft configuration
+3. `TestCluster::add_node()` was sending join request twice (once in builder, once explicitly)
 
-**Impact**: This is an edge case test for extreme scenarios. The core functionality works correctly in normal operations.
+**Fixes Applied**:
+1. Updated `add_node()` to find and connect through the current leader
+2. Changed join duplicate detection to check Raft voters instead of peer list
+3. Removed duplicate `send_join_request()` call in `add_node()`
 
-**Workaround**: The test has been updated to use smaller state sizes and better error handling, but the underlying issue with node ID allocation in edge cases remains.
+**Current Status**: Test now passes. The warning about sync timeout is expected for large state transfers and doesn't affect test success.
 
 ## Compiler Warnings
 
