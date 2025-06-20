@@ -4,11 +4,10 @@ use std::time::Duration;
 
 use blixard::{
     proto::{
-        cluster_service_client::ClusterServiceClient,
         TaskRequest, HealthCheckRequest, ClusterStatusRequest,
         CreateVmRequest, ListVmsRequest,
     },
-    test_helpers::{TestNode, TestCluster},
+    test_helpers::{TestNode, TestCluster, timing},
 };
 
 mod common;
@@ -174,42 +173,29 @@ async fn test_node_failure_handling() {
     cluster.remove_node(node_to_remove).await.unwrap();
     
     // Wait for configuration change to propagate
-    let start = tokio::time::Instant::now();
-    let timeout = Duration::from_secs(10);
-    let mut all_nodes_see_removal = false;
-    
-    while start.elapsed() < timeout && !all_nodes_see_removal {
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        
-        all_nodes_see_removal = true;
-        for node in cluster.nodes().values() {
-            let mut client = match node.client().await {
-                Ok(c) => c,
-                Err(_) => {
-                    all_nodes_see_removal = false;
-                    continue;
+    timing::wait_for_condition_with_backoff(
+        || async {
+            for node in cluster.nodes().values() {
+                let mut client = match node.client().await {
+                    Ok(c) => c,
+                    Err(_) => return false,
+                };
+                
+                let status = match client.get_cluster_status(ClusterStatusRequest {}).await {
+                    Ok(s) => s.into_inner(),
+                    Err(_) => return false,
+                };
+                
+                if status.nodes.len() != 2 {
+                    eprintln!("Node {} still sees {} nodes: {:?}", node.id, status.nodes.len(), status.nodes);
+                    return false;
                 }
-            };
-            
-            let status = match client.get_cluster_status(ClusterStatusRequest {}).await {
-                Ok(s) => s.into_inner(),
-                Err(_) => {
-                    all_nodes_see_removal = false;
-                    continue;
-                }
-            };
-            
-            if status.nodes.len() != 2 {
-                all_nodes_see_removal = false;
-                eprintln!("Node {} still sees {} nodes: {:?}", node.id, status.nodes.len(), status.nodes);
-                break;
             }
-        }
-    }
-    
-    if !all_nodes_see_removal {
-        eprintln!("Timeout waiting for nodes to see removal after {} seconds", timeout.as_secs());
-    }
+            true
+        },
+        Duration::from_secs(10),
+        Duration::from_millis(500),
+    ).await.expect("All nodes should see removal within 10 seconds");
     
     // Now verify all nodes see the correct state
     for node in cluster.nodes().values() {

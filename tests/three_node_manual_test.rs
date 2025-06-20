@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 use blixard::{
-    test_helpers::TestNode,
+    test_helpers::{TestNode, timing},
     proto::HealthCheckRequest,
 };
 
@@ -25,23 +25,18 @@ async fn test_three_node_cluster_manual_approach() {
     eprintln!("Created bootstrap node 1 at {}", node1.addr);
     
     // Wait for bootstrap node to elect itself as leader
-    let mut retries = 0;
-    let mut is_leader = false;
-    loop {
-        let status = node1.shared_state.get_raft_status().await.unwrap();
-        if status.is_leader {
-            is_leader = true;
-            break;
-        }
-        retries += 1;
-        if retries > 100 {
-            eprintln!("Warning: Node 1 did not become leader in time, continuing anyway");
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    let is_leader = timing::wait_for_condition_with_backoff(
+        || async {
+            let status = node1.shared_state.get_raft_status().await.unwrap();
+            status.is_leader
+        },
+        Duration::from_secs(10),
+        Duration::from_millis(100),
+    ).await.is_ok();
     
-    if is_leader {
+    if !is_leader {
+        eprintln!("Warning: Node 1 did not become leader in time, continuing anyway");
+    } else {
         eprintln!("✓ Node 1 is leader");
     }
     
@@ -57,18 +52,14 @@ async fn test_three_node_cluster_manual_approach() {
     eprintln!("Created node 2 at {} (will auto-join)", node2.addr);
     
     // Wait for node 2 to be added to cluster
-    let mut retries = 0;
-    loop {
-        let (_, peers, _) = node1.shared_state.get_cluster_status().await.unwrap();
-        if peers.len() == 2 {
-            break;
-        }
-        retries += 1;
-        if retries > 50 {
-            panic!("Node 2 failed to join cluster after {} retries", retries);
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
+    timing::wait_for_condition_with_backoff(
+        || async {
+            let (_, peers, _) = node1.shared_state.get_cluster_status().await.unwrap();
+            peers.len() == 2
+        },
+        Duration::from_secs(10),
+        Duration::from_millis(200),
+    ).await.expect("Node 2 failed to join cluster within 10 seconds");
     
     // Trigger log replication with a health check
     let mut client1 = node1.client().await.unwrap();
@@ -86,42 +77,32 @@ async fn test_three_node_cluster_manual_approach() {
     eprintln!("Created node 3 at {} (will auto-join)", node3.addr);
     
     // Wait for node 3 to be added to cluster
-    let mut retries = 0;
-    loop {
-        let (_, peers, _) = node1.shared_state.get_cluster_status().await.unwrap();
-        if peers.len() == 3 {
-            break;
-        }
-        retries += 1;
-        if retries > 50 {
-            panic!("Node 3 failed to join cluster after {} retries", retries);
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
+    timing::wait_for_condition_with_backoff(
+        || async {
+            let (_, peers, _) = node1.shared_state.get_cluster_status().await.unwrap();
+            peers.len() == 3
+        },
+        Duration::from_secs(10),
+        Duration::from_millis(200),
+    ).await.expect("Node 3 failed to join cluster within 10 seconds");
     
     // Trigger log replication again
     let _ = client1.health_check(HealthCheckRequest {}).await;
     
     // Step 4: Wait for all nodes to converge on cluster state
-    let mut retries = 0;
-    loop {
-        let mut all_see_three = true;
-        for node in [&node1, &node2, &node3] {
-            let (_, peers, _) = node.shared_state.get_cluster_status().await.unwrap();
-            if peers.len() != 3 {
-                all_see_three = false;
-                break;
+    timing::wait_for_condition_with_backoff(
+        || async {
+            for node in [&node1, &node2, &node3] {
+                let (_, peers, _) = node.shared_state.get_cluster_status().await.unwrap();
+                if peers.len() != 3 {
+                    return false;
+                }
             }
-        }
-        if all_see_three {
-            break;
-        }
-        retries += 1;
-        if retries > 50 {
-            panic!("Not all nodes converged to 3-node cluster after {} retries", retries);
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
+            true
+        },
+        Duration::from_secs(10),
+        Duration::from_millis(200),
+    ).await.expect("Not all nodes converged to 3-node cluster within 10 seconds");
     
     // Check all nodes agree on cluster size
     let mut cluster_sizes = vec![];
@@ -136,8 +117,10 @@ async fn test_three_node_cluster_manual_approach() {
             "Not all nodes see 3 peers: {:?}", cluster_sizes);
     
     // Check all nodes agree on leader - wait for convergence
-    let mut retries = 0;
+    let start = std::time::Instant::now();
+    let timeout = Duration::from_secs(10);
     let mut final_leader_id = None;
+    
     loop {
         let mut leader_ids = vec![];
         let mut all_know_leader = true;
@@ -158,18 +141,13 @@ async fn test_three_node_cluster_manual_approach() {
             break;
         }
         
-        retries += 1;
-        if retries > 50 {
-            panic!("Nodes did not converge on leader after {} retries. Leader IDs: {:?}", 
-                   retries, leader_ids);
+        if start.elapsed() >= timeout {
+            panic!("Nodes did not converge on leader within 10 seconds");
         }
         
-        // Trigger log replication to help convergence
-        if retries % 10 == 5 {
-            let _ = client1.health_check(HealthCheckRequest {}).await;
-        }
-        
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        // Trigger log replication periodically to help convergence
+        let _ = client1.health_check(HealthCheckRequest {}).await;
+        timing::robust_sleep(Duration::from_millis(200)).await;
     }
     
     assert!(final_leader_id.is_some(), "No leader found");

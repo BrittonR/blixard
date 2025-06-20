@@ -8,6 +8,7 @@ use blixard::{
     types::{NodeConfig, VmConfig, VmCommand, VmStatus},
     error::BlixardError,
     storage::{VM_STATE_TABLE, TASK_TABLE, WORKER_TABLE, WORKER_STATUS_TABLE},
+    test_helpers::timing,
 };
 
 mod common;
@@ -695,7 +696,7 @@ async fn test_concurrent_start_stop() {
     });
     
     let handle2 = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        timing::robust_sleep(Duration::from_millis(10)).await;
     });
     
     // Stop should handle concurrent access gracefully
@@ -789,7 +790,7 @@ async fn test_vm_lifecycle_operations() {
     assert!(stop_response.into_inner().success, "VM stop should succeed");
     
     // Wait for VM to be stopped or verify stop was acknowledged
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    timing::robust_sleep(Duration::from_millis(500)).await;
     
     // Since VM lifecycle is stubbed, just verify we can get status after stop
     let final_status_req = GetVmStatusRequest {

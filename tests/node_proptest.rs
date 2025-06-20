@@ -7,6 +7,7 @@ use once_cell::sync::Lazy;
 use blixard::{
     node::Node,
     types::{NodeConfig, VmConfig, VmCommand, VmStatus},
+    test_helpers::timing,
 };
 
 mod common;
@@ -271,7 +272,7 @@ proptest! {
                 prop_assert!(node.is_running().await);
                 
                 // Small delay to ensure start completes
-                tokio::time::sleep(Duration::from_millis(10)).await;
+                timing::robust_sleep(Duration::from_millis(10)).await;
                 
                 // Stop
                 let stop_result = node.stop().await;

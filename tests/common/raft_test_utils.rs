@@ -4,7 +4,7 @@ use std::time::Duration;
 use blixard::error::{BlixardError, BlixardResult};
 
 #[cfg(feature = "test-helpers")]
-use blixard::test_helpers::{TestNode, TestCluster};
+use blixard::test_helpers::{TestNode, TestCluster, timing};
 
 /// Helper to create a cluster and wait for convergence
 #[cfg(feature = "test-helpers")]
@@ -34,18 +34,21 @@ pub async fn wait_for_new_leader(
 ) -> BlixardResult<u64> {
     let start = std::time::Instant::now();
     
-    while start.elapsed() < timeout {
+    loop {
         if let Some(new_leader) = find_leader(cluster).await {
             if new_leader != old_leader {
                 return Ok(new_leader);
             }
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        
+        if start.elapsed() >= timeout {
+            return Err(BlixardError::Internal {
+                message: format!("Timeout waiting for new leader after {:?}", timeout),
+            });
+        }
+        
+        timing::robust_sleep(Duration::from_millis(100)).await;
     }
-    
-    Err(BlixardError::Internal {
-        message: format!("Timeout waiting for new leader after {:?}", timeout),
-    })
 }
 
 /// Helper to verify all nodes have applied a specific index
