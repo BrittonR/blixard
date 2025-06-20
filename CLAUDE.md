@@ -131,21 +131,22 @@ cargo test --test proptest_example  # Original domain properties
 cargo test --test stateright_simple_test
 ```
 
-#### Distributed System Tests (`simulation/tests/` directory - ~3000 lines)
+#### Distributed System Tests (`simulation/tests/` directory - 28 test files)
 Deterministic simulation tests for distributed behaviors:
 ```bash
 # MadSim deterministic simulation (FULLY DETERMINISTIC)
-./scripts/sim-test.sh  # Run all simulation tests
-MADSIM_TEST_SEED=12345 ./scripts/sim-test.sh  # Reproduce specific run
+mnt-all                            # Run ALL 28 simulation test files (recommended)
+./scripts/test-madsim.sh all       # Alternative: run all simulation tests
+MADSIM_TEST_SEED=12345 mnt-all    # Reproduce specific test run
 
 # Specific simulation test suites
-cd simulation && cargo test three_node_cluster  # 3-node cluster tests
-cd simulation && cargo test distributed_storage # Storage consistency
-cd simulation && cargo test raft_comprehensive  # Comprehensive Raft testing
+mnt-byzantine                      # Run Byzantine failure tests only
+mnt-clock-skew                     # Run clock skew tests only
+cd simulation && cargo test three_node_cluster  # Run specific test file
 
 # Determinism verification tools
-./scripts/verify-determinism.sh  # Comprehensive determinism audit
-./scripts/demo-determinism.sh    # Simple determinism demonstration
+./scripts/verify-determinism.sh    # Comprehensive determinism audit
+./scripts/demo-determinism.sh      # Simple determinism demonstration
 ```
 
 **Moved to Simulation** (20 test files for deterministic execution):
@@ -182,8 +183,10 @@ These tests benefit from:
 
 ### Test Infrastructure Status
 - **✅ Clean Separation**: Tests now properly separated by type
-  - **Unit Tests** (171 tests): Fast, reliable tests in `tests/` - ALL PASSING
-  - **Distributed Tests** (20 test files): Moved to deterministic `simulation/tests/`
+  - **Unit Tests** (171 tests): Fast, reliable tests in `tests/` - ALL PASSING ✅
+  - **Distributed Tests** (28 test files): All in deterministic `simulation/tests/`
+    - 8 original simulation tests (Byzantine, clock skew, Raft, etc.)
+    - 20 moved distributed tests from main suite
 - **✅ Comprehensive Unit Tests**: Core functionality coverage
   - CLI command parsing and validation (`tests/cli_tests.rs`)
   - Error handling and type conversions (`tests/error_tests.rs`)
