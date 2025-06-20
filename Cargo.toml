@@ -125,9 +125,6 @@ path = "src/main.rs"
 name = "three_node_cluster_example"
 required-features = ["test-helpers"]
 
-[[test]]
-name = "raft_state_machine_tests"
-required-features = ["test-helpers"]
 
 
 [profile.release]

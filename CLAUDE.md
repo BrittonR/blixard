@@ -107,7 +107,7 @@ cargo install cargo-nextest --locked
 
 The test suite is organized into two distinct categories:
 
-#### Unit Tests (`tests/` directory - 84 tests)
+#### Unit Tests (`tests/` directory - 177 tests)
 Fast, reliable unit tests for individual components:
 ```bash
 # Run all unit tests
@@ -148,15 +148,30 @@ cd simulation && cargo test raft_comprehensive  # Comprehensive Raft testing
 ./scripts/demo-determinism.sh    # Simple determinism demonstration
 ```
 
-**Recently Moved to Simulation** (for deterministic execution):
+**Moved to Simulation** (19 test files for deterministic execution):
+
+First wave (8 files):
 - `three_node_cluster_tests.rs` - Multi-node cluster formation
-- `distributed_storage_consistency_tests.rs` - Replication consistency
+- `distributed_storage_consistency_tests.rs` - Replication consistency  
 - `cluster_integration_tests.rs` - Cluster-wide operations
 - `node_lifecycle_integration_tests.rs` - Task distribution
 - `join_cluster_config_test.rs` - Dynamic membership
 - `three_node_manual_test.rs` - Manual cluster testing
 - `raft_quick_test.rs` - Basic Raft consensus
 - `raft_proptest.rs` - Raft property testing
+
+Second wave (11 files):
+- `network_partition_storage_tests.rs` - Network partition scenarios
+- `storage_performance_benchmarks.rs` - Distributed storage benchmarks
+- `cli_cluster_commands_test.rs` - Cluster CLI command testing
+- `grpc_service_tests.rs` - gRPC service interactions
+- `snapshot_tests.rs` - Raft snapshot functionality
+- `raft_state_machine_tests.rs` - Raft state machine testing
+- `port_allocation_stress_test.rs` - Concurrent port allocation
+- `test_isolation_verification.rs` - Test resource cleanup
+- `peer_management_tests.rs` - Peer connection management
+- `peer_connector_tests.rs` - Connection lifecycle testing
+- `peer_connector_proptest.rs` - Peer connection properties
 
 These tests benefit from:
 - **Deterministic execution** - Same seed produces identical results
@@ -166,8 +181,8 @@ These tests benefit from:
 
 ### Test Infrastructure Status
 - **✅ Clean Separation**: Tests now properly separated by type
-  - **Unit Tests** (84 tests): Fast, reliable tests in `tests/`
-  - **Distributed Tests** (~3000 lines): Moved to deterministic `simulation/tests/`
+  - **Unit Tests** (177 tests): Fast, reliable tests in `tests/`
+  - **Distributed Tests** (19 test files): Moved to deterministic `simulation/tests/`
 - **✅ Comprehensive Unit Tests**: Core functionality coverage
   - CLI command parsing and validation (`tests/cli_tests.rs`)
   - Error handling and type conversions (`tests/error_tests.rs`)
