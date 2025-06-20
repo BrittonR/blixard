@@ -107,7 +107,7 @@ cargo install cargo-nextest --locked
 
 The test suite is organized into two distinct categories:
 
-#### Unit Tests (`tests/` directory - 177 tests)
+#### Unit Tests (`tests/` directory - 171 tests)
 Fast, reliable unit tests for individual components:
 ```bash
 # Run all unit tests
@@ -148,7 +148,7 @@ cd simulation && cargo test raft_comprehensive  # Comprehensive Raft testing
 ./scripts/demo-determinism.sh    # Simple determinism demonstration
 ```
 
-**Moved to Simulation** (19 test files for deterministic execution):
+**Moved to Simulation** (20 test files for deterministic execution):
 
 First wave (8 files):
 - `three_node_cluster_tests.rs` - Multi-node cluster formation
@@ -160,7 +160,7 @@ First wave (8 files):
 - `raft_quick_test.rs` - Basic Raft consensus
 - `raft_proptest.rs` - Raft property testing
 
-Second wave (11 files):
+Second wave (12 files):
 - `network_partition_storage_tests.rs` - Network partition scenarios
 - `storage_performance_benchmarks.rs` - Distributed storage benchmarks
 - `cli_cluster_commands_test.rs` - Cluster CLI command testing
@@ -172,6 +172,7 @@ Second wave (11 files):
 - `peer_management_tests.rs` - Peer connection management
 - `peer_connector_tests.rs` - Connection lifecycle testing
 - `peer_connector_proptest.rs` - Peer connection properties
+- `storage_edge_case_tests.rs` - Distributed edge cases (large state transfer, validation)
 
 These tests benefit from:
 - **Deterministic execution** - Same seed produces identical results
@@ -181,8 +182,8 @@ These tests benefit from:
 
 ### Test Infrastructure Status
 - **✅ Clean Separation**: Tests now properly separated by type
-  - **Unit Tests** (177 tests): Fast, reliable tests in `tests/`
-  - **Distributed Tests** (19 test files): Moved to deterministic `simulation/tests/`
+  - **Unit Tests** (171 tests): Fast, reliable tests in `tests/` - ALL PASSING
+  - **Distributed Tests** (20 test files): Moved to deterministic `simulation/tests/`
 - **✅ Comprehensive Unit Tests**: Core functionality coverage
   - CLI command parsing and validation (`tests/cli_tests.rs`)
   - Error handling and type conversions (`tests/error_tests.rs`)
