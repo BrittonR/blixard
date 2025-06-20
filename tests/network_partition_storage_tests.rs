@@ -55,7 +55,9 @@ async fn wait_for_no_leader(node_ids: &[u64], cluster: &TestCluster, timeout_dur
         },
         timeout_duration,
         Duration::from_millis(100),
-    ).await
+    )
+    .await
+    .map_err(|e| format!("Failed to wait for no leader: {:?}", e))
 }
 
 /// Simulate a network partition by removing nodes from the cluster

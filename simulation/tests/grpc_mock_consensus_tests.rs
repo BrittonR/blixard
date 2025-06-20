@@ -146,6 +146,7 @@ impl ClusterService for TestRaftNode {
             success: true,
             message: format!("Node {} joined successfully", req.node_id),
             peers,
+            voters: state.members.iter().cloned().collect(), // All members are voters in this mock
         }))
     }
 
