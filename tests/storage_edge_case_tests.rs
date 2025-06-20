@@ -115,10 +115,10 @@ async fn test_large_state_transfer() {
     let vm_success_rate = vm_creation_successes as f64 / total_vms as f64;
     let task_success_rate = task_submission_successes as f64 / total_tasks as f64;
     
-    info!("VM creation success rate: {:.2}% ({}/{})", 
-        vm_success_rate * 100.0, vm_creation_successes, total_vms);
-    info!("Task submission success rate: {:.2}% ({}/{})", 
-        task_success_rate * 100.0, task_submission_successes, total_tasks);
+    info!("VM creation: {} successes, {} failures, success rate: {:.2}%", 
+        vm_creation_successes, vm_creation_failures, vm_success_rate * 100.0);
+    info!("Task submission: {} successes, {} failures, success rate: {:.2}%", 
+        task_submission_successes, task_submission_failures, task_success_rate * 100.0);
     
     // Under stress conditions, we expect at least 80% success rate
     assert!(vm_success_rate >= 0.8, 
