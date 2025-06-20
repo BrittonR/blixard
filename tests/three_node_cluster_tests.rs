@@ -364,9 +364,8 @@ async fn test_three_node_cluster_concurrent_operations() {
                     }
                 }
                 
-                // Small delay between submissions
-                // Brief delay between requests to create realistic concurrent load
-                tokio::time::sleep(Duration::from_millis(10)).await;
+                // Small delay between submissions to create realistic concurrent load
+                timing::robust_sleep(Duration::from_millis(10)).await;
             }
             
             results
@@ -520,7 +519,7 @@ async fn test_three_node_cluster_stress() {
         }
         
         // Very short delay to stress the system
-        tokio::time::sleep(Duration::from_millis(1)).await;
+        timing::robust_sleep(Duration::from_millis(1)).await;
     }
     
     eprintln!("Submitted {} tasks in {:?}", task_count, start.elapsed());
@@ -580,7 +579,7 @@ async fn test_removed_node_message_handling() {
     let mut node_client_clone = node_client.clone();
     let message_sender = tokio::spawn(async move {
         for i in 0..20 {
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            timing::robust_sleep(Duration::from_millis(50)).await;
             
             // Try to submit a task which will generate Raft messages
             let _ = node_client_clone.submit_task(TaskRequest {
@@ -598,7 +597,7 @@ async fn test_removed_node_message_handling() {
     });
     
     // Wait a bit for messages to start flowing
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    timing::robust_sleep(Duration::from_millis(100)).await;
     
     // Remove node from the cluster
     eprintln!("Removing node {} from cluster", node_to_remove);
@@ -610,7 +609,7 @@ async fn test_removed_node_message_handling() {
     match &result {
         Err(e) if e.to_string().contains("removed all voters") => {
             eprintln!("Got expected 'removed all voters' error, waiting for recovery");
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            timing::robust_sleep(Duration::from_millis(500)).await;
         }
         Err(e) => panic!("Unexpected error during leave_cluster: {}", e),
         Ok(resp) => {
@@ -624,7 +623,7 @@ async fn test_removed_node_message_handling() {
     }
     
     // Let the message sender continue for a bit
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    timing::robust_sleep(Duration::from_millis(200)).await;
     
     // Now submit tasks from the leader - this should succeed despite messages from removed node
     eprintln!("Submitting tasks after node removal");
@@ -646,7 +645,7 @@ async fn test_removed_node_message_handling() {
                 panic!("Task submission failed after node removal: {}. This indicates messages from removed nodes are crashing the Raft manager.", e);
             }
         }
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        timing::robust_sleep(Duration::from_millis(10)).await;
     }
     
     eprintln!("All tasks submitted successfully - removed node messages handled gracefully!");

@@ -133,7 +133,7 @@ async fn benchmark_replication_latency_by_cluster_size() {
         cluster.shutdown().await;
         
         // Give time between tests
-        sleep(Duration::from_millis(500)).await;
+        timing::robust_sleep(Duration::from_millis(500)).await;
     }
     
     // Print summary
@@ -318,7 +318,7 @@ async fn benchmark_snapshot_transfer() {
         }
         
         // Wait for state to be replicated and cluster to stabilize
-        sleep(Duration::from_millis(500)).await;
+        timing::robust_sleep(Duration::from_millis(500)).await;
         
         // Ensure all VMs are actually created and committed
         let wait_result = timing::wait_for_condition_with_backoff(
@@ -352,7 +352,7 @@ async fn benchmark_snapshot_transfer() {
                 }
                 Err(e) => {
                     warn!("Failed to add node (attempt {}): {}", attempt + 1, e);
-                    sleep(Duration::from_secs(2)).await;
+                    timing::robust_sleep(Duration::from_secs(2)).await;
                 }
             }
         }
@@ -398,7 +398,7 @@ async fn benchmark_snapshot_transfer() {
         
         // Clean up
         cluster.shutdown().await;
-        sleep(Duration::from_millis(500)).await;
+        timing::robust_sleep(Duration::from_millis(500)).await;
     }
 }
 
@@ -543,7 +543,7 @@ async fn benchmark_sustained_load() {
         
         // Small delay to avoid overwhelming the system
         if operation_count % 10 == 0 {
-            sleep(Duration::from_millis(10)).await;
+            timing::robust_sleep(Duration::from_millis(10)).await;
         }
     }
     

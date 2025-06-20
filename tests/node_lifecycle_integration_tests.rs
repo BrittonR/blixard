@@ -182,7 +182,7 @@ mod tests {
         
         // Wait for configuration change - node3 removal may take time
         // For now we just give it a moment as leave_cluster is not implemented
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        blixard::test_helpers::timing::robust_sleep(Duration::from_millis(500)).await;
         
         // After shutdown, verify remaining nodes still work
         let (_, nodes, _) = node1.shared_state.get_cluster_status().await.unwrap();
@@ -283,7 +283,7 @@ mod tests {
         let node3 = nodes.get(&3).unwrap();
         
         // Wait a bit for cluster to stabilize after convergence
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        blixard::test_helpers::timing::robust_sleep(Duration::from_millis(500)).await;
         
         // Submit tasks concurrently from all nodes
         let task = TaskSpec {
@@ -315,7 +315,7 @@ mod tests {
             handles.push(handle);
             
             // Small delay between submissions
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            blixard::test_helpers::timing::robust_sleep(Duration::from_millis(100)).await;
         }
         
         // Wait for all task submissions
@@ -402,7 +402,7 @@ mod tests {
         node1.shutdown().await;
         
         // Give time for shutdown to complete
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        blixard::test_helpers::timing::robust_sleep(Duration::from_millis(100)).await;
         
         // After shutdown, get_cluster_status should fail because node is not initialized
         assert!(node1_state.get_cluster_status().await.is_err());
