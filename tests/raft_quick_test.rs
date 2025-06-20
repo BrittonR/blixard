@@ -2,12 +2,11 @@
 
 use std::time::Duration;
 use tempfile::TempDir;
-use tokio::time::sleep;
 
 use blixard::{
     node::Node,
     types::NodeConfig,
-    test_helpers::PortAllocator,
+    test_helpers::{PortAllocator, timing},
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -51,7 +50,7 @@ async fn test_raft_starts_and_becomes_leader() {
             panic!("Node failed to become leader within 5 seconds");
         }
         
-        sleep(Duration::from_millis(50)).await;
+        timing::robust_sleep(Duration::from_millis(50)).await;
     }
     
     // Verify node is functioning properly by checking it remains running

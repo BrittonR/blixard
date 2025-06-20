@@ -15,3 +15,8 @@ nt-ci = "nextest run --profile ci"
 nt-stress = "nextest run --profile stress"
 nt-retry = "nextest run --profile ci --no-fail-fast"
 nt-verbose = "nextest run --no-capture"
+
+# MadSim test aliases (require: RUSTFLAGS="--cfg madsim" cargo nt-madsim)
+nt-madsim = "nextest run --manifest-path simulation/Cargo.toml --test byzantine_tests --test clock_skew_tests"
+nt-byzantine = "nextest run --manifest-path simulation/Cargo.toml --test byzantine_tests"
+nt-clock-skew = "nextest run --manifest-path simulation/Cargo.toml --test clock_skew_tests"

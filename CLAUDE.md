@@ -68,11 +68,28 @@ cargo run -- --help       # Show CLI help
 cargo nextest run          # Run all tests with nextest (faster, better isolation)
 cargo nextest run --profile ci  # Run with CI profile (more retries, JUnit output)
 cargo nt                   # Short alias for nextest run
-cargo nt-all              # Run all tests with test-helpers feature
+cargo nt-all              # Run all tests with test-helpers feature (main workspace only)
 cargo nt-ci               # Run with CI profile
 cargo nt-stress           # Run stress test profile (no retries, find real failure rate)
 cargo nt-retry            # Run with retries enabled, no fail-fast
 cargo nt-verbose          # Run with output capture disabled
+
+# MadSim Tests (deterministic distributed systems testing)
+# Option 1: Shell functions (available in nix develop shell)
+mnt-all               # Run all MadSim tests (auto-sets RUSTFLAGS)
+mnt-byzantine         # Run Byzantine failure tests  
+mnt-clock-skew        # Run clock skew tests
+madsim-all            # Alternative name for mnt-all
+
+# Option 2: Using convenience script
+./scripts/test-madsim.sh all        # Run all MadSim tests
+./scripts/test-madsim.sh byzantine  # Run Byzantine failure tests  
+./scripts/test-madsim.sh clock-skew # Run clock skew tests
+
+# Option 3: Direct cargo commands (require RUSTFLAGS="--cfg madsim")
+RUSTFLAGS="--cfg madsim" cargo nt-madsim     # Run all MadSim tests
+RUSTFLAGS="--cfg madsim" cargo nt-byzantine  # Run Byzantine failure tests
+RUSTFLAGS="--cfg madsim" cargo nt-clock-skew # Run clock skew tests
 ```
 
 ### Nextest Configuration

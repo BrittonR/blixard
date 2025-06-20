@@ -15,10 +15,10 @@ use blixard::{
     proto::{
         CreateVmRequest, ListVmsRequest, ClusterStatusRequest, LeaveRequest,
     },
-    test_helpers::{TestCluster, wait_for_condition},
+    test_helpers::{TestCluster, wait_for_condition, timing},
     error::BlixardError,
 };
-use tokio::time::{sleep, timeout};
+use tokio::time::timeout;
 use tracing::{info, warn};
 
 /// Helper to wait for a specific leader with retries
@@ -31,7 +31,7 @@ async fn wait_for_leader(cluster: &TestCluster, expected_leader: Option<u64>, ti
                 return Ok(leader);
             }
         }
-        sleep(Duration::from_millis(100)).await;
+        timing::robust_sleep(Duration::from_millis(100)).await;
     }
     
     Err(format!("No leader found within {:?}", timeout_duration))
@@ -85,7 +85,7 @@ async fn create_partition(
     }
     
     // Wait a bit for Raft to process the configuration changes
-    sleep(Duration::from_millis(500)).await;
+    timing::robust_sleep(Duration::from_millis(500)).await;
     
     info!("Created partition isolating nodes: {:?}", nodes_to_isolate);
     Ok(isolated_nodes)

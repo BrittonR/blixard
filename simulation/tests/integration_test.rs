@@ -66,9 +66,17 @@ async fn test_deterministic_randomness() {
     
     // Values should be deterministic based on seed
     assert!(!values.is_empty());
+    assert_eq!(values.len(), 5, "Should generate 5 random values");
+    
+    // Verify values are actually random (not all the same)
+    let unique_values: std::collections::HashSet<_> = values.iter().cloned().collect();
+    assert!(unique_values.len() > 1, "Random values should have some variation");
     
     // If we run with same seed, we'd get same values
-    println!("Random values: {:?}", values);
+    // Create another RNG and verify it produces the same sequence
+    let mut rng2 = thread_rng();
+    let values2: Vec<u32> = (0..5).map(|_| rng2.gen()).collect();
+    assert_eq!(values, values2, "Same seed should produce same random sequence");
 }
 
 #[madsim::test]

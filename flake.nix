@@ -62,15 +62,20 @@
             echo ""
             echo "Available commands:"
             echo "  cargo build           - Build the project"
-            echo "  cargo nextest run     - Run tests"
+            echo "  cargo nt-all          - Run all tests (main workspace)"
             echo "  cargo run -- node     - Start a Blixard node"
             echo "  cargo run -- vm       - VM management commands"
             echo ""
+            echo "MadSim tests (deterministic distributed systems testing):"
+            echo "  mnt-all               - Run all MadSim tests"
+            echo "  mnt-byzantine         - Run Byzantine failure tests"  
+            echo "  mnt-clock-skew        - Run clock skew tests"
+            echo "  madsim-all            - Alternative name for mnt-all"
+            echo ""
             echo "Test scripts:"
-            echo "  ./quick_test.sh       - Quick 2-node test"
-            echo "  ./test_bootstrap.sh   - 3-node bootstrap test"
-            echo "  ./test_simple.sh      - Simple node test"
-            echo "  ./test_cluster.sh     - Full cluster test"
+            echo "  ./scripts/test-madsim.sh all      - MadSim tests (alternative)"
+            echo "  ./quick_test.sh                   - Quick 2-node test"
+            echo "  ./test_bootstrap.sh               - 3-node bootstrap test"
             echo ""
             echo "microvm.nix available at: ${microvm.packages.${system}.microvm}/bin/microvm"
             
@@ -83,6 +88,32 @@
             alias bw='cargo watch -x test'
             alias bts='cargo test --features simulation'
             alias btf='cargo test --features failpoints'
+            
+            # MadSim test functions (auto-set RUSTFLAGS)
+            mnt-all() {
+                RUSTFLAGS="--cfg madsim" cargo nt-madsim "$@"
+            }
+            
+            mnt-byzantine() {
+                RUSTFLAGS="--cfg madsim" cargo nt-byzantine "$@"
+            }
+            
+            mnt-clock-skew() {
+                RUSTFLAGS="--cfg madsim" cargo nt-clock-skew "$@"
+            }
+            
+            # Alternative shorter names
+            madsim-all() {
+                RUSTFLAGS="--cfg madsim" cargo nt-madsim "$@"
+            }
+            
+            madsim-byzantine() {
+                RUSTFLAGS="--cfg madsim" cargo nt-byzantine "$@"
+            }
+            
+            madsim-clock-skew() {
+                RUSTFLAGS="--cfg madsim" cargo nt-clock-skew "$@"
+            }
             
             # Run all test types
             test_all() {

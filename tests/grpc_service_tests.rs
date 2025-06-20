@@ -1,7 +1,7 @@
 #![cfg(feature = "test-helpers")]
 
 use std::net::SocketAddr;
-use tokio::time::{sleep, Duration};
+use tokio::time::Duration;
 use tonic::transport::Channel;
 
 use blixard::{
@@ -11,7 +11,7 @@ use blixard::{
         GetRaftStatusRequest, ProposeTaskRequest, Task,
         HealthCheckRequest,
     },
-    test_helpers::TestNode,
+    test_helpers::{TestNode, timing},
 };
 
 async fn create_client(addr: SocketAddr) -> (BlixardServiceClient<Channel>, ClusterServiceClient<Channel>) {
@@ -33,7 +33,7 @@ async fn create_client(addr: SocketAddr) -> (BlixardServiceClient<Channel>, Clus
                 if attempts > 10 {
                     panic!("Failed to connect to gRPC server after 10 attempts: {}", e);
                 }
-                sleep(retry_delay).await;
+                timing::robust_sleep(retry_delay).await;
                 retry_delay *= 2;
             }
         }
@@ -328,7 +328,7 @@ async fn test_server_shutdown_gracefully() {
     node.shutdown().await;
     
     // Give it time to shut down
-    sleep(Duration::from_millis(500)).await;
+    timing::robust_sleep(Duration::from_millis(500)).await;
     
     // Create a new client to test connection - existing client may have cached connection
     let endpoint = format!("http://{}", addr);

@@ -19,7 +19,7 @@ use blixard::{
     test_helpers::{TestCluster, timing},
 };
 use tokio::time::sleep;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Test very large state transfers
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -40,6 +40,9 @@ async fn test_large_state_transfer() {
     const LARGE_VM_COUNT: usize = 100;  // Reduced from 1000
     const BATCH_SIZE: usize = 10;
     
+    let mut vm_creation_failures = 0;
+    let mut vm_creation_successes = 0;
+    
     for batch_start in (0..LARGE_VM_COUNT).step_by(BATCH_SIZE) {
         let batch_end = (batch_start + BATCH_SIZE).min(LARGE_VM_COUNT);
         
@@ -54,8 +57,11 @@ async fn test_large_state_transfer() {
             };
             
             match leader_client.clone().create_vm(create_request).await {
-                Ok(_) => {},
-                Err(e) => warn!("Failed to create VM {}: {}", i, e),
+                Ok(_) => vm_creation_successes += 1,
+                Err(e) => {
+                    vm_creation_failures += 1;
+                    info!("Failed to create VM {}: {}", i, e);
+                }
             }
         }
         
@@ -66,6 +72,9 @@ async fn test_large_state_transfer() {
     // Create a large number of tasks with batching
     const LARGE_TASK_COUNT: usize = 50;  // Reduced from 500
     const TASK_BATCH_SIZE: usize = 5;
+    
+    let mut task_submission_failures = 0;
+    let mut task_submission_successes = 0;
     
     for batch_start in (0..LARGE_TASK_COUNT).step_by(TASK_BATCH_SIZE) {
         let batch_end = (batch_start + TASK_BATCH_SIZE).min(LARGE_TASK_COUNT);
@@ -84,14 +93,38 @@ async fn test_large_state_transfer() {
             };
             
             match leader_client.clone().submit_task(task_request).await {
-                Ok(_) => {},
-                Err(e) => warn!("Failed to submit task {}: {}", i, e),
+                Ok(_) => task_submission_successes += 1,
+                Err(e) => {
+                    task_submission_failures += 1;
+                    info!("Failed to submit task {}: {}", i, e);
+                }
             }
         }
         
         // Allow Raft to process entries after each batch
         sleep(Duration::from_millis(200)).await;
     }
+    
+    // Verify that at least 80% of operations succeeded (allowing for some failures under stress)
+    let total_vms = LARGE_VM_COUNT;
+    let total_tasks = LARGE_TASK_COUNT;
+    
+    assert!(vm_creation_successes > 0, "At least some VMs should be created successfully");
+    assert!(task_submission_successes > 0, "At least some tasks should be submitted successfully");
+    
+    let vm_success_rate = vm_creation_successes as f64 / total_vms as f64;
+    let task_success_rate = task_submission_successes as f64 / total_tasks as f64;
+    
+    info!("VM creation success rate: {:.2}% ({}/{})", 
+        vm_success_rate * 100.0, vm_creation_successes, total_vms);
+    info!("Task submission success rate: {:.2}% ({}/{})", 
+        task_success_rate * 100.0, task_submission_successes, total_tasks);
+    
+    // Under stress conditions, we expect at least 80% success rate
+    assert!(vm_success_rate >= 0.8, 
+        "VM creation success rate {:.2}% is below acceptable threshold of 80%", vm_success_rate * 100.0);
+    assert!(task_success_rate >= 0.8, 
+        "Task submission success rate {:.2}% is below acceptable threshold of 80%", task_success_rate * 100.0);
     
     // Wait for initial replication
     sleep(Duration::from_secs(2)).await;
@@ -116,7 +149,7 @@ async fn test_large_state_transfer() {
                             return vm_count >= 90; // Allow for some tolerance (90% of 100 VMs)
                         }
                         Err(e) => {
-                            warn!("Failed to list VMs on new node: {}", e);
+                            info!("Still waiting for new node to sync: {}", e);
                         }
                     }
                 }
@@ -131,8 +164,24 @@ async fn test_large_state_transfer() {
     
     if sync_result.is_ok() {
         info!("Large state sync completed in {:?}", sync_time);
+        assert!(sync_time.as_secs() < 60, 
+            "Large state sync took {:?}, which exceeds reasonable limit of 60s", sync_time);
     } else {
-        warn!("Large state sync failed to complete within timeout");
+        // Get final VM count on new node for diagnostics
+        let final_count = if let Ok(client) = cluster.client(new_node_id).await {
+            if let Ok(response) = client.clone().list_vms(ListVmsRequest {}).await {
+                response.into_inner().vms.len()
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+        
+        panic!("Large state sync failed to complete within timeout. \
+                New node synced {} VMs out of expected 90+. \
+                This indicates a critical issue with snapshot transfer or replication.", 
+                final_count);
     }
     
     cluster.shutdown().await;
@@ -445,12 +494,21 @@ async fn test_failure_recovery_scenarios() {
     
     // Scenario 2: Rapid configuration changes
     info!("Testing rapid configuration changes");
+    let mut add_node_successes = 0;
+    let mut add_node_failures = 0;
+    
     for i in 0..5 {
         if i % 2 == 0 {
             // Add a node
             match cluster.add_node().await {
-                Ok(id) => info!("Added node {}", id),
-                Err(e) => warn!("Failed to add node: {}", e),
+                Ok(id) => {
+                    info!("Added node {}", id);
+                    add_node_successes += 1;
+                },
+                Err(e) => {
+                    info!("Failed to add node during rapid changes: {}", e);
+                    add_node_failures += 1;
+                }
             }
         } else {
             // Remove a non-leader node
@@ -460,6 +518,12 @@ async fn test_failure_recovery_scenarios() {
         
         sleep(Duration::from_millis(200)).await;
     }
+    
+    // Assert that at least some configuration changes succeeded
+    assert!(add_node_successes > 0, 
+        "At least some node additions should succeed during rapid configuration changes");
+    info!("Rapid configuration changes: {} succeeded, {} failed", 
+        add_node_successes, add_node_failures);
     
     // Verify final state consistency
     let final_vm_count = if let Ok(client) = cluster.leader_client().await {

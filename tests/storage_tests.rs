@@ -4,7 +4,7 @@ use tempfile::TempDir;
 use blixard::{
     types::{VmState, VmConfig, VmStatus},
 };
-use redb::{Database, TableDefinition};
+use redb::{Database, TableDefinition, ReadableTableMetadata};
 
 mod common;
 
@@ -38,8 +38,40 @@ fn create_test_vm_state(name: &str, node_id: u64) -> VmState {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_database_creation() {
-    let (_database, _temp_dir) = create_test_database().await;
-    // Database creation should succeed without errors
+    let (database, temp_dir) = create_test_database().await;
+    
+    // Verify database file was created
+    let db_path = temp_dir.path().join("test.db");
+    assert!(db_path.exists(), "Database file should exist");
+    assert!(db_path.is_file(), "Database path should be a file");
+    
+    // Test data
+    let test_key = "test-key";
+    let test_data = b"test-data";
+    
+    // Verify we can create tables
+    let write_txn = database.begin_write().unwrap();
+    {
+        let table_result = write_txn.open_table(VM_STATE_TABLE);
+        assert!(table_result.is_ok(), "Should be able to create VM_STATE_TABLE");
+        let mut table = table_result.unwrap();
+        
+        // Verify empty table
+        assert_eq!(table.len().unwrap(), 0, "New table should be empty");
+        
+        // Verify we can write and read data
+        table.insert(test_key, test_data as &[u8]).unwrap();
+    }
+    write_txn.commit().unwrap();
+    
+    // Verify data persisted
+    let read_txn = database.begin_read().unwrap();
+    let read_table = read_txn.open_table(VM_STATE_TABLE).unwrap();
+    assert_eq!(read_table.len().unwrap(), 1, "Table should have one entry");
+    
+    let retrieved = read_table.get(test_key).unwrap();
+    assert!(retrieved.is_some(), "Should retrieve stored data");
+    assert_eq!(retrieved.unwrap().value(), test_data as &[u8], "Retrieved data should match");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
