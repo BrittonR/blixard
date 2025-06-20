@@ -340,6 +340,16 @@ async fn test_memory_pressure() {
     
     info!("Successfully created {} VMs with increasing memory requirements", created_vms);
     
+    // ASSERTION: Should be able to create at least a few VMs
+    assert!(created_vms >= 3, "Should create at least 3 VMs before hitting memory limits, got {}", created_vms);
+    assert!(created_vms <= 100, "VM creation should eventually fail due to memory constraints");
+    
+    // Verify VMs are actually stored in cluster state
+    let vm_list = leader_client.clone().list_vms(ListVmsRequest {}).await
+        .expect("Should be able to list VMs");
+    let stored_vm_count = vm_list.into_inner().vms.len();
+    assert_eq!(stored_vm_count, created_vms, "All created VMs should be stored in cluster state");
+    
     // Test task scheduling under memory pressure
     let mut scheduled_tasks = 0;
     for i in 0..50 {
@@ -371,6 +381,18 @@ async fn test_memory_pressure() {
     }
     
     info!("Successfully scheduled {} tasks under memory pressure", scheduled_tasks);
+    
+    // ASSERTION: Should be able to schedule at least some tasks
+    assert!(scheduled_tasks >= 1, "Should schedule at least 1 task before resource constraints, got {}", scheduled_tasks);
+    assert!(scheduled_tasks <= 50, "Task scheduling should eventually be limited by resources");
+    
+    // Verify system remains responsive despite memory pressure
+    let health_check = leader_client.clone().get_cluster_status(ClusterStatusRequest {}).await;
+    assert!(health_check.is_ok(), "Cluster should remain responsive under memory pressure");
+    
+    let status = health_check.unwrap().into_inner();
+    assert!(status.leader_id > 0, "Cluster should maintain leadership under memory pressure");
+    assert_eq!(status.nodes.len(), 3, "All nodes should remain in cluster under memory pressure");
     
     cluster.shutdown().await;
 }
@@ -469,7 +491,7 @@ async fn test_extreme_request_handling() {
     
     let leader_client = cluster.leader_client().await.expect("Failed to get leader client");
     
-    // Test 1: VM with extremely long name
+    // Test 1: VM with extremely long name (should be rejected)
     let long_name = "vm-".to_string() + &"x".repeat(1000);
     let create_request = CreateVmRequest {
         name: long_name,
@@ -478,16 +500,20 @@ async fn test_extreme_request_handling() {
         memory_mb: 256,
     };
     
-    match leader_client.clone().create_vm(create_request).await {
+    let long_name_result = leader_client.clone().create_vm(create_request).await;
+    match long_name_result {
         Ok(resp) => {
-            info!("Long name VM creation result: success={}", resp.into_inner().success);
+            let success = resp.into_inner().success;
+            info!("Long name VM creation result: success={}", success);
+            assert!(!success, "VM with extremely long name should be rejected by validation");
         },
         Err(e) => {
             info!("Long name VM creation failed as expected: {}", e);
+            // Error response is acceptable - validates input properly
         }
     }
     
-    // Test 2: VM with zero resources
+    // Test 2: VM with zero resources (should be rejected)
     let create_request = CreateVmRequest {
         name: "zero-resource-vm".to_string(),
         config_path: "/tmp/test.nix".to_string(),
@@ -495,16 +521,20 @@ async fn test_extreme_request_handling() {
         memory_mb: 0,
     };
     
-    match leader_client.clone().create_vm(create_request).await {
+    let zero_resource_result = leader_client.clone().create_vm(create_request).await;
+    match zero_resource_result {
         Ok(resp) => {
-            info!("Zero resource VM creation result: success={}", resp.into_inner().success);
+            let success = resp.into_inner().success;
+            info!("Zero resource VM creation result: success={}", success);
+            assert!(!success, "VM with zero resources should be rejected by validation");
         },
         Err(e) => {
             info!("Zero resource VM creation failed as expected: {}", e);
+            // Error response is acceptable - validates input properly
         }
     }
     
-    // Test 3: Task with unrealistic requirements
+    // Test 3: Task with unrealistic requirements (should be rejected)
     let task_request = TaskRequest {
         task_id: "impossible-task".to_string(),
         command: "impossible".to_string(),
@@ -516,14 +546,35 @@ async fn test_extreme_request_handling() {
         timeout_secs: 1,
     };
     
-    match leader_client.clone().submit_task(task_request).await {
+    let impossible_task_result = leader_client.clone().submit_task(task_request).await;
+    match impossible_task_result {
         Ok(resp) => {
-            info!("Impossible task submission result: accepted={}", resp.into_inner().accepted);
+            let accepted = resp.into_inner().accepted;
+            info!("Impossible task submission result: accepted={}", accepted);
+            assert!(!accepted, "Task with impossible requirements should be rejected");
         },
         Err(e) => {
             info!("Impossible task submission failed as expected: {}", e);
+            // Error response is acceptable - validates input properly
         }
     }
+    
+    // Verify cluster remains functional after processing malformed requests
+    let health_check = leader_client.clone().get_cluster_status(ClusterStatusRequest {}).await;
+    assert!(health_check.is_ok(), "Cluster should remain responsive after malformed requests");
+    
+    // Verify a normal request still works
+    let normal_vm = CreateVmRequest {
+        name: "normal-vm".to_string(),
+        config_path: "/tmp/test.nix".to_string(),
+        vcpus: 2,
+        memory_mb: 512,
+    };
+    
+    let normal_result = leader_client.clone().create_vm(normal_vm).await;
+    assert!(normal_result.is_ok(), "Normal VM creation should still work after processing malformed requests");
+    let normal_resp = normal_result.unwrap().into_inner();
+    assert!(normal_resp.success, "Normal VM should be created successfully");
     
     // Test 4: Rapid repeated operations on same resource
     let vm_name = "contested-vm";

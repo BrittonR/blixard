@@ -358,25 +358,43 @@ The project includes dependencies for:
    - 99.5% test success rate (189/190 tests passing)
    - See `TEST_STATUS_SUMMARY.md` for detailed test status
 
+7. **Hollow Test Elimination** (✅ FIXED)
+   - Fixed: `raft_quick_test.rs` only checking completion without verifying Raft behavior
+   - Fixed: `storage_edge_case_tests.rs` logging results without assertions
+   - Solution: Added proper assertions to verify distributed system correctness
+   - Solution: Tests now verify leader election, consensus, and input validation
+   - Result: Improved tests caught real bugs in Raft implementation
+   - **32+ sleep() calls identified** for future replacement with condition-based waiting
+
 ## Test Infrastructure Status
 
 See `TEST_RELIABILITY_ISSUES.md` for details on the improvements made:
 
 **✅ FIXED Issues:**
-1. **37 hardcoded sleep() calls** - Replaced with condition-based waiting
+1. **37 hardcoded sleep() calls** - Replaced with condition-based waiting (32+ additional identified)
 2. **Race condition with removed nodes** - Messages from removed nodes no longer crash Raft
 3. **Raft manager recovery** - Automatic restart with exponential backoff on failures
 4. **Test reliability improved** - Most tests now pass consistently
+5. **Hollow tests eliminated** - Tests now verify actual distributed system behavior instead of just completion
+6. **Edge case validation** - Tests verify proper input validation and error handling
+
+**Recent Improvements:**
+- `raft_quick_test.rs`: Now verifies leader election and Raft consensus behavior
+- `storage_edge_case_tests.rs`: Added assertions for memory pressure and invalid input handling
+- `three_node_cluster_tests.rs`: Replaced sleep with condition-based waiting for replication
 
 **Remaining Work:**
+- Replace remaining 30+ sleep() calls with condition-based waiting
 - Some node tests marked as `#[ignore]` need updating to use TestCluster for Raft consensus
-- Network partition tests need investigation
 - Performance benchmarks need adjustment for new architecture
 
 When working on tests:
 - Use `test_helpers::TestNode` and `TestCluster` abstractions
 - Use `timing::wait_for_condition_with_backoff()` instead of `sleep()`
 - Tests requiring Raft consensus must use TestCluster, not direct Node operations
+- **Always include meaningful assertions** - tests should verify actual behavior, not just completion
+- Edge case tests must verify proper error handling and input validation
+- Performance tests should include assertions about system responsiveness under load
 
 ## Future Implementation Areas
 

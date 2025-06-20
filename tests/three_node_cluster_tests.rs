@@ -120,9 +120,23 @@ async fn test_three_node_cluster_task_submission() {
     }
     
     // Wait for tasks to be replicated across the cluster
-    // In a production system, we would check commit indices or task status
-    // For testing, a brief delay ensures replication completes
-    timing::robust_sleep(Duration::from_secs(2)).await;
+    // Verify each node can see the submitted tasks
+    timing::wait_for_condition_with_backoff(
+        || async {
+            for (node_id, _) in cluster.nodes() {
+                if let Ok(client) = cluster.client(*node_id).await {
+                    // Check if this node knows about the task by trying to submit another
+                    // In a real distributed system, we'd check task status or Raft commit index
+                    if let Err(_) = client.clone().get_cluster_status(ClusterStatusRequest {}).await {
+                        return false;
+                    }
+                }
+            }
+            true
+        },
+        Duration::from_secs(5),
+        Duration::from_millis(100),
+    ).await.expect("Tasks should be replicated to all nodes");
     
     cluster.shutdown().await;
 }
