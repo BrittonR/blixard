@@ -18,12 +18,20 @@ case "${1:-all}" in
         echo "Running clock skew tests..."
         cargo nextest run --test clock_skew_tests
         ;;
-    "all")
-        echo "Running all MadSim tests..."
+    "special")
+        echo "Running special MadSim tests (Byzantine + clock skew)..."
         cargo nextest run --test byzantine_tests --test clock_skew_tests
         ;;
+    "all")
+        echo "Running ALL simulation tests..."
+        cargo nextest run
+        ;;
     *)
-        echo "Usage: $0 [all|byzantine|clock-skew]"
+        echo "Usage: $0 [all|byzantine|clock-skew|special]"
+        echo "  all        - Run all simulation tests (including moved distributed tests)"
+        echo "  byzantine  - Run only Byzantine failure tests"
+        echo "  clock-skew - Run only clock skew tests"
+        echo "  special    - Run only Byzantine + clock skew tests"
         exit 1
         ;;
 esac
