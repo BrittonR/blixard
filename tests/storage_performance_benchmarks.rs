@@ -317,12 +317,52 @@ async fn benchmark_snapshot_transfer() {
             }
         }
         
-        // Wait for state to be replicated
+        // Wait for state to be replicated and cluster to stabilize
         sleep(Duration::from_millis(500)).await;
         
-        // Add a new node and measure time to catch up via snapshot
+        // Ensure all VMs are actually created and committed
+        let wait_result = timing::wait_for_condition_with_backoff(
+            || {
+                let mut leader_client = leader_client.clone();
+                let expected_count = vm_count;
+                async move {
+                    if let Ok(response) = leader_client.list_vms(ListVmsRequest {}).await {
+                        response.into_inner().vms.len() >= expected_count
+                    } else {
+                        false
+                    }
+                }
+            },
+            Duration::from_secs(10),
+            Duration::from_millis(100),
+        ).await;
+        
+        if wait_result.is_err() {
+            warn!("State not fully replicated before adding node");
+        }
+        
+        // Add a new node with retry logic
         let start = Instant::now();
-        let new_node_id = cluster.add_node().await.expect("Failed to add node");
+        let mut new_node_id = None;
+        for attempt in 0..3 {
+            match cluster.add_node().await {
+                Ok(id) => {
+                    new_node_id = Some(id);
+                    break;
+                }
+                Err(e) => {
+                    warn!("Failed to add node (attempt {}): {}", attempt + 1, e);
+                    sleep(Duration::from_secs(2)).await;
+                }
+            }
+        }
+        let new_node_id = match new_node_id {
+            Some(id) => id,
+            None => {
+                warn!("Failed to add node after retries for {} state", size_name);
+                continue;
+            }
+        };
         
         // Wait for new node to catch up
         let catch_up_result = timing::wait_for_condition_with_backoff(

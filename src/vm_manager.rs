@@ -5,7 +5,6 @@ use redb::{Database, ReadableTable};
 use crate::error::{BlixardError, BlixardResult};
 use crate::types::{VmState, VmCommand, VmConfig, VmStatus};
 // VM_STATE_TABLE is used in get_vm_status and list_vms methods
-use crate::storage::VM_STATE_TABLE;
 
 /// Manages VM lifecycle operations
 /// 

@@ -1,1 +1,2 @@
 # Seeds for failure cases discovered by proptest.cc 69f4eb965a58c1a602e45d9a313f7d160be4be4843028494418459a6e1ba3b64 # shrinks to ops = [Disconnect(320)]
+cc bdcb62b9f3263c43284486d844fbd40217251b3703b6e65cb29dac7cfc92851c # shrinks to peers = [PeerInfo { id: 776, address: "127.0.0.1:49152", is_connected: false }, PeerInfo { id: 776, address: "127.0.0.1:53071", is_connected: false }]

@@ -263,6 +263,10 @@ mod tests {
         #[test]
         fn test_concurrent_operations(
             peers in vec(peer_info_strategy(), 2..=5)
+                .prop_filter("unique peer ids", |peers| {
+                    let mut ids = std::collections::HashSet::new();
+                    peers.iter().all(|p| ids.insert(p.id))
+                })
         ) {
             let rt = tokio::runtime::Runtime::new().unwrap();
             

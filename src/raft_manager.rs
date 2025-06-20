@@ -587,13 +587,6 @@ impl RaftManager {
         let logger = slog::Logger::root(drain, o!("node_id" => node_id));
 
         // Create Raft node with a clone of storage
-        let mut raft_node = RawNode::new(&cfg, storage.clone(), &logger)
-            .map_err(|e| BlixardError::Raft {
-                operation: "create raft node".to_string(),
-                source: Box::new(e),
-            })?;
-        
-        // Create Raft node with a clone of storage
         let raft_node = RawNode::new(&cfg, storage.clone(), &logger)
             .map_err(|e| BlixardError::Raft {
                 operation: "create raft node".to_string(),
