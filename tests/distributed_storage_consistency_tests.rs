@@ -19,7 +19,6 @@ use blixard::{
     },
     test_helpers::{TestCluster, timing},
 };
-use tokio::time::sleep;
 use tracing::{info, warn};
 
 /// Test read-after-write consistency for task operations
@@ -57,8 +56,35 @@ async fn test_task_read_after_write_consistency() {
     
     assert!(response.into_inner().accepted, "Task should be accepted");
     
-    // Wait a brief moment for replication
-    sleep(Duration::from_millis(100)).await;
+    // Wait for task to be replicated to all nodes
+    timing::wait_for_condition_with_backoff(
+        || {
+            let task_id = task_id.clone();
+            let cluster = &cluster;
+            async move {
+                // Check if task is visible on all nodes
+                for (node_id, _) in cluster.nodes() {
+                    if let Ok(client) = cluster.client(*node_id).await {
+                        let status_request = TaskStatusRequest {
+                            task_id: task_id.clone(),
+                        };
+                        if let Ok(resp) = client.clone().get_task_status(status_request).await {
+                            if !resp.into_inner().found {
+                                return false;
+                            }
+                        } else {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+                true
+            }
+        },
+        Duration::from_secs(5),
+        Duration::from_millis(50),
+    ).await.expect("Task should be replicated to all nodes");
     
     // Verify task is readable from all nodes
     info!("Verifying task is readable from all nodes");
@@ -103,8 +129,37 @@ async fn test_task_read_after_write_consistency() {
         task_ids.push(task_id);
     }
     
-    // Wait for replication
-    sleep(Duration::from_millis(200)).await;
+    // Wait for all tasks to be replicated
+    timing::wait_for_condition_with_backoff(
+        || {
+            let task_ids = task_ids.clone();
+            let cluster = &cluster;
+            async move {
+                // Check if all tasks are visible on all nodes
+                for (node_id, _) in cluster.nodes() {
+                    if let Ok(client) = cluster.client(*node_id).await {
+                        for task_id in &task_ids {
+                            let status_request = TaskStatusRequest {
+                                task_id: task_id.clone(),
+                            };
+                            if let Ok(resp) = client.clone().get_task_status(status_request).await {
+                                if !resp.into_inner().found {
+                                    return false;
+                                }
+                            } else {
+                                return false;
+                            }
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+                true
+            }
+        },
+        Duration::from_secs(10),
+        Duration::from_millis(100),
+    ).await.expect("All tasks should be replicated");
     
     // Verify all tasks are readable from all nodes
     for (node_id, _) in cluster.nodes() {
@@ -159,8 +214,35 @@ async fn test_vm_read_after_write_consistency() {
     
     assert!(response.into_inner().success, "VM creation should succeed");
     
-    // Wait for replication
-    sleep(Duration::from_millis(100)).await;
+    // Wait for VM to be replicated to all nodes
+    timing::wait_for_condition_with_backoff(
+        || {
+            let vm_name = vm_name.clone();
+            let cluster = &cluster;
+            async move {
+                // Check if VM is visible on all nodes
+                for (node_id, _) in cluster.nodes() {
+                    if let Ok(client) = cluster.client(*node_id).await {
+                        let status_request = GetVmStatusRequest {
+                            name: vm_name.clone(),
+                        };
+                        if let Ok(resp) = client.clone().get_vm_status(status_request).await {
+                            if !resp.into_inner().found {
+                                return false;
+                            }
+                        } else {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+                true
+            }
+        },
+        Duration::from_secs(5),
+        Duration::from_millis(50),
+    ).await.expect("VM should be replicated to all nodes");
     
     // Verify VM is visible from all nodes
     info!("Verifying VM is visible from all nodes");
@@ -220,8 +302,37 @@ async fn test_data_verification_across_nodes() {
         vms.insert(vm_name, (create_request.vcpus, create_request.memory_mb));
     }
     
-    // Wait for replication
-    sleep(Duration::from_millis(200)).await;
+    // Wait for all VMs to be replicated
+    timing::wait_for_condition_with_backoff(
+        || {
+            let vms = vms.clone();
+            let cluster = &cluster;
+            async move {
+                // Check if all VMs are visible on all nodes
+                for (node_id, _) in cluster.nodes() {
+                    if let Ok(client) = cluster.client(*node_id).await {
+                        for vm_name in vms.keys() {
+                            let status_request = GetVmStatusRequest {
+                                name: vm_name.clone(),
+                            };
+                            if let Ok(resp) = client.clone().get_vm_status(status_request).await {
+                                if !resp.into_inner().found {
+                                    return false;
+                                }
+                            } else {
+                                return false;
+                            }
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+                true
+            }
+        },
+        Duration::from_secs(10),
+        Duration::from_millis(100),
+    ).await.expect("All VMs should be replicated");
     
     // Collect VM lists from all nodes
     let mut node_vm_lists = HashMap::new();
@@ -429,7 +540,7 @@ async fn test_concurrent_writes_consistency() {
                 }
                 
                 // Small delay between operations
-                sleep(Duration::from_millis(10)).await;
+                timing::robust_sleep(Duration::from_millis(10)).await;
             }
             
             (node_id, created_vms)
@@ -445,14 +556,45 @@ async fn test_concurrent_writes_consistency() {
         .map(|r| r.expect("Task should not panic"))
         .collect();
     
-    // Wait for replication to settle
-    sleep(Duration::from_millis(500)).await;
-    
-    // Verify all VMs exist on all nodes
-    info!("Verifying all concurrent writes are visible on all nodes");
+    // Collect all VMs that were created
     let all_vms: Vec<String> = results.iter()
         .flat_map(|(_, vms)| vms.clone())
         .collect();
+    
+    // Wait for all concurrent writes to be replicated
+    timing::wait_for_condition_with_backoff(
+        || {
+            let all_vms = all_vms.clone();
+            let cluster = &cluster;
+            async move {
+                // Check if all VMs are visible on all nodes
+                for (node_id, _) in cluster.nodes() {
+                    if let Ok(client) = cluster.client(*node_id).await {
+                        for vm_name in &all_vms {
+                            let status_request = GetVmStatusRequest {
+                                name: vm_name.clone(),
+                            };
+                            if let Ok(resp) = client.clone().get_vm_status(status_request).await {
+                                if !resp.into_inner().found {
+                                    return false;
+                                }
+                            } else {
+                                return false;
+                            }
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+                true
+            }
+        },
+        Duration::from_secs(10),
+        Duration::from_millis(100),
+    ).await.expect("All concurrent writes should be replicated");
+    
+    // Verify all VMs exist on all nodes
+    info!("Verifying all concurrent writes are visible on all nodes");
     
     for (node_id, _) in cluster.nodes() {
         let client = cluster.client(*node_id).await.expect("Failed to get client");
@@ -516,8 +658,40 @@ async fn test_linearizability() {
     // For true linearizability, we would need to either:
     // 1. Forward read requests to the leader
     // 2. Have followers wait until they've applied the latest committed entries
-    // For now, we add a small wait to allow replication to complete.
-    sleep(Duration::from_millis(100)).await;
+    // For now, we wait for replication to complete.
+    timing::wait_for_condition_with_backoff(
+        || {
+            let vm_name = vm_name.to_string();
+            let cluster = &cluster;
+            async move {
+                // Check if VM start is visible on all nodes
+                let mut states = Vec::new();
+                for (node_id, _) in cluster.nodes() {
+                    if let Ok(client) = cluster.client(*node_id).await {
+                        let status_request = GetVmStatusRequest {
+                            name: vm_name.clone(),
+                        };
+                        if let Ok(resp) = client.clone().get_vm_status(status_request).await {
+                            if let Some(vm_info) = resp.into_inner().vm_info {
+                                states.push(vm_info.state);
+                            } else {
+                                return false;
+                            }
+                        } else {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+                // All nodes should see the same state
+                states.len() == cluster.nodes().len() && 
+                    states.windows(2).all(|w| w[0] == w[1])
+            }
+        },
+        Duration::from_secs(5),
+        Duration::from_millis(50),
+    ).await.expect("VM state should be consistent across all nodes");
     
     // Read from all nodes - they should all see the latest state
     let mut states = Vec::new();

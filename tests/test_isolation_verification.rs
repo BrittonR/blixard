@@ -3,8 +3,7 @@
 //! Tests to verify proper resource cleanup and test isolation
 
 use std::time::Duration;
-use tokio::time::sleep;
-use blixard::test_helpers::{TestNode, TestCluster};
+use blixard::test_helpers::{TestNode, TestCluster, timing};
 
 /// Test that TestNode properly cleans up all resources
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -30,7 +29,7 @@ async fn test_node_cleanup_releases_resources() {
         node.shutdown().await;
         
         // Give OS time to release resources
-        sleep(Duration::from_millis(100)).await;
+        timing::robust_sleep(Duration::from_millis(100)).await;
     }
     
     // Verify we got different ports for each node
@@ -54,7 +53,7 @@ async fn test_background_tasks_cleanup() {
         .expect("Failed to create node");
     
     // Wait for background tasks to start
-    sleep(Duration::from_millis(500)).await;
+    timing::robust_sleep(Duration::from_millis(500)).await;
     
     // Get task count with node running
     let running_tasks = tokio::runtime::Handle::current().metrics().num_alive_tasks();
@@ -64,7 +63,7 @@ async fn test_background_tasks_cleanup() {
     node.shutdown().await;
     
     // Wait for tasks to terminate
-    sleep(Duration::from_millis(500)).await;
+    timing::robust_sleep(Duration::from_millis(500)).await;
     
     // Verify tasks were cleaned up (allow some tolerance for test framework tasks)
     let final_tasks = tokio::runtime::Handle::current().metrics().num_alive_tasks();
@@ -95,7 +94,7 @@ async fn test_port_reuse_after_cleanup() {
         node1.shutdown().await;
         
         // Give OS time to release the port
-        sleep(Duration::from_millis(200)).await;
+        timing::robust_sleep(Duration::from_millis(200)).await;
     }
     
     // Second node should be able to use the same port
@@ -143,7 +142,7 @@ async fn test_database_cleanup() {
         node1.shutdown().await;
         
         // Give time for file handles to be released
-        sleep(Duration::from_millis(100)).await;
+        timing::robust_sleep(Duration::from_millis(100)).await;
     }
     
     // Second node should be able to use the same database directory
@@ -183,7 +182,7 @@ async fn test_cluster_cleanup() {
     cluster.shutdown().await;
     
     // Give time for cleanup
-    sleep(Duration::from_millis(200)).await;
+    timing::robust_sleep(Duration::from_millis(200)).await;
     
     // All nodes should be stopped (verified by shutdown method)
     // If we get here without hanging, cleanup was successful
@@ -208,7 +207,7 @@ async fn test_rapid_node_lifecycle() {
         node.shutdown().await;
         
         // Very short delay
-        sleep(Duration::from_millis(10)).await;
+        timing::robust_sleep(Duration::from_millis(10)).await;
     }
     
     // If we complete without errors or hangs, cleanup is working
@@ -227,7 +226,7 @@ async fn test_peer_connector_task_cleanup() {
     
     // The peer connector starts background tasks even without peers
     // Wait a bit to ensure tasks are started
-    sleep(Duration::from_millis(200)).await;
+    timing::robust_sleep(Duration::from_millis(200)).await;
     
     // Verify node is running
     assert!(node.shared_state.is_running().await);
@@ -240,7 +239,7 @@ async fn test_peer_connector_task_cleanup() {
     node.shutdown().await;
     
     // Give time for all background tasks to terminate
-    sleep(Duration::from_millis(500)).await;
+    timing::robust_sleep(Duration::from_millis(500)).await;
     
     // Verify task count decreased (allow some tolerance)
     let tasks_after_shutdown = metrics.num_alive_tasks();

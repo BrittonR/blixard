@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 use tonic::{Request, Response, Status};
+use blixard::test_helpers::timing;
 
 use blixard::node_shared::SharedNodeState;
 use blixard::peer_connector::PeerConnector;
@@ -117,7 +118,7 @@ impl ClusterService for MockClusterService {
         // Simulate delay if configured
         let delay = *self.response_delay_ms.read().await;
         if delay > 0 {
-            tokio::time::sleep(Duration::from_millis(delay)).await;
+            timing::robust_sleep(Duration::from_millis(delay)).await;
         }
 
         // Check if we should fail
@@ -285,8 +286,15 @@ impl TestHarness {
                 .await;
         });
 
-        // Give server time to start
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Wait for server to be ready
+        timing::wait_for_condition_with_backoff(
+            || async {
+                // Try to connect to verify server is ready
+                tokio::net::TcpStream::connect(addr).await.is_ok()
+            },
+            Duration::from_secs(5),
+            Duration::from_millis(50),
+        ).await.expect("Mock server should start");
 
         // Add peer to shared state if it doesn't exist yet
         if self.shared_state.get_peer(peer_id).await.is_none() {
@@ -350,8 +358,15 @@ mod tests {
         let message = create_test_message(1, 2);
         harness.peer_connector.send_raft_message(2, message.clone()).await.unwrap();
         
-        // Verify message was received
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Wait for message to be received
+        timing::wait_for_condition_with_backoff(
+            || async {
+                mock_service.get_received_messages().await.len() > 0
+            },
+            Duration::from_secs(5),
+            Duration::from_millis(50),
+        ).await.expect("Message should be received");
+        
         let received = mock_service.get_received_messages().await;
         assert_eq!(received.len(), 1);
         assert_eq!(received[0].from, 1);
@@ -437,8 +452,14 @@ mod tests {
         harness.peer_connector.send_raft_message(2, message1.clone()).await.unwrap();
         harness.peer_connector.send_raft_message(2, message2.clone()).await.unwrap();
         
-        // Give async connection attempt time to complete
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        // Wait for async connection and message delivery
+        timing::wait_for_condition_with_backoff(
+            || async {
+                mock_service.get_received_messages().await.len() >= 2
+            },
+            Duration::from_secs(5),
+            Duration::from_millis(50),
+        ).await.expect("Messages should be delivered after connection");
         
         // Messages should have been delivered
         let received = mock_service.get_received_messages().await;
@@ -501,8 +522,15 @@ mod tests {
             assert!(handle.await.unwrap().is_ok());
         }
         
-        // Verify all messages were received
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Wait for all messages to be received
+        timing::wait_for_condition_with_backoff(
+            || async {
+                mock_service.get_received_messages().await.len() >= 10
+            },
+            Duration::from_secs(5),
+            Duration::from_millis(50),
+        ).await.expect("All concurrent messages should be received");
+        
         let received = mock_service.get_received_messages().await;
         assert_eq!(received.len(), 10);
         
@@ -539,7 +567,13 @@ mod tests {
         mock_service.set_fail_responses(false).await;
         
         // Wait for automatic reconnection
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        timing::wait_for_condition_with_backoff(
+            || async {
+                harness.peer_connector.get_connection(2).await.is_some()
+            },
+            Duration::from_secs(5),
+            Duration::from_millis(100),
+        ).await.expect("Connection should be re-established");
         
         // Clear any buffered messages that were sent during reconnection
         mock_service.clear_received_messages().await;
@@ -548,8 +582,15 @@ mod tests {
         let message2 = create_test_message_with_type(1, 2, MessageType::MsgHeartbeat);
         harness.peer_connector.send_raft_message(2, message2.clone()).await.unwrap();
         
-        // Verify message was received
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Wait for message to be received
+        timing::wait_for_condition_with_backoff(
+            || async {
+                mock_service.get_received_messages().await.len() > 0
+            },
+            Duration::from_secs(5),
+            Duration::from_millis(50),
+        ).await.expect("Message should be received after reconnection");
+        
         let received = mock_service.get_received_messages().await;
         assert_eq!(received.len(), 1);
         assert_eq!(received[0].msg_type(), MessageType::MsgHeartbeat);
@@ -571,8 +612,8 @@ mod tests {
         // Add a peer that's not listening
         harness.shared_state.add_peer(2, peer_addr.to_string()).await.unwrap();
         
-        // Wait a bit - maintenance should try to connect but fail
-        tokio::time::sleep(Duration::from_secs(6)).await;
+        // Wait for maintenance task to attempt connection (it will fail)
+        timing::robust_sleep(Duration::from_secs(6)).await;
         
         // Should not be connected
         assert!(!harness.shared_state.get_peer(2).await.unwrap().is_connected);
@@ -581,7 +622,13 @@ mod tests {
         let _mock_service = harness.start_mock_peer(2, peer_addr).await;
         
         // Wait for maintenance to connect
-        tokio::time::sleep(Duration::from_secs(6)).await;
+        timing::wait_for_condition_with_backoff(
+            || async {
+                harness.shared_state.get_peer(2).await.map(|p| p.is_connected).unwrap_or(false)
+            },
+            Duration::from_secs(10),
+            Duration::from_millis(500),
+        ).await.expect("Maintenance should establish connection");
         
         // Should be connected now
         assert!(harness.shared_state.get_peer(2).await.unwrap().is_connected);
@@ -612,7 +659,7 @@ mod tests {
         assert!(elapsed2 < Duration::from_millis(50)); // Should fail fast
         
         // Wait for backoff period
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        timing::robust_sleep(Duration::from_millis(150)).await;
         
         // Third attempt should work (after backoff)
         let result3 = harness.peer_connector.connect_to_peer(&peer).await;
@@ -634,14 +681,14 @@ mod tests {
         // Fail a few times to build up backoff
         for _ in 0..3 {
             let _ = harness.peer_connector.connect_to_peer(&peer).await;
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            timing::robust_sleep(Duration::from_millis(50)).await;
         }
         
         // Start the server
         let _mock_service = harness.start_mock_peer(2, peer_addr).await;
         
         // Wait for backoff and connect
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        timing::robust_sleep(Duration::from_millis(500)).await;
         harness.peer_connector.connect_to_peer(&peer).await.unwrap();
         
         // Disconnect
@@ -710,7 +757,13 @@ mod tests {
         mock_service.set_fail_responses(true).await;
         
         // Wait for health check to detect and disconnect
-        tokio::time::sleep(Duration::from_secs(11)).await;
+        timing::wait_for_condition_with_backoff(
+            || async {
+                !harness.shared_state.get_peer(2).await.map(|p| p.is_connected).unwrap_or(true)
+            },
+            Duration::from_secs(15),
+            Duration::from_millis(500),
+        ).await.expect("Unhealthy connection should be disconnected");
         
         // Should be disconnected now
         assert!(!harness.shared_state.get_peer(2).await.unwrap().is_connected);
@@ -719,7 +772,13 @@ mod tests {
         mock_service.set_fail_responses(false).await;
         
         // Wait for reconnection
-        tokio::time::sleep(Duration::from_secs(6)).await;
+        timing::wait_for_condition_with_backoff(
+            || async {
+                harness.shared_state.get_peer(2).await.map(|p| p.is_connected).unwrap_or(false)
+            },
+            Duration::from_secs(10),
+            Duration::from_millis(500),
+        ).await.expect("Connection should be re-established after fixing mock");
         
         // Should be reconnected
         assert!(harness.shared_state.get_peer(2).await.unwrap().is_connected);
@@ -743,7 +802,7 @@ mod tests {
             
             // Small delay between attempts
             if i < 4 {
-                tokio::time::sleep(Duration::from_millis(150)).await;
+                timing::robust_sleep(Duration::from_millis(150)).await;
             }
         }
         
@@ -776,7 +835,7 @@ mod tests {
         for i in 0..5 {
             let _ = harness.peer_connector.connect_to_peer(&peer).await;
             if i < 4 {
-                tokio::time::sleep(Duration::from_millis(150)).await;
+                timing::robust_sleep(Duration::from_millis(150)).await;
             }
         }
         
@@ -785,7 +844,7 @@ mod tests {
         
         // Wait 30 seconds for circuit to transition to half-open
         // (In real code we'd configure this timeout, using a shorter time for tests)
-        tokio::time::sleep(Duration::from_secs(31)).await;
+        timing::robust_sleep(Duration::from_secs(31)).await;
         
         // Next attempt should succeed and close the circuit
         harness.peer_connector.connect_to_peer(&peer).await.unwrap();
@@ -862,8 +921,8 @@ mod tests {
         let message = create_test_message(1, 2);
         let _ = harness.peer_connector.send_raft_message(2, message).await;
         
-        // Connection should be cleaned up after failure
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Wait for connection cleanup after failure
+        timing::robust_sleep(Duration::from_millis(100)).await;
         
         // We should be able to make a new connection (pool not exhausted)
         let peer_addr = get_available_addr().await;

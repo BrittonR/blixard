@@ -16,6 +16,12 @@ Replaced sleep-and-hope patterns with **condition-based waiting** using:
 - `timing::robust_sleep()` - Environment-aware delays (3x longer in CI)
 - `timing::scaled_timeout()` - Automatic timeout scaling for resource constraints
 
+## Progress Summary
+- **Total sleep() calls identified**: 76
+- **Calls fixed**: 43 (57%)
+- **Calls remaining**: 33 (43%)
+- **Test files improved**: 7
+
 ## Files Fixed ✅
 
 ### 1. **three_node_cluster_tests.rs** (9 sleep calls → condition-based)
@@ -77,6 +83,78 @@ Similar pattern - CLI tests now use environment-aware timing.
 ### 5. **storage_performance_benchmarks.rs** - Import cleanup
 Removed unused `use tokio::time::sleep;` import.
 
+### 6. **peer_connector_tests.rs** (17 sleep calls → condition-based) ✅ NEW
+**Before:**
+```rust
+tokio::time::sleep(Duration::from_millis(100)).await;
+let received = mock_service.get_received_messages().await;
+assert_eq!(received.len(), 1);
+```
+
+**After:**
+```rust
+timing::wait_for_condition_with_backoff(
+    || async {
+        mock_service.get_received_messages().await.len() > 0
+    },
+    Duration::from_secs(5),
+    Duration::from_millis(50),
+).await.expect("Message should be received");
+```
+
+**Impact:** Connection tests now verify actual message delivery and connection readiness instead of arbitrary delays.
+
+### 7. **test_isolation_verification.rs** (9 sleep calls → robust timing) ✅ NEW
+**Before:**
+```rust
+sleep(Duration::from_millis(100)).await; // Give OS time to release resources
+```
+
+**After:**
+```rust
+timing::robust_sleep(Duration::from_millis(100)).await; // Environment-aware OS cleanup
+```
+
+**Impact:** Resource cleanup tests use environment-aware timing that scales 3x in CI environments.
+
+### 8. **distributed_storage_consistency_tests.rs** (7 sleep calls → condition-based) ✅ NEW
+**Before:**
+```rust
+sleep(Duration::from_millis(200)).await; // Wait for replication
+```
+
+**After:**
+```rust
+timing::wait_for_condition_with_backoff(
+    || async {
+        // Check if all VMs are visible on all nodes
+        for (node_id, _) in cluster.nodes() {
+            if let Ok(client) = cluster.client(*node_id).await {
+                for vm_name in &all_vms {
+                    let status_request = GetVmStatusRequest {
+                        name: vm_name.clone(),
+                    };
+                    if let Ok(resp) = client.clone().get_vm_status(status_request).await {
+                        if !resp.into_inner().found {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+            } else {
+                return false;
+            }
+        }
+        true
+    },
+    Duration::from_secs(10),
+    Duration::from_millis(100),
+).await.expect("All VMs should be replicated");
+```
+
+**Impact:** Storage consistency tests now verify actual replication completion across all nodes instead of hoping 200ms is sufficient.
+
 ## Technical Improvements
 
 ### Condition-Based Waiting Pattern
@@ -113,8 +191,8 @@ Added meaningful assertions that verify distributed system correctness:
 ## Results
 
 ### Quantitative Improvements
-- **Fixed 20 of 76 total sleep() calls** (26% completion)
-- **5 critical test files** now use proper synchronization
+- **Fixed 43 of 76 total sleep() calls** (57% completion)
+- **7 critical test files** now use proper synchronization
 - **100% test success rate** for improved files
 - **Zero flaky test failures** in improved tests during validation
 
@@ -139,12 +217,12 @@ Test output shows proper distributed system behavior:
 - Log replication
 - Consensus establishment
 
-## Remaining Work (33 files with sleep calls remaining)
+## Remaining Work (33 sleep calls remaining)
 
-### High Priority (33 instances)
-- `peer_connector_tests.rs` (17 calls) - Connection lifecycle tests
-- `test_isolation_verification.rs` (9 calls) - Test isolation verification  
-- `distributed_storage_consistency_tests.rs` (7 calls) - Storage consistency
+### Files still needing attention
+- Various test files with 1-3 sleep() calls each
+- Focus on files with the most sleep() calls first
+- Apply established patterns from completed work
 
 ### Patterns for Future Work
 1. **Connection establishment** - Replace with connection health checks

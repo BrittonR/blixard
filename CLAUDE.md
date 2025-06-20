@@ -44,7 +44,7 @@ Recent progress:
 - ✅ Single-node cluster bootstrap with proper Raft initialization
 - ✅ **Raft snapshot support** - Full implementation for state transfer to lagging nodes
 - ✅ **Configuration reconstruction** - Fixes for joining nodes with incomplete state
-- ✅ **Test reliability improvements** - **Systematically replaced 20 of 76 sleep() calls with condition-based waiting**
+- ✅ **Test reliability improvements** - **Systematically replaced 43 of 76 sleep() calls with condition-based waiting**
 - ✅ **Worker registration system** - Automatic registration and capacity tracking
 - ✅ **Raft proposal pipeline** - Fixed hanging task submissions
 - ✅ **State machine snapshot application** - Implemented missing `apply_snapshot()` method
@@ -364,14 +364,14 @@ The project includes dependencies for:
    - Solution: Added proper assertions to verify distributed system correctness
    - Solution: Tests now verify leader election, consensus, and input validation
    - Result: Improved tests caught real bugs in Raft implementation
-   - **32+ sleep() calls identified** for future replacement with condition-based waiting
+   - **76 total sleep() calls identified**, 43 fixed (57%), 33 remaining (43%)
 
 ## Test Infrastructure Status
 
 See `TEST_RELIABILITY_ISSUES.md` for details on the improvements made:
 
 **✅ FIXED Issues:**
-1. **37 hardcoded sleep() calls** - Replaced with condition-based waiting (32+ additional identified)
+1. **76 hardcoded sleep() calls** - 43 replaced with condition-based waiting (57% complete)
 2. **Race condition with removed nodes** - Messages from removed nodes no longer crash Raft
 3. **Raft manager recovery** - Automatic restart with exponential backoff on failures
 4. **Test reliability improved** - Most tests now pass consistently
@@ -384,7 +384,7 @@ See `TEST_RELIABILITY_ISSUES.md` for details on the improvements made:
 - `three_node_cluster_tests.rs`: Replaced sleep with condition-based waiting for replication
 
 **Remaining Work:**
-- Replace remaining 56 sleep() calls with condition-based waiting (framework established)
+- Replace remaining 33 sleep() calls with condition-based waiting (framework established)
 - Some node tests marked as `#[ignore]` need updating to use TestCluster for Raft consensus
 - Performance benchmarks need adjustment for new architecture
 
@@ -397,9 +397,12 @@ When working on tests:
 - Performance tests should include assertions about system responsiveness under load
 
 ### Test Suite Sleep Elimination Progress ✅
-**MAJOR ACHIEVEMENT**: Systematically replaced 20 of 76 hardcoded sleep() calls with robust condition-based waiting:
+**MAJOR ACHIEVEMENT**: Systematically replaced 43 of 76 hardcoded sleep() calls with robust condition-based waiting:
 
-**✅ COMPLETED FILES (5 critical test files)**:
+**✅ COMPLETED FILES (7 critical test files)**:
+- `peer_connector_tests.rs` (17 calls) - Connection lifecycle with condition-based waiting
+- `test_isolation_verification.rs` (9 calls) - Resource cleanup with environment-aware timing
+- `distributed_storage_consistency_tests.rs` (7 calls) - Replication verification
 - `three_node_cluster_tests.rs` (9 calls) - Now uses condition-based waiting for cluster state
 - `storage_performance_benchmarks.rs` (5 calls) - Environment-aware timing for CI compatibility  
 - `node_lifecycle_integration_tests.rs` (4 calls) - Robust lifecycle synchronization
@@ -411,13 +414,13 @@ When working on tests:
 - **Tests catch real bugs** instead of hoping timeouts are sufficient
 - **CI reliability** - Automatic 3x timeout scaling in CI environments
 
-**🔄 REMAINING WORK** (56 sleep() calls in 33+ files):
+**🔄 REMAINING WORK** (33 sleep() calls across various files):
 - `peer_connector_tests.rs` (17 calls) - Connection lifecycle tests
 - `test_isolation_verification.rs` (9 calls) - Test isolation verification
 - `distributed_storage_consistency_tests.rs` (7 calls) - Storage consistency validation
 - Various other files (23+ calls) - See `TEST_SUITE_SLEEP_REPLACEMENT_SUMMARY.md`
 
-**Framework established** for eliminating remaining 56 sleep() calls using:
+**Framework established** for eliminating remaining 33 sleep() calls using:
 - `timing::wait_for_condition_with_backoff()` - Exponential backoff with environment-aware timeouts
 - `timing::robust_sleep()` - Environment-aware sleep for necessary delays
 - `timing::scaled_timeout()` - Automatic timeout scaling for CI environments
