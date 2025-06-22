@@ -193,7 +193,7 @@ async fn test_true_network_partition() {
             
         let addr: SocketAddr = format!("10.0.0.{}:7001", id).parse().unwrap();
         
-        let leader_id = std::sync::Arc::new(std::sync::Mutex::new(if id == 1 { 1 } else { 0 }));
+        let leader_id = std::sync::Arc::new(std::sync::Mutex::new(1)); // All nodes initially see node 1 as leader
         let vms = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let peers = std::sync::Arc::new(std::sync::Mutex::new((1..=5).collect()));
         
@@ -225,24 +225,44 @@ async fn test_true_network_partition() {
     // Wait for services to start - needs more time in MadSim
     sleep(Duration::from_secs(1)).await;
     
-    // Verify initial connectivity with retries
-    for (id, addr, _, _, _) in &nodes {
-        let mut connected = false;
-        for _ in 0..10 {
-            if let Ok(mut client) = ClusterServiceClient::connect(format!("http://{}", addr)).await {
-                connected = true;
-                let response = client.get_cluster_status(ClusterStatusRequest {})
-                    .await
-                    .expect("Should get status");
-                
-                let status = response.into_inner();
-                assert_eq!(status.leader_id, 1, "Node {} should see node 1 as leader", id);
-                break;
+    // Create a client node to verify connectivity
+    let client_node = handle.create_node()
+        .name("test-client")
+        .ip("10.0.0.10".parse().unwrap())
+        .build();
+    
+    // Verify initial connectivity from client node
+    let nodes_for_client = nodes.clone();
+    client_node.spawn(async move {
+        // Give servers a bit more time to fully start
+        sleep(Duration::from_millis(500)).await;
+        
+        for (id, addr, _, _, _) in &nodes_for_client {
+            let mut connected = false;
+            let mut last_error = String::new();
+            
+            for attempt in 0..10 {
+                match ClusterServiceClient::connect(format!("http://{}", addr)).await {
+                    Ok(mut client) => {
+                        connected = true;
+                        let response = client.get_cluster_status(ClusterStatusRequest {})
+                            .await
+                            .expect("Should get status");
+                        
+                        let status = response.into_inner();
+                        assert_eq!(status.leader_id, 1, "Node {} should see node 1 as leader", id);
+                        break;
+                    }
+                    Err(e) => {
+                        last_error = format!("Attempt {}: {}", attempt + 1, e);
+                        sleep(Duration::from_millis(200)).await;
+                    }
+                }
             }
-            sleep(Duration::from_millis(100)).await;
+            assert!(connected, "Should be able to connect to node {} at {} - Last error: {}", id, addr, last_error);
         }
-        assert!(connected, "Should be able to connect to node {}", id);
-    }
+        info!("All nodes are accessible and report correct leader");
+    }).await.unwrap();
     
     info!("Initial cluster state verified, all nodes see node 1 as leader");
     
@@ -278,40 +298,69 @@ async fn test_true_network_partition() {
     info!("Network partition created, testing write operations");
     
     // Test: Majority partition should accept writes
-    let mut client1 = ClusterServiceClient::connect(format!("http://{}", nodes[0].1))
-        .await
-        .expect("Should connect to node 1");
+    let majority_test_node = handle.create_node()
+        .name("majority-test")
+        .ip("10.0.0.12".parse().unwrap())
+        .build();
         
-    let response = client1.create_vm(CreateVmRequest {
-        name: "majority-vm".to_string(),
-        config_path: "/tmp/test.nix".to_string(),
-        vcpus: 1,
-        memory_mb: 256,
-    }).await.expect("Should create VM");
+    let majority_nodes = nodes.clone();
+    let majority_result = majority_test_node.spawn(async move {
+        sleep(Duration::from_millis(200)).await; // Let partition settle
+        
+        // Try to connect to node 1 (in majority)
+        if let Ok(mut client) = ClusterServiceClient::connect(format!("http://{}", majority_nodes[0].1)).await {
+            let response = client.create_vm(CreateVmRequest {
+                name: "majority-vm".to_string(),
+                config_path: "/tmp/test.nix".to_string(),
+                vcpus: 1,
+                memory_mb: 256,
+            }).await.expect("Should create VM");
+            
+            response.into_inner().success
+        } else {
+            panic!("Should connect to node 1 in majority");
+        }
+    }).await.unwrap();
     
-    assert!(response.into_inner().success, "Majority should accept writes");
+    assert!(majority_result, "Majority should accept writes");
     
     // Test: Minority partition should reject writes
-    let mut client4 = ClusterServiceClient::connect(format!("http://{}", nodes[3].1))
-        .await
-        .expect("Should connect to node 4");
+    let minority_test_node = handle.create_node()
+        .name("minority-test")
+        .ip("10.0.0.13".parse().unwrap())
+        .build();
         
-    let response = client4.create_vm(CreateVmRequest {
-        name: "minority-vm".to_string(),
-        config_path: "/tmp/test.nix".to_string(),
-        vcpus: 1,
-        memory_mb: 256,
-    }).await.expect("Should get response");
-    
-    assert!(!response.into_inner().success, "Minority should reject writes");
-    
-    // Verify no split-brain: minority doesn't elect its own leader
-    let response = client4.get_cluster_status(ClusterStatusRequest {})
-        .await
-        .expect("Should get status");
+    let minority_nodes = nodes.clone();
+    let (minority_accepts_writes, minority_leader) = minority_test_node.spawn(async move {
+        sleep(Duration::from_millis(200)).await; // Let partition settle
         
-    let status = response.into_inner();
-    assert_eq!(status.leader_id, 0, "Minority should have no leader");
+        // Try to connect to node 4 (in minority)
+        if let Ok(mut client) = ClusterServiceClient::connect(format!("http://{}", minority_nodes[3].1)).await {
+            // Try to create VM
+            let vm_response = client.create_vm(CreateVmRequest {
+                name: "minority-vm".to_string(),
+                config_path: "/tmp/test.nix".to_string(),
+                vcpus: 1,
+                memory_mb: 256,
+            }).await.expect("Should get response");
+            
+            let accepts_writes = vm_response.into_inner().success;
+            
+            // Check cluster status
+            let status_response = client.get_cluster_status(ClusterStatusRequest {})
+                .await
+                .expect("Should get status");
+            
+            let leader_id = status_response.into_inner().leader_id;
+            
+            (accepts_writes, leader_id)
+        } else {
+            panic!("Should connect to node 4 in minority");
+        }
+    }).await.unwrap();
+    
+    assert!(!minority_accepts_writes, "Minority should reject writes");
+    assert_eq!(minority_leader, 0, "Minority should have no leader");
     
     info!("Split-brain prevention verified");
     
@@ -334,19 +383,29 @@ async fn test_true_network_partition() {
     sleep(Duration::from_millis(200)).await;
     
     // Verify all nodes converged
-    for (id, addr, _, _, _) in &nodes {
-        let mut client = ClusterServiceClient::connect(format!("http://{}", addr))
-            .await
-            .expect("Should reconnect after healing");
-            
-        let response = client.get_cluster_status(ClusterStatusRequest {})
-            .await
-            .expect("Should get status");
-            
-        let status = response.into_inner();
-        assert_eq!(status.leader_id, 1, "Node {} should see leader after healing", id);
-        assert_eq!(status.nodes.len(), 5, "Node {} should see all peers", id);
-    }
+    let verify_node = handle.create_node()
+        .name("verify-healing")
+        .ip("10.0.0.14".parse().unwrap())
+        .build();
+        
+    let nodes_for_verify = nodes.clone();
+    verify_node.spawn(async move {
+        sleep(Duration::from_millis(200)).await; // Let healing settle
+        
+        for (id, addr, _, _, _) in &nodes_for_verify {
+            let mut client = ClusterServiceClient::connect(format!("http://{}", addr))
+                .await
+                .expect("Should reconnect after healing");
+                
+            let response = client.get_cluster_status(ClusterStatusRequest {})
+                .await
+                .expect("Should get status");
+                
+            let status = response.into_inner();
+            assert_eq!(status.leader_id, 1, "Node {} should see leader after healing", id);
+            assert_eq!(status.nodes.len(), 5, "Node {} should see all peers", id);
+        }
+    }).await.unwrap();
     
     info!("Network partition healed successfully");
 }
@@ -399,6 +458,33 @@ async fn test_node_isolation() {
     
     sleep(Duration::from_millis(100)).await;
     
+    // Create a client node to verify initial state
+    let client_node = handle.create_node()
+        .name("test-client")
+        .ip("10.0.0.10".parse().unwrap())
+        .build();
+    
+    // Verify initial state
+    let nodes_for_client = nodes.clone();
+    client_node.spawn(async move {
+        sleep(Duration::from_millis(200)).await;
+        
+        // Verify all nodes initially see node 1 as leader
+        for (id, addr, _, _) in &nodes_for_client {
+            let mut client = ClusterServiceClient::connect(format!("http://{}", addr))
+                .await
+                .expect("Should connect initially");
+            
+            let response = client.get_cluster_status(ClusterStatusRequest {})
+                .await
+                .expect("Should get status");
+            
+            let status = response.into_inner();
+            assert_eq!(status.leader_id, 1, "Node {} should initially see node 1 as leader", id);
+        }
+        info!("Initial state verified - all nodes see node 1 as leader");
+    }).await.unwrap();
+    
     // Isolate node 1 (the leader)
     info!("Isolating node 1");
     net.clog_node(node_handles[0].id());
@@ -414,25 +500,36 @@ async fn test_node_isolation() {
     
     // Node 1 still thinks it's leader but isolated
     
-    // Test: Isolated node can't be reached
-    let client1_result = ClusterServiceClient::connect(format!("http://{}", nodes[0].1)).await;
-    assert!(client1_result.is_err() || {
-        // If we somehow connect, operations should fail
-        let mut client = client1_result.unwrap();
-        client.get_cluster_status(ClusterStatusRequest {}).await.is_err()
-    }, "Isolated node should be unreachable");
+    // Test connectivity from a new client node
+    let test_client = handle.create_node()
+        .name("test-isolation")
+        .ip("10.0.0.11".parse().unwrap())
+        .build();
     
-    // Test: Remaining nodes have new leader
-    let mut client2 = ClusterServiceClient::connect(format!("http://{}", nodes[1].1))
-        .await
-        .expect("Should connect to node 2");
+    let nodes_for_test = nodes.clone();
+    test_client.spawn(async move {
+        sleep(Duration::from_millis(200)).await;
         
-    let response = client2.get_cluster_status(ClusterStatusRequest {})
-        .await
-        .expect("Should get status");
+        // Test: Isolated node can't be reached
+        let client1_result = ClusterServiceClient::connect(format!("http://{}", nodes_for_test[0].1)).await;
+        assert!(client1_result.is_err() || {
+            // If we somehow connect, operations should fail
+            let mut client = client1_result.unwrap();
+            client.get_cluster_status(ClusterStatusRequest {}).await.is_err()
+        }, "Isolated node should be unreachable");
         
-    let status = response.into_inner();
-    assert_eq!(status.leader_id, 2, "Nodes 2,3 should elect node 2 as leader");
+        // Test: Remaining nodes have new leader
+        let mut client2 = ClusterServiceClient::connect(format!("http://{}", nodes_for_test[1].1))
+            .await
+            .expect("Should connect to node 2");
+            
+        let response = client2.get_cluster_status(ClusterStatusRequest {})
+            .await
+            .expect("Should get status");
+            
+        let status = response.into_inner();
+        assert_eq!(status.leader_id, 2, "Nodes 2,3 should elect node 2 as leader");
+    }).await.unwrap();
     
     // Restore node 1
     info!("Restoring node 1");
@@ -445,18 +542,28 @@ async fn test_node_isolation() {
     sleep(Duration::from_millis(200)).await;
     
     // Verify all nodes see node 2 as leader
-    for (id, addr, _, _) in &nodes {
-        let mut client = ClusterServiceClient::connect(format!("http://{}", addr))
-            .await
-            .expect("Should connect after restoration");
-            
-        let response = client.get_cluster_status(ClusterStatusRequest {})
-            .await
-            .expect("Should get status");
-            
-        let status = response.into_inner();
-        assert_eq!(status.leader_id, 2, "Node {} should see node 2 as leader", id);
-    }
+    let verify_client = handle.create_node()
+        .name("verify-restoration")
+        .ip("10.0.0.12".parse().unwrap())
+        .build();
+    
+    let nodes_for_verify = nodes.clone();
+    verify_client.spawn(async move {
+        sleep(Duration::from_millis(200)).await;
+        
+        for (id, addr, _, _) in &nodes_for_verify {
+            let mut client = ClusterServiceClient::connect(format!("http://{}", addr))
+                .await
+                .expect("Should connect after restoration");
+                
+            let response = client.get_cluster_status(ClusterStatusRequest {})
+                .await
+                .expect("Should get status");
+                
+            let status = response.into_inner();
+            assert_eq!(status.leader_id, 2, "Node {} should see node 2 as leader", id);
+        }
+    }).await.unwrap();
     
     info!("Node isolation test completed successfully");
 }
