@@ -160,10 +160,11 @@ impl ClusterService for BlixardGrpcService {
                 tracing::info!("[JOIN] Configuration change proposed to Raft for node {}", req.node_id);
                 
                 // Also propose worker registration for the joining node
+                let worker_defaults = crate::config::get().worker;
                 let capabilities = crate::raft_manager::WorkerCapabilities {
-                    cpu_cores: 4, // Default capabilities for joining nodes
-                    memory_mb: 8192,
-                    disk_gb: 100,
+                    cpu_cores: worker_defaults.cpu_cores,
+                    memory_mb: worker_defaults.memory_mb,
+                    disk_gb: worker_defaults.disk_gb,
                     features: vec!["microvm".to_string()],
                 };
                 
@@ -187,11 +188,25 @@ impl ClusterService for BlixardGrpcService {
                 }
                 // Get current peers to return
                 let peers = self.node.get_peers().await;
+                // Get current Raft status to determine states
+                let raft_status = self.node.get_raft_status().await
+                    .unwrap_or(crate::node_shared::RaftStatus {
+                        is_leader: false,
+                        node_id: self.node.get_id(),
+                        leader_id: None,
+                        term: 0,
+                        state: "follower".to_string(),
+                    });
+                
                 let mut peer_infos: Vec<NodeInfo> = peers.into_iter()
                     .map(|p| NodeInfo {
                         id: p.id,
                         address: p.address,
-                        state: NodeState::Follower.into(), // TODO: Get actual state
+                        state: if Some(p.id) == raft_status.leader_id {
+                            NodeState::Leader.into()
+                        } else {
+                            NodeState::Follower.into()
+                        },
                     })
                     .collect();
                 
@@ -201,10 +216,10 @@ impl ClusterService for BlixardGrpcService {
                 peer_infos.push(NodeInfo {
                     id: self.node.get_id(),
                     address: self.node.get_bind_addr().to_string(),
-                    state: if is_leader {
-                        NodeState::Leader.into()
-                    } else {
-                        NodeState::Follower.into()
+                    state: match raft_status.state.as_str() {
+                        "leader" => NodeState::Leader.into(),
+                        "candidate" => NodeState::Candidate.into(),
+                        _ => NodeState::Follower.into(),
                     },
                 });
                 
@@ -422,8 +437,14 @@ impl ClusterService for BlixardGrpcService {
                     .map(|p| p.address.clone())
                     .unwrap_or_else(|| format!("unknown-{}", node_id));
                     
-                // TODO: Track actual peer states
-                (peer_addr, NodeState::Follower)
+                // For peers, we can determine if they're the leader
+                let state = if Some(node_id) == raft_status.leader_id {
+                    NodeState::Leader
+                } else {
+                    // We don't have enough info to know if they're candidates or followers
+                    NodeState::Follower
+                };
+                (peer_addr, state)
             };
             
             nodes.push(NodeInfo {
@@ -731,7 +752,7 @@ impl BlixardService for BlixardGrpcService {
                 disk_gb: 0, // Not in proto Task, default to 0
                 required_features: vec![], // Not in proto Task, default to empty
             },
-            timeout_secs: 300, // Default 5 minute timeout
+            timeout_secs: crate::config::get().task.default_timeout_secs,
         };
         
         // Submit task through Raft consensus

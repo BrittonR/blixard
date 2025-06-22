@@ -382,7 +382,7 @@ impl SharedNodeState {
             
             // CRITICAL FIX: For network partition safety, verify leadership is still valid
             // by ensuring we have recent communication with a majority of the configured voters
-            let raft_status = self.get_raft_status().await?;
+            let _raft_status = self.get_raft_status().await?;
             
             // Additional safety check: if we haven't heard from followers recently,
             // we might be in a network partition and should reject writes
@@ -445,7 +445,8 @@ impl SharedNodeState {
                 
                 tracing::info!("Waiting for VM proposal response...");
                 // Wait for response with a timeout
-                match tokio::time::timeout(tokio::time::Duration::from_secs(10), response_rx).await {
+                let timeout = crate::config::get().timeouts.proposal_timeout_secs;
+                match tokio::time::timeout(tokio::time::Duration::from_secs(timeout), response_rx).await {
                     Ok(Ok(result)) => {
                         tracing::info!("Received VM proposal response: {:?}", result.is_ok());
                         result?;
@@ -587,7 +588,8 @@ impl SharedNodeState {
             }
             
             // Wait for response
-            match tokio::time::timeout(tokio::time::Duration::from_secs(10), response_rx).await {
+            let timeout = crate::config::get().timeouts.proposal_timeout_secs;
+            match tokio::time::timeout(tokio::time::Duration::from_secs(timeout), response_rx).await {
                 Ok(Ok(result)) => {
                     result?;
                     Ok(())
@@ -713,7 +715,8 @@ impl SharedNodeState {
             
             tracing::info!("Waiting for proposal response...");
             // Wait for response with a timeout
-            match tokio::time::timeout(tokio::time::Duration::from_secs(10), response_rx).await {
+            let timeout = crate::config::get().timeouts.proposal_timeout_secs;
+            match tokio::time::timeout(tokio::time::Duration::from_secs(timeout), response_rx).await {
                 Ok(Ok(result)) => {
                     tracing::info!("Received proposal response: {:?}", result.is_ok());
                     result?;
@@ -926,10 +929,11 @@ impl SharedNodeState {
                 }
             }
             
-            tracing::info!("[NODE-SHARED] Waiting for conf change response from Raft (timeout: 5s)");
+            let timeout = crate::config::get().timeouts.conf_change_timeout_secs;
+            tracing::info!("[NODE-SHARED] Waiting for conf change response from Raft (timeout: {}s)", timeout);
             // Wait for the configuration change to be committed
             // Use a timeout to prevent indefinite blocking
-            match tokio::time::timeout(tokio::time::Duration::from_secs(5), response_rx).await {
+            match tokio::time::timeout(tokio::time::Duration::from_secs(timeout), response_rx).await {
                 Ok(Ok(result)) => {
                     match &result {
                         Ok(_) => {
@@ -1025,7 +1029,8 @@ impl SharedNodeState {
             }
             
             // Wait for the proposal to be committed
-            match tokio::time::timeout(tokio::time::Duration::from_secs(10), response_rx).await {
+            let timeout = crate::config::get().timeouts.proposal_timeout_secs;
+            match tokio::time::timeout(tokio::time::Duration::from_secs(timeout), response_rx).await {
                 Ok(Ok(result)) => {
                     match result {
                         Ok(_) => {

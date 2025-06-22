@@ -8,6 +8,7 @@ pub mod raft_manager;
 pub mod storage;
 pub mod vm_manager;
 pub mod peer_connector;
+pub mod config;
 
 // Test helpers are exposed for integration tests
 #[cfg(any(test, feature = "test-helpers"))]

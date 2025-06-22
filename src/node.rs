@@ -80,7 +80,7 @@ impl Node {
         let peers = if let Some(join_addr) = &self.shared.config.join_addr {
             // We're joining an existing cluster, add a dummy peer to prevent bootstrap
             // The actual peer will be discovered during join
-            vec![(1, join_addr.to_string())] // Use node 1 as default leader
+            vec![] // Empty peers - will be populated during join
         } else {
             vec![] // Start with no peers, bootstrap as single node
         };
@@ -162,8 +162,9 @@ impl Node {
         let shared_weak = Arc::downgrade(&self.shared);
         let raft_handle = tokio::spawn(async move {
             let mut restart_count = 0;
-            const MAX_RESTARTS: u32 = 5;
-            const RESTART_DELAY_MS: u64 = 1000;
+            let raft_config = crate::config::get().raft;
+            let max_restarts = raft_config.max_restarts;
+            let restart_delay_ms = raft_config.restart_delay_ms;
             
             // Run the initial Raft manager
             match raft_manager.run().await {
@@ -178,7 +179,7 @@ impl Node {
             }
             
             // Recovery loop
-            while restart_count < MAX_RESTARTS {
+            while restart_count < max_restarts {
                 tracing::info!("Restarting Raft manager (attempt #{})", restart_count + 1);
                 
                 // Get strong reference to shared state
@@ -191,7 +192,7 @@ impl Node {
                 };
                 
                 // Wait before restarting with exponential backoff
-                tokio::time::sleep(tokio::time::Duration::from_millis(RESTART_DELAY_MS * restart_count as u64)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(restart_delay_ms * restart_count as u64)).await;
                 
                 // Get database and peers
                 let db = match shared.get_database().await {
@@ -254,7 +255,7 @@ impl Node {
             }
             
             Err(BlixardError::Internal {
-                message: format!("Raft manager failed after {} restart attempts", MAX_RESTARTS),
+                message: format!("Raft manager failed after {} restart attempts", max_restarts),
             })
         });
         self.raft_handle = Some(raft_handle);
@@ -262,7 +263,8 @@ impl Node {
         // If we have a join address, send join request after initialization
         if let Some(join_addr) = self.shared.config.join_addr.clone() {
             // Give the Raft manager a moment to start
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            let join_delay = crate::config::get().timeouts.join_request_delay_ms;
+            tokio::time::sleep(tokio::time::Duration::from_millis(join_delay)).await;
             
             // Pre-connect to the join address to ensure bidirectional connectivity
             if let Some(peer) = self.shared.get_peer(1).await {
@@ -584,8 +586,8 @@ impl Node {
             }
         }
         
-        // Default to 8GB if detection fails
-        8192
+        // Default from configuration if detection fails
+        crate::config::get().resource.default_memory_mb
     }
     
     /// Estimate available disk space in GB
@@ -600,7 +602,7 @@ impl Node {
         
         // Create directory if it doesn't exist and return default
         let _ = std::fs::create_dir_all(data_dir);
-        100
+        crate::config::get().resource.default_disk_gb
     }
 }
 

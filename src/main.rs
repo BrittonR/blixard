@@ -93,11 +93,16 @@ enum ClusterCommands {
 #[tokio::main]
 async fn main() -> BlixardResult<()> {
     // Initialize logging
+    let filter = tracing_subscriber::EnvFilter::from_default_env()
+        .add_directive(
+            "blixard=info".parse()
+                .map_err(|e| blixard::error::BlixardError::ConfigError(
+                    format!("Invalid log directive: {}", e)
+                ))?
+        );
+    
     tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("blixard=info".parse().expect("valid log directive"))
-        )
+        .with_env_filter(filter)
         .init();
 
     let cli = Cli::parse();
@@ -207,10 +212,26 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
             // Parse peer address to get node ID (assuming format nodeID@address)
             let (node_id, bind_address) = if peer.contains('@') {
                 let parts: Vec<&str> = peer.split('@').collect();
-                let id = parts[0].parse::<u64>().unwrap_or(0);
+                if parts.len() != 2 {
+                    eprintln!("Invalid peer format. Expected 'nodeID@address' but got '{}'", peer);
+                    std::process::exit(1);
+                }
+                
+                let id = match parts[0].parse::<u64>() {
+                    Ok(id) if id > 0 => id,
+                    Ok(0) => {
+                        eprintln!("Invalid node ID: must be greater than 0");
+                        std::process::exit(1);
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to parse node ID '{}': {}", parts[0], e);
+                        std::process::exit(1);
+                    }
+                };
                 (id, parts[1].to_string())
             } else {
-                // Default node ID if not specified
+                // When no node ID is specified, we'll let the server assign one
+                eprintln!("Note: No node ID specified in peer address. Using server assignment.");
                 (0, peer.clone())
             };
             
