@@ -77,7 +77,7 @@ impl Node {
 
         // Initialize Raft manager
         // If join_addr is provided, don't bootstrap as single node
-        let peers = if let Some(join_addr) = &self.shared.config.join_addr {
+        let peers = if let Some(_join_addr) = &self.shared.config.join_addr {
             // We're joining an existing cluster, add a dummy peer to prevent bootstrap
             // The actual peer will be discovered during join
             vec![] // Empty peers - will be populated during join

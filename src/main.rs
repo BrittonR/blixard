@@ -218,11 +218,11 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
                 }
                 
                 let id = match parts[0].parse::<u64>() {
-                    Ok(id) if id > 0 => id,
                     Ok(0) => {
                         eprintln!("Invalid node ID: must be greater than 0");
                         std::process::exit(1);
                     }
+                    Ok(id) => id,
                     Err(e) => {
                         eprintln!("Failed to parse node ID '{}': {}", parts[0], e);
                         std::process::exit(1);
