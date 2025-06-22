@@ -34,6 +34,7 @@ use blixard::proto::{
     TaskStatusRequest, TaskStatusResponse,
 };
 
+
 /// Mock gRPC server for testing peer connections
 #[derive(Debug, Clone)]
 struct MockClusterService {

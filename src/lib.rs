@@ -14,12 +14,6 @@ pub mod peer_connector;
 pub mod test_helpers;
 
 // Include the generated proto code
-#[cfg(not(madsim))]
 pub mod proto {
     tonic::include_proto!("blixard");
-}
-
-#[cfg(madsim)]
-pub mod proto {
-    tonic::include_proto!("sim/blixard");
 }

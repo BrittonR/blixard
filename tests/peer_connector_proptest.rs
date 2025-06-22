@@ -7,6 +7,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use proptest::prelude::*;
 use proptest::collection::vec;
+#[cfg(madsim)]
+use madsim::sync::RwLock;
+#[cfg(not(madsim))]
 use tokio::sync::RwLock;
 
 use blixard::peer_connector::PeerConnector;
@@ -185,6 +188,9 @@ mod tests {
         /// Test that PeerConnector maintains invariants across random operations
         #[test]
         fn test_peer_connector_invariants(ops in operation_sequence_strategy(10)) {
+            #[cfg(madsim)]
+            let rt = madsim::runtime::Runtime::new();
+            #[cfg(not(madsim))]
             let rt = tokio::runtime::Runtime::new().unwrap();
             
             rt.block_on(async {
@@ -204,6 +210,9 @@ mod tests {
         /// Test that connection/disconnection operations are idempotent
         #[test]
         fn test_connection_idempotency(peer in peer_info_strategy()) {
+            #[cfg(madsim)]
+            let rt = madsim::runtime::Runtime::new();
+            #[cfg(not(madsim))]
             let rt = tokio::runtime::Runtime::new().unwrap();
             
             rt.block_on(async {
@@ -232,6 +241,9 @@ mod tests {
             peer in peer_info_strategy(),
             message_count in 0..200usize
         ) {
+            #[cfg(madsim)]
+            let rt = madsim::runtime::Runtime::new();
+            #[cfg(not(madsim))]
             let rt = tokio::runtime::Runtime::new().unwrap();
             
             rt.block_on(async {
@@ -268,6 +280,9 @@ mod tests {
                     peers.iter().all(|p| ids.insert(p.id))
                 })
         ) {
+            #[cfg(madsim)]
+            let rt = madsim::runtime::Runtime::new();
+            #[cfg(not(madsim))]
             let rt = tokio::runtime::Runtime::new().unwrap();
             
             rt.block_on(async {
@@ -286,6 +301,11 @@ mod tests {
                     let peer_clone = peer.clone();
                     
                     // Connect
+                    #[cfg(madsim)]
+                    let handle1 = madsim::task::spawn(async move {
+                        connector.send_raft_message(peer_id, create_test_message(1, peer_id)).await
+                    });
+                    #[cfg(not(madsim))]
                     let handle1 = tokio::spawn(async move {
                         let _ = connector.connect_to_peer(&peer_clone).await;
                     });
@@ -294,6 +314,17 @@ mod tests {
                     // Send message
                     let connector = harness.peer_connector.clone();
                     let peer_id = peer.id;
+                    #[cfg(madsim)]
+                    let handle2 = madsim::task::spawn(async move {
+                        let message = raft::prelude::Message {
+                            msg_type: raft::prelude::MessageType::MsgHeartbeat.into(),
+                            from: 1,
+                            to: peer_id,
+                            ..Default::default()
+                        };
+                        let _ = connector.send_raft_message(peer_id, message).await;
+                    });
+                    #[cfg(not(madsim))]
                     let handle2 = tokio::spawn(async move {
                         let message = raft::prelude::Message {
                             msg_type: raft::prelude::MessageType::MsgHeartbeat.into(),

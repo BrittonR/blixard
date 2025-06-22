@@ -10,7 +10,7 @@ use blixard::{
         RaftStateMachine, ProposalData, TaskSpec, TaskResult, ResourceRequirements,
         WorkerCapabilities, WorkerStatus, schedule_task,
     },
-    storage::{TASK_RESULT_TABLE, WORKER_TABLE, WORKER_STATUS_TABLE},
+    storage::{TASK_RESULT_TABLE, WORKER_TABLE, WORKER_STATUS_TABLE, VM_STATE_TABLE},
     types::{VmConfig, VmCommand},
 };
 
@@ -288,7 +288,7 @@ proptest! {
             
             // Verify final state consistency
             let read_txn = database.begin_read().unwrap();
-            if let Ok(vm_table) = read_txn.open_table(blixard::storage::VM_STATE_TABLE) {
+            if let Ok(vm_table) = read_txn.open_table(VM_STATE_TABLE) {
                 let stored_count = vm_table.iter().unwrap().count();
                 // Can't do exact comparison due to delete operations, but count should be reasonable
                 assert!(stored_count <= vm_names.len());
