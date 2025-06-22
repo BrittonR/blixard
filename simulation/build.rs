@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("cargo:rerun-if-changed=../proto/blixard.proto");
+    println!("cargo:rerun-if-changed=../blixard-core/proto/blixard.proto");
     
     // Tell cargo about our custom cfg flag
     println!("cargo:rustc-check-cfg=cfg(madsim)");
@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // madsim-tonic-build handles both madsim and non-madsim cases
     tonic_build::configure()
         .out_dir(&sim_dir)
-        .compile(&["../proto/blixard.proto"], &["../proto"])?;
+        .compile(&["../blixard-core/proto/blixard.proto"], &["../blixard-core/proto"])?;
     
     Ok(())
 }

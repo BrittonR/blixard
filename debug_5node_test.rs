@@ -1,5 +1,5 @@
 use std::time::Duration;
-use blixard::test_helpers::TestCluster;
+use blixard_core::test_helpers::TestCluster;
 
 #[tokio::main]
 async fn main() {

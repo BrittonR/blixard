@@ -6,7 +6,7 @@
 #![cfg(feature = "test-helpers")]
 
 use std::time::Duration;
-use blixard::{
+use blixard_core::{
     test_helpers::{TestNode, timing},
     proto::HealthCheckRequest,
 };

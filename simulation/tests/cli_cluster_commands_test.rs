@@ -1,7 +1,7 @@
 #[cfg(feature = "test-helpers")]
 mod tests {
     use std::time::Duration;
-    use blixard::test_helpers::{TestNode, PortAllocator};
+    use blixard_core::test_helpers::{TestNode, PortAllocator};
     use tokio::time::timeout;
     use tokio::process::Command;
     
@@ -17,7 +17,7 @@ mod tests {
             .expect("Failed to create node");
         
         // Wait for node to be ready
-        blixard::test_helpers::timing::robust_sleep(Duration::from_millis(500)).await;
+        blixard_core::test_helpers::timing::robust_sleep(Duration::from_millis(500)).await;
         
         // Run cluster status command with timeout
         let result = timeout(
@@ -65,7 +65,7 @@ mod tests {
             .expect("Failed to create node 2");
         
         // Wait for nodes to be ready
-        blixard::test_helpers::timing::robust_sleep(Duration::from_millis(500)).await;
+        blixard_core::test_helpers::timing::robust_sleep(Duration::from_millis(500)).await;
         
         // Run join command from node2 to join node1's cluster with timeout
         let result = timeout(

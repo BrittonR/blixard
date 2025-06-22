@@ -1,9 +1,9 @@
 #![cfg(feature = "test-helpers")]
 
 use std::sync::Arc;
-use blixard::node_shared::{SharedNodeState, PeerInfo};
-use blixard::types::NodeConfig;
-use blixard::test_helpers::PortAllocator;
+use blixard_core::node_shared::{SharedNodeState, PeerInfo};
+use blixard_core::types::NodeConfig;
+use blixard_core::test_helpers::PortAllocator;
 
 fn create_test_node_state(id: u64) -> SharedNodeState {
     let port = PortAllocator::next_port();
@@ -212,7 +212,7 @@ async fn test_raft_status_tracking() {
     assert_eq!(status.state, "follower");
     
     // Update to leader
-    let status = blixard::node_shared::RaftStatus {
+    let status = blixard_core::node_shared::RaftStatus {
         is_leader: true,
         node_id: 1,
         leader_id: Some(1),

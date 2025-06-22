@@ -1,6 +1,6 @@
 #![cfg(feature = "test-helpers")]
 
-use blixard::test_helpers::{PortAllocator, TestNode};
+use blixard_core::test_helpers::{PortAllocator, TestNode};
 use std::collections::HashSet;
 use tokio::task::JoinHandle;
 

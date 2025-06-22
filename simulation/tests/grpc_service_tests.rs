@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use tokio::time::Duration;
 use tonic::transport::Channel;
 
-use blixard::{
+use blixard_core::{
     proto::{
         blixard_service_client::BlixardServiceClient,
         cluster_service_client::ClusterServiceClient,
@@ -99,7 +99,7 @@ async fn test_get_raft_status_after_update() {
         .unwrap();
     
     // Update Raft status
-    let status = blixard::node_shared::RaftStatus {
+    let status = blixard_core::node_shared::RaftStatus {
         is_leader: true,
         node_id: 1,
         leader_id: Some(1),
@@ -346,7 +346,7 @@ async fn test_error_handling_for_invalid_raft_state() {
         .unwrap();
     
     // Set some edge case values
-    let status = blixard::node_shared::RaftStatus {
+    let status = blixard_core::node_shared::RaftStatus {
         is_leader: false,
         node_id: 1,
         leader_id: None,

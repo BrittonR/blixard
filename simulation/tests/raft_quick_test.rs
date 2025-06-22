@@ -3,7 +3,7 @@
 use std::time::Duration;
 use tempfile::TempDir;
 
-use blixard::{
+use blixard_core::{
     node::Node,
     types::NodeConfig,
     test_helpers::{PortAllocator, timing},

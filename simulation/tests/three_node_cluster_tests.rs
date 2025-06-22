@@ -29,7 +29,7 @@
 use std::time::Duration;
 use std::collections::HashSet;
 
-use blixard::{
+use blixard_core::{
     test_helpers::{TestCluster, TestNode, timing},
     proto::{
         HealthCheckRequest, TaskRequest, ClusterStatusRequest,
@@ -531,7 +531,7 @@ async fn test_three_node_cluster_stress() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore] // Manual test - run with: cargo test test_removed_node_message_handling -- --ignored --nocapture
 async fn test_removed_node_message_handling() {
-    use blixard::proto::{TaskRequest, LeaveRequest};
+    use blixard_core::proto::{TaskRequest, LeaveRequest};
     
     let _ = tracing_subscriber::fmt()
         .with_env_filter("info")

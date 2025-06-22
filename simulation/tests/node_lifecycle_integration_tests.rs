@@ -1,7 +1,7 @@
 #[cfg(feature = "test-helpers")]
 mod tests {
-    use blixard::test_helpers::{TestNode, TestCluster};
-    use blixard::raft_manager::{TaskSpec, ResourceRequirements};
+    use blixard_core::test_helpers::{TestNode, TestCluster};
+    use blixard_core::raft_manager::{TaskSpec, ResourceRequirements};
     use std::time::Duration;
 
     /// Test the complete lifecycle of a single node
@@ -25,7 +25,7 @@ mod tests {
         // (already bootstrapped in TestNode creation)
         
         // Wait for leader election using condition-based waiting
-        blixard::test_helpers::timing::wait_for_condition_with_backoff(
+        blixard_core::test_helpers::timing::wait_for_condition_with_backoff(
             || async {
                 if let Ok(status) = node.shared_state.get_raft_status().await {
                     status.is_leader && status.leader_id == Some(1)
@@ -84,7 +84,7 @@ mod tests {
             .unwrap();
         
         // Wait for leader election using condition-based waiting
-        blixard::test_helpers::timing::wait_for_condition_with_backoff(
+        blixard_core::test_helpers::timing::wait_for_condition_with_backoff(
             || async {
                 if let Ok(status) = node1.shared_state.get_raft_status().await {
                     status.leader_id.is_some()
@@ -108,7 +108,7 @@ mod tests {
             .unwrap();
         
         // Wait for cluster to stabilize - both nodes should see each other
-        blixard::test_helpers::timing::wait_for_condition_with_backoff(
+        blixard_core::test_helpers::timing::wait_for_condition_with_backoff(
             || async {
                 let peers1 = node1.shared_state.get_peers().await;
                 let peers2 = node2.shared_state.get_peers().await;
@@ -136,7 +136,7 @@ mod tests {
             .unwrap();
         
         // Wait for cluster to stabilize - all 3 nodes should be in the cluster
-        blixard::test_helpers::timing::wait_for_condition_with_backoff(
+        blixard_core::test_helpers::timing::wait_for_condition_with_backoff(
             || async {
                 if let Ok((leader_id, nodes, _term)) = node1.shared_state.get_cluster_status().await {
                     leader_id > 0 && nodes.len() == 3 && 
@@ -182,7 +182,7 @@ mod tests {
         
         // Wait for configuration change - node3 removal may take time
         // For now we just give it a moment as leave_cluster is not implemented
-        blixard::test_helpers::timing::robust_sleep(Duration::from_millis(500)).await;
+        blixard_core::test_helpers::timing::robust_sleep(Duration::from_millis(500)).await;
         
         // After shutdown, verify remaining nodes still work
         let (_, nodes, _) = node1.shared_state.get_cluster_status().await.unwrap();
@@ -216,7 +216,7 @@ mod tests {
             .unwrap();
         
         // Wait for leader election
-        blixard::test_helpers::timing::wait_for_condition_with_backoff(
+        blixard_core::test_helpers::timing::wait_for_condition_with_backoff(
             || async {
                 if let Ok(status) = node.shared_state.get_raft_status().await {
                     status.is_leader
@@ -283,7 +283,7 @@ mod tests {
         let node3 = nodes.get(&3).unwrap();
         
         // Wait a bit for cluster to stabilize after convergence
-        blixard::test_helpers::timing::robust_sleep(Duration::from_millis(500)).await;
+        blixard_core::test_helpers::timing::robust_sleep(Duration::from_millis(500)).await;
         
         // Submit tasks concurrently from all nodes
         let task = TaskSpec {
@@ -315,7 +315,7 @@ mod tests {
             handles.push(handle);
             
             // Small delay between submissions
-            blixard::test_helpers::timing::robust_sleep(Duration::from_millis(100)).await;
+            blixard_core::test_helpers::timing::robust_sleep(Duration::from_millis(100)).await;
         }
         
         // Wait for all task submissions
@@ -344,7 +344,7 @@ mod tests {
         // Create a node but don't let it fully initialize
         // We'll manually control its state to test error conditions
         let temp_dir = tempfile::tempdir().unwrap();
-        let node_config = blixard::types::NodeConfig {
+        let node_config = blixard_core::types::NodeConfig {
             id: 999,  // Use a unique ID that won't conflict with TestNode
             bind_addr: "127.0.0.1:0".parse().unwrap(),
             data_dir: temp_dir.path().to_str().unwrap().to_string(),
@@ -352,7 +352,7 @@ mod tests {
             use_tailscale: false,
         };
         
-        let shared_state = std::sync::Arc::new(blixard::node_shared::SharedNodeState::new(node_config));
+        let shared_state = std::sync::Arc::new(blixard_core::node_shared::SharedNodeState::new(node_config));
         
         // These should fail because node is not initialized
         assert!(shared_state.submit_task("test", TaskSpec {
@@ -378,7 +378,7 @@ mod tests {
             .unwrap();
         
         // Wait for node1 to be ready and become leader
-        blixard::test_helpers::timing::wait_for_condition_with_backoff(
+        blixard_core::test_helpers::timing::wait_for_condition_with_backoff(
             || async {
                 if let Ok(status) = node1.shared_state.get_raft_status().await {
                     status.is_leader
@@ -402,7 +402,7 @@ mod tests {
         node1.shutdown().await;
         
         // Give time for shutdown to complete
-        blixard::test_helpers::timing::robust_sleep(Duration::from_millis(100)).await;
+        blixard_core::test_helpers::timing::robust_sleep(Duration::from_millis(100)).await;
         
         // After shutdown, get_cluster_status should fail because node is not initialized
         assert!(node1_state.get_cluster_status().await.is_err());

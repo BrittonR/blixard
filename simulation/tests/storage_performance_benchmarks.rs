@@ -11,7 +11,7 @@
 
 use std::time::{Duration, Instant};
 use std::collections::HashMap;
-use blixard::{
+use blixard_core::{
     proto::{
         CreateVmRequest, ListVmsRequest, TaskRequest,
         GetVmStatusRequest, StartVmRequest,

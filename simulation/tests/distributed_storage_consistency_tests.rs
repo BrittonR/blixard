@@ -12,7 +12,7 @@
 
 use std::time::{Duration, Instant};
 use std::collections::HashMap;
-use blixard::{
+use blixard_core::{
     proto::{
         TaskRequest, TaskStatusRequest, CreateVmRequest, GetVmStatusRequest,
         ListVmsRequest,
@@ -647,7 +647,7 @@ async fn test_linearizability() {
     
     // Start the VM (this should update its state)
     leader_client.clone()
-        .start_vm(blixard::proto::StartVmRequest {
+        .start_vm(blixard_core::proto::StartVmRequest {
             name: vm_name.to_string(),
         })
         .await

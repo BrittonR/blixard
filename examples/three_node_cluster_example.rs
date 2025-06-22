@@ -4,7 +4,7 @@
 //! addressing the known reliability issues documented in TEST_RELIABILITY_ISSUES.md
 
 use std::time::Duration;
-use blixard::test_helpers::{TestNode, timing};
+use blixard_core::test_helpers::{TestNode, timing};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

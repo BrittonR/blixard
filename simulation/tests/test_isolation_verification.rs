@@ -3,7 +3,7 @@
 //! Tests to verify proper resource cleanup and test isolation
 
 use std::time::Duration;
-use blixard::test_helpers::{TestNode, TestCluster, timing};
+use blixard_core::test_helpers::{TestNode, TestCluster, timing};
 
 /// Test that TestNode properly cleans up all resources
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

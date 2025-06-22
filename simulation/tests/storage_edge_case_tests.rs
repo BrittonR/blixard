@@ -11,7 +11,7 @@
 #![cfg(feature = "test-helpers")]
 
 use std::time::{Duration, Instant};
-use blixard::{
+use blixard_core::{
     proto::{
         CreateVmRequest, ListVmsRequest, 
         TaskRequest, ClusterStatusRequest, StopVmRequest,
@@ -660,7 +660,7 @@ async fn test_extreme_request_handling() {
                 client.create_vm(create_request).await.is_ok()
             } else if i % 3 == 1 {
                 // Start
-                let start_request = blixard::proto::StartVmRequest {
+                let start_request = blixard_core::proto::StartVmRequest {
                     name: vm_name,
                 };
                 client.start_vm(start_request).await.is_ok()

@@ -1,6 +1,6 @@
 //! Example gRPC client for testing Blixard server
 
-use blixard::proto::{
+use blixard_core::proto::{
     cluster_service_client::ClusterServiceClient,
     HealthCheckRequest, CreateVmRequest, ListVmsRequest, ClusterStatusRequest,
 };

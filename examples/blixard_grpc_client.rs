@@ -3,7 +3,7 @@
 //! This demonstrates how to use the BlixardService gRPC API.
 
 use tonic::transport::Channel;
-use blixard::proto::{
+use blixard_core::proto::{
     blixard_service_client::BlixardServiceClient,
     GetRaftStatusRequest, ProposeTaskRequest, Task,
 };

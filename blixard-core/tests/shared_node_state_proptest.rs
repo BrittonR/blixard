@@ -389,10 +389,10 @@ proptest! {
             let db = Arc::new(redb::Database::create(db_path).unwrap());
             
             // Initialize the database tables
-            blixard::storage::init_database_tables(&db).unwrap();
+            blixard_core::storage::init_database_tables(&db).unwrap();
             
             // Initialize storage for single node
-            let storage = blixard::storage::RedbRaftStorage { database: db.clone() };
+            let storage = blixard_core::storage::RedbRaftStorage { database: db.clone() };
             storage.initialize_single_node(config.id).unwrap();
             
             // Set the database

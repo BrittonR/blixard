@@ -1,7 +1,7 @@
 #![cfg(feature = "test-helpers")]
 
 
-use blixard::{
+use blixard_core::{
     error::BlixardResult,
     storage::{RedbRaftStorage, SnapshotData},
     raft_manager::RaftStateMachine,
@@ -22,12 +22,12 @@ async fn test_snapshot_creation() -> BlixardResult<()> {
     {
         let write_txn = database.begin_write()?;
         {
-            let mut vm_table = write_txn.open_table(blixard::storage::VM_STATE_TABLE)?;
+            let mut vm_table = write_txn.open_table(blixard_core::storage::VM_STATE_TABLE)?;
             vm_table.insert("test-vm-1", b"vm-state-1".as_slice())?;
             vm_table.insert("test-vm-2", b"vm-state-2".as_slice())?;
         }
         {
-            let mut task_table = write_txn.open_table(blixard::storage::TASK_TABLE)?;
+            let mut task_table = write_txn.open_table(blixard_core::storage::TASK_TABLE)?;
             task_table.insert("task-1", b"task-data-1".as_slice())?;
             task_table.insert("task-2", b"task-data-2".as_slice())?;
         }
@@ -89,12 +89,12 @@ async fn test_snapshot_restoration() -> BlixardResult<()> {
         let read_txn = database.begin_read()?;
         
         // Check VM states
-        let vm_table = read_txn.open_table(blixard::storage::VM_STATE_TABLE)?;
+        let vm_table = read_txn.open_table(blixard_core::storage::VM_STATE_TABLE)?;
         assert_eq!(vm_table.get("vm-1")?.map(|v| v.value().to_vec()), Some(b"state-1".to_vec()));
         assert_eq!(vm_table.get("vm-2")?.map(|v| v.value().to_vec()), Some(b"state-2".to_vec()));
         
         // Check tasks
-        let task_table = read_txn.open_table(blixard::storage::TASK_TABLE)?;
+        let task_table = read_txn.open_table(blixard_core::storage::TASK_TABLE)?;
         assert_eq!(task_table.get("task-1")?.map(|v| v.value().to_vec()), Some(b"task-data-1".to_vec()));
     }
     
@@ -135,14 +135,14 @@ async fn test_state_machine_apply_snapshot() -> BlixardResult<()> {
         let read_txn = database.begin_read()?;
         
         // Check VM states were applied
-        let vm_table = read_txn.open_table(blixard::storage::VM_STATE_TABLE)?;
+        let vm_table = read_txn.open_table(blixard_core::storage::VM_STATE_TABLE)?;
         assert_eq!(vm_table.get("applied-vm-1")?.map(|v| v.value().to_vec()), 
                    Some(b"applied-state-1".to_vec()));
         assert_eq!(vm_table.get("applied-vm-2")?.map(|v| v.value().to_vec()),
                    Some(b"applied-state-2".to_vec()));
         
         // Check tasks were applied
-        let task_table = read_txn.open_table(blixard::storage::TASK_TABLE)?;
+        let task_table = read_txn.open_table(blixard_core::storage::TASK_TABLE)?;
         assert_eq!(task_table.get("applied-task-1")?.map(|v| v.value().to_vec()),
                    Some(b"task-data".to_vec()));
     }
@@ -162,7 +162,7 @@ async fn test_snapshot_clears_previous_state() -> BlixardResult<()> {
     {
         let write_txn = database.begin_write()?;
         {
-            let mut vm_table = write_txn.open_table(blixard::storage::VM_STATE_TABLE)?;
+            let mut vm_table = write_txn.open_table(blixard_core::storage::VM_STATE_TABLE)?;
             vm_table.insert("old-vm", b"old-state".as_slice())?;
         }
         write_txn.commit()?;
@@ -189,7 +189,7 @@ async fn test_snapshot_clears_previous_state() -> BlixardResult<()> {
     // Verify old state was cleared and new state exists
     {
         let read_txn = database.begin_read()?;
-        let vm_table = read_txn.open_table(blixard::storage::VM_STATE_TABLE)?;
+        let vm_table = read_txn.open_table(blixard_core::storage::VM_STATE_TABLE)?;
         
         // Old VM should be gone
         assert!(vm_table.get("old-vm")?.is_none(), "Old VM should be removed");
@@ -214,7 +214,7 @@ async fn test_large_snapshot() -> BlixardResult<()> {
     {
         let write_txn = database.begin_write()?;
         {
-            let mut vm_table = write_txn.open_table(blixard::storage::VM_STATE_TABLE)?;
+            let mut vm_table = write_txn.open_table(blixard_core::storage::VM_STATE_TABLE)?;
             for i in 0..100 {
                 let key = format!("vm-{}", i);
                 let value = format!("state-{}", i);
@@ -222,7 +222,7 @@ async fn test_large_snapshot() -> BlixardResult<()> {
             }
         }
         {
-            let mut task_table = write_txn.open_table(blixard::storage::TASK_TABLE)?;
+            let mut task_table = write_txn.open_table(blixard_core::storage::TASK_TABLE)?;
             for i in 0..100 {
                 let key = format!("task-{}", i);
                 let value = format!("task-data-{}", i);
@@ -250,7 +250,7 @@ async fn test_large_snapshot() -> BlixardResult<()> {
     // Verify all data was restored
     {
         let read_txn = new_database.begin_read()?;
-        let vm_table = read_txn.open_table(blixard::storage::VM_STATE_TABLE)?;
+        let vm_table = read_txn.open_table(blixard_core::storage::VM_STATE_TABLE)?;
         
         for i in 0..100 {
             let key = format!("vm-{}", i);
@@ -275,7 +275,7 @@ async fn test_concurrent_snapshot_safety() -> BlixardResult<()> {
     {
         let write_txn = database.begin_write()?;
         {
-            let mut vm_table = write_txn.open_table(blixard::storage::VM_STATE_TABLE)?;
+            let mut vm_table = write_txn.open_table(blixard_core::storage::VM_STATE_TABLE)?;
             vm_table.insert("initial-vm", b"initial-state".as_slice())?;
         }
         write_txn.commit()?;
@@ -291,7 +291,7 @@ async fn test_concurrent_snapshot_safety() -> BlixardResult<()> {
             
             // Verify snapshot is valid
             assert!(!snapshot.vm_states.is_empty(), "Task {} snapshot should have data", i);
-            Ok::<_, blixard::error::BlixardError>(())
+            Ok::<_, blixard_core::error::BlixardError>(())
         });
         handles.push(handle);
     }

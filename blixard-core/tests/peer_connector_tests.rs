@@ -128,7 +128,7 @@ impl ClusterService for MockClusterService {
         }
 
         // Deserialize and store the message
-        let message = match blixard::raft_codec::deserialize_message(&request.into_inner().raft_data) {
+        let message = match blixard_core::raft_codec::deserialize_message(&request.into_inner().raft_data) {
             Ok(msg) => msg,
             Err(e) => {
                 return Ok(Response::new(RaftMessageResponse {

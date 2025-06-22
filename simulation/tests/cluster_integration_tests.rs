@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use blixard::{
+use blixard_core::{
     proto::{
         TaskRequest, HealthCheckRequest, ClusterStatusRequest,
         CreateVmRequest, ListVmsRequest,

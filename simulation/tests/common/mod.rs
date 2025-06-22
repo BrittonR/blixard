@@ -1,7 +1,7 @@
 // Common test utilities and helpers for integration tests
 
 use std::time::Duration;
-use blixard::{
+use blixard_core::{
     error::{BlixardError, Result as BlixardResult},
     types::{NodeConfig, VmConfig}
 };

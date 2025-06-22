@@ -1,4 +1,5 @@
 use blixard_core::raft_codec::*;
+use blixard_core::error::BlixardError;
 use raft::prelude::*;
 use proptest::prelude::*;
 
@@ -73,7 +74,7 @@ mod unit_tests {
         
         if let Err(e) = result {
             match e {
-                blixard::error::BlixardError::Serialization { operation, .. } => {
+                BlixardError::Serialization { operation, .. } => {
                     assert_eq!(operation, "deserialize entry");
                 }
                 _ => panic!("Expected serialization error"),
@@ -256,7 +257,7 @@ mod unit_tests {
             }
             Err(e) => {
                 match e {
-                    blixard::error::BlixardError::Serialization { operation, .. } => {
+                    BlixardError::Serialization { operation, .. } => {
                         assert_eq!(operation, "deserialize raft message");
                     }
                     _ => panic!("Expected serialization error"),

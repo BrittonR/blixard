@@ -1,10 +1,10 @@
 #[allow(dead_code)]
 
 use std::time::Duration;
-use blixard::error::{BlixardError, BlixardResult};
+use blixard_core::error::{BlixardError, BlixardResult};
 
 #[cfg(feature = "test-helpers")]
-use blixard::test_helpers::{TestNode, TestCluster, timing};
+use blixard_core::test_helpers::{TestNode, TestCluster, timing};
 
 /// Helper to create a cluster and wait for convergence
 #[cfg(feature = "test-helpers")]

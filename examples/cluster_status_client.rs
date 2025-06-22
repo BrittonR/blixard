@@ -1,7 +1,7 @@
 //! Simple gRPC client to check cluster status
 
 use tonic::transport::Channel;
-use blixard::proto::{
+use blixard_core::proto::{
     cluster_service_client::ClusterServiceClient,
     ClusterStatusRequest,
 };

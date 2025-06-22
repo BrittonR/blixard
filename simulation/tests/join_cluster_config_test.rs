@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 use tracing::info;
-use blixard::test_helpers::{TestNode, PortAllocator};
-use blixard::proto::{cluster_service_client::ClusterServiceClient, HealthCheckRequest};
+use blixard_core::test_helpers::{TestNode, PortAllocator};
+use blixard_core::proto::{cluster_service_client::ClusterServiceClient, HealthCheckRequest};
 
 // Include common test utilities
 mod common;
@@ -44,7 +44,7 @@ async fn test_join_cluster_configuration_update() {
     
     // Check leader's initial configuration
     {
-        let storage = blixard::storage::RedbRaftStorage { 
+        let storage = blixard_core::storage::RedbRaftStorage { 
             database: leader_node.shared_state.get_database().await.unwrap() 
         };
         let conf_state = storage.load_conf_state().unwrap();
@@ -71,7 +71,7 @@ async fn test_join_cluster_configuration_update() {
         || async {
             // Check if node2's configuration has been updated
             if let Some(db) = node2_shared.get_database().await {
-                let storage = blixard::storage::RedbRaftStorage { database: db };
+                let storage = blixard_core::storage::RedbRaftStorage { database: db };
                 if let Ok(conf_state) = storage.load_conf_state() {
                     // Join is complete when node2 sees both nodes in the configuration
                     conf_state.voters.len() == 2 && 
@@ -90,7 +90,7 @@ async fn test_join_cluster_configuration_update() {
     
     // Check if joining node's configuration was updated
     {
-        let storage = blixard::storage::RedbRaftStorage { 
+        let storage = blixard_core::storage::RedbRaftStorage { 
             database: joining_node.shared_state.get_database().await.unwrap() 
         };
         let conf_state = storage.load_conf_state().unwrap();
@@ -105,7 +105,7 @@ async fn test_join_cluster_configuration_update() {
     
     // Also check leader's configuration was updated
     {
-        let storage = blixard::storage::RedbRaftStorage { 
+        let storage = blixard_core::storage::RedbRaftStorage { 
             database: leader_node.shared_state.get_database().await.unwrap() 
         };
         let conf_state = storage.load_conf_state().unwrap();
