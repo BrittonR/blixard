@@ -51,8 +51,7 @@ tonic-build = { version = "0.5", package = "madsim-tonic-build" }
 
 [features]
 default = []
-
-[workspace]
+test-helpers = []
 
 # Exclude broken examples from build
 [[example]]
