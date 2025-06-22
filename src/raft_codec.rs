@@ -44,11 +44,19 @@ pub fn deserialize_entry(data: &[u8]) -> BlixardResult<Entry> {
     let mut cursor = 0;
     
     // Read index
-    let index = u64::from_le_bytes(data[cursor..cursor+8].try_into().unwrap());
+    let index = u64::from_le_bytes(data[cursor..cursor+8].try_into()
+        .map_err(|_| BlixardError::Serialization {
+            operation: "deserialize entry".to_string(),
+            source: "failed to read index bytes".into(),
+        })?);
     cursor += 8;
     
     // Read term
-    let term = u64::from_le_bytes(data[cursor..cursor+8].try_into().unwrap());
+    let term = u64::from_le_bytes(data[cursor..cursor+8].try_into()
+        .map_err(|_| BlixardError::Serialization {
+            operation: "deserialize entry".to_string(),
+            source: "failed to read term bytes".into(),
+        })?);
     cursor += 8;
     
     // Read entry type
@@ -62,7 +70,11 @@ pub fn deserialize_entry(data: &[u8]) -> BlixardResult<Entry> {
             source: "insufficient data for data length".into(),
         });
     }
-    let data_len = u32::from_le_bytes(data[cursor..cursor+4].try_into().unwrap()) as usize;
+    let data_len = u32::from_le_bytes(data[cursor..cursor+4].try_into()
+        .map_err(|_| BlixardError::Serialization {
+            operation: "deserialize entry".to_string(),
+            source: "failed to read data length bytes".into(),
+        })?) as usize;
     cursor += 4;
     
     // Check if we have enough bytes for data
@@ -83,7 +95,11 @@ pub fn deserialize_entry(data: &[u8]) -> BlixardResult<Entry> {
             source: "insufficient data for context length".into(),
         });
     }
-    let context_len = u32::from_le_bytes(data[cursor..cursor+4].try_into().unwrap()) as usize;
+    let context_len = u32::from_le_bytes(data[cursor..cursor+4].try_into()
+        .map_err(|_| BlixardError::Serialization {
+            operation: "deserialize entry".to_string(),
+            source: "failed to read context length bytes".into(),
+        })?) as usize;
     cursor += 4;
     
     // Check if we have enough bytes for context
@@ -134,9 +150,21 @@ pub fn deserialize_hard_state(data: &[u8]) -> BlixardResult<HardState> {
     }
     
     let mut hs = HardState::default();
-    hs.term = u64::from_le_bytes(data[0..8].try_into().unwrap());
-    hs.vote = u64::from_le_bytes(data[8..16].try_into().unwrap());
-    hs.commit = u64::from_le_bytes(data[16..24].try_into().unwrap());
+    hs.term = u64::from_le_bytes(data[0..8].try_into()
+        .map_err(|_| BlixardError::Serialization {
+            operation: "deserialize hard state".to_string(),
+            source: "failed to read term bytes".into(),
+        })?);
+    hs.vote = u64::from_le_bytes(data[8..16].try_into()
+        .map_err(|_| BlixardError::Serialization {
+            operation: "deserialize hard state".to_string(),
+            source: "failed to read vote bytes".into(),
+        })?);
+    hs.commit = u64::from_le_bytes(data[16..24].try_into()
+        .map_err(|_| BlixardError::Serialization {
+            operation: "deserialize hard state".to_string(),
+            source: "failed to read commit bytes".into(),
+        })?);
     Ok(hs)
 }
 
@@ -192,7 +220,11 @@ pub fn deserialize_conf_state(data: &[u8]) -> BlixardResult<ConfState> {
             source: "insufficient data for voters length".into(),
         });
     }
-    let voters_len = u32::from_le_bytes(data[cursor..cursor+4].try_into().unwrap()) as usize;
+    let voters_len = u32::from_le_bytes(data[cursor..cursor+4].try_into()
+        .map_err(|_| BlixardError::Serialization {
+            operation: "deserialize conf state".to_string(),
+            source: "failed to read voters length bytes".into(),
+        })?) as usize;
     cursor += 4;
     
     for _ in 0..voters_len {
@@ -202,7 +234,11 @@ pub fn deserialize_conf_state(data: &[u8]) -> BlixardResult<ConfState> {
                 source: "insufficient data for voter".into(),
             });
         }
-        cs.voters.push(u64::from_le_bytes(data[cursor..cursor+8].try_into().unwrap()));
+        cs.voters.push(u64::from_le_bytes(data[cursor..cursor+8].try_into()
+            .map_err(|_| BlixardError::Serialization {
+                operation: "deserialize conf state".to_string(),
+                source: "failed to read voter bytes".into(),
+            })?));
         cursor += 8;
     }
     
@@ -213,7 +249,11 @@ pub fn deserialize_conf_state(data: &[u8]) -> BlixardResult<ConfState> {
             source: "insufficient data for learners length".into(),
         });
     }
-    let learners_len = u32::from_le_bytes(data[cursor..cursor+4].try_into().unwrap()) as usize;
+    let learners_len = u32::from_le_bytes(data[cursor..cursor+4].try_into()
+        .map_err(|_| BlixardError::Serialization {
+            operation: "deserialize conf state".to_string(),
+            source: "failed to read learners length bytes".into(),
+        })?) as usize;
     cursor += 4;
     
     for _ in 0..learners_len {
@@ -223,7 +263,11 @@ pub fn deserialize_conf_state(data: &[u8]) -> BlixardResult<ConfState> {
                 source: "insufficient data for learner".into(),
             });
         }
-        cs.learners.push(u64::from_le_bytes(data[cursor..cursor+8].try_into().unwrap()));
+        cs.learners.push(u64::from_le_bytes(data[cursor..cursor+8].try_into()
+            .map_err(|_| BlixardError::Serialization {
+                operation: "deserialize conf state".to_string(),
+                source: "failed to read learner bytes".into(),
+            })?));
         cursor += 8;
     }
     
@@ -234,7 +278,11 @@ pub fn deserialize_conf_state(data: &[u8]) -> BlixardResult<ConfState> {
             source: "insufficient data for voters_outgoing length".into(),
         });
     }
-    let voters_out_len = u32::from_le_bytes(data[cursor..cursor+4].try_into().unwrap()) as usize;
+    let voters_out_len = u32::from_le_bytes(data[cursor..cursor+4].try_into()
+        .map_err(|_| BlixardError::Serialization {
+            operation: "deserialize conf state".to_string(),
+            source: "failed to read voters_outgoing length bytes".into(),
+        })?) as usize;
     cursor += 4;
     
     for _ in 0..voters_out_len {
@@ -244,7 +292,11 @@ pub fn deserialize_conf_state(data: &[u8]) -> BlixardResult<ConfState> {
                 source: "insufficient data for voter_outgoing".into(),
             });
         }
-        cs.voters_outgoing.push(u64::from_le_bytes(data[cursor..cursor+8].try_into().unwrap()));
+        cs.voters_outgoing.push(u64::from_le_bytes(data[cursor..cursor+8].try_into()
+            .map_err(|_| BlixardError::Serialization {
+                operation: "deserialize conf state".to_string(),
+                source: "failed to read voter_outgoing bytes".into(),
+            })?));
         cursor += 8;
     }
     
@@ -255,7 +307,11 @@ pub fn deserialize_conf_state(data: &[u8]) -> BlixardResult<ConfState> {
             source: "insufficient data for learners_next length".into(),
         });
     }
-    let learners_next_len = u32::from_le_bytes(data[cursor..cursor+4].try_into().unwrap()) as usize;
+    let learners_next_len = u32::from_le_bytes(data[cursor..cursor+4].try_into()
+        .map_err(|_| BlixardError::Serialization {
+            operation: "deserialize conf state".to_string(),
+            source: "failed to read learners_next length bytes".into(),
+        })?) as usize;
     cursor += 4;
     
     for _ in 0..learners_next_len {
@@ -265,7 +321,11 @@ pub fn deserialize_conf_state(data: &[u8]) -> BlixardResult<ConfState> {
                 source: "insufficient data for learner_next".into(),
             });
         }
-        cs.learners_next.push(u64::from_le_bytes(data[cursor..cursor+8].try_into().unwrap()));
+        cs.learners_next.push(u64::from_le_bytes(data[cursor..cursor+8].try_into()
+            .map_err(|_| BlixardError::Serialization {
+                operation: "deserialize conf state".to_string(),
+                source: "failed to read learner_next bytes".into(),
+            })?));
         cursor += 8;
     }
     

@@ -74,6 +74,10 @@ enum ClusterCommands {
     },
     /// Leave the current cluster
     Leave {
+        /// Node ID to remove from cluster
+        #[arg(long)]
+        node_id: u64,
+        
         /// Local node address
         #[arg(long, default_value = "127.0.0.1:7001")]
         local_addr: String,
@@ -92,7 +96,7 @@ async fn main() -> BlixardResult<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("blixard=info".parse().unwrap())
+                .add_directive("blixard=info".parse().expect("valid log directive"))
         )
         .init();
 
@@ -233,7 +237,7 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
                 }
             }
         }
-        ClusterCommands::Leave { local_addr } => {
+        ClusterCommands::Leave { node_id, local_addr } => {
             // Connect to the local node
             let mut client = ClusterServiceClient::connect(format!("http://{}", local_addr))
                 .await
@@ -241,9 +245,9 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
                     message: format!("Failed to connect to local node: {}", e)
                 })?;
             
-            // Send leave request (need to get node ID from somewhere, using 0 for now)
+            // Send leave request with the provided node ID
             let request = tonic::Request::new(LeaveRequest {
-                node_id: 0, // TODO: Get actual node ID
+                node_id,
             });
             
             match client.leave_cluster(request).await {

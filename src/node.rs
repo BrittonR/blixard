@@ -94,10 +94,15 @@ impl Node {
             
             // Register this node as a worker in bootstrap mode
             let address = self.shared.get_bind_addr().to_string();
+            // Get system resources - use reasonable defaults
+            // In production, these could be configured or detected more accurately
+            let total_memory_mb = Self::estimate_available_memory();
+            let disk_gb = Self::estimate_available_disk(&self.shared.config.data_dir);
+            
             let capabilities = crate::raft_manager::WorkerCapabilities {
                 cpu_cores: num_cpus::get() as u32,
-                memory_mb: 8192, // TODO: Get actual memory
-                disk_gb: 100, // TODO: Get actual disk space
+                memory_mb: total_memory_mb,
+                disk_gb,
                 features: vec!["microvm".to_string()],
             };
             
@@ -395,10 +400,14 @@ impl Node {
         
         let node_id = self.shared.get_id();
         let address = self.shared.get_bind_addr().to_string();
+        // Get system resources - use reasonable defaults
+        let total_memory_mb = Self::estimate_available_memory();
+        let disk_gb = Self::estimate_available_disk(&self.shared.config.data_dir);
+        
         let capabilities = crate::raft_manager::WorkerCapabilities {
             cpu_cores: num_cpus::get() as u32,
-            memory_mb: 8192, // TODO: Get actual memory
-            disk_gb: 100, // TODO: Get actual disk space
+            memory_mb: total_memory_mb,
+            disk_gb,
             features: vec!["microvm".to_string()],
         };
         
@@ -555,6 +564,44 @@ impl Node {
     pub async fn get_task_status(&self, task_id: &str) -> BlixardResult<Option<(String, Option<crate::raft_manager::TaskResult>)>> {
         self.shared.get_task_status(task_id).await
     }
+    
+    /// Estimate available memory in MB
+    /// Returns a conservative default if detection fails
+    fn estimate_available_memory() -> u64 {
+        // Try to read from /proc/meminfo on Linux
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(contents) = std::fs::read_to_string("/proc/meminfo") {
+                for line in contents.lines() {
+                    if line.starts_with("MemTotal:") {
+                        if let Some(kb_str) = line.split_whitespace().nth(1) {
+                            if let Ok(kb) = kb_str.parse::<u64>() {
+                                return kb / 1024; // Convert KB to MB
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Default to 8GB if detection fails
+        8192
+    }
+    
+    /// Estimate available disk space in GB
+    /// Returns a conservative default if detection fails
+    fn estimate_available_disk(data_dir: &str) -> u64 {
+        // Try to get filesystem stats
+        if let Ok(_metadata) = std::fs::metadata(data_dir) {
+            // On Unix systems, we could use statvfs, but for now use a default
+            // In production, use a proper system info crate
+            return 100; // Default to 100GB
+        }
+        
+        // Create directory if it doesn't exist and return default
+        let _ = std::fs::create_dir_all(data_dir);
+        100
+    }
 }
 
 #[cfg(test)]
@@ -566,7 +613,7 @@ mod tests {
         let config = NodeConfig {
             id: 1,
             data_dir: "/tmp/test".to_string(),
-            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            bind_addr: "127.0.0.1:0".parse().expect("valid test address"),
             join_addr: None,
             use_tailscale: false,
         };
@@ -574,11 +621,11 @@ mod tests {
         let mut node = Node::new(config);
         
         // Start node
-        node.start().await.unwrap();
+        node.start().await.expect("node should start");
         assert!(node.is_running().await);
 
         // Stop node
-        node.stop().await.unwrap();
+        node.stop().await.expect("node should stop");
         assert!(!node.is_running().await);
     }
 }

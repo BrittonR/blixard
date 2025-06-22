@@ -182,7 +182,12 @@ impl RaftStateMachine {
         {
             // Store task spec
             let mut task_table = txn.open_table(TASK_TABLE)?;
-            task_table.insert(task_id, bincode::serialize(task).unwrap().as_slice())?;
+            let task_data = bincode::serialize(task)
+                .map_err(|e| BlixardError::Serialization {
+                    operation: "serialize task spec".to_string(),
+                    source: Box::new(e),
+                })?;
+            task_table.insert(task_id, task_data.as_slice())?;
             
             // Store assignment
             let mut assignment_table = txn.open_table(TASK_ASSIGNMENT_TABLE)?;
@@ -199,7 +204,12 @@ impl RaftStateMachine {
         {
             // Store result
             let mut result_table = txn.open_table(TASK_RESULT_TABLE)?;
-            result_table.insert(task_id, bincode::serialize(result).unwrap().as_slice())?;
+            let result_data = bincode::serialize(result)
+                .map_err(|e| BlixardError::Serialization {
+                    operation: "serialize task result".to_string(),
+                    source: Box::new(e),
+                })?;
+            result_table.insert(task_id, result_data.as_slice())?;
             
             // Remove assignment
             let mut assignment_table = txn.open_table(TASK_ASSIGNMENT_TABLE)?;
@@ -213,7 +223,11 @@ impl RaftStateMachine {
     fn apply_register_worker(&self, txn: WriteTransaction, node_id: u64, address: &str, capabilities: &WorkerCapabilities) -> BlixardResult<()> {
         use crate::storage::{WORKER_TABLE, WORKER_STATUS_TABLE};
         
-        let worker_data = bincode::serialize(&(address, capabilities)).unwrap();
+        let worker_data = bincode::serialize(&(address, capabilities))
+            .map_err(|e| BlixardError::Serialization {
+                operation: "serialize worker info".to_string(),
+                source: Box::new(e),
+            })?;
         
         {
             // Store worker info
@@ -258,16 +272,29 @@ impl RaftStateMachine {
                         updated_at: Utc::now(),
                     };
                     
-                    table.insert(config.name.as_str(), bincode::serialize(&vm_state).unwrap().as_slice())?;
+                    let vm_data = bincode::serialize(&vm_state)
+                        .map_err(|e| BlixardError::Serialization {
+                            operation: "serialize vm state".to_string(),
+                            source: Box::new(e),
+                        })?;
+                    table.insert(config.name.as_str(), vm_data.as_slice())?;
                 }
                 VmCommand::UpdateStatus { name, status } => {
                     let serialized = {
                         let vm_state_data = table.get(name.as_str())?;
                         if let Some(data) = vm_state_data {
-                            let mut vm_state: crate::types::VmState = bincode::deserialize(data.value()).unwrap();
+                            let mut vm_state: crate::types::VmState = bincode::deserialize(data.value())
+                                .map_err(|e| BlixardError::Serialization {
+                                    operation: "deserialize vm state".to_string(),
+                                    source: Box::new(e),
+                                })?;
                             vm_state.status = *status;
                             vm_state.updated_at = Utc::now();
-                            Some(bincode::serialize(&vm_state).unwrap())
+                            Some(bincode::serialize(&vm_state)
+                                .map_err(|e| BlixardError::Serialization {
+                                    operation: "serialize vm state".to_string(),
+                                    source: Box::new(e),
+                                })?)
                         } else {
                             None
                         }
@@ -282,10 +309,18 @@ impl RaftStateMachine {
                     let serialized = {
                         let vm_state_data = table.get(name.as_str())?;
                         if let Some(data) = vm_state_data {
-                            let mut vm_state: crate::types::VmState = bincode::deserialize(data.value()).unwrap();
+                            let mut vm_state: crate::types::VmState = bincode::deserialize(data.value())
+                                .map_err(|e| BlixardError::Serialization {
+                                    operation: "deserialize vm state".to_string(),
+                                    source: Box::new(e),
+                                })?;
                             vm_state.status = VmStatus::Starting;
                             vm_state.updated_at = Utc::now();
-                            Some(bincode::serialize(&vm_state).unwrap())
+                            Some(bincode::serialize(&vm_state)
+                                .map_err(|e| BlixardError::Serialization {
+                                    operation: "serialize vm state".to_string(),
+                                    source: Box::new(e),
+                                })?)
                         } else {
                             None
                         }
@@ -300,10 +335,18 @@ impl RaftStateMachine {
                     let serialized = {
                         let vm_state_data = table.get(name.as_str())?;
                         if let Some(data) = vm_state_data {
-                            let mut vm_state: crate::types::VmState = bincode::deserialize(data.value()).unwrap();
+                            let mut vm_state: crate::types::VmState = bincode::deserialize(data.value())
+                                .map_err(|e| BlixardError::Serialization {
+                                    operation: "deserialize vm state".to_string(),
+                                    source: Box::new(e),
+                                })?;
                             vm_state.status = VmStatus::Stopping;
                             vm_state.updated_at = Utc::now();
-                            Some(bincode::serialize(&vm_state).unwrap())
+                            Some(bincode::serialize(&vm_state)
+                                .map_err(|e| BlixardError::Serialization {
+                                    operation: "serialize vm state".to_string(),
+                                    source: Box::new(e),
+                                })?)
                         } else {
                             None
                         }
@@ -377,11 +420,19 @@ impl RaftStateMachine {
             let serialized = {
                 let vm_state_data = table.get(vm_name)?;
                 if let Some(data) = vm_state_data {
-                    let mut vm_state: crate::types::VmState = bincode::deserialize(data.value()).unwrap();
+                    let mut vm_state: crate::types::VmState = bincode::deserialize(data.value())
+                        .map_err(|e| BlixardError::Serialization {
+                            operation: "deserialize vm state".to_string(),
+                            source: Box::new(e),
+                        })?;
                     vm_state.status = status;
                     vm_state.node_id = node_id;
                     vm_state.updated_at = Utc::now();
-                    Some(bincode::serialize(&vm_state).unwrap())
+                    Some(bincode::serialize(&vm_state)
+                        .map_err(|e| BlixardError::Serialization {
+                            operation: "serialize vm state".to_string(),
+                            source: Box::new(e),
+                        })?)
                 } else {
                     None
                 }
@@ -1106,7 +1157,11 @@ impl RaftManager {
         
         // For add node, include the address in context
         let context = if matches!(conf_change.change_type, ConfChangeType::AddNode) {
-            bincode::serialize(&conf_change.address).unwrap()
+            bincode::serialize(&conf_change.address)
+                .map_err(|e| BlixardError::Serialization {
+                    operation: "serialize node address".to_string(),
+                    source: Box::new(e),
+                })?
         } else {
             vec![]
         };
@@ -2278,7 +2333,11 @@ pub async fn schedule_task(
     let mut worker_count = 0;
     for entry in worker_table.iter()? {
         let (node_id_bytes, worker_data) = entry?;
-        let node_id = u64::from_le_bytes(node_id_bytes.value().try_into().unwrap());
+        let node_id = u64::from_le_bytes(node_id_bytes.value().try_into()
+            .map_err(|_| BlixardError::Storage {
+                operation: "read node id".to_string(),
+                source: "invalid node id bytes length".into(),
+            })?);
         worker_count += 1;
         
         tracing::info!("Found worker {}", node_id);
@@ -2297,7 +2356,11 @@ pub async fn schedule_task(
         
         // Deserialize worker capabilities
         let (_address, capabilities): (String, WorkerCapabilities) = 
-            bincode::deserialize(worker_data.value()).unwrap();
+            bincode::deserialize(worker_data.value())
+                .map_err(|e| BlixardError::Serialization {
+                    operation: "deserialize worker capabilities".to_string(),
+                    source: Box::new(e),
+                })?;
         
         tracing::info!("Worker {} capabilities: {:?}", node_id, capabilities);
         
@@ -2311,7 +2374,7 @@ pub async fn schedule_task(
             let score = (capabilities.cpu_cores - task.resources.cpu_cores) as i32 +
                        ((capabilities.memory_mb - task.resources.memory_mb) / 1024) as i32;
             
-            if best_worker.is_none() || score < best_worker.unwrap().1 {
+            if best_worker.map_or(true, |(_id, best_score)| score < best_score) {
                 best_worker = Some((node_id, score));
             }
         }
