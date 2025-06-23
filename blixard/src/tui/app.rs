@@ -306,6 +306,19 @@ impl App {
                     }
                 }
             }
+            KeyCode::Char('D') => {
+                // Delete selected VM (requires VM to be stopped)
+                if let Some(vm_index) = self.selected_vm {
+                    if let Some(vm) = self.vms.get(vm_index) {
+                        if matches!(vm.status, blixard_core::types::VmStatus::Stopped) {
+                            let vm_name = vm.name.clone();
+                            self.delete_vm(&vm_name).await?;
+                        } else {
+                            self.error_message = Some(format!("VM '{}' must be stopped before deletion", vm.name));
+                        }
+                    }
+                }
+            }
             _ => {}
         }
 
@@ -351,6 +364,20 @@ impl App {
                             self.mode = AppMode::SshSession;
                         } else {
                             self.error_message = Some(format!("VM '{}' must be running to SSH", vm.name));
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('D') => {
+                // Delete selected VM (requires VM to be stopped)
+                if let Some(vm_index) = self.selected_vm {
+                    if let Some(vm) = self.vms.get(vm_index) {
+                        if matches!(vm.status, blixard_core::types::VmStatus::Stopped) {
+                            let vm_name = vm.name.clone();
+                            self.delete_vm(&vm_name).await?;
+                            self.mode = AppMode::VmList; // Return to list after deletion
+                        } else {
+                            self.error_message = Some(format!("VM '{}' must be stopped before deletion", vm.name));
                         }
                     }
                 }
@@ -674,6 +701,23 @@ impl App {
             }
             Err(e) => {
                 self.error_message = Some(format!("Failed to stop VM '{}': {}", name, e));
+                self.status_message = None;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn delete_vm(&mut self, name: &str) -> BlixardResult<()> {
+        match self.vm_client.delete_vm(name).await {
+            Ok(_) => {
+                self.status_message = Some(format!("✓ Deleted VM '{}'", name));
+                self.error_message = None;
+                // Refresh to update list (VM should be removed)
+                self.refresh_vm_list().await?;
+            }
+            Err(e) => {
+                self.error_message = Some(format!("Failed to delete VM '{}': {}", name, e));
                 self.status_message = None;
             }
         }

@@ -11,7 +11,7 @@ use crate::{
     proto::{
         cluster_service_server::{ClusterService, ClusterServiceServer},
         blixard_service_server::{BlixardService, BlixardServiceServer},
-        CreateVmRequest, CreateVmResponse, GetVmStatusRequest, GetVmStatusResponse,
+        CreateVmRequest, CreateVmResponse, DeleteVmRequest, DeleteVmResponse, GetVmStatusRequest, GetVmStatusResponse,
         HealthCheckRequest, HealthCheckResponse, JoinRequest, JoinResponse, LeaveRequest,
         LeaveResponse, ListVmsRequest, ListVmsResponse, NodeInfo, NodeState, StartVmRequest,
         StartVmResponse, StopVmRequest, StopVmResponse, VmInfo, VmState, ClusterStatusRequest,
@@ -545,6 +545,28 @@ impl ClusterService for BlixardGrpcService {
             Err(e) => Ok(Response::new(StopVmResponse {
                 success: false,
                 message: format!("Failed to stop VM: {}", e),
+            })),
+        }
+    }
+
+    async fn delete_vm(
+        &self,
+        request: Request<DeleteVmRequest>,
+    ) -> Result<Response<DeleteVmResponse>, Status> {
+        let req = request.into_inner();
+
+        let command = VmCommand::Delete {
+            name: req.name.clone(),
+        };
+
+        match self.node.send_vm_operation_through_raft(command).await {
+            Ok(_) => Ok(Response::new(DeleteVmResponse {
+                success: true,
+                message: format!("VM '{}' delete command sent", req.name),
+            })),
+            Err(e) => Ok(Response::new(DeleteVmResponse {
+                success: false,
+                message: format!("Failed to delete VM: {}", e),
             })),
         }
     }

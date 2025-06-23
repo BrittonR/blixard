@@ -20,6 +20,7 @@ service ClusterService {
   rpc CreateVm(CreateVmRequest) returns (CreateVmResponse);
   rpc StartVm(StartVmRequest) returns (StartVmResponse);
   rpc StopVm(StopVmRequest) returns (StopVmResponse);
+  rpc DeleteVm(DeleteVmRequest) returns (DeleteVmResponse);
   rpc ListVms(ListVmsRequest) returns (ListVmsResponse);
   rpc GetVmStatus(GetVmStatusRequest) returns (GetVmStatusResponse);
   
@@ -107,6 +108,15 @@ message StopVmRequest {
 }
 
 message StopVmResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message DeleteVmRequest {
+  string name = 1;
+}
+
+message DeleteVmResponse {
   bool success = 1;
   string message = 2;
 }

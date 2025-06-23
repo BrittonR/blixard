@@ -3,7 +3,7 @@ use super::app::{VmInfo, ClusterInfo};
 use blixard_core::{
     proto::{
         cluster_service_client::ClusterServiceClient,
-        CreateVmRequest, StartVmRequest, StopVmRequest, GetVmStatusRequest, ListVmsRequest,
+        CreateVmRequest, StartVmRequest, StopVmRequest, DeleteVmRequest, GetVmStatusRequest, ListVmsRequest,
         ClusterStatusRequest,
     },
     types::VmStatus,
@@ -128,6 +128,25 @@ impl VmClient {
         Ok(())
     }
 
+    pub async fn delete_vm(&mut self, name: &str) -> BlixardResult<()> {
+        let request = tonic::Request::new(DeleteVmRequest {
+            name: name.to_string(),
+        });
+
+        let response = self.client.delete_vm(request).await
+            .map_err(|e| crate::BlixardError::Internal {
+                message: format!("Failed to delete VM: {}", e),
+            })?;
+
+        let resp = response.into_inner();
+        if !resp.success {
+            return Err(crate::BlixardError::Internal {
+                message: format!("VM deletion failed: {}", resp.message),
+            });
+        }
+
+        Ok(())
+    }
 
     pub async fn get_vm_status(&mut self, name: &str) -> BlixardResult<Option<VmInfo>> {
         let request = tonic::Request::new(GetVmStatusRequest {
