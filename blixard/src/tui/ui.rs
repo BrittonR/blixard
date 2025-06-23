@@ -3,7 +3,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, List, ListItem, Paragraph, Wrap,
+        Block, Borders, Paragraph, Wrap, Table, Row, Cell,
     },
     Frame,
 };
@@ -15,7 +15,8 @@ pub fn render(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5),  // Header (expanded for cluster info)
+            Constraint::Length(3),  // Header (title and status)
+            Constraint::Length(4),  // Raft status panel (always visible)
             Constraint::Min(8),     // Main content
             Constraint::Length(8),  // Live log panel
             Constraint::Length(3),  // Footer
@@ -23,39 +24,31 @@ pub fn render(f: &mut Frame, app: &App) {
         .split(f.size());
 
     render_header(f, chunks[0], app);
+    render_raft_panel(f, chunks[1], app);
     
     match app.mode {
-        AppMode::VmList => render_vm_list(f, chunks[1], app),
-        AppMode::VmDetails => render_vm_details(f, chunks[1], app),
-        AppMode::VmCreate => render_vm_create(f, chunks[1], app),
-        AppMode::VmLogs => render_vm_logs(f, chunks[1], app),
-        AppMode::Help => render_help(f, chunks[1]),
-        AppMode::SshSession => render_ssh_session(f, chunks[1], app),
-        AppMode::RaftStatus => render_raft_status(f, chunks[1], app),
+        AppMode::VmList => render_vm_list(f, chunks[2], app),
+        AppMode::VmDetails => render_vm_details(f, chunks[2], app),
+        AppMode::VmCreate => render_vm_create(f, chunks[2], app),
+        AppMode::VmLogs => render_vm_logs(f, chunks[2], app),
+        AppMode::Help => render_help(f, chunks[2]),
+        AppMode::SshSession => render_ssh_session(f, chunks[2], app),
+        AppMode::RaftStatus => render_raft_status(f, chunks[2], app),
     }
     
-    render_live_log_panel(f, chunks[2], app);
-    render_footer(f, chunks[3], app);
+    render_live_log_panel(f, chunks[3], app);
+    render_footer(f, chunks[4], app);
 }
 
 fn render_header(f: &mut Frame, area: Rect, app: &App) {
-    // Split header vertically for two rows
-    let header_rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // Title and main status row
-            Constraint::Length(2), // Cluster status row
-        ])
-        .split(area);
-
-    // Top row: Split horizontally for title and status
-    let top_chunks = Layout::default()
+    // Split header horizontally for title and status
+    let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Min(25),     // Title area
             Constraint::Length(50),  // Status/error messages
         ])
-        .split(header_rows[0]);
+        .split(area);
 
     // Main title
     let title = Paragraph::new("🚀 Blixard VM Manager")
@@ -63,21 +56,21 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Blue)));
     
-    f.render_widget(title, top_chunks[0]);
+    f.render_widget(title, chunks[0]);
 
-    // Status/error messages in top right
+    // Status/error messages
     if let Some(msg) = &app.status_message {
         let status = Paragraph::new(format!("✓ {}", msg))
             .style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
             .alignment(Alignment::Center)
             .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Green)));
-        f.render_widget(status, top_chunks[1]);
+        f.render_widget(status, chunks[1]);
     } else if let Some(msg) = &app.error_message {
         let error = Paragraph::new(format!("✗ {}", msg))
             .style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
             .alignment(Alignment::Center)
             .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Red)));
-        f.render_widget(error, top_chunks[1]);
+        f.render_widget(error, chunks[1]);
     } else {
         // Show live log following status when no other messages
         let log_status = match &app.live_log_vm {
@@ -88,21 +81,24 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
             .style(Style::default().fg(Color::Gray))
             .alignment(Alignment::Center)
             .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Gray)));
-        f.render_widget(status, top_chunks[1]);
+        f.render_widget(status, chunks[1]);
     }
+}
 
-    // Bottom row: Split horizontally for cluster info
-    let bottom_chunks = Layout::default()
+fn render_raft_panel(f: &mut Frame, area: Rect, app: &App) {
+    // Split into columns for compact display
+    let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(33), // Node info
-            Constraint::Percentage(33), // Cluster info 
-            Constraint::Percentage(34), // Raft status
+            Constraint::Percentage(25), // Current node info
+            Constraint::Percentage(25), // Cluster info 
+            Constraint::Percentage(25), // Leader/Term info
+            Constraint::Percentage(25), // Online nodes
         ])
-        .split(header_rows[1]);
+        .split(area);
 
-    // Node information
-    let node_info = format!("Node {}: {}", 
+    // Current node information
+    let node_info = format!("Node {}\n{}", 
         app.cluster_info.current_node_id, 
         app.cluster_info.current_node_state
     );
@@ -113,35 +109,56 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         _ => Color::Gray,
     };
     let node_widget = Paragraph::new(node_info)
-        .style(Style::default().fg(node_color))
+        .style(Style::default().fg(node_color).add_modifier(Modifier::BOLD))
         .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(node_color)));
-    f.render_widget(node_widget, bottom_chunks[0]);
+        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(node_color)))
+        .wrap(Wrap { trim: true });
+    f.render_widget(node_widget, chunks[0]);
 
     // Cluster information  
-    let cluster_info = format!("Cluster: {} nodes", app.cluster_info.node_count);
+    let cluster_info = format!("Cluster\n{} nodes", app.cluster_info.node_count);
     let cluster_color = if app.cluster_info.node_count > 0 { Color::Green } else { Color::Red };
     let cluster_widget = Paragraph::new(cluster_info)
-        .style(Style::default().fg(cluster_color))
+        .style(Style::default().fg(cluster_color).add_modifier(Modifier::BOLD))
         .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(cluster_color)));
-    f.render_widget(cluster_widget, bottom_chunks[1]);
+        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(cluster_color)))
+        .wrap(Wrap { trim: true });
+    f.render_widget(cluster_widget, chunks[1]);
 
-    // Raft status
-    let raft_info = if app.cluster_info.leader_id > 0 {
-        format!("Leader: {} | Term: {}", 
+    // Leader and Term info
+    let leader_info = if app.cluster_info.leader_id > 0 {
+        format!("Leader: {}\nTerm: {}", 
             app.cluster_info.leader_id,
             app.cluster_info.term
         )
     } else {
-        format!("No Leader | Term: {} | Press 'R' for details", app.cluster_info.term)
+        format!("No Leader\nTerm: {}", app.cluster_info.term)
     };
-    let raft_color = if app.cluster_info.leader_id > 0 { Color::Green } else { Color::Red };
-    let raft_widget = Paragraph::new(raft_info)
-        .style(Style::default().fg(raft_color))
+    let leader_color = if app.cluster_info.leader_id > 0 { Color::Green } else { Color::Red };
+    let leader_widget = Paragraph::new(leader_info)
+        .style(Style::default().fg(leader_color).add_modifier(Modifier::BOLD))
         .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(raft_color)));
-    f.render_widget(raft_widget, bottom_chunks[2]);
+        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(leader_color)))
+        .wrap(Wrap { trim: true });
+    f.render_widget(leader_widget, chunks[2]);
+
+    // Online nodes list
+    let nodes_summary = if app.cluster_info.nodes.is_empty() {
+        "Nodes\nLoading...".to_string()
+    } else {
+        let leader_count = app.cluster_info.nodes.iter().filter(|n| n.state == "Leader").count();
+        let follower_count = app.cluster_info.nodes.iter().filter(|n| n.state == "Follower").count();
+        let candidate_count = app.cluster_info.nodes.iter().filter(|n| n.state == "Candidate").count();
+        
+        format!("Nodes (R=details)\nL:{} F:{} C:{}", leader_count, follower_count, candidate_count)
+    };
+    let nodes_color = if app.cluster_info.nodes.is_empty() { Color::Gray } else { Color::White };
+    let nodes_widget = Paragraph::new(nodes_summary)
+        .style(Style::default().fg(nodes_color))
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(nodes_color)))
+        .wrap(Wrap { trim: true });
+    f.render_widget(nodes_widget, chunks[3]);
 }
 
 fn render_footer(f: &mut Frame, area: Rect, app: &App) {
@@ -230,15 +247,21 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
 
 
 fn render_vm_list(f: &mut Frame, area: Rect, app: &App) {
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(100)])
-        .split(area);
+    // Define table headers
+    let headers = Row::new(vec![
+        Cell::from("Status").style(Style::default().add_modifier(Modifier::BOLD)),
+        Cell::from("VM Name").style(Style::default().add_modifier(Modifier::BOLD)),
+        Cell::from("vCPU").style(Style::default().add_modifier(Modifier::BOLD)),
+        Cell::from("Memory").style(Style::default().add_modifier(Modifier::BOLD)),
+        Cell::from("Node").style(Style::default().add_modifier(Modifier::BOLD)),
+    ]);
 
-    let vm_items: Vec<ListItem> = app
+    // Create table rows from VM data
+    let rows: Vec<Row> = app
         .vms
         .iter()
-        .map(|vm| {
+        .enumerate()
+        .map(|(index, vm)| {
             let status_color = match vm.status {
                 VmStatus::Creating => Color::Yellow,
                 VmStatus::Running => Color::Green,
@@ -249,46 +272,53 @@ fn render_vm_list(f: &mut Frame, area: Rect, app: &App) {
             };
 
             let status_indicator = match vm.status {
-                VmStatus::Creating => "◔",
-                VmStatus::Running => "●",
-                VmStatus::Starting => "◐",
-                VmStatus::Stopping => "◑",
-                VmStatus::Stopped => "○",
-                VmStatus::Failed => "✗",
+                VmStatus::Creating => "◔ Creating",
+                VmStatus::Running => "● Running",
+                VmStatus::Starting => "◐ Starting",
+                VmStatus::Stopping => "◑ Stopping",
+                VmStatus::Stopped => "○ Stopped",
+                VmStatus::Failed => "✗ Failed",
             };
 
-            let content = Line::from(vec![
-                Span::styled(status_indicator, Style::default().fg(status_color)),
-                Span::raw(" "),
-                Span::styled(&vm.name, Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(format!(" ({}vcpu, {}MB)", vm.vcpus, vm.memory)),
-                Span::raw(" on node "),
-                Span::styled(vm.node_id.to_string(), Style::default().fg(Color::Cyan)),
-            ]);
+            // Determine if this row should be highlighted
+            let is_selected = app.selected_vm.map_or(false, |selected| selected == index);
+            let row_style = if is_selected {
+                Style::default().bg(Color::Blue).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
 
-            ListItem::new(content)
+            Row::new(vec![
+                Cell::from(status_indicator).style(Style::default().fg(status_color)),
+                Cell::from(vm.name.clone()).style(Style::default().add_modifier(Modifier::BOLD)),
+                Cell::from(vm.vcpus.to_string()).style(Style::default().fg(Color::Cyan)),
+                Cell::from(format!("{}MB", vm.memory)).style(Style::default().fg(Color::Cyan)),
+                Cell::from(vm.node_id.to_string()).style(Style::default().fg(Color::Yellow)),
+            ]).style(row_style)
         })
         .collect();
 
-    let vm_list = List::new(vm_items)
+    // Create the table widget
+    let title = format!("VMs ({})", app.vms.len());
+    let table = Table::new(
+        rows,
+        &[
+            Constraint::Length(15), // Status column
+            Constraint::Min(20),    // VM Name column (flexible)
+            Constraint::Length(8),  // vCPU column
+            Constraint::Length(10), // Memory column
+            Constraint::Length(8),  // Node column
+        ]
+    )
+        .header(headers)
         .block(
             Block::default()
-                .title("VMs")
+                .title(title)
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
-        )
-        .highlight_style(Style::default().bg(Color::Blue).add_modifier(Modifier::BOLD))
-        .highlight_symbol("▶ ");
+                .border_style(Style::default().fg(Color::Blue))
+        );
 
-    f.render_stateful_widget(vm_list, chunks[0], &mut app.vm_list_state.clone());
-
-    // Show VM count in the title
-    let title = format!("VMs ({})", app.vms.len());
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Blue));
-    f.render_widget(block, chunks[0]);
+    f.render_widget(table, area);
 }
 
 fn render_vm_details(f: &mut Frame, area: Rect, app: &App) {
