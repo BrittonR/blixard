@@ -1,12 +1,69 @@
+# Rust build artifacts
 /target
 /Cargo.lock
+target/
+Cargo.lock
+
+# Database files
 *.db
+*.db-shm
+*.db-wal
+
+# Temporary files
 /tmp
+tmp/
 .DS_Store
 .direnv/
 
-# Test logs
+# Test logs and outputs
 *.log
+test_*.txt
+*_output.txt
 
 # Local madsim repository copy
-madsim-repo/rootdisk.img
+madsim-repo/
+
+# Data directories (node data, VM data)
+/data/
+data/
+vm-data/
+vm-configs/vms/*/result
+vm-configs/vms/*/rootdisk.img
+vm-configs/vms/*/flake.lock
+vm-configs/vms/*/*.sock
+vm-configs/vms/*/vm-data/
+vm-configs/vms/*/vm-runtime/
+
+# VM disk images
+*.img
+rootdisk.img
+
+# Unix socket files
+*.sock
+
+# Nix build results
+result
+result-*
+
+# Generated flakes directory
+generated-flakes/
+
+# PropTest regression files
+*.proptest-regressions
+
+# Test data
+test-data/
+
+# Shell scripts (if they're generated or temporary)
+interactive-vm.sh
+start-*.sh
+vm-console.sh
+
+# Example VM directories (if generated)
+example-microvm.nix
+example-ssh-vm.nix
+console-vm.nix
+
+# Simulation build artifacts
+simulation/target/
+simulation/Cargo.lock
