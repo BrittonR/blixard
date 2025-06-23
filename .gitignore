@@ -9,4 +9,4 @@
 *.log
 
 # Local madsim repository copy
-madsim-repo/
+madsim-repo/rootdisk.img
