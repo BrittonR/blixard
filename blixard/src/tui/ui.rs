@@ -31,6 +31,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::VmLogs => render_vm_logs(f, chunks[1], app),
         AppMode::Help => render_help(f, chunks[1]),
         AppMode::SshSession => render_ssh_session(f, chunks[1], app),
+        AppMode::RaftStatus => render_raft_status(f, chunks[1], app),
     }
     
     render_live_log_panel(f, chunks[2], app);
@@ -127,10 +128,14 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(cluster_widget, bottom_chunks[1]);
 
     // Raft status
-    let raft_info = format!("Leader: {} Term: {}", 
-        app.cluster_info.leader_id,
-        app.cluster_info.term
-    );
+    let raft_info = if app.cluster_info.leader_id > 0 {
+        format!("Leader: {} | Term: {}", 
+            app.cluster_info.leader_id,
+            app.cluster_info.term
+        )
+    } else {
+        format!("No Leader | Term: {} | Press 'R' for details", app.cluster_info.term)
+    };
     let raft_color = if app.cluster_info.leader_id > 0 { Color::Green } else { Color::Red };
     let raft_widget = Paragraph::new(raft_info)
         .style(Style::default().fg(raft_color))
@@ -153,6 +158,7 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
                 ("f", "Follow VM"),
                 ("F", "Follow All"),
                 ("r", "Refresh"),
+                ("R", "Raft Status"),
                 ("?", "Help"),
                 ("q", "Quit"),
             ]
@@ -192,6 +198,12 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
                 ("Ctrl+C", "Interrupt"),
                 ("Ctrl+D", "EOF"),
                 ("Esc", "Exit"),
+            ]
+        }
+        AppMode::RaftStatus => {
+            vec![
+                ("r", "Refresh"),
+                ("Any Key", "Back"),
             ]
         }
     };
@@ -659,6 +671,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         Line::from("  f              - Follow selected VM in live panel"),
         Line::from("  F              - Follow all VMs in live panel"),
         Line::from("  r              - Refresh VM list"),
+        Line::from("  R              - View detailed Raft status"),
         Line::from(""),
         Line::from("VM Details View:").style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         Line::from("  s              - Start VM"),
@@ -687,6 +700,12 @@ fn render_help(f: &mut Frame, area: Rect) {
         Line::from("  Cluster size and Raft term displayed"),
         Line::from("  Auto-refreshes every 7.5 seconds"),
         Line::from(""),
+        Line::from("Raft Status View:").style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Line::from("  Shows detailed Raft consensus state"),
+        Line::from("  Displays all cluster nodes and their roles"),
+        Line::from("  Real-time term, leader, and node status"),
+        Line::from("  Press 'r' to refresh, any key to exit"),
+        Line::from(""),
         Line::from("SSH Connection:").style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         Line::from("  Press 'c' on running VM to open embedded SSH session"),
         Line::from("  Uses SSH key authentication for seamless access"),
@@ -707,6 +726,123 @@ fn render_help(f: &mut Frame, area: Rect) {
         .wrap(Wrap { trim: true });
 
     f.render_widget(help, area);
+}
+
+fn render_raft_status(f: &mut Frame, area: Rect, app: &App) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(6),  // Raft Overview
+            Constraint::Min(8),     // Node Details
+        ])
+        .split(area);
+
+    // Raft Overview
+    let raft_overview = vec![
+        Line::from(vec![
+            Span::styled("🗳️ Raft Cluster Status", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("Current Term: "),
+            Span::styled(app.cluster_info.term.to_string(), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::raw(" | Leader: "),
+            Span::styled(
+                if app.cluster_info.leader_id > 0 { 
+                    format!("Node {}", app.cluster_info.leader_id) 
+                } else { 
+                    "No Leader".to_string() 
+                },
+                Style::default().fg(if app.cluster_info.leader_id > 0 { Color::Green } else { Color::Red }).add_modifier(Modifier::BOLD)
+            ),
+        ]),
+        Line::from(vec![
+            Span::raw("Cluster Size: "),
+            Span::styled(
+                format!("{} nodes", app.cluster_info.node_count),
+                Style::default().fg(if app.cluster_info.node_count > 0 { Color::Green } else { Color::Red }).add_modifier(Modifier::BOLD)
+            ),
+            Span::raw(" | Current Node: "),
+            Span::styled(
+                format!("Node {} ({})", app.cluster_info.current_node_id, app.cluster_info.current_node_state),
+                Style::default().fg(match app.cluster_info.current_node_state.as_str() {
+                    "Leader" => Color::Green,
+                    "Follower" => Color::Blue,
+                    "Candidate" => Color::Yellow,
+                    _ => Color::Gray,
+                }).add_modifier(Modifier::BOLD)
+            ),
+        ]),
+    ];
+
+    let overview_widget = Paragraph::new(raft_overview)
+        .block(
+            Block::default()
+                .title("Raft Overview")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue))
+        );
+    f.render_widget(overview_widget, chunks[0]);
+
+    // Node Details
+    let node_lines: Vec<Line> = if app.cluster_info.nodes.is_empty() {
+        vec![
+            Line::from("No node information available"),
+            Line::from(""),
+            Line::from("This could indicate:"),
+            Line::from("• The cluster is not initialized"),
+            Line::from("• Connection to the cluster failed"),
+            Line::from("• The node is not yet part of a cluster"),
+        ]
+    } else {
+        let mut lines = vec![
+            Line::from(vec![
+                Span::styled("Node Details:", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(""),
+        ];
+        
+        for node in &app.cluster_info.nodes {
+            let state_color = match node.state.as_str() {
+                "Leader" => Color::Green,
+                "Follower" => Color::Blue,
+                "Candidate" => Color::Yellow,
+                _ => Color::Gray,
+            };
+
+            let prefix = if node.id == app.cluster_info.current_node_id { "▶ " } else { "  " };
+            
+            lines.push(Line::from(vec![
+                Span::raw(prefix),
+                Span::styled(format!("Node {}", node.id), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::raw(" @ "),
+                Span::styled(&node.address, Style::default().fg(Color::White)),
+                Span::raw(" - "),
+                Span::styled(&node.state, Style::default().fg(state_color).add_modifier(Modifier::BOLD)),
+                if node.id == app.cluster_info.leader_id {
+                    Span::styled(" 👑", Style::default().fg(Color::Yellow))
+                } else {
+                    Span::raw("")
+                },
+            ]));
+        }
+        
+        lines.push(Line::from(""));
+        lines.push(Line::from("Legend: ▶ Current Node | 👑 Leader"));
+        lines.push(Line::from("Press 'r' to refresh, any other key to go back"));
+        
+        lines
+    };
+
+    let nodes_widget = Paragraph::new(node_lines)
+        .block(
+            Block::default()
+                .title("Cluster Nodes")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Green))
+        )
+        .wrap(Wrap { trim: true });
+    f.render_widget(nodes_widget, chunks[1]);
 }
 
 fn render_ssh_session(f: &mut Frame, area: Rect, app: &App) {

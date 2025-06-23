@@ -178,10 +178,9 @@ impl VmClient {
             
         let status = response.into_inner();
         
-        // Find current node info
-        let (current_node_id, current_node_state) = status.nodes
+        // Map all nodes with detailed info
+        let nodes: Vec<crate::tui::app::NodeInfo> = status.nodes
             .iter()
-            .find(|node| node.id == status.leader_id || status.nodes.len() == 1)
             .map(|node| {
                 let state_name = match node.state {
                     0 => "Unknown",
@@ -190,8 +189,20 @@ impl VmClient {
                     3 => "Leader",
                     _ => "Invalid",
                 };
-                (node.id, state_name.to_string())
+                crate::tui::app::NodeInfo {
+                    id: node.id,
+                    address: node.address.clone(),
+                    state: state_name.to_string(),
+                    is_current: node.id == status.leader_id || status.nodes.len() == 1, // Rough heuristic
+                }
             })
+            .collect();
+        
+        // Find current node info
+        let (current_node_id, current_node_state) = nodes
+            .iter()
+            .find(|node| node.id == status.leader_id || status.nodes.len() == 1)
+            .map(|node| (node.id, node.state.clone()))
             .unwrap_or((0, "Unknown".to_string()));
         
         Ok(ClusterInfo {
@@ -200,6 +211,7 @@ impl VmClient {
             node_count: status.nodes.len(),
             current_node_id,
             current_node_state,
+            nodes,
         })
     }
 }

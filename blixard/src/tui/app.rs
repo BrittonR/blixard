@@ -24,6 +24,7 @@ pub enum AppMode {
     VmLogs,
     Help,
     SshSession,
+    RaftStatus,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -194,6 +195,7 @@ impl App {
             AppMode::VmLogs => self.handle_vm_logs_keys(key).await?,
             AppMode::Help => self.handle_help_keys(key).await?,
             AppMode::SshSession => self.handle_ssh_keys(key).await?,
+            AppMode::RaftStatus => self.handle_raft_status_keys(key).await?,
         }
 
         Ok(())
@@ -265,6 +267,9 @@ impl App {
             }
             KeyCode::Char('?') => {
                 self.mode = AppMode::Help;
+            }
+            KeyCode::Char('R') => {
+                self.mode = AppMode::RaftStatus;
             }
             KeyCode::Char('f') => {
                 // Follow logs for selected VM in live panel
@@ -433,6 +438,22 @@ impl App {
     async fn handle_help_keys(&mut self, _key: crossterm::event::KeyEvent) -> BlixardResult<()> {
         // Any key exits help
         self.mode = AppMode::VmList;
+        Ok(())
+    }
+
+    async fn handle_raft_status_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
+        use crossterm::event::KeyCode;
+
+        match key.code {
+            KeyCode::Char('r') => {
+                // Refresh Raft status
+                self.refresh_cluster_status().await?;
+            }
+            _ => {
+                // Any other key exits Raft status view
+                self.mode = AppMode::VmList;
+            }
+        }
         Ok(())
     }
 
@@ -1267,6 +1288,15 @@ pub struct ClusterInfo {
     pub node_count: usize,
     pub current_node_id: u64,
     pub current_node_state: String,
+    pub nodes: Vec<NodeInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NodeInfo {
+    pub id: u64,
+    pub address: String,
+    pub state: String,
+    pub is_current: bool,
 }
 
 impl Default for ClusterInfo {
@@ -1277,6 +1307,7 @@ impl Default for ClusterInfo {
             node_count: 0,
             current_node_id: 0,
             current_node_state: "Unknown".to_string(),
+            nodes: Vec::new(),
         }
     }
 }
