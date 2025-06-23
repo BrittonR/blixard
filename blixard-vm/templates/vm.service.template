@@ -1,8 +1,7 @@
 [Unit]
 Description=Blixard MicroVM: {{ vm_name }}
-After=network.target nix-daemon.service
+After=network.target
 Wants=network.target
-Requires=nix-daemon.service
 
 [Service]
 Type=simple
