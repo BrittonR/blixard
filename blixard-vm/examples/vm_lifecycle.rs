@@ -57,14 +57,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  1. Build the VM using: nix build <flake>#nixosConfigurations.{}.config.microvm.runner", vm_config.name);
     println!("  2. Run the resulting VM runner executable");
     
-    // Clean up
-    println!("\nDeleting VM '{}'...", vm_config.name);
-    backend.delete_vm(&vm_config.name).await?;
-    println!("✓ VM deleted successfully");
+    // Show the generated flake path
+    let flake_path = PathBuf::from("vm-configs/vms/example-vm/flake.nix");
+    if flake_path.exists() {
+        println!("\n✓ Generated flake at: {}", flake_path.display());
+        println!("\nTo build this VM:");
+        println!("  cd vm-configs/vms/example-vm");
+        println!("  nix build .#nixosConfigurations.example-vm.config.microvm.runner.qemu");
+        println!("\nTo run this VM:");
+        println!("  nix run .#nixosConfigurations.example-vm.config.microvm.runner.qemu");
+    }
     
-    // Verify deletion
-    let vms = backend.list_vms().await?;
-    println!("\nVMs after deletion: {}", vms.len());
+    // Clean up (commented out to keep the flake for inspection)
+    // println!("\nCleaning up...");
+    // backend.delete_vm(&vm_config.name).await?;
+    // println!("✓ VM deleted successfully");
+    
+    println!("\n💡 Flake preserved for inspection and testing!");
     
     Ok(())
 }

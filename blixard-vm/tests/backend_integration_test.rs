@@ -69,6 +69,6 @@ mod tests {
         assert!(flake_content.contains("flake-test"));
         assert!(flake_content.contains("nixosConfigurations"));
         assert!(flake_content.contains("microvm.nixosModules.microvm"));
-        assert!(flake_content.contains("cloud-hypervisor"));  // Default hypervisor from backend
+        assert!(flake_content.contains("qemu"));  // Default hypervisor from backend
     }
 }

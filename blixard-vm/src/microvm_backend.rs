@@ -84,15 +84,11 @@ impl MicrovmBackend {
     fn convert_config(&self, core_config: &CoreVmConfig) -> vm_types::VmConfig {
         vm_types::VmConfig {
             name: core_config.name.clone(),
-            hypervisor: vm_types::Hypervisor::CloudHypervisor,
+            hypervisor: vm_types::Hypervisor::Qemu,
             vcpus: core_config.vcpus,
             memory: core_config.memory,
             networks: vec![
-                vm_types::NetworkConfig::Tap {
-                    name: format!("vm-{}", core_config.name),
-                    bridge: None,
-                    mac: Some("02:00:00:00:00:01".to_string()),
-                }
+                vm_types::NetworkConfig::User
             ],
             volumes: vec![
                 vm_types::VolumeConfig::RootDisk {
