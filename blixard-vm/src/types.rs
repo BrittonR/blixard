@@ -1,0 +1,90 @@
+use serde::{Serialize, Deserialize};
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VmConfig {
+    pub name: String,
+    pub hypervisor: Hypervisor,
+    pub vcpus: u32,
+    pub memory: u32, // MB
+    pub networks: Vec<NetworkConfig>,
+    pub volumes: Vec<VolumeConfig>,
+    pub nixos_modules: Vec<NixModule>,
+    pub flake_modules: Vec<String>, // References to reusable modules
+    pub kernel: Option<KernelConfig>,
+    pub init_command: Option<String>,
+}
+
+impl Default for VmConfig {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            hypervisor: Hypervisor::CloudHypervisor,
+            vcpus: 1,
+            memory: 512,
+            networks: Vec::new(),
+            volumes: Vec::new(),
+            nixos_modules: Vec::new(),
+            flake_modules: Vec::new(),
+            kernel: None,
+            init_command: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum Hypervisor {
+    CloudHypervisor,
+    Firecracker,
+    Qemu,
+}
+
+impl std::fmt::Display for Hypervisor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Hypervisor::CloudHypervisor => write!(f, "cloud-hypervisor"),
+            Hypervisor::Firecracker => write!(f, "firecracker"),
+            Hypervisor::Qemu => write!(f, "qemu"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum NetworkConfig {
+    Tap {
+        name: String,
+        bridge: Option<String>,
+        mac: Option<String>,
+    },
+    User, // QEMU user networking (not for production)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum VolumeConfig {
+    RootDisk { 
+        size: u64, // MB
+    },
+    DataDisk { 
+        path: String,
+        size: u64,
+        read_only: bool,
+    },
+    Share {
+        tag: String,
+        source: PathBuf,
+        mount_point: PathBuf,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum NixModule {
+    Inline(String),
+    File(PathBuf),
+    FlakePart(String), // Reference to a flake-parts module
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct KernelConfig {
+    pub package: Option<String>,
+    pub cmdline: Option<String>,
+}
