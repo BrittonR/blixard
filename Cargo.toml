@@ -1,5 +1,5 @@
 [workspace]
-members = ["blixard", "blixard-core", "blixard-vm", "simulation"]
+members = ["blixard", "blixard-core", "blixard-vm"]
 resolver = "2"
 
 [workspace.dependencies]
