@@ -295,6 +295,18 @@ impl TestNode {
         // Temp dir will be cleaned up on drop
     }
     
+    /// Get the node ID
+    pub fn get_id(&self) -> u64 {
+        self.id
+    }
+    
+    /// Get VM backend for VM operations (placeholder for now)
+    pub fn get_vm_backend(&self) -> Option<&dyn crate::vm_backend::VmBackend> {
+        // For now, return None - this would need to be implemented
+        // when we add VM backend to Node
+        None
+    }
+    
     /// Dump diagnostic information about this node
     pub async fn dump_diagnostics(&self) -> String {
         let raft_status = self.shared_state.get_raft_status().await.ok();
@@ -660,6 +672,32 @@ impl TestCluster {
     /// Get mutable reference to nodes (for testing)
     pub fn nodes_mut(&mut self) -> &mut HashMap<u64, TestNode> {
         &mut self.nodes
+    }
+    
+    /// Get the current leader's node ID
+    pub async fn get_leader_id(&self) -> BlixardResult<u64> {
+        for node in self.nodes.values() {
+            let state = node.shared_state.get_raft_status().await.unwrap();
+            if let Some(leader_id) = state.leader_id {
+                return Ok(leader_id);
+            }
+        }
+        Err(BlixardError::ClusterError("No leader found".to_string()))
+    }
+    
+    /// Get a specific node by ID
+    pub fn get_node(&self, node_id: u64) -> BlixardResult<&TestNode> {
+        self.nodes.get(&node_id)
+            .ok_or_else(|| BlixardError::NodeError(format!("Node {} not found", node_id)))
+    }
+    
+    /// Clone cluster reference for test scenarios
+    pub fn clone_for_test(&self) -> Self {
+        TestCluster {
+            nodes: HashMap::new(), // Empty for now - would need proper cloning for real use
+            client_cache: self.client_cache.clone(),
+            next_node_id: self.next_node_id,
+        }
     }
 }
 

@@ -143,8 +143,9 @@ impl VmProcessManager {
         let runner_path = self.build_vm_runner(name, flake_path).await?;
         
         // Start the VM process
+        debug!("Attempting to run VM with runner: {}", runner_path.display());
         let (child, pid) = self.command_executor
-            .spawn(&runner_path.to_string_lossy(), &[], None)
+            .spawn(&runner_path.to_string_lossy(), &[], Some(flake_path))
             .await
             .map_err(|e| BlixardError::VmOperationFailed {
                 operation: "start".to_string(),
@@ -246,12 +247,12 @@ impl VmProcessManager {
                 "nix",
                 &[
                     "build",
-                    &format!("{}#nixosConfigurations.{}.config.microvm.runner", 
-                        flake_path.display(), name),
+                    &format!(".#nixosConfigurations.{}.config.microvm.runner.qemu", name),
                     "--out-link",
                     &out_link.to_string_lossy(),
+                    "--impure", // Allow building in dirty git tree
                 ],
-                Some(flake_path.parent().unwrap_or(Path::new("."))),
+                Some(flake_path),
             )
             .await
             .map_err(|e| BlixardError::VmOperationFailed {
