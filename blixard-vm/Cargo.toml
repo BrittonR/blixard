@@ -38,5 +38,8 @@ tera = "1.19"
 uuid = { version = "1.6", features = ["v4", "serde"] }
 tempfile = "3.8"
 
+[dev-dependencies]
+tracing-subscriber = "0.3"
+
 [features]
 default = []

@@ -9,20 +9,20 @@
 
   outputs = { self, nixpkgs, microvm }:
     let
-      system = "{{ system }}";
+      system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
     in {
-      nixosConfigurations."{{ vm_name }}" = nixpkgs.lib.nixosSystem {
+      nixosConfigurations."example-vm" = nixpkgs.lib.nixosSystem {
         inherit system;
         modules = [
           microvm.nixosModules.microvm
           {
-            networking.hostName = "{{ vm_name }}";
+            networking.hostName = "example-vm";
             
             microvm = {
-              hypervisor = "{{ hypervisor }}";
-              vcpu = {{ vcpus }};
-              mem = {{ memory }};
+              hypervisor = "cloud-hypervisor";
+              vcpu = 2;
+              mem = 1024;
               
               interfaces = [
                 {

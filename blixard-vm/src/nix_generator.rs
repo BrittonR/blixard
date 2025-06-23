@@ -37,7 +37,13 @@ impl NixFlakeGenerator {
         // Basic configuration
         context.insert("vm_name", &config.name);
         context.insert("system", "x86_64-linux");
-        context.insert("modules_path", &self.modules_dir.to_string_lossy().into_owned());
+        
+        // Use absolute path for modules
+        let modules_path = std::fs::canonicalize(&self.modules_dir)
+            .unwrap_or_else(|_| self.modules_dir.clone())
+            .to_string_lossy()
+            .into_owned();
+        context.insert("modules_path", &modules_path);
         context.insert("hypervisor", &config.hypervisor.to_string());
         context.insert("vcpus", &config.vcpus);
         context.insert("memory", &config.memory);
@@ -50,12 +56,16 @@ impl NixFlakeGenerator {
         let networks: Vec<_> = config.networks.iter().map(|net| {
             match net {
                 NetworkConfig::Tap { name, bridge, mac } => {
-                    json!({
-                        "type": "tap",
-                        "name": name,
-                        "bridge": bridge,
-                        "mac": mac,
-                    })
+                    let mut network_obj = serde_json::Map::new();
+                    network_obj.insert("type".to_string(), json!("tap"));
+                    network_obj.insert("name".to_string(), json!(name));
+                    if let Some(bridge) = bridge {
+                        network_obj.insert("bridge".to_string(), json!(bridge));
+                    }
+                    if let Some(mac) = mac {
+                        network_obj.insert("mac".to_string(), json!(mac));
+                    }
+                    json!(network_obj)
                 },
                 NetworkConfig::User => {
                     json!({
