@@ -8,7 +8,7 @@ A distributed microVM orchestration platform built in Rust, providing enterprise
 - **Multi-Node Clustering**: Dynamic cluster formation with join/leave operations (✅ Implemented)
 - **Raft Snapshots**: Full snapshot support for state transfer and log compaction (✅ Implemented)
 - **State Machine Snapshots**: Complete state machine snapshot application (✅ Implemented)
-- **MicroVM Integration**: Seamless integration with microvm.nix for lightweight virtualization
+- **MicroVM Integration**: Complete microvm.nix integration with Nix flake generation and process management (✅ Implemented)
 - **Tailscale Discovery**: Automatic node discovery via Tailscale networking
 - **Persistent Storage**: Durable state management with redb (✅ Implemented)
 - **Fault Tolerant**: Designed for high availability with automatic failover
@@ -97,6 +97,11 @@ cargo run -- vm list
 
 # Check VM status
 cargo run -- vm status my-vm
+
+# microvm.nix Integration Examples
+cargo test -p blixard-vm                    # Test VM backend
+cargo run --example vm_lifecycle            # VM lifecycle demo
+nix build ./generated-flakes/example-vm#nixosConfigurations.example-vm.config.microvm.runner.cloud-hypervisor
 ```
 
 ## Testing
@@ -243,6 +248,7 @@ The codebase is organized as:
 - `src/types.rs`: Core domain types
 - `src/error.rs`: Error handling
 - `proto/`: Protocol buffer definitions
+- `blixard-vm/`: Complete microvm.nix integration with flake generation and process management
 
 ## License
 
