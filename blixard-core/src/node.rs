@@ -635,8 +635,10 @@ impl Node {
         use std::path::PathBuf;
         
         let data_dir = &self.shared.config.data_dir;
-        let vm_config_dir = PathBuf::from(data_dir).join("vm-configs");
-        let vm_data_dir = PathBuf::from(data_dir).join("vm-data");
+        let vm_config_dir = std::fs::canonicalize(PathBuf::from(data_dir).join("vm-configs"))
+            .unwrap_or_else(|_| std::env::current_dir().unwrap().join(data_dir).join("vm-configs"));
+        let vm_data_dir = std::fs::canonicalize(PathBuf::from(data_dir).join("vm-data"))
+            .unwrap_or_else(|_| std::env::current_dir().unwrap().join(data_dir).join("vm-data"));
         
         // Create directories
         std::fs::create_dir_all(&vm_config_dir)

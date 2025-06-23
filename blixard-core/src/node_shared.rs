@@ -274,10 +274,15 @@ impl SharedNodeState {
     
     /// Send a VM command
     pub async fn send_vm_command(&self, command: VmCommand) -> BlixardResult<()> {
+        tracing::info!("🔥 send_vm_command called with command: {:?}", command);
         let vm_manager = self.vm_manager.read().await;
         if let Some(manager) = vm_manager.as_ref() {
-            manager.inner.process_command(command).await
+            tracing::info!("🔥 VM manager found, processing command");
+            let result = manager.inner.process_command(command).await;
+            tracing::info!("🔥 VM command processing result: {:?}", result);
+            result
         } else {
+            tracing::error!("🔥 VM manager not initialized");
             Err(BlixardError::Internal {
                 message: "VM manager not initialized".to_string(),
             })
@@ -553,7 +558,7 @@ impl SharedNodeState {
             tracing::info!("Processing VM operation locally as leader");
             
             // Send the actual VM command through Raft
-            let proposal_data = crate::raft_manager::ProposalData::CreateVm(command);
+            let proposal_data = crate::raft_manager::ProposalData::CreateVm(command.clone());
             
             let (response_tx, response_rx) = oneshot::channel();
             let proposal_id = uuid::Uuid::new_v4().as_bytes().to_vec();
@@ -567,10 +572,10 @@ impl SharedNodeState {
             // Send proposal
             match self.send_raft_proposal(proposal).await {
                 Ok(_) => {
-                    tracing::info!("Successfully sent VM operation proposal");
+                    tracing::info!("🔥 Successfully sent VM operation proposal: {:?}", command);
                 }
                 Err(e) => {
-                    tracing::error!("Failed to send VM operation proposal: {}", e);
+                    tracing::error!("🔥 Failed to send VM operation proposal: {}", e);
                     return Err(e);
                 }
             }

@@ -256,6 +256,7 @@ impl RaftStateMachine {
     }
 
     fn apply_vm_command(&self, txn: WriteTransaction, command: &VmCommand) -> BlixardResult<()> {
+        tracing::info!("🔥 apply_vm_command called with command: {:?}", command);
         use crate::storage::VM_STATE_TABLE;
         
         {
