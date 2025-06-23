@@ -33,7 +33,8 @@ mod tests {
         assert!(flake.contains("cloud-hypervisor"));
         assert!(flake.contains("vcpu = 2"));
         assert!(flake.contains("mem = 1024"));
-        assert!(flake.contains("inputs.microvm.flakeModule"));
+        assert!(flake.contains("microvm.nixosModules.microvm"));
+        assert!(flake.contains("nixosConfigurations"));
     }
     
     #[test]

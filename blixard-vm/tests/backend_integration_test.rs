@@ -67,7 +67,8 @@ mod tests {
         // Read and verify flake content
         let flake_content = std::fs::read_to_string(flake_path).unwrap();
         assert!(flake_content.contains("flake-test"));
-        assert!(flake_content.contains("microvm.vms"));
-        assert!(flake_content.contains("cloud-hypervisor"));
+        assert!(flake_content.contains("nixosConfigurations"));
+        assert!(flake_content.contains("microvm.nixosModules.microvm"));
+        assert!(flake_content.contains("cloud-hypervisor"));  // Default hypervisor from backend
     }
 }
