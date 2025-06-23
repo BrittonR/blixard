@@ -106,6 +106,11 @@ impl MicrovmBackend {
     fn get_vm_flake_dir(&self, name: &str) -> PathBuf {
         self.config_dir.join("vms").join(name)
     }
+    
+    /// Connect to VM console for interactive access
+    pub async fn connect_to_console(&self, name: &str) -> BlixardResult<()> {
+        self.process_manager.connect_to_console(name).await
+    }
 }
 
 #[async_trait]
@@ -142,8 +147,16 @@ impl VmBackend for MicrovmBackend {
             });
         }
         
-        // Start the VM using the process manager
-        self.process_manager.start_vm(name, &flake_dir).await?;
+        // Get the VM configuration
+        let vm_configs = self.vm_configs.read().await;
+        let vm_config = vm_configs.get(name)
+            .ok_or_else(|| BlixardError::VmOperationFailed {
+                operation: "start".to_string(),
+                details: format!("VM '{}' configuration not found in memory", name),
+            })?;
+        
+        // Start the VM using user systemd service management for better logging
+        self.process_manager.start_vm_systemd(name, &flake_dir, vm_config).await?;
         
         info!("Successfully started microVM '{}'", name);
         Ok(())
@@ -152,8 +165,8 @@ impl VmBackend for MicrovmBackend {
     async fn stop_vm(&self, name: &str) -> BlixardResult<()> {
         info!("Stopping microVM '{}'", name);
         
-        // Stop the VM using the process manager
-        self.process_manager.stop_vm(name).await?;
+        // Stop the VM using user systemd service management
+        self.process_manager.stop_vm_systemd(name).await?;
         
         info!("Successfully stopped microVM '{}'", name);
         Ok(())
@@ -202,8 +215,8 @@ impl VmBackend for MicrovmBackend {
     }
     
     async fn get_vm_status(&self, name: &str) -> BlixardResult<Option<VmStatus>> {
-        // Check with the process manager
-        self.process_manager.get_vm_status(name).await
+        // Check with the process manager using user systemd service management
+        self.process_manager.get_vm_status_systemd(name).await
     }
     
     async fn list_vms(&self) -> BlixardResult<Vec<(CoreVmConfig, VmStatus)>> {

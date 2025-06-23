@@ -7,8 +7,9 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::process::{Command, Child};
 use tokio::sync::RwLock;
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, debug};
 use std::process::Stdio;
+use tokio::fs;
 
 /// Manages VM processes and their lifecycle
 pub struct VmProcessManager {
@@ -28,6 +29,7 @@ pub struct VmProcess {
     pub started_at: SystemTime,
     pub hypervisor: Hypervisor,
     pub runner_path: PathBuf,
+    pub _temp_dir: Option<tempfile::TempDir>, // Keep temp directory alive
 }
 
 /// Trait for executing commands - allows mocking in tests
@@ -124,9 +126,9 @@ impl VmProcessManager {
         }
     }
     
-    /// Start a VM from a flake path
+    /// Start a VM from a flake path using microvm command
     pub async fn start_vm(&self, name: &str, flake_path: &Path) -> BlixardResult<()> {
-        info!("Starting VM '{}' from flake at {}", name, flake_path.display());
+        info!("Starting VM '{}' from flake at {} using nix run command", name, flake_path.display());
         
         // Check if VM is already running
         {
@@ -139,28 +141,43 @@ impl VmProcessManager {
             }
         }
         
-        // Use nix run to start the VM directly
-        debug!("Starting VM '{}' with nix run", name);
+        // Create a temporary flake copy outside git repository to avoid git tracking issues
+        let temp_dir = tempfile::TempDir::new()
+            .map_err(|e| BlixardError::VmOperationFailed {
+                operation: "start".to_string(),
+                details: format!("Failed to create temp directory: {}", e),
+            })?;
+        
+        let temp_flake_path = temp_dir.path().join("flake.nix");
+        std::fs::copy(flake_path.join("flake.nix"), &temp_flake_path)
+            .map_err(|e| BlixardError::VmOperationFailed {
+                operation: "start".to_string(),
+                details: format!("Failed to copy flake: {}", e),
+            })?;
+        
+        // Use nix run to start the VM directly (microvm command requires /var/lib/microvms)
+        debug!("Starting VM '{}' with nix run command", name);
+        let nix_path = format!("path:{}#nixosConfigurations.{}.config.microvm.declaredRunner", 
+                              temp_dir.path().display(), name);
         let (child, pid) = self.command_executor
             .spawn(
                 "nix",
                 &[
-                    "--extra-experimental-features", "nix-command flakes",
                     "run",
-                    &format!("path:{}#nixosConfigurations.{}.config.microvm.runner.qemu", flake_path.display(), name),
+                    "--extra-experimental-features", "nix-command flakes",
                     "--impure",
-                    "--",
-                    "--no-reboot",
+                    "--accept-flake-config",
+                    &nix_path,
                 ],
-                None
+                Some(temp_dir.path())
             )
             .await
             .map_err(|e| BlixardError::VmOperationFailed {
                 operation: "start".to_string(),
-                details: format!("Failed to start VM: {}", e),
+                details: format!("Failed to start VM with nix run command: {}", e),
             })?;
         
-        info!("Started VM '{}' with PID {}", name, pid);
+        info!("Started VM '{}' with PID {} using nix run command", name, pid);
         
         // Track the process
         let vm_process = VmProcess {
@@ -168,8 +185,9 @@ impl VmProcessManager {
             child: Some(child),
             pid,
             started_at: SystemTime::now(),
-            hypervisor: Hypervisor::Qemu,
+            hypervisor: Hypervisor::Qemu, // Default, could be detected from config
             runner_path: PathBuf::new(),
+            _temp_dir: Some(temp_dir), // Keep temp directory alive for the VM
         };
         
         self.processes.write().await.insert(name.to_string(), vm_process);
@@ -232,6 +250,29 @@ impl VmProcessManager {
         Ok(processes.keys().cloned().collect())
     }
     
+    /// Connect to VM console socket for interactive access
+    pub async fn connect_to_console(&self, name: &str) -> BlixardResult<()> {
+        info!("Connecting to console for VM '{}'", name);
+        
+        // Check if VM is running
+        let processes = self.processes.read().await;
+        if !processes.contains_key(name) {
+            return Err(BlixardError::VmOperationFailed {
+                operation: "console".to_string(),
+                details: format!("VM '{}' is not running", name),
+            });
+        }
+        
+        let socket_path = format!("/tmp/{}-console.sock", name);
+        
+        info!("Console socket for VM '{}' should be available at: {}", name, socket_path);
+        info!("To connect manually, use: socat - UNIX-CONNECT:{}", socket_path);
+        
+        // For now, just return info about how to connect
+        // In a full implementation, we could spawn socat or provide a direct connection
+        Ok(())
+    }
+    
     /// Build the VM runner using nix
     async fn build_vm_runner(&self, name: &str, flake_path: &Path) -> BlixardResult<PathBuf> {
         let out_link = self.runtime_dir.join(format!("{}-runner", name));
@@ -286,6 +327,175 @@ impl VmProcessManager {
         }
     }
     
+    /// Start a VM using systemd service management
+    pub async fn start_vm_systemd(&self, name: &str, flake_path: &Path, config: &VmConfig) -> BlixardResult<()> {
+        info!("Starting VM '{}' using systemd", name);
+        
+        // Create systemd service file
+        self.create_systemd_service(name, flake_path, config).await?;
+        
+        // Start the user service
+        let output = self.command_executor
+            .execute("systemctl", &["--user", "start", &format!("blixard-vm-{}", name)], None)
+            .await
+            .map_err(|e| BlixardError::VmOperationFailed {
+                operation: "systemd_start".to_string(),
+                details: format!("Failed to start systemd service: {}", e),
+            })?;
+        
+        if !output.status.success() {
+            return Err(BlixardError::VmOperationFailed {
+                operation: "systemd_start".to_string(),
+                details: String::from_utf8_lossy(&output.stderr).to_string(),
+            });
+        }
+        
+        info!("Successfully started VM '{}' as systemd service", name);
+        Ok(())
+    }
+    
+    /// Stop a VM using systemd service management
+    pub async fn stop_vm_systemd(&self, name: &str) -> BlixardResult<()> {
+        info!("Stopping VM '{}' using systemd", name);
+        
+        let service_name = format!("blixard-vm-{}", name);
+        
+        // Stop the user service
+        let output = self.command_executor
+            .execute("systemctl", &["--user", "stop", &service_name], None)
+            .await
+            .map_err(|e| BlixardError::VmOperationFailed {
+                operation: "systemd_stop".to_string(),
+                details: format!("Failed to stop systemd service: {}", e),
+            })?;
+        
+        if !output.status.success() {
+            warn!("Failed to stop systemd service: {}", String::from_utf8_lossy(&output.stderr));
+        }
+        
+        // Remove the service file
+        self.remove_systemd_service(name).await?;
+        
+        info!("Successfully stopped VM '{}' systemd service", name);
+        Ok(())
+    }
+    
+    /// Get VM status from systemd
+    pub async fn get_vm_status_systemd(&self, name: &str) -> BlixardResult<Option<VmStatus>> {
+        let service_name = format!("blixard-vm-{}", name);
+        
+        let output = self.command_executor
+            .execute("systemctl", &["--user", "is-active", &service_name], None)
+            .await
+            .map_err(|e| BlixardError::VmOperationFailed {
+                operation: "systemd_status".to_string(),
+                details: format!("Failed to check systemd service status: {}", e),
+            })?;
+        
+        let status_str = String::from_utf8_lossy(&output.stdout);
+        let status_str = status_str.trim();
+        let status = match status_str {
+            "active" => VmStatus::Running,
+            "activating" => VmStatus::Starting,
+            "deactivating" => VmStatus::Stopping,
+            "failed" => VmStatus::Failed,
+            "inactive" => VmStatus::Stopped,
+            _ => VmStatus::Failed, // Unknown status, treat as failed
+        };
+        
+        Ok(Some(status))
+    }
+    
+    /// Create systemd service file for a VM (user service for NixOS compatibility)
+    async fn create_systemd_service(&self, name: &str, flake_path: &Path, config: &VmConfig) -> BlixardResult<()> {
+        let service_name = format!("blixard-vm-{}.service", name);
+        let user_home = std::env::var("HOME")
+            .map_err(|e| BlixardError::ConfigError(format!("Failed to get HOME directory: {}", e)))?;
+        let service_path = format!("{}/.config/systemd/user/{}", user_home, service_name);
+        
+        // Read template
+        let template_path = PathBuf::from("blixard-vm/templates/vm.service.template");
+        let template = fs::read_to_string(&template_path)
+            .await
+            .map_err(|e| BlixardError::ConfigError(format!("Failed to read service template: {}", e)))?;
+        
+        // Replace template variables
+        let cpu_quota = config.vcpus * 100; // 100% per vCPU
+        let _service_content = template
+            .replace("{{ vm_name }}", name)
+            .replace("{{ flake_path }}", &flake_path.display().to_string())
+            .replace("{{ memory_mb }}", &config.memory.to_string())
+            .replace("{{ cpu_quota }}", &cpu_quota.to_string())
+            .replace("{{ working_dir }}", &flake_path.display().to_string())
+            .replace("{{ user }}", &std::env::var("USER").unwrap_or_else(|_| "user".to_string()))
+            .replace("{{ home }}", &user_home);
+        
+        // Create user systemd directory
+        let user_systemd_dir = format!("{}/.config/systemd/user", user_home);
+        std::fs::create_dir_all(&user_systemd_dir)
+            .map_err(|e| BlixardError::ConfigError(format!("Failed to create user systemd directory: {}", e)))?;
+        
+        // Write service file to temporary location first
+        let temp_path = format!("/tmp/blixard-vm-{}.service", name);
+        fs::write(&temp_path, _service_content)
+            .await
+            .map_err(|e| BlixardError::VmOperationFailed {
+                operation: "create_service".to_string(),
+                details: format!("Failed to write temporary service file: {}", e),
+            })?;
+        
+        // Copy to user systemd location directly
+        std::fs::copy(&temp_path, &service_path)
+            .map_err(|e| BlixardError::VmOperationFailed {
+                operation: "create_service".to_string(),
+                details: format!("Failed to copy service file: {}", e),
+            })?;
+        
+        // Reload user systemd
+        let output = self.command_executor
+            .execute("systemctl", &["--user", "daemon-reload"], None)
+            .await
+            .map_err(|e| BlixardError::VmOperationFailed {
+                operation: "daemon_reload".to_string(),
+                details: format!("Failed to reload systemd: {}", e),
+            })?;
+        
+        if !output.status.success() {
+            return Err(BlixardError::VmOperationFailed {
+                operation: "daemon_reload".to_string(),
+                details: String::from_utf8_lossy(&output.stderr).to_string(),
+            });
+        }
+        
+        Ok(())
+    }
+    
+    /// Remove systemd service file for a VM
+    async fn remove_systemd_service(&self, name: &str) -> BlixardResult<()> {
+        let service_name = format!("blixard-vm-{}.service", name);
+        let user_home = std::env::var("HOME")
+            .map_err(|e| BlixardError::ConfigError(format!("Failed to get HOME directory: {}", e)))?;
+        let service_path = format!("{}/.config/systemd/user/{}", user_home, service_name);
+        
+        // Remove service file directly
+        std::fs::remove_file(&service_path).ok(); // Ignore errors if file doesn't exist
+        
+        // Reload user systemd
+        let output = self.command_executor
+            .execute("systemctl", &["--user", "daemon-reload"], None)
+            .await
+            .map_err(|e| BlixardError::VmOperationFailed {
+                operation: "daemon_reload".to_string(),
+                details: format!("Failed to reload systemd: {}", e),
+            })?;
+        
+        if !output.status.success() {
+            warn!("Failed to reload systemd: {}", String::from_utf8_lossy(&output.stderr));
+        }
+        
+        Ok(())
+    }
+    
 }
 
 
@@ -319,7 +529,7 @@ mod tests {
                 next_pid: AtomicU32::new(1000),
                 killed_pids: Arc::new(Mutex::new(Vec::new())),
                 build_should_fail: true,
-                spawn_should_fail: false,
+                spawn_should_fail: true, // Make spawn fail for microvm command
             }
         }
     }
@@ -433,7 +643,7 @@ mod tests {
     }
     
     #[tokio::test]
-    async fn test_build_failure() {
+    async fn test_microvm_start_failure() {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let executor = Box::new(MockCommandExecutor::failing_build());
         let manager = VmProcessManager::with_executor(
@@ -444,9 +654,9 @@ mod tests {
         let flake_path = temp_dir.path().join("test-flake");
         std::fs::create_dir_all(&flake_path).unwrap();
         
-        // Start should fail due to build failure
+        // Start should fail due to spawn failure (simulating microvm command failure)
         let result = manager.start_vm("test-vm", &flake_path).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Build failed"));
+        assert!(result.unwrap_err().to_string().contains("Failed to start VM with microvm command"));
     }
 }

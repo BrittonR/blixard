@@ -46,6 +46,14 @@ impl Node {
     async fn initialize_internal(&mut self, registry_opt: Option<VmBackendRegistry>) -> BlixardResult<()> {
         // Initialize database
         let data_dir = self.shared.config.data_dir.clone();
+        
+        // Ensure the data directory exists
+        std::fs::create_dir_all(&data_dir)
+            .map_err(|e| BlixardError::Storage {
+                operation: "create data directory".to_string(),
+                source: Box::new(e),
+            })?;
+        
         let db_path = format!("{}/blixard.db", data_dir);
         
         // Try to open existing database first, create if it doesn't exist

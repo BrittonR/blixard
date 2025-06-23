@@ -1,0 +1,44 @@
+[Unit]
+Description=Blixard MicroVM: {{ vm_name }}
+After=network.target nix-daemon.service
+Wants=network.target
+Requires=nix-daemon.service
+
+[Service]
+Type=simple
+ExecStart=/run/current-system/sw/bin/nix run --extra-experimental-features "nix-command flakes" --impure --accept-flake-config "path:{{ flake_path }}#nixosConfigurations.{{ vm_name }}.config.microvm.declaredRunner"
+ExecStop=/run/current-system/sw/bin/kill -TERM $MAINPID
+ExecReload=/run/current-system/sw/bin/kill -HUP $MAINPID
+
+# Resource limits
+MemoryMax={{ memory_mb }}M
+CPUQuota={{ cpu_quota }}%
+
+# Security settings (relaxed for VM execution)
+NoNewPrivileges=false
+PrivateTmp=false
+
+# Restart behavior
+Restart=on-failure
+RestartSec=10s
+StartLimitInterval=300s
+StartLimitBurst=3
+
+# Enhanced logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=blixard-vm-{{ vm_name }}
+
+# Working directory
+WorkingDirectory={{ working_dir }}
+
+# Environment for Nix
+Environment=NIX_CONF_DIR=/etc/nix
+Environment=PATH=/run/current-system/sw/bin:/usr/bin:/bin
+Environment=USER={{ user }}
+Environment=HOME={{ home }}
+
+# Note: User services don't support PID files in the same way
+
+[Install]
+WantedBy=default.target

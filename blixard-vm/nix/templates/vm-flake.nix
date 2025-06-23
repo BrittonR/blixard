@@ -39,11 +39,56 @@
                   size = 10240;
                 }
               ];
+              
+              # Enable SSH port forwarding  
+              forwardPorts = [
+                {
+                  from = "host";
+                  host.port = 2222;
+                  guest.port = 22;
+                }
+              ];
+              
+              # Console configuration using microvm.nix socket pattern
+              socket = "/tmp/{{ vm_name }}-console.sock";
             };
             
             # Basic NixOS configuration
             services.getty.autologinUser = "root";
-            users.users.root.password = "";
+            users.users.root = {
+              password = "";
+              openssh.authorizedKeys.keys = [
+                # Add your SSH public key here for key-based auth
+                # "ssh-rsa AAAAB3NzaC1yc2E... your-email@example.com"
+              ];
+            };
+            
+            # Enable SSH
+            services.openssh = {
+              enable = true;
+              settings = {
+                PermitRootLogin = "yes";
+                PasswordAuthentication = true;
+                PermitEmptyPasswords = true;
+              };
+            };
+            
+            # Enable serial console
+            systemd.services."serial-getty@ttyS0" = {
+              enable = true;
+              wantedBy = [ "getty.target" ];
+            };
+            
+            # Enable networking
+            networking.useDHCP = false;
+            networking.interfaces.eth0.useDHCP = true;
+            networking.firewall.enable = false;
+            
+            # Configure kernel for serial console
+            boot.kernelParams = [ 
+              "console=ttyS0,115200"
+              "console=tty0"
+            ];
             
             systemd.services.init-command = {
               description = "Run initialization command";
@@ -51,7 +96,7 @@
               after = [ "network.target" ];
               serviceConfig = {
                 Type = "oneshot";
-                ExecStart = "${pkgs.coreutils}/bin/echo 'Blixard VM started successfully!'";
+                ExecStart = "${pkgs.coreutils}/bin/echo 'Blixard VM started successfully! SSH: localhost:2222'";
                 RemainAfterExit = true;
               };
             };
