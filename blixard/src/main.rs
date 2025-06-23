@@ -7,6 +7,8 @@ use blixard::{
 };
 use blixard::orchestrator::OrchestratorConfig;
 
+mod tui;
+
 #[cfg(not(madsim))]
 use blixard_core::grpc_server::start_grpc_server;
 
@@ -82,6 +84,8 @@ enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// Launch TUI (Terminal User Interface) for VM management
+    Tui,
 }
 
 #[derive(clap::Subcommand)]
@@ -111,6 +115,20 @@ enum VmCommands {
     Status {
         #[arg(long)]
         name: String,
+    },
+    /// View VM logs
+    Logs {
+        #[arg(long)]
+        name: String,
+        /// Follow log output (default: true, use --no-follow to disable)
+        #[arg(long, default_value = "true")]
+        follow: bool,
+        /// Don't follow log output (show last N lines and exit)
+        #[arg(long, conflicts_with = "follow")]
+        no_follow: bool,
+        /// Number of lines to show initially
+        #[arg(long, short = 'n', default_value = "50")]
+        lines: u32,
     },
     /// List all VMs
     List,
@@ -249,8 +267,80 @@ async fn main() -> BlixardResult<()> {
         Commands::Reset { data_dir, vm_config_dir, vm_data_dir, force } => {
             handle_reset_command(&data_dir, &vm_config_dir, &vm_data_dir, force).await?;
         }
+        Commands::Tui => {
+            handle_tui_command().await?;
+        }
     }
 
+    Ok(())
+}
+
+#[cfg(not(madsim))]
+async fn handle_vm_logs(vm_name: &str, follow: bool, lines: u32) -> BlixardResult<()> {
+    use tokio::process::Command;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    
+    let service_name = format!("blixard-vm-{}", vm_name);
+    
+    if follow {
+        println!("Following logs for VM '{}' (Press Ctrl+C to exit)...", vm_name);
+        println!("Service: {}", service_name);
+        println!("---");
+        
+        // Use journalctl --follow for live log streaming
+        let mut child = Command::new("journalctl")
+            .args(&[
+                "--user",
+                "-u", &service_name,
+                "-n", &lines.to_string(),
+                "--follow",
+                "--no-pager"
+            ])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to start journalctl: {}", e),
+            })?;
+        
+        if let Some(stdout) = child.stdout.take() {
+            let reader = BufReader::new(stdout);
+            let mut lines = reader.lines();
+            
+            while let Some(line) = lines.next_line().await.map_err(|e| BlixardError::Internal {
+                message: format!("Failed to read log line: {}", e),
+            })? {
+                println!("{}", line);
+            }
+        }
+        
+        // Wait for the child process to finish (it won't unless user interrupts)
+        let _ = child.wait().await;
+    } else {
+        // Show last N lines without following
+        let output = Command::new("journalctl")
+            .args(&[
+                "--user",
+                "-u", &service_name,
+                "-n", &lines.to_string(),
+                "--no-pager"
+            ])
+            .output()
+            .await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to run journalctl: {}", e),
+            })?;
+        
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!("journalctl failed: {}", stderr);
+            std::process::exit(1);
+        }
+        
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        print!("{}", stdout);
+    }
+    
     Ok(())
 }
 
@@ -394,9 +484,19 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
                 }
             }
         }
+        VmCommands::Logs { name, follow, no_follow, lines } => {
+            let should_follow = follow && !no_follow;
+            handle_vm_logs(&name, should_follow, lines).await?;
+        }
     }
     
     Ok(())
+}
+
+#[cfg(madsim)]
+async fn handle_vm_logs(_vm_name: &str, _follow: bool, _lines: u32) -> BlixardResult<()> {
+    eprintln!("VM logs are not available in simulation mode");
+    std::process::exit(1);
 }
 
 #[cfg(madsim)]
@@ -659,4 +759,91 @@ async fn handle_reset_command(
     println!("💡 You can now start fresh with: cargo run -- node --id 1 --bind 127.0.0.1:7001");
     
     Ok(())
+}
+
+#[cfg(not(madsim))]
+async fn handle_tui_command() -> BlixardResult<()> {
+    use crossterm::{
+        execute,
+        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    };
+    use ratatui::{
+        backend::CrosstermBackend,
+        Terminal,
+    };
+    use std::io;
+
+    // Setup terminal
+    enable_raw_mode().map_err(|e| BlixardError::Internal {
+        message: format!("Failed to enable raw mode: {}", e),
+    })?;
+    
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen).map_err(|e| {
+        BlixardError::Internal {
+            message: format!("Failed to setup terminal: {}", e),
+        }
+    })?;
+    
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend).map_err(|e| BlixardError::Internal {
+        message: format!("Failed to create terminal: {}", e),
+    })?;
+
+    // Create app and event handler
+    let mut app = tui::app::App::new().await?;
+    let mut event_handler = tui::events::EventHandler::new(250); // 250ms tick rate
+
+    // Initial VM list refresh
+    app.refresh_vm_list().await?;
+
+    // Main loop
+    let result = loop {
+        // Draw UI
+        terminal.draw(|f| tui::ui::render(f, &app)).map_err(|e| {
+            BlixardError::Internal {
+                message: format!("Failed to draw terminal: {}", e),
+            }
+        })?;
+
+        // Handle events
+        match event_handler.next().await {
+            Ok(event) => {
+                if let Err(e) = app.handle_event(event).await {
+                    eprintln!("Error handling event: {}", e);
+                }
+                
+                if app.should_quit {
+                    break Ok(());
+                }
+            }
+            Err(e) => {
+                break Err(e);
+            }
+        }
+    };
+
+    // Restore terminal
+    disable_raw_mode().map_err(|e| BlixardError::Internal {
+        message: format!("Failed to disable raw mode: {}", e),
+    })?;
+    
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen
+    ).map_err(|e| BlixardError::Internal {
+        message: format!("Failed to restore terminal: {}", e),
+    })?;
+    
+    terminal.show_cursor().map_err(|e| BlixardError::Internal {
+        message: format!("Failed to show cursor: {}", e),
+    })?;
+
+    result
+}
+
+#[cfg(madsim)]
+async fn handle_tui_command() -> BlixardResult<()> {
+    eprintln!("TUI is not available in simulation mode");
+    std::process::exit(1);
 }
