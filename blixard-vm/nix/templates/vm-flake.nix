@@ -20,14 +20,14 @@
             networking.hostName = "{{ vm_name }}";
             
             microvm = {
-              hypervisor = "{{ hypervisor }}";
+              hypervisor = "qemu";
               vcpu = {{ vcpus }};
               mem = {{ memory }};
               
               interfaces = [
                 {
-                  type = "tap";
-                  id = "eth0";
+                  type = "user";
+                  id = "user0";
                   mac = "02:00:00:00:00:01";
                 }
               ];
@@ -40,12 +40,6 @@
                 }
               ];
               
-              shares = [{
-                tag = "ro-store";
-                source = "/nix/store";
-                mountPoint = "/nix/.ro-store";
-                proto = "virtiofs";
-              }];
             };
             
             # Basic NixOS configuration
