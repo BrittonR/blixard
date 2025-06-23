@@ -8,6 +8,7 @@ pub struct NodeConfig {
     pub bind_addr: SocketAddr,
     pub join_addr: Option<String>,
     pub use_tailscale: bool,
+    pub vm_backend: String, // Backend type: "mock", "microvm", "docker", etc.
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -75,6 +75,7 @@ proptest! {
             bind_addr,
             join_addr,
             use_tailscale,
+            vm_backend: "mock".to_string(),
         };
         
         // Test JSON serialization roundtrip (NodeConfig doesn't derive Serialize, so we test properties)
@@ -350,6 +351,7 @@ proptest! {
             bind_addr: parsed_addr,
             join_addr: None,
             use_tailscale: false,
+            vm_backend: "mock".to_string(),
         };
         
         prop_assert_eq!(config.bind_addr.port(), port);

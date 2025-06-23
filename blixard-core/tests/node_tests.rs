@@ -24,6 +24,7 @@ async fn create_test_node(id: u64) -> (Node, TempDir) {
         bind_addr: "127.0.0.1:0".parse().unwrap(),
         join_addr: None,
         use_tailscale: false,
+            vm_backend: "mock".to_string(),
     };
     
     (Node::new(config), temp_dir)
@@ -174,6 +175,7 @@ async fn test_node_with_different_configs() {
         bind_addr: "127.0.0.1:0".parse().unwrap(),
         join_addr: Some("127.0.0.1:8000".parse().unwrap()),
         use_tailscale: true,
+        vm_backend: "mock".to_string(),
     };
     
     let node3 = Node::new(config);
@@ -228,6 +230,7 @@ async fn test_database_initialization() {
         bind_addr: "127.0.0.1:0".parse().unwrap(),
         join_addr: None,
         use_tailscale: false,
+            vm_backend: "mock".to_string(),
     };
     
     let mut node = Node::new(config);
@@ -270,6 +273,7 @@ async fn test_database_persistence_across_restarts() {
             bind_addr: "127.0.0.1:0".parse().unwrap(),
             join_addr: None,
             use_tailscale: false,
+            vm_backend: "mock".to_string(),
         };
         
         let mut node = Node::new(config);
@@ -328,6 +332,7 @@ async fn test_database_persistence_across_restarts() {
             bind_addr: "127.0.0.1:0".parse().unwrap(),
             join_addr: None,
             use_tailscale: false,
+            vm_backend: "mock".to_string(),
         };
         
         let mut node = Node::new(config);
@@ -651,6 +656,7 @@ async fn test_database_initialization_failure() {
         bind_addr: "127.0.0.1:0".parse().unwrap(),
         join_addr: None,
         use_tailscale: false,
+            vm_backend: "mock".to_string(),
     };
     
     let mut node = Node::new(config);

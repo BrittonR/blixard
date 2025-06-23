@@ -181,6 +181,12 @@ impl SharedNodeState {
         *self.vm_manager.write().await = Some(shared);
     }
     
+    /// Get the VM manager
+    pub async fn get_vm_manager(&self) -> Option<Arc<VmManager>> {
+        let vm_manager = self.vm_manager.read().await;
+        vm_manager.as_ref().map(|shared| shared.inner.clone())
+    }
+    
     /// Get node ID
     pub fn get_id(&self) -> u64 {
         self.config.id
@@ -546,21 +552,8 @@ impl SharedNodeState {
             // We are the leader, process through Raft
             tracing::info!("Processing VM operation locally as leader");
             
-            // For now, use UpdateVmStatus proposal for start/stop operations
-            let (vm_name, new_status) = match &command {
-                VmCommand::Start { name } => (name.clone(), VmStatus::Starting),
-                VmCommand::Stop { name } => (name.clone(), VmStatus::Stopping),
-                VmCommand::Delete { name } => (name.clone(), VmStatus::Stopped), // Delete after stopping
-                _ => return Err(BlixardError::Internal {
-                    message: "Unsupported VM command".to_string(),
-                }),
-            };
-            
-            let proposal_data = crate::raft_manager::ProposalData::UpdateVmStatus {
-                vm_name,
-                status: new_status,
-                node_id: self.get_id(),
-            };
+            // Send the actual VM command through Raft
+            let proposal_data = crate::raft_manager::ProposalData::CreateVm(command);
             
             let (response_tx, response_rx) = oneshot::channel();
             let proposal_id = uuid::Uuid::new_v4().as_bytes().to_vec();

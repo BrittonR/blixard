@@ -3,6 +3,7 @@
 use blixard_core::proto::{
     cluster_service_client::ClusterServiceClient,
     HealthCheckRequest, CreateVmRequest, ListVmsRequest, ClusterStatusRequest,
+    StartVmRequest,
 };
 
 #[tokio::main]
@@ -19,11 +20,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nTesting VM creation...");
     let response = client.create_vm(CreateVmRequest {
         name: "example-vm".to_string(),
-        config_path: "/path/to/config.toml".to_string(),
+        config_path: "./example-microvm.nix".to_string(),
         vcpus: 2,
         memory_mb: 1024,
     }).await?;
-    println!("Create VM response: {:?}", response.into_inner());
+    let create_result = response.into_inner();
+    println!("Create VM response: {:?}", create_result);
+    
+    // If VM was created successfully, start it
+    if create_result.success {
+        println!("\nStarting VM...");
+        let response = client.start_vm(StartVmRequest {
+            name: "example-vm".to_string(),
+        }).await?;
+        println!("Start VM response: {:?}", response.into_inner());
+    }
     
     // Test list VMs
     println!("\nTesting VM listing...");

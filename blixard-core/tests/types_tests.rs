@@ -14,6 +14,7 @@ fn test_node_config_creation() {
         bind_addr: "127.0.0.1:7001".parse().unwrap(),
         join_addr: Some("127.0.0.1:7000".parse().unwrap()),
         use_tailscale: true,
+        vm_backend: "mock".to_string(),
     };
     
     assert_eq!(config.id, 1);

@@ -10,6 +10,9 @@ authors = ["Blixard Contributors"]
 # Core types and interfaces
 blixard-core = { path = "../blixard-core" }
 
+# Storage (needed for factory pattern)
+redb = "2.0"
+
 # Async runtime
 async-trait = "0.1"
 futures = "0.3"

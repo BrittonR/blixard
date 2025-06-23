@@ -139,17 +139,25 @@ impl VmProcessManager {
             }
         }
         
-        // Build the VM runner
-        let runner_path = self.build_vm_runner(name, flake_path).await?;
-        
-        // Start the VM process
-        debug!("Attempting to run VM with runner: {}", runner_path.display());
+        // Use nix run to start the VM directly
+        debug!("Starting VM '{}' with nix run", name);
         let (child, pid) = self.command_executor
-            .spawn(&runner_path.to_string_lossy(), &[], Some(flake_path))
+            .spawn(
+                "nix",
+                &[
+                    "--extra-experimental-features", "nix-command flakes",
+                    "run",
+                    &format!("path:{}#nixosConfigurations.{}.config.microvm.runner.qemu", flake_path.display(), name),
+                    "--impure",
+                    "--",
+                    "--no-reboot",
+                ],
+                None
+            )
             .await
             .map_err(|e| BlixardError::VmOperationFailed {
                 operation: "start".to_string(),
-                details: format!("Failed to spawn VM process: {}", e),
+                details: format!("Failed to start VM: {}", e),
             })?;
         
         info!("Started VM '{}' with PID {}", name, pid);
@@ -160,8 +168,8 @@ impl VmProcessManager {
             child: Some(child),
             pid,
             started_at: SystemTime::now(),
-            hypervisor: self.detect_hypervisor(&runner_path).await?,
-            runner_path,
+            hypervisor: Hypervisor::Qemu,
+            runner_path: PathBuf::new(),
         };
         
         self.processes.write().await.insert(name.to_string(), vm_process);
@@ -180,32 +188,20 @@ impl VmProcessManager {
                 details: format!("VM '{}' is not running", name),
             })?;
         
-        // Try graceful shutdown first
-        if let Err(e) = self.command_executor.kill(vm_process.pid).await {
-            warn!("Failed to send SIGTERM to VM '{}': {}", name, e);
-        }
-        
-        // Wait for process to exit (with timeout)
+        // Kill the process
         if let Some(mut child) = vm_process.child {
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                child.wait()
-            ).await {
-                Ok(Ok(status)) => {
-                    info!("VM '{}' exited with status: {}", name, status);
-                }
-                Ok(Err(e)) => {
-                    warn!("Error waiting for VM '{}' to exit: {}", name, e);
-                }
-                Err(_) => {
-                    warn!("Timeout waiting for VM '{}' to exit, killing forcefully", name);
-                    if let Err(e) = child.kill().await {
-                        error!("Failed to kill VM '{}': {}", name, e);
-                    }
-                }
+            match child.kill().await {
+                Ok(_) => info!("Successfully killed VM '{}' process", name),
+                Err(e) => warn!("Error killing VM '{}': {}", name, e),
+            }
+        } else {
+            // Try to kill by PID
+            if let Err(e) = self.command_executor.kill(vm_process.pid).await {
+                warn!("Failed to kill VM '{}' by PID: {}", name, e);
             }
         }
         
+        info!("Successfully stopped VM '{}'", name);
         Ok(())
     }
     
@@ -289,6 +285,7 @@ impl VmProcessManager {
             Err(e) => Err(BlixardError::SystemError(format!("Failed to check process: {}", e))),
         }
     }
+    
 }
 
 

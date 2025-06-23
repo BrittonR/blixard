@@ -1,8 +1,10 @@
 use async_trait::async_trait;
 use std::sync::Arc;
+use std::path::PathBuf;
+use std::collections::HashMap;
 use redb::{Database, ReadableTable};
 
-use crate::error::BlixardResult;
+use crate::error::{BlixardResult, BlixardError};
 use crate::types::{VmConfig, VmStatus, VmCommand};
 
 /// Abstract interface for VM backend implementations
@@ -162,5 +164,186 @@ impl VmBackend for MockVmBackend {
         }
         
         Ok(result)
+    }
+}
+
+/// Factory trait for creating VM backends
+/// 
+/// This trait enables the plugin architecture for VM backends.
+/// Different implementations (microvm.nix, Docker, Firecracker, etc.)
+/// can register factories to create their specific backend instances.
+pub trait VmBackendFactory: Send + Sync {
+    /// Create a new VM backend instance
+    fn create_backend(
+        &self, 
+        config_dir: PathBuf, 
+        data_dir: PathBuf,
+        database: Arc<Database>
+    ) -> BlixardResult<Arc<dyn VmBackend>>;
+    
+    /// Get the name of this backend type
+    fn backend_type(&self) -> &'static str;
+    
+    /// Get a description of this backend
+    fn description(&self) -> &'static str;
+}
+
+/// Registry for VM backend factories
+/// 
+/// This provides a centralized way to register and discover VM backends.
+/// Backends register themselves at startup, and the Node can create
+/// the appropriate backend based on configuration.
+pub struct VmBackendRegistry {
+    factories: HashMap<String, Arc<dyn VmBackendFactory>>,
+}
+
+impl VmBackendRegistry {
+    /// Create a new empty registry
+    pub fn new() -> Self {
+        Self {
+            factories: HashMap::new(),
+        }
+    }
+    
+    /// Register a backend factory
+    pub fn register(&mut self, factory: Arc<dyn VmBackendFactory>) {
+        let backend_type = factory.backend_type().to_string();
+        tracing::info!("Registering VM backend: {} ({})", backend_type, factory.description());
+        self.factories.insert(backend_type, factory);
+    }
+    
+    /// Create a backend of the specified type
+    pub fn create_backend(
+        &self,
+        backend_type: &str,
+        config_dir: PathBuf,
+        data_dir: PathBuf,
+        database: Arc<Database>
+    ) -> BlixardResult<Arc<dyn VmBackend>> {
+        let factory = self.factories.get(backend_type)
+            .ok_or_else(|| BlixardError::ConfigError(
+                format!("Unknown VM backend type: '{}'. Available backends: {:?}", 
+                    backend_type, self.list_available_backends())
+            ))?;
+        
+        factory.create_backend(config_dir, data_dir, database)
+    }
+    
+    /// List all available backend types
+    pub fn list_available_backends(&self) -> Vec<&str> {
+        self.factories.keys().map(|s| s.as_str()).collect()
+    }
+    
+    /// Get information about all registered backends
+    pub fn get_backend_info(&self) -> Vec<(String, String)> {
+        self.factories.values()
+            .map(|f| (f.backend_type().to_string(), f.description().to_string()))
+            .collect()
+    }
+}
+
+impl Default for VmBackendRegistry {
+    fn default() -> Self {
+        let mut registry = Self::new();
+        
+        // Register the built-in mock backend
+        registry.register(Arc::new(MockVmBackendFactory));
+        
+        registry
+    }
+}
+
+/// Factory for the mock VM backend (built-in for testing)
+pub struct MockVmBackendFactory;
+
+impl VmBackendFactory for MockVmBackendFactory {
+    fn create_backend(
+        &self,
+        _config_dir: PathBuf,
+        _data_dir: PathBuf,
+        database: Arc<Database>
+    ) -> BlixardResult<Arc<dyn VmBackend>> {
+        Ok(Arc::new(MockVmBackend::new(database)))
+    }
+    
+    fn backend_type(&self) -> &'static str {
+        "mock"
+    }
+    
+    fn description(&self) -> &'static str {
+        "Mock VM backend for testing (no actual VMs created)"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+    
+    #[test]
+    fn test_vm_backend_registry() {
+        let mut registry = VmBackendRegistry::new();
+        
+        // Should start empty (no default mock in new())
+        assert!(registry.list_available_backends().is_empty());
+        
+        // Register mock backend
+        registry.register(Arc::new(MockVmBackendFactory));
+        assert_eq!(registry.list_available_backends(), vec!["mock"]);
+        
+        // Test default() includes mock
+        let default_registry = VmBackendRegistry::default();
+        assert!(default_registry.list_available_backends().contains(&"mock"));
+    }
+    
+    #[tokio::test]
+    async fn test_mock_backend_creation() {
+        let registry = VmBackendRegistry::default();
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let database = Arc::new(redb::Database::create(db_path).unwrap());
+        
+        let config_dir = temp_dir.path().join("config");
+        let data_dir = temp_dir.path().join("data");
+        
+        // Should successfully create mock backend
+        let backend = registry.create_backend(
+            "mock",
+            config_dir,
+            data_dir,
+            database
+        ).unwrap();
+        
+        // Test basic operations
+        let vm_config = crate::types::VmConfig {
+            name: "test-vm".to_string(),
+            config_path: "/tmp/test.nix".to_string(),
+            vcpus: 1,
+            memory: 512,
+        };
+        
+        backend.create_vm(&vm_config, 1).await.unwrap();
+        backend.start_vm("test-vm").await.unwrap();
+        backend.stop_vm("test-vm").await.unwrap();
+        backend.delete_vm("test-vm").await.unwrap();
+    }
+    
+    #[test]
+    fn test_unknown_backend_error() {
+        let registry = VmBackendRegistry::default();
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let database = Arc::new(redb::Database::create(db_path).unwrap());
+        
+        let result = registry.create_backend(
+            "unknown",
+            PathBuf::new(),
+            PathBuf::new(),
+            database
+        );
+        
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert!(err.to_string().contains("Unknown VM backend type"));
     }
 }

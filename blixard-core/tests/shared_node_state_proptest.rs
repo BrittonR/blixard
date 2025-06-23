@@ -23,6 +23,7 @@ fn arb_node_config() -> impl Strategy<Value = NodeConfig> {
                 data_dir,
                 join_addr,
                 use_tailscale,
+                vm_backend: "mock".to_string(),
             }
         })
 }

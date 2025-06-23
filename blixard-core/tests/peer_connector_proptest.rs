@@ -95,6 +95,7 @@ impl PropTestHarness {
             bind_addr: "127.0.0.1:0".parse().unwrap(),
             join_addr: None,
             use_tailscale: false,
+            vm_backend: "mock".to_string(),
         };
         let shared_state = Arc::new(SharedNodeState::new(config));
         let peer_connector = Arc::new(PeerConnector::new(shared_state.clone()));

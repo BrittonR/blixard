@@ -1,25 +1,20 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use blixard_core::{
     error::BlixardResult,
     types::NodeConfig,
-    vm_backend::{VmManager, MockVmBackend},
+    vm_backend::{VmManager, VmBackendRegistry},
     node::Node,
 };
-use blixard_vm::{VmBackend, MicrovmBackend};
+use blixard_vm::{MicrovmBackendFactory};
 
 /// Configuration for the Blixard orchestrator
 #[derive(Debug, Clone)]
 pub struct OrchestratorConfig {
     /// Node configuration for distributed consensus
     pub node_config: NodeConfig,
-    /// Path to VM configuration directory
-    pub vm_config_dir: PathBuf,
-    /// Path to VM data directory
-    pub vm_data_dir: PathBuf,
-    /// Whether to use mock VM backend for testing
-    pub use_mock_vm: bool,
+    /// VM backend type to use ("mock", "microvm", "docker", etc.)
+    pub vm_backend_type: String,
 }
 
 /// Main orchestrator that coordinates between distributed systems and VM management
@@ -51,65 +46,42 @@ pub struct OrchestratorConfig {
 /// ```
 pub struct BlixardOrchestrator {
     node: Node,
-    vm_manager: Arc<VmManager>,
-    _vm_backend: Arc<dyn VmBackend>,
 }
 
 impl BlixardOrchestrator {
     /// Create a new orchestrator with the given configuration
     pub async fn new(config: OrchestratorConfig) -> BlixardResult<Self> {
-        tracing::info!("Initializing Blixard orchestrator");
+        tracing::info!("Creating Blixard orchestrator with VM backend: {}", config.vm_backend_type);
         
-        // Create VM backend based on configuration
-        let vm_backend: Arc<dyn VmBackend> = if config.use_mock_vm {
-            tracing::info!("Using mock VM backend for testing");
-            // We'll need to pass the database to MockVmBackend, but we don't have it yet
-            // For now, we'll create it after the node is created
-            todo!("Need to create mock backend after node creation")
-        } else {
-            tracing::info!("Using microvm.nix backend");
-            Arc::new(MicrovmBackend::new(config.vm_config_dir, config.vm_data_dir)?)
-        };
+        // Update node config to include VM backend type
+        let mut node_config = config.node_config;
+        node_config.vm_backend = config.vm_backend_type.clone();
         
-        // Create the distributed consensus node (not async)
-        let mut node = Node::new(config.node_config);
+        // Create the distributed consensus node
+        let node = Node::new(node_config);
         
-        // Initialize the node to set up the database
-        node.initialize().await?;
+        tracing::info!("Blixard orchestrator created with {} VM backend", config.vm_backend_type);
         
-        // Get the database for VM backend creation
-        let database = node.shared().get_database().await
-            .ok_or_else(|| blixard_core::error::BlixardError::Internal { 
-                message: "Database not initialized".to_string() 
-            })?;
-        
-        // Handle mock backend creation after we have the database
-        let vm_backend: Arc<dyn VmBackend> = if config.use_mock_vm {
-            Arc::new(MockVmBackend::new(database.clone()))
-        } else {
-            vm_backend
-        };
-        
-        // Create VM manager that bridges consensus and VM backend
-        let vm_manager = Arc::new(VmManager::new(
-            database,
-            vm_backend.clone(),
-        ));
-        
-        // Wire up the VM manager with the node
-        node.shared().set_vm_manager(vm_manager.clone()).await;
-        
-        Ok(Self {
-            node,
-            vm_manager,
-            _vm_backend: vm_backend,
-        })
+        Ok(Self { node })
     }
     
     /// Initialize the node and start all services
     pub async fn initialize(&mut self) -> BlixardResult<()> {
-        tracing::info!("Starting Blixard orchestrator services");
-        // Node is already initialized in new(), but we can initialize it again if needed
+        tracing::info!("Initializing Blixard orchestrator services");
+        
+        // Set up the VM backend registry
+        let mut registry = VmBackendRegistry::default(); // Includes built-in mock backend
+        
+        // Register the microvm backend
+        registry.register(Arc::new(MicrovmBackendFactory));
+        
+        // TODO: Future backends can be registered here
+        // registry.register(Arc::new(DockerBackendFactory));
+        // registry.register(Arc::new(FirecrackerBackendFactory));
+        
+        // Initialize with the VM backend registry
+        self.node.initialize_with_vm_registry(registry).await?;
+        
         tracing::info!("Blixard orchestrator initialized successfully");
         Ok(())
     }
@@ -136,8 +108,8 @@ impl BlixardOrchestrator {
     }
     
     /// Get the VM manager for direct access to VM operations
-    pub fn vm_manager(&self) -> Arc<VmManager> {
-        self.vm_manager.clone()
+    pub async fn vm_manager(&self) -> Option<Arc<VmManager>> {
+        self.node.shared().get_vm_manager().await
     }
     
     /// Get the bind address of the gRPC server

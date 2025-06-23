@@ -67,6 +67,7 @@ proptest! {
                     None 
                 },
                 use_tailscale,
+                vm_backend: "mock".to_string(),
             };
             
             let (node, _temp_dir) = create_test_node_with_config(config.clone()).await;
@@ -95,6 +96,7 @@ proptest! {
                 bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
+            vm_backend: "mock".to_string(),
             };
             
             let (mut node, _temp_dir) = create_test_node_with_config(config).await;
@@ -135,6 +137,7 @@ proptest! {
                 bind_addr: format!("127.0.0.1:{}", port).parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
+            vm_backend: "mock".to_string(),
             };
             
             let (mut node, _temp_dir) = create_test_node_with_config(temp_config).await;
@@ -178,6 +181,7 @@ proptest! {
                 bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
+            vm_backend: "mock".to_string(),
             };
             
             let (mut node, _temp_dir) = create_test_node_with_config(config).await;
@@ -224,6 +228,7 @@ proptest! {
                 bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
+            vm_backend: "mock".to_string(),
             };
             
             let (mut node, _temp_dir) = create_test_node_with_config(config).await;
@@ -260,6 +265,7 @@ proptest! {
                 bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
+            vm_backend: "mock".to_string(),
             };
             
             let (mut node, _temp_dir) = create_test_node_with_config(config).await;
@@ -299,6 +305,7 @@ proptest! {
                 bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
+            vm_backend: "mock".to_string(),
             };
             
             let (mut node, _temp_dir) = create_test_node_with_config(config).await;
@@ -346,6 +353,7 @@ proptest! {
                 bind_addr: "127.0.0.1:0".parse().unwrap(),
                 join_addr: None,
                 use_tailscale: false,
+            vm_backend: "mock".to_string(),
             };
             
             let (mut node, _temp_dir) = create_test_node_with_config(config).await;

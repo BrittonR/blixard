@@ -1,6 +1,5 @@
 use clap::Parser;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 
 use blixard::{
     BlixardOrchestrator,
@@ -46,6 +45,10 @@ enum Commands {
         /// Use mock VM backend for testing
         #[arg(long)]
         mock_vm: bool,
+        
+        /// VM backend type to use ("mock", "microvm", "docker", etc.)
+        #[arg(long, default_value = "microvm")]
+        vm_backend: String,
         
         /// Cluster peers to join (comma-separated addresses)
         #[arg(long)]
@@ -122,7 +125,7 @@ async fn main() -> BlixardResult<()> {
     let cli = Cli::parse();
     
     match cli.command {
-        Commands::Node { id, bind, data_dir, vm_config_dir, vm_data_dir, mock_vm, peers } => {
+        Commands::Node { id, bind, data_dir, vm_config_dir: _, vm_data_dir: _, mock_vm, vm_backend, peers } => {
             // Parse bind address
             let bind_address: SocketAddr = bind.parse()
                 .map_err(|e| BlixardError::ConfigError(
@@ -146,6 +149,13 @@ async fn main() -> BlixardResult<()> {
                 None
             };
 
+            // Determine VM backend type (mock_vm flag overrides explicit backend selection)
+            let vm_backend_type = if mock_vm {
+                "mock".to_string()
+            } else {
+                vm_backend
+            };
+            
             // Create node configuration
             let node_config = NodeConfig {
                 id,
@@ -153,14 +163,13 @@ async fn main() -> BlixardResult<()> {
                 data_dir,
                 join_addr,
                 use_tailscale: false,
+                vm_backend: vm_backend_type.clone(),
             };
             
             // Create orchestrator configuration
             let orchestrator_config = OrchestratorConfig {
                 node_config,
-                vm_config_dir: PathBuf::from(vm_config_dir),
-                vm_data_dir: PathBuf::from(vm_data_dir),
-                use_mock_vm: mock_vm,
+                vm_backend_type,
             };
 
             // Create and initialize the orchestrator

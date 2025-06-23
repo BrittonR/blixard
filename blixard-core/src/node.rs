@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::types::{NodeConfig, VmCommand};
-use crate::vm_backend::VmManager;
+use crate::vm_backend::{VmManager, VmBackendRegistry};
 use crate::raft_manager::{RaftManager, RaftProposal, ProposalData};
 use crate::node_shared::SharedNodeState;
 use crate::peer_connector::PeerConnector;
@@ -38,6 +38,12 @@ impl Node {
 
     /// Initialize the node with database and channels
     pub async fn initialize(&mut self) -> BlixardResult<()> {
+        // Call internal initialization with default registry
+        self.initialize_internal(None).await
+    }
+    
+    /// Internal initialization that accepts an optional VM backend registry
+    async fn initialize_internal(&mut self, registry_opt: Option<VmBackendRegistry>) -> BlixardResult<()> {
         // Initialize database
         let data_dir = self.shared.config.data_dir.clone();
         let db_path = format!("{}/blixard.db", data_dir);
@@ -68,10 +74,11 @@ impl Node {
         
         self.shared.set_database(db_arc.clone()).await;
 
-        // Initialize VM manager with default mock backend
-        use crate::vm_backend::MockVmBackend;
-        let mock_backend = Arc::new(MockVmBackend::new(db_arc.clone()));
-        let vm_manager = Arc::new(VmManager::new(db_arc.clone(), mock_backend));
+        // Initialize VM manager with factory pattern
+        // Use provided registry or default to mock backend
+        let registry = registry_opt.unwrap_or_else(VmBackendRegistry::default);
+        let vm_backend = self.create_vm_backend(&registry, db_arc.clone())?;
+        let vm_manager = Arc::new(VmManager::new(db_arc.clone(), vm_backend));
         
         self.shared.set_vm_manager(vm_manager).await;
 
@@ -604,6 +611,40 @@ impl Node {
         let _ = std::fs::create_dir_all(data_dir);
         crate::config::get().resource.default_disk_gb
     }
+    
+    /// Initialize VM backend with custom registry (for applications to register backends)
+    pub async fn initialize_with_vm_registry(&mut self, registry: VmBackendRegistry) -> BlixardResult<()> {
+        // Call the internal initialization with the custom registry
+        self.initialize_internal(Some(registry)).await
+    }
+    
+    /// Create a VM backend using the factory pattern
+    fn create_vm_backend(
+        &self, 
+        registry: &VmBackendRegistry, 
+        database: Arc<Database>
+    ) -> BlixardResult<Arc<dyn crate::vm_backend::VmBackend>> {
+        use std::path::PathBuf;
+        
+        let data_dir = &self.shared.config.data_dir;
+        let vm_config_dir = PathBuf::from(data_dir).join("vm-configs");
+        let vm_data_dir = PathBuf::from(data_dir).join("vm-data");
+        
+        // Create directories
+        std::fs::create_dir_all(&vm_config_dir)
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to create VM config directory: {}", e),
+            })?;
+        std::fs::create_dir_all(&vm_data_dir)
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to create VM data directory: {}", e),
+            })?;
+        
+        let backend_type = &self.shared.config.vm_backend;
+        tracing::info!("Creating VM backend of type: {}", backend_type);
+        
+        registry.create_backend(backend_type, vm_config_dir, vm_data_dir, database)
+    }
 }
 
 #[cfg(test)]
@@ -618,6 +659,7 @@ mod tests {
             bind_addr: "127.0.0.1:0".parse().expect("valid test address"),
             join_addr: None,
             use_tailscale: false,
+            vm_backend: "mock".to_string(),
         };
 
         let mut node = Node::new(config);

@@ -47,6 +47,13 @@
           ripgrep
           fd
           
+          # VM Console Access Tools
+          socat
+          screen
+          tmux
+          minicom
+          picocom
+          
           # Testing
           microvm.packages.${system}.microvm
         ];

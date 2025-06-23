@@ -260,3 +260,30 @@ impl VmBackend for MicrovmBackend {
         Ok(result)
     }
 }
+
+/// Factory for creating MicrovmBackend instances
+/// 
+/// This factory implements the VmBackendFactory trait from blixard-core,
+/// allowing the MicrovmBackend to be registered and created through the
+/// factory pattern for modular VM backend architecture.
+pub struct MicrovmBackendFactory;
+
+impl blixard_core::vm_backend::VmBackendFactory for MicrovmBackendFactory {
+    fn create_backend(
+        &self,
+        config_dir: std::path::PathBuf,
+        data_dir: std::path::PathBuf,
+        _database: std::sync::Arc<redb::Database>
+    ) -> BlixardResult<std::sync::Arc<dyn blixard_core::vm_backend::VmBackend>> {
+        let backend = MicrovmBackend::new(config_dir, data_dir)?;
+        Ok(std::sync::Arc::new(backend))
+    }
+    
+    fn backend_type(&self) -> &'static str {
+        "microvm"
+    }
+    
+    fn description(&self) -> &'static str {
+        "MicroVM backend using microvm.nix for lightweight NixOS VMs"
+    }
+}

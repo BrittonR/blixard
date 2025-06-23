@@ -24,6 +24,7 @@ pub fn test_node_config(id: u64, port: u16) -> NodeConfig {
         join_addr: None,
         data_dir: format!("/tmp/blixard-test-{}", id),
         use_tailscale: false,
+        vm_backend: "mock".to_string(),
     }
 }
 
