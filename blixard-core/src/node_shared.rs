@@ -489,6 +489,50 @@ impl SharedNodeState {
         }
     }
     
+    /// Schedule VM placement using the intelligent scheduler
+    pub async fn schedule_vm_placement(
+        &self,
+        vm_config: &VmConfig,
+        strategy: crate::vm_scheduler::PlacementStrategy,
+    ) -> BlixardResult<crate::vm_scheduler::PlacementDecision> {
+        let vm_manager = self.vm_manager.read().await;
+        if let Some(manager) = vm_manager.as_ref() {
+            manager.inner.schedule_vm_placement(vm_config, strategy).await
+        } else {
+            Err(BlixardError::Internal {
+                message: "VM manager not initialized".to_string(),
+            })
+        }
+    }
+    
+    /// Get cluster-wide resource summary
+    pub async fn get_cluster_resource_summary(&self) -> BlixardResult<crate::vm_scheduler::ClusterResourceSummary> {
+        let vm_manager = self.vm_manager.read().await;
+        if let Some(manager) = vm_manager.as_ref() {
+            manager.inner.get_cluster_resource_summary().await
+        } else {
+            Err(BlixardError::Internal {
+                message: "VM manager not initialized".to_string(),
+            })
+        }
+    }
+    
+    /// Create a VM with automatic placement scheduling
+    pub async fn create_vm_with_scheduling(
+        &self,
+        vm_config: VmConfig,
+        strategy: crate::vm_scheduler::PlacementStrategy,
+    ) -> BlixardResult<crate::vm_scheduler::PlacementDecision> {
+        let vm_manager = self.vm_manager.read().await;
+        if let Some(manager) = vm_manager.as_ref() {
+            manager.inner.create_vm_with_scheduling(vm_config, strategy).await
+        } else {
+            Err(BlixardError::Internal {
+                message: "VM manager not initialized".to_string(),
+            })
+        }
+    }
+    
     /// Send VM operation through Raft consensus
     pub async fn send_vm_operation_through_raft(&self, command: VmCommand) -> BlixardResult<()> {
         tracing::info!("send_vm_operation_through_raft called");

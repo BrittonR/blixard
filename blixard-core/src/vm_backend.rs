@@ -3,9 +3,11 @@ use std::sync::Arc;
 use std::path::PathBuf;
 use std::collections::HashMap;
 use redb::{Database, ReadableTable};
+use uuid;
 
 use crate::error::{BlixardResult, BlixardError};
 use crate::types::{VmConfig, VmStatus, VmCommand};
+use crate::vm_scheduler::{VmScheduler, PlacementStrategy, PlacementDecision};
 
 /// Abstract interface for VM backend implementations
 /// 
@@ -217,6 +219,68 @@ impl VmManager {
             
             tracing::warn!("VM '{}' status monitoring timed out after {} attempts", name, MAX_ATTEMPTS);
         });
+    }
+    
+    /// Schedule VM placement using the intelligent scheduler
+    /// 
+    /// This method uses the VM scheduler to determine the best node for VM placement
+    /// based on resource requirements and placement strategy. The actual VM creation
+    /// still goes through Raft consensus for distributed coordination.
+    pub async fn schedule_vm_placement(
+        &self,
+        vm_config: &VmConfig,
+        strategy: PlacementStrategy,
+    ) -> BlixardResult<PlacementDecision> {
+        let scheduler = VmScheduler::new(Arc::clone(&self.database));
+        scheduler.schedule_vm_placement(vm_config, strategy).await
+    }
+    
+    /// Get cluster-wide resource summary
+    /// 
+    /// This provides visibility into cluster resource utilization for
+    /// management and monitoring purposes.
+    pub async fn get_cluster_resource_summary(&self) -> BlixardResult<crate::vm_scheduler::ClusterResourceSummary> {
+        let scheduler = VmScheduler::new(Arc::clone(&self.database));
+        scheduler.get_cluster_resource_summary().await
+    }
+    
+    /// Create a VM with automatic placement
+    /// 
+    /// This is a convenience method that combines scheduling and VM creation.
+    /// It automatically selects the best node using the specified strategy,
+    /// then creates the VM through the normal Raft consensus process.
+    pub async fn create_vm_with_scheduling(
+        &self,
+        vm_config: VmConfig,
+        strategy: PlacementStrategy,
+    ) -> BlixardResult<PlacementDecision> {
+        // Schedule placement
+        let placement = self.schedule_vm_placement(&vm_config, strategy).await?;
+        
+        tracing::info!(
+            "Scheduled VM '{}' for placement on node {}: {}",
+            vm_config.name,
+            placement.selected_node_id,
+            placement.reason
+        );
+        
+        // Propose VM creation through Raft consensus
+        let vm_command = VmCommand::Create {
+            config: vm_config,
+            node_id: placement.selected_node_id,
+        };
+        
+        // Submit the command through Raft for distributed consensus
+        let proposal_data = crate::raft_manager::ProposalData::CreateVm(vm_command);
+        let proposal = crate::raft_manager::RaftProposal {
+            id: uuid::Uuid::new_v4().as_bytes().to_vec(),
+            data: proposal_data,
+            response_tx: None, // Fire-and-forget for scheduling
+        };
+        
+        self.node_state.send_raft_proposal(proposal).await?;
+        
+        Ok(placement)
     }
 }
 

@@ -18,6 +18,9 @@ use crate::{
         ClusterStatusResponse, RaftMessageRequest, RaftMessageResponse, TaskRequest, TaskResponse,
         TaskStatusRequest, TaskStatusResponse, TaskStatus,
         GetRaftStatusRequest, GetRaftStatusResponse, ProposeTaskRequest, ProposeTaskResponse,
+        CreateVmWithSchedulingRequest, CreateVmWithSchedulingResponse, ScheduleVmPlacementRequest,
+        ScheduleVmPlacementResponse, ClusterResourceSummaryRequest, ClusterResourceSummaryResponse,
+        PlacementStrategy, ClusterResourceSummary, NodeResourceUsage, WorkerCapabilities,
     },
 };
 use std::sync::Arc;
@@ -736,6 +739,179 @@ impl ClusterService for BlixardGrpcService {
                 execution_time_ms: 0,
             })),
             Err(e) => Err(Self::error_to_status(e)),
+        }
+    }
+    
+    async fn create_vm_with_scheduling(
+        &self,
+        request: Request<crate::proto::CreateVmWithSchedulingRequest>,
+    ) -> Result<Response<crate::proto::CreateVmWithSchedulingResponse>, Status> {
+        let req = request.into_inner();
+
+        // Validate request
+        if req.name.is_empty() {
+            return Ok(Response::new(crate::proto::CreateVmWithSchedulingResponse {
+                success: false,
+                message: "VM name cannot be empty".to_string(),
+                vm_id: String::new(),
+                selected_node_id: 0,
+                placement_reason: String::new(),
+                alternative_nodes: vec![],
+            }));
+        }
+
+        // Convert proto placement strategy to internal type
+        let strategy = match req.strategy() {
+            crate::proto::PlacementStrategy::MostAvailable => 
+                crate::vm_scheduler::PlacementStrategy::MostAvailable,
+            crate::proto::PlacementStrategy::LeastAvailable => 
+                crate::vm_scheduler::PlacementStrategy::LeastAvailable,
+            crate::proto::PlacementStrategy::RoundRobin => 
+                crate::vm_scheduler::PlacementStrategy::RoundRobin,
+            crate::proto::PlacementStrategy::Manual => {
+                // For manual placement, we need a node ID, but the proto doesn't specify it
+                // Default to current node for now
+                crate::vm_scheduler::PlacementStrategy::Manual { 
+                    node_id: self.node.get_id() 
+                }
+            }
+        };
+
+        // Create VM config
+        let vm_config = crate::types::VmConfig {
+            name: req.name.clone(),
+            config_path: req.config_path,
+            vcpus: req.vcpus,
+            memory: req.memory_mb,
+        };
+
+        // Create VM with scheduling through VM manager
+        match self.node.create_vm_with_scheduling(vm_config, strategy).await {
+            Ok(placement) => Ok(Response::new(crate::proto::CreateVmWithSchedulingResponse {
+                success: true,
+                message: format!("VM '{}' scheduled and created successfully", req.name),
+                vm_id: req.name,
+                selected_node_id: placement.selected_node_id,
+                placement_reason: placement.reason,
+                alternative_nodes: placement.alternative_nodes,
+            })),
+            Err(e) => Ok(Response::new(crate::proto::CreateVmWithSchedulingResponse {
+                success: false,
+                message: format!("Failed to create VM with scheduling: {}", e),
+                vm_id: String::new(),
+                selected_node_id: 0,
+                placement_reason: String::new(),
+                alternative_nodes: vec![],
+            })),
+        }
+    }
+    
+    async fn schedule_vm_placement(
+        &self,
+        request: Request<crate::proto::ScheduleVmPlacementRequest>,
+    ) -> Result<Response<crate::proto::ScheduleVmPlacementResponse>, Status> {
+        let req = request.into_inner();
+
+        // Validate request
+        if req.name.is_empty() {
+            return Ok(Response::new(crate::proto::ScheduleVmPlacementResponse {
+                success: false,
+                message: "VM name cannot be empty".to_string(),
+                selected_node_id: 0,
+                placement_reason: String::new(),
+                alternative_nodes: vec![],
+            }));
+        }
+
+        // Convert proto placement strategy to internal type
+        let strategy = match req.strategy() {
+            crate::proto::PlacementStrategy::MostAvailable => 
+                crate::vm_scheduler::PlacementStrategy::MostAvailable,
+            crate::proto::PlacementStrategy::LeastAvailable => 
+                crate::vm_scheduler::PlacementStrategy::LeastAvailable,
+            crate::proto::PlacementStrategy::RoundRobin => 
+                crate::vm_scheduler::PlacementStrategy::RoundRobin,
+            crate::proto::PlacementStrategy::Manual => {
+                crate::vm_scheduler::PlacementStrategy::Manual { 
+                    node_id: self.node.get_id() 
+                }
+            }
+        };
+
+        // Create VM config for scheduling
+        let vm_config = crate::types::VmConfig {
+            name: req.name.clone(),
+            config_path: req.config_path,
+            vcpus: req.vcpus,
+            memory: req.memory_mb,
+        };
+
+        // Schedule VM placement
+        match self.node.schedule_vm_placement(&vm_config, strategy).await {
+            Ok(placement) => Ok(Response::new(crate::proto::ScheduleVmPlacementResponse {
+                success: true,
+                message: "VM placement scheduled successfully".to_string(),
+                selected_node_id: placement.selected_node_id,
+                placement_reason: placement.reason,
+                alternative_nodes: placement.alternative_nodes,
+            })),
+            Err(e) => Ok(Response::new(crate::proto::ScheduleVmPlacementResponse {
+                success: false,
+                message: format!("Failed to schedule VM placement: {}", e),
+                selected_node_id: 0,
+                placement_reason: String::new(),
+                alternative_nodes: vec![],
+            })),
+        }
+    }
+    
+    async fn get_cluster_resource_summary(
+        &self,
+        _request: Request<crate::proto::ClusterResourceSummaryRequest>,
+    ) -> Result<Response<crate::proto::ClusterResourceSummaryResponse>, Status> {
+        match self.node.get_cluster_resource_summary().await {
+            Ok(summary) => {
+                // Convert internal types to proto
+                let proto_nodes: Vec<crate::proto::NodeResourceUsage> = summary.nodes
+                    .into_iter()
+                    .map(|node| crate::proto::NodeResourceUsage {
+                        node_id: node.node_id,
+                        capabilities: Some(crate::proto::WorkerCapabilities {
+                            cpu_cores: node.capabilities.cpu_cores,
+                            memory_mb: node.capabilities.memory_mb,
+                            disk_gb: node.capabilities.disk_gb,
+                            features: node.capabilities.features,
+                        }),
+                        used_vcpus: node.used_vcpus,
+                        used_memory_mb: node.used_memory_mb,
+                        used_disk_gb: node.used_disk_gb,
+                        running_vms: node.running_vms,
+                    })
+                    .collect();
+                
+                let proto_summary = crate::proto::ClusterResourceSummary {
+                    total_nodes: summary.total_nodes,
+                    total_vcpus: summary.total_vcpus,
+                    used_vcpus: summary.used_vcpus,
+                    total_memory_mb: summary.total_memory_mb,
+                    used_memory_mb: summary.used_memory_mb,
+                    total_disk_gb: summary.total_disk_gb,
+                    used_disk_gb: summary.used_disk_gb,
+                    total_running_vms: summary.total_running_vms,
+                    nodes: proto_nodes,
+                };
+                
+                Ok(Response::new(crate::proto::ClusterResourceSummaryResponse {
+                    success: true,
+                    message: "Cluster resource summary retrieved successfully".to_string(),
+                    summary: Some(proto_summary),
+                }))
+            }
+            Err(e) => Ok(Response::new(crate::proto::ClusterResourceSummaryResponse {
+                success: false,
+                message: format!("Failed to get cluster resource summary: {}", e),
+                summary: None,
+            })),
         }
     }
 }

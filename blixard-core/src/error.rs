@@ -64,6 +64,9 @@ pub enum BlixardError {
 
     #[error("VM operation '{operation}' failed: {details}")]
     VmOperationFailed { operation: String, details: String },
+
+    #[error("Scheduling error: {message}")]
+    SchedulingError { message: String },
 }
 
 pub type Result<T> = std::result::Result<T, BlixardError>;

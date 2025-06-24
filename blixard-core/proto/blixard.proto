@@ -18,11 +18,16 @@ service ClusterService {
   
   // VM operations
   rpc CreateVm(CreateVmRequest) returns (CreateVmResponse);
+  rpc CreateVmWithScheduling(CreateVmWithSchedulingRequest) returns (CreateVmWithSchedulingResponse);
   rpc StartVm(StartVmRequest) returns (StartVmResponse);
   rpc StopVm(StopVmRequest) returns (StopVmResponse);
   rpc DeleteVm(DeleteVmRequest) returns (DeleteVmResponse);
   rpc ListVms(ListVmsRequest) returns (ListVmsResponse);
   rpc GetVmStatus(GetVmStatusRequest) returns (GetVmStatusResponse);
+  
+  // VM scheduling operations
+  rpc ScheduleVmPlacement(ScheduleVmPlacementRequest) returns (ScheduleVmPlacementResponse);
+  rpc GetClusterResourceSummary(ClusterResourceSummaryRequest) returns (ClusterResourceSummaryResponse);
   
   // Health check
   rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
@@ -153,6 +158,83 @@ message GetVmStatusRequest {
 message GetVmStatusResponse {
   bool found = 1;
   VmInfo vm_info = 2;
+}
+
+// VM Scheduling messages
+message CreateVmWithSchedulingRequest {
+  string name = 1;
+  string config_path = 2;
+  uint32 vcpus = 3;
+  uint32 memory_mb = 4;
+  PlacementStrategy strategy = 5;
+}
+
+message CreateVmWithSchedulingResponse {
+  bool success = 1;
+  string message = 2;
+  string vm_id = 3;
+  uint64 selected_node_id = 4;
+  string placement_reason = 5;
+  repeated uint64 alternative_nodes = 6;
+}
+
+message ScheduleVmPlacementRequest {
+  string name = 1;
+  string config_path = 2;
+  uint32 vcpus = 3;
+  uint32 memory_mb = 4;
+  PlacementStrategy strategy = 5;
+}
+
+message ScheduleVmPlacementResponse {
+  bool success = 1;
+  string message = 2;
+  uint64 selected_node_id = 3;
+  string placement_reason = 4;
+  repeated uint64 alternative_nodes = 5;
+}
+
+message ClusterResourceSummaryRequest {}
+
+message ClusterResourceSummaryResponse {
+  bool success = 1;
+  string message = 2;
+  ClusterResourceSummary summary = 3;
+}
+
+enum PlacementStrategy {
+  PLACEMENT_STRATEGY_MOST_AVAILABLE = 0;
+  PLACEMENT_STRATEGY_LEAST_AVAILABLE = 1;
+  PLACEMENT_STRATEGY_ROUND_ROBIN = 2;
+  PLACEMENT_STRATEGY_MANUAL = 3;
+}
+
+message ClusterResourceSummary {
+  uint32 total_nodes = 1;
+  uint32 total_vcpus = 2;
+  uint32 used_vcpus = 3;
+  uint64 total_memory_mb = 4;
+  uint64 used_memory_mb = 5;
+  uint64 total_disk_gb = 6;
+  uint64 used_disk_gb = 7;
+  uint32 total_running_vms = 8;
+  repeated NodeResourceUsage nodes = 9;
+}
+
+message NodeResourceUsage {
+  uint64 node_id = 1;
+  WorkerCapabilities capabilities = 2;
+  uint32 used_vcpus = 3;
+  uint64 used_memory_mb = 4;
+  uint64 used_disk_gb = 5;
+  uint32 running_vms = 6;
+}
+
+message WorkerCapabilities {
+  uint32 cpu_cores = 1;
+  uint64 memory_mb = 2;
+  uint64 disk_gb = 3;
+  repeated string features = 4;
 }
 
 // Health check

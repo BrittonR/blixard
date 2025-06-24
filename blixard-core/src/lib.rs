@@ -7,6 +7,7 @@ pub mod raft_codec;
 pub mod raft_manager;
 pub mod storage;
 pub mod vm_backend;
+pub mod vm_scheduler;
 pub mod peer_connector;
 pub mod config;
 
