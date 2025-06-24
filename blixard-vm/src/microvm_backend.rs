@@ -246,11 +246,19 @@ impl MicrovmBackend {
         // Allocate IP address and generate network config for the VM
         let (vm_ip, mac_address, gateway, subnet) = self.allocate_vm_ip(&core_config.name).await?;
         
+        // Extract VM index from IP address (last octet of 10.0.0.x)
+        let vm_index = vm_ip.parse::<std::net::Ipv4Addr>()
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Invalid IP address format: {}", e),
+            })?
+            .octets()[3] as u32;
+        
         // Generate interface ID based on VM name
         let interface_id = format!("vm-{}", core_config.name);
         
         Ok(vm_types::VmConfig {
             name: core_config.name.clone(),
+            vm_index,
             hypervisor: vm_types::Hypervisor::Qemu,
             vcpus: core_config.vcpus,
             memory: core_config.memory,

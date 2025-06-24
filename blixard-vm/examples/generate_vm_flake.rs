@@ -13,6 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Define a simple VM configuration
     let config = VmConfig {
         name: "example-vm".to_string(),
+        vm_index: 3,
         hypervisor: Hypervisor::CloudHypervisor,
         vcpus: 2,
         memory: 1024,

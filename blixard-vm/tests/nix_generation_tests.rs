@@ -15,6 +15,7 @@ mod tests {
         
         let config = VmConfig {
             name: "test-vm".to_string(),
+            vm_index: 5,
             hypervisor: Hypervisor::CloudHypervisor,
             vcpus: 2,
             memory: 1024,
@@ -47,6 +48,7 @@ mod tests {
         
         let config = VmConfig {
             name: "modular-vm".to_string(),
+            vm_index: 10,
             hypervisor: Hypervisor::Firecracker,
             vcpus: 4,
             memory: 2048,

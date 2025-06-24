@@ -4,6 +4,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct VmConfig {
     pub name: String,
+    pub vm_index: u32, // Unique index for static IP assignment (1-254)
     pub hypervisor: Hypervisor,
     pub vcpus: u32,
     pub memory: u32, // MB
@@ -19,6 +20,7 @@ impl Default for VmConfig {
     fn default() -> Self {
         Self {
             name: String::new(),
+            vm_index: 1,
             hypervisor: Hypervisor::CloudHypervisor,
             vcpus: 1,
             memory: 512,

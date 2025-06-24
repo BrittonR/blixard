@@ -24,31 +24,11 @@
               vcpu = {{ vcpus }};
               mem = {{ memory }};
               
-              interfaces = [
-                {% if networks -%}
-                {% for network in networks -%}
-                {
-                  type = "macvtap";
-                  id = "{{ network.id }}";
-                  mac = "{{ network.mac }}";
-                  macvtap = {
-                    link = "br0";
-                    mode = "bridge";
-                  };
-                }
-                {% endfor -%}
-                {% else -%}
-                {
-                  type = "macvtap";
-                  id = "vm-default";
-                  mac = "02:00:00:00:00:01";
-                  macvtap = {
-                    link = "br0";
-                    mode = "bridge";
-                  };
-                }
-                {% endif -%}
-              ];
+              interfaces = [ {
+                id = "{{ vm_name }}";
+                type = "tap";
+                mac = "{{ vm_mac }}";
+              } ];
               
               volumes = [
                 {
@@ -88,33 +68,47 @@
               wantedBy = [ "getty.target" ];
             };
             
-            # Static IP networking configuration for routed network
-            networking.useDHCP = false;
+            # Network configuration using systemd-networkd
+            networking.useNetworkd = true;
             networking.firewall.enable = false;
             
-            # Configure static IP based on allocated address
-            {% if networks -%}
-            {% for network in networks -%}
-            {% if network.type == "routed" -%}
-            networking.interfaces.eth0 = {
-              ipv4.addresses = [
+            systemd.network.networks."10-eth" = {
+              matchConfig.MACAddress = "{{ vm_mac }}";
+              # Static IP configuration based on VM index
+              address = [
+                "10.0.0.{{ vm_index }}/32"
+                "fec0::{{ vm_index_hex }}/128"
+              ];
+              routes = [
                 {
-                  address = "{{ network.ip }}";
-                  prefixLength = 24;
+                  # A route to the host
+                  Destination = "10.0.0.0/32";
+                  GatewayOnLink = true;
+                }
+                {
+                  # Default route
+                  Destination = "0.0.0.0/0";
+                  Gateway = "10.0.0.0";
+                  GatewayOnLink = true;
+                }
+                {
+                  # IPv6 default route
+                  Destination = "::/0";
+                  Gateway = "fec0::";
+                  GatewayOnLink = true;
                 }
               ];
+              networkConfig = {
+                # DNS servers
+                DNS = [
+                  # Quad9.net
+                  "9.9.9.9"
+                  "149.112.112.112"
+                  "2620:fe::fe"
+                  "2620:fe::9"
+                ];
+              };
             };
-            networking.defaultGateway = {
-              address = "{{ network.gateway }}";
-              interface = "eth0";
-            };
-            networking.nameservers = [ "8.8.8.8" "1.1.1.1" ];
-            {% endif -%}
-            {% endfor -%}
-            {% else -%}
-            # Fallback to DHCP if no network config
-            networking.interfaces.eth0.useDHCP = true;
-            {% endif -%}
             
             # Configure kernel for serial console
             boot.kernelParams = [ 
@@ -128,15 +122,7 @@
               after = [ "network.target" ];
               serviceConfig = {
                 Type = "oneshot";
-                {% if networks -%}
-                {% for network in networks -%}
-                {% if network.type == "routed" -%}
-                ExecStart = "${pkgs.coreutils}/bin/echo 'Blixard VM started successfully! SSH: {{ network.ip }}:22'";
-                {% endif -%}
-                {% endfor -%}
-                {% else -%}
-                ExecStart = "${pkgs.coreutils}/bin/echo 'Blixard VM started successfully!'";
-                {% endif -%}
+                ExecStart = "${pkgs.coreutils}/bin/echo 'Blixard VM {{ vm_name }} started successfully! SSH: 10.0.0.{{ vm_index }}:22'";
                 RemainAfterExit = true;
               };
             };

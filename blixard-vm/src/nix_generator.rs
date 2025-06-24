@@ -36,6 +36,9 @@ impl NixFlakeGenerator {
         
         // Basic configuration
         context.insert("vm_name", &config.name);
+        context.insert("vm_index", &config.vm_index);
+        context.insert("vm_index_hex", &format!("{:x}", config.vm_index));
+        context.insert("vm_mac", &format!("02:00:00:00:{:02x}:01", config.vm_index));
         context.insert("system", "x86_64-linux");
         
         // Use absolute path for modules
