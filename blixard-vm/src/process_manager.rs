@@ -431,9 +431,9 @@ impl VmProcessManager {
             .replace("{{ user }}", &std::env::var("USER").unwrap_or_else(|_| "user".to_string()))
             .replace("{{ home }}", &user_home);
         
-        // Ensure system systemd directory exists (should exist by default)
-        std::fs::create_dir_all("/etc/systemd/system")
-            .map_err(|e| BlixardError::ConfigError(format!("Failed to access system systemd directory: {}", e)))?;
+        // Ensure user systemd directory exists
+        std::fs::create_dir_all(&format!("/home/{}/.config/systemd/user", user_name))
+            .map_err(|e| BlixardError::ConfigError(format!("Failed to create user systemd directory: {}", e)))?;
         
         // Write service file to temporary location first
         let temp_path = format!("/tmp/blixard-vm-{}.service", name);
@@ -443,10 +443,6 @@ impl VmProcessManager {
                 operation: "create_service".to_string(),
                 details: format!("Failed to write temporary service file: {}", e),
             })?;
-        
-        // Ensure user systemd directory exists
-        std::fs::create_dir_all(&format!("/home/{}/.config/systemd/user", user_name))
-            .map_err(|e| BlixardError::ConfigError(format!("Failed to create user systemd directory: {}", e)))?;
         
         // Copy to user systemd location
         let copy_output = self.command_executor
