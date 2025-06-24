@@ -577,16 +577,23 @@ impl ClusterService for BlixardGrpcService {
     ) -> Result<Response<ListVmsResponse>, Status> {
         match self.node.list_vms().await {
             Ok(vms) => {
-                let vm_infos: Vec<VmInfo> = vms
-                    .into_iter()
-                    .map(|(vm_config, vm_status)| VmInfo {
+                let mut vm_infos = Vec::new();
+                
+                for (vm_config, vm_status) in vms {
+                    // Get IP address for this VM
+                    let ip_address = self.node.get_vm_ip(&vm_config.name).await
+                        .unwrap_or(None)
+                        .unwrap_or_default();
+                    
+                    vm_infos.push(VmInfo {
                         name: vm_config.name,
                         state: Self::vm_status_to_proto(&vm_status).into(),
                         node_id: self.node.get_id(),
                         vcpus: vm_config.vcpus,
                         memory_mb: vm_config.memory,
-                    })
-                    .collect();
+                        ip_address,
+                    });
+                }
 
                 Ok(Response::new(ListVmsResponse { vms: vm_infos }))
             }
@@ -602,12 +609,18 @@ impl ClusterService for BlixardGrpcService {
 
         match self.node.get_vm_status(&req.name).await {
             Ok(Some((vm_config, vm_status))) => {
+                // Get IP address for this VM
+                let ip_address = self.node.get_vm_ip(&vm_config.name).await
+                    .unwrap_or(None)
+                    .unwrap_or_default();
+                
                 let vm_info = VmInfo {
                     name: vm_config.name,
                     state: Self::vm_status_to_proto(&vm_status).into(),
                     node_id: self.node.get_id(),
                     vcpus: vm_config.vcpus,
                     memory_mb: vm_config.memory,
+                    ip_address,
                 };
 
                 Ok(Response::new(GetVmStatusResponse {

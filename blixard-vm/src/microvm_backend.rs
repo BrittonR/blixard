@@ -3,7 +3,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, debug};
+use tracing::{info, debug, warn};
+use std::net::Ipv4Addr;
 
 use blixard_core::{
     vm_backend::VmBackend,
@@ -16,6 +17,136 @@ use crate::{
     process_manager::VmProcessManager,
     types as vm_types,
 };
+
+/// IP address pool manager for routed VM networking
+/// 
+/// Manages IP address allocation within a subnet for VM instances.
+/// Default subnet is 10.0.0.0/24 with gateway at 10.0.0.1.
+/// VM IPs are allocated from 10.0.0.10 onwards.
+#[derive(Debug, Clone)]
+struct IpAddressPool {
+    /// The subnet CIDR (e.g., "10.0.0.0/24")
+    subnet: String,
+    /// Gateway IP address (e.g., "10.0.0.1")
+    gateway: Ipv4Addr,
+    /// Network base address (e.g., 10.0.0.0)
+    network_base: Ipv4Addr,
+    /// Subnet mask bits (e.g., 24 for /24)
+    prefix_len: u8,
+    /// Start of VM allocation range (e.g., 10.0.0.10)
+    allocation_start: Ipv4Addr,
+    /// Currently allocated IP addresses
+    allocated_ips: HashSet<Ipv4Addr>,
+    /// Next IP to try for allocation
+    next_ip: Ipv4Addr,
+}
+
+impl IpAddressPool {
+    /// Create a new IP address pool with default subnet 10.0.0.0/24
+    fn new() -> Self {
+        let gateway = Ipv4Addr::new(10, 0, 0, 1);
+        let network_base = Ipv4Addr::new(10, 0, 0, 0);
+        let allocation_start = Ipv4Addr::new(10, 0, 0, 10);
+        
+        Self {
+            subnet: "10.0.0.0/24".to_string(),
+            gateway,
+            network_base,
+            prefix_len: 24,
+            allocation_start,
+            allocated_ips: HashSet::new(),
+            next_ip: allocation_start,
+        }
+    }
+    
+    /// Allocate a new IP address from the pool
+    fn allocate_ip(&mut self) -> BlixardResult<Ipv4Addr> {
+        let max_attempts = 254; // Maximum IPs in /24 subnet
+        let mut attempts = 0;
+        
+        while attempts < max_attempts {
+            let candidate_ip = self.next_ip;
+            
+            // Check if IP is available
+            if !self.allocated_ips.contains(&candidate_ip) && 
+               candidate_ip != self.gateway &&
+               self.is_ip_in_subnet(candidate_ip) {
+                
+                self.allocated_ips.insert(candidate_ip);
+                self.advance_next_ip();
+                info!("Allocated IP address: {}", candidate_ip);
+                return Ok(candidate_ip);
+            }
+            
+            self.advance_next_ip();
+            attempts += 1;
+        }
+        
+        Err(BlixardError::VmOperationFailed {
+            operation: "allocate_ip".to_string(),
+            details: format!("No available IP addresses in subnet {}", self.subnet),
+        })
+    }
+    
+    /// Release an IP address back to the pool
+    fn release_ip(&mut self, ip: Ipv4Addr) {
+        if self.allocated_ips.remove(&ip) {
+            info!("Released IP address: {}", ip);
+        } else {
+            warn!("Attempted to release unallocated IP: {}", ip);
+        }
+    }
+    
+    /// Generate a unique MAC address for a VM
+    fn generate_mac_address(&self, vm_name: &str) -> String {
+        // Generate a deterministic MAC address based on VM name
+        // Use a hash of the VM name to ensure uniqueness
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        
+        let mut hasher = DefaultHasher::new();
+        vm_name.hash(&mut hasher);
+        let hash = hasher.finish();
+        
+        // Use hash to generate last 3 octets of MAC
+        // First 3 octets are 02:00:00 (locally administered)
+        format!("02:00:00:{:02x}:{:02x}:{:02x}", 
+                (hash >> 16) & 0xff,
+                (hash >> 8) & 0xff, 
+                hash & 0xff)
+    }
+    
+    /// Check if an IP address is within the subnet range
+    fn is_ip_in_subnet(&self, ip: Ipv4Addr) -> bool {
+        let ip_num = u32::from(ip);
+        let network_num = u32::from(self.network_base);
+        let mask = !0u32 << (32 - self.prefix_len);
+        
+        (ip_num & mask) == (network_num & mask) &&
+        ip_num > u32::from(self.allocation_start)
+    }
+    
+    /// Advance to the next IP address candidate
+    fn advance_next_ip(&mut self) {
+        let next_num = u32::from(self.next_ip) + 1;
+        self.next_ip = Ipv4Addr::from(next_num);
+        
+        // Wrap around if we go past the allocation range
+        if !self.is_ip_in_subnet(self.next_ip) {
+            self.next_ip = self.allocation_start;
+        }
+    }
+    
+    /// Get the gateway IP address
+    fn gateway(&self) -> Ipv4Addr {
+        self.gateway
+    }
+    
+    /// Get the subnet CIDR string
+    fn subnet(&self) -> &str {
+        &self.subnet
+    }
+}
 
 /// VM backend implementation using microvm.nix
 /// 
@@ -47,10 +178,8 @@ pub struct MicrovmBackend {
     process_manager: VmProcessManager,
     /// In-memory cache of VM configurations
     vm_configs: Arc<RwLock<HashMap<String, vm_types::VmConfig>>>,
-    /// Port allocator for SSH forwarding
-    allocated_ports: Arc<RwLock<HashSet<u16>>>,
-    /// Next available SSH port
-    next_ssh_port: Arc<RwLock<u16>>,
+    /// IP address pool manager for routed networking
+    ip_pool: Arc<RwLock<IpAddressPool>>,
 }
 
 impl MicrovmBackend {
@@ -81,44 +210,44 @@ impl MicrovmBackend {
             flake_generator,
             process_manager,
             vm_configs: Arc::new(RwLock::new(HashMap::new())),
-            allocated_ports: Arc::new(RwLock::new(HashSet::new())),
-            next_ssh_port: Arc::new(RwLock::new(2222)), // Start from 2222
+            ip_pool: Arc::new(RwLock::new(IpAddressPool::new())),
         })
     }
     
-    /// Allocate a unique SSH port for a VM
-    async fn allocate_ssh_port(&self) -> BlixardResult<u16> {
-        let mut allocated_ports = self.allocated_ports.write().await;
-        let mut next_port = self.next_ssh_port.write().await;
+    /// Allocate a unique IP address for a VM
+    async fn allocate_vm_ip(&self, vm_name: &str) -> BlixardResult<(String, String, String, String)> {
+        let mut ip_pool = self.ip_pool.write().await;
         
-        // Find next available port starting from current next_port
-        let mut port = *next_port;
-        while allocated_ports.contains(&port) {
-            port += 1;
-            if port > 9999 { // Reasonable upper limit
-                return Err(BlixardError::VmOperationFailed {
-                    operation: "allocate_port".to_string(),
-                    details: "No available SSH ports in range 2222-9999".to_string(),
-                });
-            }
+        // Allocate IP address
+        let vm_ip = ip_pool.allocate_ip()?;
+        
+        // Generate MAC address
+        let mac_address = ip_pool.generate_mac_address(vm_name);
+        
+        // Get network configuration
+        let gateway = ip_pool.gateway().to_string();
+        let subnet = ip_pool.subnet().to_string();
+        
+        Ok((vm_ip.to_string(), mac_address, gateway, subnet))
+    }
+    
+    /// Release an allocated IP address
+    async fn release_vm_ip(&self, ip: &str) {
+        if let Ok(ip_addr) = ip.parse::<Ipv4Addr>() {
+            let mut ip_pool = self.ip_pool.write().await;
+            ip_pool.release_ip(ip_addr);
+        } else {
+            warn!("Invalid IP address format for release: {}", ip);
         }
-        
-        allocated_ports.insert(port);
-        *next_port = port + 1;
-        
-        Ok(port)
     }
     
-    /// Release an allocated SSH port
-    async fn release_ssh_port(&self, port: u16) {
-        let mut allocated_ports = self.allocated_ports.write().await;
-        allocated_ports.remove(&port);
-    }
-    
-    /// Convert core VM config to our enhanced VM config with dynamic port allocation
+    /// Convert core VM config to our enhanced VM config with routed networking
     async fn convert_config(&self, core_config: &CoreVmConfig) -> BlixardResult<vm_types::VmConfig> {
-        // Allocate SSH port for the VM
-        let ssh_port = self.allocate_ssh_port().await?;
+        // Allocate IP address and generate network config for the VM
+        let (vm_ip, mac_address, gateway, subnet) = self.allocate_vm_ip(&core_config.name).await?;
+        
+        // Generate interface ID based on VM name
+        let interface_id = format!("vm-{}", core_config.name);
         
         Ok(vm_types::VmConfig {
             name: core_config.name.clone(),
@@ -126,8 +255,12 @@ impl MicrovmBackend {
             vcpus: core_config.vcpus,
             memory: core_config.memory,
             networks: vec![
-                vm_types::NetworkConfig::User {
-                    ssh_port: Some(ssh_port),
+                vm_types::NetworkConfig::Routed {
+                    id: interface_id,
+                    mac: mac_address,
+                    ip: vm_ip,
+                    gateway,
+                    subnet,
                 }
             ],
             volumes: vec![
@@ -151,6 +284,22 @@ impl MicrovmBackend {
     pub async fn connect_to_console(&self, name: &str) -> BlixardResult<()> {
         self.process_manager.connect_to_console(name).await
     }
+    
+    /// Get the IP address of a VM
+    pub async fn get_vm_ip(&self, name: &str) -> BlixardResult<Option<String>> {
+        let configs = self.vm_configs.read().await;
+        
+        if let Some(vm_config) = configs.get(name) {
+            // Find routed network configuration
+            for network in &vm_config.networks {
+                if let vm_types::NetworkConfig::Routed { ip, .. } = network {
+                    return Ok(Some(ip.clone()));
+                }
+            }
+        }
+        
+        Ok(None)
+    }
 }
 
 #[async_trait]
@@ -158,7 +307,7 @@ impl VmBackend for MicrovmBackend {
     async fn create_vm(&self, config: &CoreVmConfig, _node_id: u64) -> BlixardResult<()> {
         info!("Creating microVM '{}'", config.name);
         
-        // Convert to our enhanced config with allocated SSH port
+        // Convert to our enhanced config with allocated IP address
         let vm_config = self.convert_config(config).await?;
         
         // Generate and write the flake
@@ -222,15 +371,15 @@ impl VmBackend for MicrovmBackend {
             }
         }
         
-        // Release allocated SSH port before removing config
+        // Release allocated IP address before removing config
         {
             let mut configs = self.vm_configs.write().await;
             if let Some(vm_config) = configs.get(name) {
-                // Find and release SSH port
+                // Find and release IP address
                 for network in &vm_config.networks {
-                    if let vm_types::NetworkConfig::User { ssh_port: Some(port) } = network {
-                        self.release_ssh_port(*port).await;
-                        info!("Released SSH port {} for VM '{}'", port, name);
+                    if let vm_types::NetworkConfig::Routed { ip, .. } = network {
+                        self.release_vm_ip(ip).await;
+                        info!("Released IP address {} for VM '{}'", ip, name);
                     }
                 }
             }
@@ -320,6 +469,10 @@ impl VmBackend for MicrovmBackend {
         }
         
         Ok(result)
+    }
+    
+    async fn get_vm_ip(&self, name: &str) -> BlixardResult<Option<String>> {
+        self.get_vm_ip(name).await
     }
 }
 

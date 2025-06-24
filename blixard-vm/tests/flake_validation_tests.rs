@@ -92,11 +92,17 @@ mod flake_validation_tests {
                 vcpus: 2,
                 memory: 512,
                 networks: vec![
-                    NetworkConfig::User { ssh_port: Some(2222) },
+                    NetworkConfig::Routed {
+                        id: "vm-networked".to_string(),
+                        mac: "02:00:00:00:00:01".to_string(),
+                        ip: "10.0.0.10".to_string(),
+                        gateway: "10.0.0.1".to_string(),
+                        subnet: "10.0.0.0/24".to_string(),
+                    },
                     NetworkConfig::Tap {
                         name: "tap0".to_string(),
                         bridge: None,
-                        mac: Some("02:00:00:00:00:01".to_string()),
+                        mac: Some("02:00:00:00:00:02".to_string()),
                     },
                 ],
                 volumes: vec![],
@@ -111,7 +117,13 @@ mod flake_validation_tests {
                 hypervisor: Hypervisor::Qemu,
                 vcpus: 4,
                 memory: 2048,
-                networks: vec![NetworkConfig::User { ssh_port: Some(2223) }],
+                networks: vec![NetworkConfig::Routed {
+                    id: "vm-storage".to_string(),
+                    mac: "02:00:00:00:00:03".to_string(),
+                    ip: "10.0.0.11".to_string(),
+                    gateway: "10.0.0.1".to_string(),
+                    subnet: "10.0.0.0/24".to_string(),
+                }],
                 volumes: vec![
                     VolumeConfig::RootDisk { size: 10240 },
                     VolumeConfig::DataDisk {
@@ -175,7 +187,13 @@ mod flake_validation_tests {
             hypervisor: Hypervisor::Qemu,
             vcpus: 2,
             memory: 1024,
-            networks: vec![NetworkConfig::User { ssh_port: Some(2224) }],
+            networks: vec![NetworkConfig::Routed {
+                id: "vm-module-test".to_string(),
+                mac: "02:00:00:00:00:04".to_string(),
+                ip: "10.0.0.12".to_string(),
+                gateway: "10.0.0.1".to_string(),
+                subnet: "10.0.0.0/24".to_string(),
+            }],
             volumes: vec![VolumeConfig::RootDisk { size: 8192 }],
             nixos_modules: vec![
                 NixModule::Inline(r#"

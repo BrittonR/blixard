@@ -34,6 +34,11 @@ pub trait VmBackend: Send + Sync {
     
     /// List all VMs managed by this backend
     async fn list_vms(&self) -> BlixardResult<Vec<(VmConfig, VmStatus)>>;
+    
+    /// Get the IP address of a VM (optional, not all backends support this)
+    async fn get_vm_ip(&self, _name: &str) -> BlixardResult<Option<String>> {
+        Ok(None) // Default implementation returns None
+    }
 }
 
 /// VM Manager that coordinates between Raft consensus and VM backend
@@ -113,6 +118,11 @@ impl VmManager {
         // We need to get both config and status, so we use list_vms and filter
         let all_vms = self.backend.list_vms().await?;
         Ok(all_vms.into_iter().find(|(config, _)| config.name == name))
+    }
+    
+    /// Get the IP address of a VM from the backend
+    pub async fn get_vm_ip(&self, name: &str) -> BlixardResult<Option<String>> {
+        self.backend.get_vm_ip(name).await
     }
     
     /// Monitor VM status after an operation and trigger status updates through Raft

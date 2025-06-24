@@ -11,6 +11,7 @@ pub struct VmInfo {
     pub vcpus: u32,
     pub memory: u32,
     pub node_id: u64,
+    pub ip_address: Option<String>, // VM IP address for routed networking
     pub uptime: Option<String>,
     pub cpu_usage: Option<f32>,
     pub memory_usage: Option<f32>,
@@ -1288,20 +1289,20 @@ impl App {
     }
 
     async fn start_ssh_session(&mut self, vm_name: &str) -> BlixardResult<()> {
-        let port = self.get_vm_ssh_port(vm_name).await?;
+        let ip_address = self.get_vm_ip_address(vm_name).await?;
         
         let (output_sender, output_receiver) = mpsc::unbounded_channel();
         let (input_sender, input_receiver) = mpsc::unbounded_channel();
         
         // Initialize SSH session
-        let mut session = SshSession {
+        let session = SshSession {
             vm_name: vm_name.to_string(),
-            host: "localhost".to_string(),
-            port,
+            host: ip_address.clone(),
+            port: 22, // Standard SSH port for direct connection
             username: "root".to_string(),
             output_lines: vec![
                 format!("🔌 Starting SSH session to VM '{}'", vm_name),
-                format!("Host: localhost:{}", port),
+                format!("Host: {}", ip_address),
                 format!("User: root"),
                 "".to_string(),
                 "Connecting...".to_string(),
@@ -1314,26 +1315,23 @@ impl App {
         };
         
         // Start SSH process in background
-        self.spawn_ssh_process(vm_name, port, output_sender, input_receiver).await?;
+        self.spawn_ssh_process(vm_name, &ip_address, output_sender, input_receiver).await?;
         
         self.ssh_session = Some(session);
         Ok(())
     }
 
-    async fn get_vm_ssh_port(&self, vm_name: &str) -> BlixardResult<u16> {
-        // Try to determine the SSH port for the VM
-        // This is a simplified version - in practice, this would be stored in the VM config
-        
-        // For now, use a simple mapping based on VM names we know
-        match vm_name {
-            "test-vm" => Ok(2223),
-            "hihi" => Ok(2224),
-            _ => {
-                // Default port mapping: start from 2225 and increment
-                // In a real implementation, this would be stored in the database
-                Ok(2225)
+    async fn get_vm_ip_address(&self, vm_name: &str) -> BlixardResult<String> {
+        // Find the VM in our current list and get its IP address
+        if let Some(vm) = self.vms.iter().find(|v| v.name == vm_name) {
+            if let Some(ip) = &vm.ip_address {
+                return Ok(ip.clone());
             }
         }
+        
+        Err(crate::BlixardError::Internal {
+            message: format!("Could not determine IP address for VM '{}'. Make sure VM list is refreshed.", vm_name),
+        })
     }
 
     fn get_ssh_key_path() -> String {
@@ -1360,7 +1358,7 @@ impl App {
     async fn spawn_ssh_process(
         &self, 
         vm_name: &str, 
-        port: u16, 
+        ip_address: &str, 
         output_sender: mpsc::UnboundedSender<String>,
         mut input_receiver: mpsc::UnboundedReceiver<String>
     ) -> BlixardResult<()> {
@@ -1368,6 +1366,7 @@ impl App {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         
         let vm_name = vm_name.to_string();
+        let ip_address = ip_address.to_string();
         
         tokio::spawn(async move {
             // Send initial connection status
@@ -1384,8 +1383,7 @@ impl App {
                     "-o", "PubkeyAuthentication=yes",         // Enable key auth
                     "-o", "PreferredAuthentications=publickey", // Prefer key auth
                     "-i", &Self::get_ssh_key_path(),   // Use user's SSH key
-                    "-p", &port.to_string(),
-                    &format!("root@localhost")
+                    &format!("root@{}", ip_address)   // Connect directly to VM IP
                 ])
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())

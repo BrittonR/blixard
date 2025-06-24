@@ -67,13 +67,14 @@ impl NixFlakeGenerator {
                     }
                     json!(network_obj)
                 },
-                NetworkConfig::User { ssh_port } => {
+                NetworkConfig::Routed { id, mac, ip, gateway, subnet } => {
                     let mut network_obj = serde_json::Map::new();
-                    network_obj.insert("type".to_string(), json!("user"));
-                    network_obj.insert("name".to_string(), json!("user0"));
-                    if let Some(port) = ssh_port {
-                        network_obj.insert("ssh_port".to_string(), json!(port));
-                    }
+                    network_obj.insert("type".to_string(), json!("routed"));
+                    network_obj.insert("id".to_string(), json!(id));
+                    network_obj.insert("mac".to_string(), json!(mac));
+                    network_obj.insert("ip".to_string(), json!(ip));
+                    network_obj.insert("gateway".to_string(), json!(gateway));
+                    network_obj.insert("subnet".to_string(), json!(subnet));
                     json!(network_obj)
                 },
             }

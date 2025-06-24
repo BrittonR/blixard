@@ -25,11 +25,29 @@
               mem = {{ memory }};
               
               interfaces = [
+                {% if networks -%}
+                {% for network in networks -%}
                 {
-                  type = "user";
-                  id = "user0";
-                  mac = "02:00:00:00:00:01";
+                  type = "macvtap";
+                  id = "{{ network.id }}";
+                  mac = "{{ network.mac }}";
+                  macvtap = {
+                    link = "br0";
+                    mode = "bridge";
+                  };
                 }
+                {% endfor -%}
+                {% else -%}
+                {
+                  type = "macvtap";
+                  id = "vm-default";
+                  mac = "02:00:00:00:00:01";
+                  macvtap = {
+                    link = "br0";
+                    mode = "bridge";
+                  };
+                }
+                {% endif -%}
               ];
               
               volumes = [
@@ -39,21 +57,6 @@
                   size = 10240;
                 }
               ];
-              
-              # SSH port forwarding (dynamic allocation)
-              {% if networks -%}
-              {% for network in networks -%}
-              {% if network.type == "user" and network.ssh_port -%}
-              forwardPorts = [
-                {
-                  from = "host";
-                  host.port = {{ network.ssh_port }};
-                  guest.port = 22;
-                }
-              ];
-              {% endif -%}
-              {% endfor -%}
-              {% endif %}
               
               # Console configuration using microvm.nix socket pattern
               socket = "/tmp/{{ vm_name }}-console.sock";
@@ -85,10 +88,30 @@
               wantedBy = [ "getty.target" ];
             };
             
-            # Enable networking
+            # Static IP networking configuration for routed network
             networking.useDHCP = false;
-            networking.interfaces.eth0.useDHCP = true;
             networking.firewall.enable = false;
+            
+            # Configure static IP based on allocated address
+            {% if networks -%}
+            {% for network in networks -%}
+            {% if network.type == "routed" -%}
+            networking.interfaces.eth0 = {
+              ipv4.addresses = [
+                {
+                  address = "{{ network.ip }}";
+                  prefixLength = 24;
+                }
+              ];
+            };
+            networking.defaultGateway = "{{ network.gateway }}";
+            networking.nameservers = [ "8.8.8.8" "1.1.1.1" ];
+            {% endif -%}
+            {% endfor -%}
+            {% else -%}
+            # Fallback to DHCP if no network config
+            networking.interfaces.eth0.useDHCP = true;
+            {% endif -%}
             
             # Configure kernel for serial console
             boot.kernelParams = [ 
@@ -102,7 +125,15 @@
               after = [ "network.target" ];
               serviceConfig = {
                 Type = "oneshot";
-                ExecStart = "${pkgs.coreutils}/bin/echo 'Blixard VM started successfully! SSH: localhost:2222'";
+                {% if networks -%}
+                {% for network in networks -%}
+                {% if network.type == "routed" -%}
+                ExecStart = "${pkgs.coreutils}/bin/echo 'Blixard VM started successfully! SSH: {{ network.ip }}:22'";
+                {% endif -%}
+                {% endfor -%}
+                {% else -%}
+                ExecStart = "${pkgs.coreutils}/bin/echo 'Blixard VM started successfully!'";
+                {% endif -%}
                 RemainAfterExit = true;
               };
             };

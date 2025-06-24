@@ -405,6 +405,11 @@ impl Node {
     pub async fn get_vm_status(&self, name: &str) -> BlixardResult<Option<(crate::types::VmConfig, crate::types::VmStatus)>> {
         self.shared.get_vm_status(name).await
     }
+    
+    /// Get the IP address of a VM
+    pub async fn get_vm_ip(&self, name: &str) -> BlixardResult<Option<String>> {
+        self.shared.get_vm_ip(name).await
+    }
 
     /// Join a cluster
     pub async fn join_cluster(&mut self, peer_addr: Option<std::net::SocketAddr>) -> BlixardResult<()> {

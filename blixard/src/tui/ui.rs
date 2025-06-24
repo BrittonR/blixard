@@ -343,7 +343,7 @@ fn render_vm_details(f: &mut Frame, area: Rect, app: &App) {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(8),  // VM details
+                    Constraint::Length(9),  // VM details (increased for IP address)
                     Constraint::Min(0),     // Resource usage (future)
                 ])
                 .split(area);
@@ -370,7 +370,7 @@ fn render_vm_info(f: &mut Frame, area: Rect, vm: &VmInfo) {
         VmStatus::Failed => Color::Red,
     };
 
-    let info_text = vec![
+    let mut info_text = vec![
         Line::from(vec![
             Span::raw("Name: "),
             Span::styled(&vm.name, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
@@ -392,6 +392,19 @@ fn render_vm_info(f: &mut Frame, area: Rect, vm: &VmInfo) {
             Span::styled(vm.node_id.to_string(), Style::default().fg(Color::Cyan)),
         ]),
     ];
+
+    // Add IP address if available
+    if let Some(ip) = &vm.ip_address {
+        info_text.push(Line::from(vec![
+            Span::raw("IP Address: "),
+            Span::styled(ip, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        ]));
+    } else {
+        info_text.push(Line::from(vec![
+            Span::raw("IP Address: "),
+            Span::styled("Not assigned", Style::default().fg(Color::Gray)),
+        ]));
+    }
 
     let info_paragraph = Paragraph::new(info_text)
         .block(Block::default().title("VM Information").borders(Borders::ALL))
@@ -924,7 +937,7 @@ fn render_ssh_session(f: &mut Frame, area: Rect, app: &App) {
                 Span::styled("🔌 SSH Session: ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
                 Span::styled(&session.vm_name, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
                 Span::raw(" | "),
-                Span::styled(format!("{}@{}:{}", session.username, session.host, session.port), Style::default().fg(Color::Green)),
+                Span::styled(format!("{}@{}", session.username, session.host), Style::default().fg(Color::Green)),
             ]),
             Line::from(vec![
                 Span::raw("Status: "),

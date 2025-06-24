@@ -56,6 +56,7 @@ impl VmClient {
                 vcpus: vm.vcpus,
                 memory: vm.memory_mb,
                 node_id: vm.node_id,
+                ip_address: if vm.ip_address.is_empty() { None } else { Some(vm.ip_address) },
                 uptime: None, // TODO: Get from VM status
                 cpu_usage: None, // TODO: Get from VM metrics
                 memory_usage: None, // TODO: Get from VM metrics
@@ -181,6 +182,7 @@ impl VmClient {
             vcpus: vm.vcpus,
             memory: vm.memory_mb,
             node_id: vm.node_id,
+            ip_address: if vm.ip_address.is_empty() { None } else { Some(vm.ip_address) },
             uptime: None, // TODO: Get from VM status
             cpu_usage: None, // TODO: Get from VM metrics
             memory_usage: None, // TODO: Get from VM metrics

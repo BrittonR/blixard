@@ -309,6 +309,16 @@ impl SharedNodeState {
         }
     }
     
+    /// Get the IP address of a VM
+    pub async fn get_vm_ip(&self, name: &str) -> BlixardResult<Option<String>> {
+        let vm_manager = self.vm_manager.read().await;
+        if let Some(manager) = vm_manager.as_ref() {
+            manager.inner.get_vm_ip(name).await
+        } else {
+            Ok(None)
+        }
+    }
+    
     /// Create a VM through Raft consensus
     pub async fn create_vm_through_raft(&self, command: VmCommand) -> BlixardResult<()> {
         tracing::info!("create_vm_through_raft called");

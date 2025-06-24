@@ -51,13 +51,19 @@ impl std::fmt::Display for Hypervisor {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum NetworkConfig {
+    /// Traditional TAP interface with bridge
     Tap {
         name: String,
         bridge: Option<String>,
         mac: Option<String>,
     },
-    User {
-        ssh_port: Option<u16>, // SSH port forwarding (None = no SSH)
+    /// Routed network with macvtap interface (recommended)
+    Routed {
+        id: String,           // Interface ID (e.g., "vm-test")
+        mac: String,          // MAC address (e.g., "02:00:00:01:01:01") 
+        ip: String,           // VM IP address (e.g., "10.0.0.10")
+        gateway: String,      // Gateway IP (usually "10.0.0.1")
+        subnet: String,       // Subnet CIDR (e.g., "10.0.0.0/24")
     },
 }
 

@@ -133,6 +133,7 @@ message VmInfo {
   uint64 node_id = 3;
   uint32 vcpus = 4;
   uint32 memory_mb = 5;
+  string ip_address = 6; // VM IP address for routed networking
 }
 
 enum VmState {

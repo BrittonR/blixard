@@ -111,6 +111,11 @@ enum VmCommands {
         #[arg(long)]
         name: String,
     },
+    /// Delete a VM
+    Delete {
+        #[arg(long)]
+        name: String,
+    },
     /// Get VM status
     Status {
         #[arg(long)]
@@ -348,7 +353,7 @@ async fn handle_vm_logs(vm_name: &str, follow: bool, lines: u32) -> BlixardResul
 async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
     use blixard_core::proto::{
         cluster_service_client::ClusterServiceClient,
-        CreateVmRequest, StartVmRequest, StopVmRequest, GetVmStatusRequest, ListVmsRequest,
+        CreateVmRequest, StartVmRequest, StopVmRequest, DeleteVmRequest, GetVmStatusRequest, ListVmsRequest,
     };
     
     // Default to connecting to local node
@@ -432,6 +437,28 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
                 }
             }
         }
+        VmCommands::Delete { name } => {
+            let request = tonic::Request::new(DeleteVmRequest {
+                name: name.clone(),
+            });
+            
+            match client.delete_vm(request).await {
+                Ok(response) => {
+                    let resp = response.into_inner();
+                    if resp.success {
+                        println!("Successfully deleted VM '{}'", name);
+                        println!("Message: {}", resp.message);
+                    } else {
+                        eprintln!("Failed to delete VM '{}': {}", name, resp.message);
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error deleting VM '{}': {}", name, e);
+                    std::process::exit(1);
+                }
+            }
+        }
         VmCommands::Status { name } => {
             let request = tonic::Request::new(GetVmStatusRequest {
                 name: name.clone(),
@@ -447,6 +474,13 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
                         println!("  Node ID: {}", vm.node_id);
                         println!("  vCPUs: {}", vm.vcpus);
                         println!("  Memory: {} MB", vm.memory_mb);
+                        
+                        let ip_display = if vm.ip_address.is_empty() {
+                            "not assigned".to_string()
+                        } else {
+                            vm.ip_address.clone()
+                        };
+                        println!("  IP Address: {}", ip_display);
                     } else {
                         println!("VM '{}' not found", name);
                     }
@@ -468,11 +502,18 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
                     } else {
                         println!("VMs:");
                         for vm in &resp.vms {
-                            println!("  - {}: {:?} ({}vcpu, {}MB) on node {}",
+                            let ip_display = if vm.ip_address.is_empty() {
+                                "no IP".to_string()
+                            } else {
+                                vm.ip_address.clone()
+                            };
+                            
+                            println!("  - {}: {:?} ({}vcpu, {}MB) IP: {} on node {}",
                                 vm.name,
                                 vm.state,
                                 vm.vcpus,
                                 vm.memory_mb,
+                                ip_display,
                                 vm.node_id
                             );
                         }
