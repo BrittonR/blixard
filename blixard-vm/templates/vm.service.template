@@ -17,6 +17,10 @@ CPUQuota={{ cpu_quota }}%
 NoNewPrivileges=false
 PrivateTmp=false
 
+# Capabilities for tap interface creation
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+
 # Restart behavior
 Restart=on-failure
 RestartSec=10s

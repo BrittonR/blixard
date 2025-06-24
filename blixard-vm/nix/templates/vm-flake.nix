@@ -25,8 +25,8 @@
               mem = {{ memory }};
               
               interfaces = [ {
-                id = "{{ vm_name }}";
                 type = "tap";
+                id = "blixard-tap{{ vm_index }}";
                 mac = "{{ vm_mac }}";
               } ];
               
