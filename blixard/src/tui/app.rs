@@ -25,6 +25,7 @@ pub enum AppMode {
     Help,
     SshSession,
     RaftStatus,
+    ServerStartup, // New mode for server startup popup
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,7 +42,7 @@ pub struct App {
     /// Whether the app should quit
     pub should_quit: bool,
     /// VM client for API calls
-    pub vm_client: VmClient,
+    pub vm_client: Option<VmClient>,
     /// List of VMs
     pub vms: Vec<VmInfo>,
     /// VM list state for navigation
@@ -78,6 +79,8 @@ pub struct App {
     pub ssh_info: Option<SshInfo>,
     /// Active SSH session for embedded terminal
     pub ssh_session: Option<SshSession>,
+    /// Server startup popup state
+    pub server_startup: ServerStartupState,
 }
 
 #[derive(Debug, Clone)]
@@ -101,10 +104,26 @@ impl Default for CreateVmForm {
 
 impl App {
     pub async fn new() -> BlixardResult<Self> {
-        let vm_client = VmClient::new("127.0.0.1:7001").await?;
+        // Try to connect to the server, but don't fail if it's not available
+        // Try multiple times with a short delay to handle transient connection issues
+        let (vm_client, server_available) = {
+            let mut attempts = 0;
+            let max_attempts = 3;
+            
+            loop {
+                match VmClient::new("127.0.0.1:7001").await {
+                    Ok(client) => break (Some(client), true),
+                    Err(_) if attempts >= max_attempts - 1 => break (None, false),
+                    Err(_) => {
+                        attempts += 1;
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    }
+                }
+            }
+        };
         
         let mut app = Self {
-            mode: AppMode::VmList,
+            mode: if server_available { AppMode::VmList } else { AppMode::ServerStartup },
             input_mode: InputMode::Normal,
             should_quit: false,
             vm_client,
@@ -126,17 +145,23 @@ impl App {
             cluster_info: ClusterInfo::default(),
             ssh_info: None,
             ssh_session: None,
+            server_startup: ServerStartupState::default(),
         };
         
-        // Start live log following for all VMs by default
-        if let Err(e) = app.start_live_log_following(None).await {
-            app.live_logs.push(format!("Failed to start live log following: {}", e));
+        // Only start live logging and get cluster status if server is available
+        if server_available {
+            // Start live log following for all VMs by default
+            if let Err(e) = app.start_live_log_following(None).await {
+                app.live_logs.push(format!("Failed to start live log following: {}", e));
+            } else {
+                app.live_logs.push("🔄 Live log following started for all VMs".to_string());
+            }
+            
+            // Get initial cluster status
+            let _ = app.refresh_cluster_status().await; // Don't fail initialization if cluster status fails
         } else {
-            app.live_logs.push("🔄 Live log following started for all VMs".to_string());
+            app.live_logs.push("⚠️  No server connection - use popup to start server".to_string());
         }
-        
-        // Get initial cluster status
-        let _ = app.refresh_cluster_status().await; // Don't fail initialization if cluster status fails
         
         Ok(app)
     }
@@ -196,6 +221,7 @@ impl App {
             AppMode::Help => self.handle_help_keys(key).await?,
             AppMode::SshSession => self.handle_ssh_keys(key).await?,
             AppMode::RaftStatus => self.handle_raft_status_keys(key).await?,
+            AppMode::ServerStartup => self.handle_server_startup_keys(key).await?,
         }
 
         Ok(())
@@ -307,14 +333,14 @@ impl App {
                 }
             }
             KeyCode::Char('D') => {
-                // Delete selected VM (requires VM to be stopped)
+                // Delete selected VM (requires VM to be stopped or failed)
                 if let Some(vm_index) = self.selected_vm {
                     if let Some(vm) = self.vms.get(vm_index) {
-                        if matches!(vm.status, blixard_core::types::VmStatus::Stopped) {
+                        if matches!(vm.status, blixard_core::types::VmStatus::Stopped | blixard_core::types::VmStatus::Failed) {
                             let vm_name = vm.name.clone();
                             self.delete_vm(&vm_name).await?;
                         } else {
-                            self.error_message = Some(format!("VM '{}' must be stopped before deletion", vm.name));
+                            self.error_message = Some(format!("VM '{}' must be stopped or failed before deletion", vm.name));
                         }
                     }
                 }
@@ -369,15 +395,15 @@ impl App {
                 }
             }
             KeyCode::Char('D') => {
-                // Delete selected VM (requires VM to be stopped)
+                // Delete selected VM (requires VM to be stopped or failed)
                 if let Some(vm_index) = self.selected_vm {
                     if let Some(vm) = self.vms.get(vm_index) {
-                        if matches!(vm.status, blixard_core::types::VmStatus::Stopped) {
+                        if matches!(vm.status, blixard_core::types::VmStatus::Stopped | blixard_core::types::VmStatus::Failed) {
                             let vm_name = vm.name.clone();
                             self.delete_vm(&vm_name).await?;
                             self.mode = AppMode::VmList; // Return to list after deletion
                         } else {
-                            self.error_message = Some(format!("VM '{}' must be stopped before deletion", vm.name));
+                            self.error_message = Some(format!("VM '{}' must be stopped or failed before deletion", vm.name));
                         }
                     }
                 }
@@ -454,7 +480,8 @@ impl App {
                 self.log_scroll = 0;
             }
             KeyCode::End => {
-                self.log_scroll = self.vm_logs.len().saturating_sub(1) as u16;
+                // Jump to the end and follow new logs
+                self.log_scroll = u16::MAX;
             }
             _ => {}
         }
@@ -551,6 +578,122 @@ impl App {
         Ok(())
     }
 
+    async fn handle_server_startup_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
+        use crossterm::event::KeyCode;
+
+        match self.server_startup.status {
+            ServerStartupStatus::Prompt => {
+                if self.server_startup.show_config {
+                    // Handle configuration input
+                    match key.code {
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            if self.server_startup.config.current_field > 0 {
+                                self.server_startup.config.current_field -= 1;
+                            }
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if self.server_startup.config.current_field < 3 {
+                                self.server_startup.config.current_field += 1;
+                            }
+                        }
+                        KeyCode::Enter => {
+                            self.start_server_with_config().await?;
+                        }
+                        KeyCode::Esc => {
+                            self.server_startup.show_config = false;
+                        }
+                        KeyCode::Char(c) => {
+                            match self.server_startup.config.current_field {
+                                0 => self.server_startup.config.node_id.push(c),
+                                1 => self.server_startup.config.bind_address.push(c),
+                                2 => self.server_startup.config.data_dir.push(c),
+                                3 => self.server_startup.config.vm_backend.push(c),
+                                _ => {}
+                            }
+                        }
+                        KeyCode::Backspace => {
+                            match self.server_startup.config.current_field {
+                                0 => { self.server_startup.config.node_id.pop(); }
+                                1 => { self.server_startup.config.bind_address.pop(); }
+                                2 => { self.server_startup.config.data_dir.pop(); }
+                                3 => { self.server_startup.config.vm_backend.pop(); }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                } else {
+                    // Handle main popup options
+                    match key.code {
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            if self.server_startup.selected_option > 0 {
+                                self.server_startup.selected_option -= 1;
+                            }
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if self.server_startup.selected_option < 2 {
+                                self.server_startup.selected_option += 1;
+                            }
+                        }
+                        KeyCode::Enter | KeyCode::Char(' ') => {
+                            match self.server_startup.selected_option {
+                                0 => {
+                                    // Yes - start with defaults
+                                    self.start_server_with_defaults().await?;
+                                }
+                                1 => {
+                                    // No - quit
+                                    self.should_quit = true;
+                                }
+                                2 => {
+                                    // Configure - show config form
+                                    self.server_startup.show_config = true;
+                                }
+                                _ => {}
+                            }
+                        }
+                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                            // Quick yes
+                            self.start_server_with_defaults().await?;
+                        }
+                        KeyCode::Char('n') | KeyCode::Char('N') => {
+                            // Quick no
+                            self.should_quit = true;
+                        }
+                        KeyCode::Char('c') | KeyCode::Char('C') => {
+                            // Quick configure
+                            self.server_startup.show_config = true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            ServerStartupStatus::Starting => {
+                // Can't do anything while starting, just wait
+            }
+            ServerStartupStatus::Success => {
+                // Any key continues to main app
+                self.mode = AppMode::VmList;
+                self.refresh_vm_list().await?;
+            }
+            ServerStartupStatus::Failed => {
+                match key.code {
+                    KeyCode::Enter | KeyCode::Char('r') => {
+                        // Retry
+                        self.server_startup.status = ServerStartupStatus::Prompt;
+                    }
+                    KeyCode::Char('q') | KeyCode::Esc => {
+                        // Quit
+                        self.should_quit = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     async fn handle_tick(&mut self) -> BlixardResult<()> {
         // Increment tick counter
         self.tick_counter += 1;
@@ -604,7 +747,8 @@ impl App {
             
             // Auto-scroll to bottom when new logs arrive and we're in log mode
             if new_logs && self.mode == AppMode::VmLogs {
-                self.log_scroll = self.vm_logs.len().saturating_sub(1) as u16;
+                // Set scroll to follow the end - the UI renderer will handle the proper positioning
+                self.log_scroll = u16::MAX;
             }
         }
         
@@ -636,38 +780,44 @@ impl App {
     }
 
     pub async fn refresh_vm_list(&mut self) -> BlixardResult<()> {
-        match self.vm_client.list_vms().await {
-            Ok(vms) => {
-                self.vms = vms;
-                self.error_message = None;
-                
-                // Adjust selection if needed
-                if self.vms.is_empty() {
-                    self.vm_list_state.select(None);
-                    self.selected_vm = None;
-                } else if self.selected_vm.is_none() || self.selected_vm.unwrap() >= self.vms.len() {
-                    self.vm_list_state.select(Some(0));
-                    self.selected_vm = Some(0);
+        if let Some(client) = &mut self.vm_client {
+            match client.list_vms().await {
+                Ok(vms) => {
+                    self.vms = vms;
+                    self.error_message = None;
+                    
+                    // Adjust selection if needed
+                    if self.vms.is_empty() {
+                        self.vm_list_state.select(None);
+                        self.selected_vm = None;
+                    } else if self.selected_vm.is_none() || self.selected_vm.unwrap() >= self.vms.len() {
+                        self.vm_list_state.select(Some(0));
+                        self.selected_vm = Some(0);
+                    }
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("Failed to list VMs: {}", e));
+                    self.status_message = None;
                 }
             }
-            Err(e) => {
-                self.error_message = Some(format!("Failed to list VMs: {}", e));
-                self.status_message = None;
-            }
+        } else {
+            self.error_message = Some("No server connection available".to_string());
         }
 
         Ok(())
     }
 
     pub async fn refresh_cluster_status(&mut self) -> BlixardResult<()> {
-        match self.vm_client.get_cluster_status().await {
-            Ok(cluster_info) => {
-                self.cluster_info = cluster_info;
-                // Don't show error message for successful cluster status updates
-            }
-            Err(_) => {
-                // Silently fail cluster status updates to avoid cluttering UI
-                // Keep previous cluster info
+        if let Some(client) = &mut self.vm_client {
+            match client.get_cluster_status().await {
+                Ok(cluster_info) => {
+                    self.cluster_info = cluster_info;
+                    // Don't show error message for successful cluster status updates
+                }
+                Err(_) => {
+                    // Silently fail cluster status updates to avoid cluttering UI
+                    // Keep previous cluster info
+                }
             }
         }
         
@@ -675,51 +825,63 @@ impl App {
     }
 
     async fn start_vm(&mut self, name: &str) -> BlixardResult<()> {
-        match self.vm_client.start_vm(name).await {
-            Ok(_) => {
-                self.status_message = Some(format!("✓ Started VM '{}'", name));
-                self.error_message = None;
-                // Refresh to update status
-                self.refresh_vm_list().await?;
+        if let Some(client) = &mut self.vm_client {
+            match client.start_vm(name).await {
+                Ok(_) => {
+                    self.status_message = Some(format!("✓ Started VM '{}'", name));
+                    self.error_message = None;
+                    // Refresh to update status
+                    self.refresh_vm_list().await?;
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("Failed to start VM '{}': {}", name, e));
+                    self.status_message = None;
+                }
             }
-            Err(e) => {
-                self.error_message = Some(format!("Failed to start VM '{}': {}", name, e));
-                self.status_message = None;
-            }
+        } else {
+            self.error_message = Some("No server connection available".to_string());
         }
 
         Ok(())
     }
 
     async fn stop_vm(&mut self, name: &str) -> BlixardResult<()> {
-        match self.vm_client.stop_vm(name).await {
-            Ok(_) => {
-                self.status_message = Some(format!("✓ Stopped VM '{}'", name));
-                self.error_message = None;
-                // Refresh to update status
-                self.refresh_vm_list().await?;
+        if let Some(client) = &mut self.vm_client {
+            match client.stop_vm(name).await {
+                Ok(_) => {
+                    self.status_message = Some(format!("✓ Stopped VM '{}'", name));
+                    self.error_message = None;
+                    // Refresh to update status
+                    self.refresh_vm_list().await?;
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("Failed to stop VM '{}': {}", name, e));
+                    self.status_message = None;
+                }
             }
-            Err(e) => {
-                self.error_message = Some(format!("Failed to stop VM '{}': {}", name, e));
-                self.status_message = None;
-            }
+        } else {
+            self.error_message = Some("No server connection available".to_string());
         }
 
         Ok(())
     }
 
     async fn delete_vm(&mut self, name: &str) -> BlixardResult<()> {
-        match self.vm_client.delete_vm(name).await {
-            Ok(_) => {
-                self.status_message = Some(format!("✓ Deleted VM '{}'", name));
-                self.error_message = None;
-                // Refresh to update list (VM should be removed)
-                self.refresh_vm_list().await?;
+        if let Some(client) = &mut self.vm_client {
+            match client.delete_vm(name).await {
+                Ok(_) => {
+                    self.status_message = Some(format!("✓ Deleted VM '{}'", name));
+                    self.error_message = None;
+                    // Refresh to update list (VM should be removed)
+                    self.refresh_vm_list().await?;
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("Failed to delete VM '{}': {}", name, e));
+                    self.status_message = None;
+                }
             }
-            Err(e) => {
-                self.error_message = Some(format!("Failed to delete VM '{}': {}", name, e));
-                self.status_message = None;
-            }
+        } else {
+            self.error_message = Some("No server connection available".to_string());
         }
 
         Ok(())
@@ -735,18 +897,22 @@ impl App {
         let vcpus: u32 = self.create_form.vcpus.parse().unwrap_or(2);
         let memory: u32 = self.create_form.memory.parse().unwrap_or(1024);
 
-        match self.vm_client.create_vm(name, vcpus, memory).await {
-            Ok(_) => {
-                self.status_message = Some(format!("✓ Created VM '{}'", name));
-                self.error_message = None;
-                self.mode = AppMode::VmList;
-                self.input_mode = InputMode::Normal;
-                self.refresh_vm_list().await?;
+        if let Some(client) = &mut self.vm_client {
+            match client.create_vm(name, vcpus, memory).await {
+                Ok(_) => {
+                    self.status_message = Some(format!("✓ Created VM '{}'", name));
+                    self.error_message = None;
+                    self.mode = AppMode::VmList;
+                    self.input_mode = InputMode::Normal;
+                    self.refresh_vm_list().await?;
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("Failed to create VM '{}': {}", name, e));
+                    self.status_message = None;
+                }
             }
-            Err(e) => {
-                self.error_message = Some(format!("Failed to create VM '{}': {}", name, e));
-                self.status_message = None;
-            }
+        } else {
+            self.error_message = Some("No server connection available".to_string());
         }
 
         Ok(())
@@ -781,6 +947,10 @@ impl App {
             self.vm_logs.push("".to_string());
             self.vm_logs.push("🔄 Following live logs (Press ESC to stop)".to_string());
         }
+
+        // Set scroll position to follow the end (most recent logs)
+        // Use a high value that the UI renderer will clamp appropriately
+        self.log_scroll = u16::MAX;
 
         Ok(())
     }
@@ -1307,6 +1477,136 @@ impl App {
         self.ssh_session = None;
         self.ssh_info = None;
     }
+
+    /// Start server with default configuration
+    async fn start_server_with_defaults(&mut self) -> BlixardResult<()> {
+        self.server_startup.status = ServerStartupStatus::Starting;
+        self.server_startup.message = "Starting blixard server with default settings...".to_string();
+
+        // Use default config values
+        let node_id = 1u64;
+        let bind_addr = "127.0.0.1:7001".to_string();
+        let data_dir = "./data".to_string();
+        let vm_backend = "microvm".to_string();
+
+        self.start_server_internal(node_id, bind_addr, data_dir, vm_backend).await
+    }
+
+    /// Start server with user-configured settings
+    async fn start_server_with_config(&mut self) -> BlixardResult<()> {
+        self.server_startup.status = ServerStartupStatus::Starting;
+        self.server_startup.message = "Starting blixard server with custom configuration...".to_string();
+
+        // Parse node_id from string
+        let node_id = match self.server_startup.config.node_id.parse::<u64>() {
+            Ok(id) if id > 0 => id,
+            _ => {
+                self.server_startup.status = ServerStartupStatus::Failed;
+                self.server_startup.message = "Invalid node ID: must be a positive number".to_string();
+                return Ok(());
+            }
+        };
+
+        // Validate bind address
+        if self.server_startup.config.bind_address.parse::<std::net::SocketAddr>().is_err() {
+            self.server_startup.status = ServerStartupStatus::Failed;
+            self.server_startup.message = "Invalid bind address format".to_string();
+            return Ok(());
+        }
+
+        self.start_server_internal(
+            node_id,
+            self.server_startup.config.bind_address.clone(),
+            self.server_startup.config.data_dir.clone(),
+            self.server_startup.config.vm_backend.clone(),
+        ).await
+    }
+
+    /// Internal server startup logic shared by both default and configured startup
+    async fn start_server_internal(&mut self, node_id: u64, bind_addr: String, data_dir: String, vm_backend: String) -> BlixardResult<()> {
+        use std::time::Duration;
+        use std::net::TcpStream;
+
+        // Start the server in a background task (same logic as the command-line version)
+        let bind_addr_clone = bind_addr.clone();
+        let data_dir_clone = data_dir.clone();
+        let vm_backend_clone = vm_backend.clone();
+        
+        tokio::spawn(async move {
+            use tokio::process::Command;
+            use std::process::Stdio;
+            
+            // Get the current executable path
+            let current_exe = std::env::current_exe().unwrap_or_else(|_| {
+                // Fallback to cargo run if we can't get the exe path
+                std::path::PathBuf::from("cargo")
+            });
+            
+            // Spawn the node as a separate process with output redirected
+            let mut cmd = if current_exe.file_name().unwrap_or_default() == "cargo" {
+                let mut cmd = Command::new("cargo");
+                cmd.args(&["run", "--", "node"]);
+                cmd
+            } else {
+                let mut cmd = Command::new(&current_exe);
+                cmd.arg("node");
+                cmd
+            };
+            
+            // Add node arguments
+            cmd.args(&[
+                "--id", &node_id.to_string(),
+                "--bind", &bind_addr_clone,
+                "--data-dir", &data_dir_clone,
+                "--vm-backend", &vm_backend_clone
+            ]);
+            
+            // Redirect all output to null to prevent interference with TUI
+            cmd.stdout(Stdio::null())
+               .stderr(Stdio::null())
+               .stdin(Stdio::null());
+            
+            // Set environment to suppress most logging
+            cmd.env("RUST_LOG", "error");
+            
+            // Start the server process and don't wait for it
+            let _ = cmd.spawn();
+        });
+        
+        // Wait for server to start with timeout
+        self.server_startup.message = "Waiting for server to start...".to_string();
+        let server_addr = bind_addr.parse::<std::net::SocketAddr>()
+            .map_err(|e| crate::BlixardError::ConfigError(format!("Invalid bind address: {}", e)))?;
+        
+        let mut attempts = 0;
+        let max_attempts = 30; // 15 seconds timeout
+        
+        while attempts < max_attempts {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            if TcpStream::connect_timeout(&server_addr, Duration::from_millis(500)).is_ok() {
+                // Server is up! Try to connect with TUI client
+                match super::VmClient::new(&bind_addr).await {
+                    Ok(client) => {
+                        self.vm_client = Some(client);
+                        self.server_startup.status = ServerStartupStatus::Success;
+                        self.server_startup.message = "Server started successfully!".to_string();
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        self.server_startup.status = ServerStartupStatus::Failed;
+                        self.server_startup.message = format!("Server started but failed to connect TUI client: {}", e);
+                        return Ok(());
+                    }
+                }
+            }
+            attempts += 1;
+        }
+        
+        // Timeout
+        self.server_startup.status = ServerStartupStatus::Failed;
+        self.server_startup.message = "Timeout waiting for server to start".to_string();
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -1377,4 +1677,54 @@ pub struct SshSession {
     pub connection_status: String,
     pub output_receiver: Option<mpsc::UnboundedReceiver<String>>,
     pub input_sender: Option<mpsc::UnboundedSender<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ServerStartupStatus {
+    Prompt,      // Asking user if they want to start server
+    Starting,    // Server is starting
+    Success,     // Server started successfully
+    Failed,      // Server failed to start
+}
+
+#[derive(Debug, Clone)]
+pub struct ServerStartupState {
+    pub status: ServerStartupStatus,
+    pub message: String,
+    pub selected_option: usize, // 0 = Yes, 1 = No, 2 = Configure
+    pub show_config: bool,
+    pub config: ServerConfig,
+}
+
+#[derive(Debug, Clone)]
+pub struct ServerConfig {
+    pub node_id: String,
+    pub bind_address: String,
+    pub data_dir: String,
+    pub vm_backend: String,
+    pub current_field: usize,
+}
+
+impl Default for ServerStartupState {
+    fn default() -> Self {
+        Self {
+            status: ServerStartupStatus::Prompt,
+            message: "No blixard server detected on 127.0.0.1:7001".to_string(),
+            selected_option: 0,
+            show_config: false,
+            config: ServerConfig::default(),
+        }
+    }
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            node_id: "1".to_string(),
+            bind_address: "127.0.0.1:7001".to_string(),
+            data_dir: "./data".to_string(),
+            vm_backend: "microvm".to_string(),
+            current_field: 0,
+        }
+    }
 }

@@ -762,6 +762,49 @@ async fn handle_reset_command(
 }
 
 #[cfg(not(madsim))]
+async fn start_server_background(
+    node_id: u64,
+    bind_addr: String,
+    data_dir: String,
+    vm_backend: String,
+) -> BlixardResult<()> {
+    // Parse bind address
+    let bind_address = bind_addr.parse::<SocketAddr>()
+        .map_err(|e| BlixardError::ConfigError(format!("Invalid bind address: {}", e)))?;
+    
+    // Create node configuration (same structure as the main node command)
+    let node_config = NodeConfig {
+        id: node_id,
+        bind_addr: bind_address,
+        data_dir,
+        join_addr: None, // No peers for auto-started server
+        use_tailscale: false,
+        vm_backend: vm_backend.clone(),
+    };
+    
+    // Create orchestrator configuration
+    let orchestrator_config = OrchestratorConfig {
+        node_config,
+        vm_backend_type: vm_backend,
+    };
+
+    // Create and initialize the orchestrator (same as main node command)
+    let mut orchestrator = BlixardOrchestrator::new(orchestrator_config).await?;
+    orchestrator.initialize().await?;
+    orchestrator.start().await?;
+    
+    // Get shared state for gRPC server
+    let shared_state = orchestrator.node().shared();
+    let actual_bind_address = orchestrator.bind_address();
+
+    // Keep orchestrator alive while running gRPC server
+    let _orchestrator = orchestrator;
+    
+    // Start gRPC server (this will run indefinitely)
+    start_grpc_server(shared_state, actual_bind_address).await
+}
+
+#[cfg(not(madsim))]
 async fn handle_tui_command() -> BlixardResult<()> {
     use crossterm::{
         execute,
@@ -794,8 +837,10 @@ async fn handle_tui_command() -> BlixardResult<()> {
     let mut app = tui::app::App::new().await?;
     let mut event_handler = tui::events::EventHandler::new(250); // 250ms tick rate
 
-    // Initial VM list refresh
-    app.refresh_vm_list().await?;
+    // Only refresh VM list if we have a server connection
+    if app.vm_client.is_some() {
+        app.refresh_vm_list().await?;
+    }
 
     // Main loop
     let result = loop {

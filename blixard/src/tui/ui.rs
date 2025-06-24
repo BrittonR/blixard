@@ -12,6 +12,12 @@ use super::app::{App, AppMode, CreateVmForm, InputMode, VmInfo};
 use blixard_core::types::VmStatus;
 
 pub fn render(f: &mut Frame, app: &App) {
+    // If we're in ServerStartup mode, only render the popup and nothing else
+    if app.mode == AppMode::ServerStartup {
+        render_server_startup_popup(f, f.size(), app);
+        return;
+    }
+    
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -34,6 +40,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::Help => render_help(f, chunks[2]),
         AppMode::SshSession => render_ssh_session(f, chunks[2], app),
         AppMode::RaftStatus => render_raft_status(f, chunks[2], app),
+        AppMode::ServerStartup => {}, // This case is handled above
     }
     
     render_live_log_panel(f, chunks[3], app);
@@ -223,6 +230,13 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
             vec![
                 ("r", "Refresh"),
                 ("Any Key", "Back"),
+            ]
+        }
+        AppMode::ServerStartup => {
+            vec![
+                ("↑/↓", "Navigate"),
+                ("Enter", "Select"),
+                ("y/n/c", "Shortcuts"),
             ]
         }
     };
@@ -610,7 +624,6 @@ fn render_vm_logs(f: &mut Frame, area: Rect, app: &App) {
     let log_lines: Vec<Line> = app
         .vm_logs
         .iter()
-        .skip(app.log_scroll as usize)
         .map(|line| Line::from(line.as_str()))
         .collect();
 
@@ -627,6 +640,20 @@ fn render_vm_logs(f: &mut Frame, area: Rect, app: &App) {
         Style::default().fg(Color::Blue)
     };
 
+    // Calculate proper scroll position to show logs from the bottom
+    let viewport_height = area.height.saturating_sub(2) as usize; // Account for borders
+    let total_lines = log_lines.len();
+    
+    // If we're following live logs (scroll is at max), automatically adjust to show bottom
+    let actual_scroll = if app.log_receiver.is_some() && 
+                          app.log_scroll as usize >= total_lines.saturating_sub(viewport_height) {
+        // Auto-follow: show the last lines
+        total_lines.saturating_sub(viewport_height) as u16
+    } else {
+        // Manual scroll: use user's scroll position
+        app.log_scroll.min(total_lines.saturating_sub(viewport_height) as u16)
+    };
+
     let logs = Paragraph::new(log_lines)
         .block(
             Block::default()
@@ -635,7 +662,7 @@ fn render_vm_logs(f: &mut Frame, area: Rect, app: &App) {
                 .border_style(title_style),
         )
         .wrap(Wrap { trim: false })
-        .scroll((app.log_scroll, 0));
+        .scroll((actual_scroll, 0));
 
     f.render_widget(logs, area);
 }
@@ -698,7 +725,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         Line::from("  n              - Create new VM"),
         Line::from("  s              - Start selected VM"),
         Line::from("  x              - Stop selected VM"),
-        Line::from("  D              - Delete selected VM (must be stopped)"),
+        Line::from("  D              - Delete selected VM (must be stopped or failed)"),
         Line::from("  c              - SSH connect to selected VM"),
         Line::from("  l              - View VM logs"),
         Line::from("  f              - Follow selected VM in live panel"),
@@ -709,7 +736,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         Line::from("VM Details View:").style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         Line::from("  s              - Start VM"),
         Line::from("  x              - Stop VM"),
-        Line::from("  D              - Delete VM (must be stopped)"),
+        Line::from("  D              - Delete VM (must be stopped or failed)"),
         Line::from("  c              - SSH connect to VM"),
         Line::from("  l              - View VM logs"),
         Line::from(""),
@@ -885,9 +912,10 @@ fn render_ssh_session(f: &mut Frame, area: Rect, app: &App) {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(4),  // Connection info header
-                Constraint::Min(5),     // Terminal output
+                Constraint::Min(10),    // Terminal output (increased minimum)
                 Constraint::Length(3),  // Input line
             ])
+            .margin(1)  // Add margin to prevent border overlap
             .split(area);
 
         // Connection info header
@@ -979,6 +1007,258 @@ fn render_ssh_session(f: &mut Frame, area: Rect, app: &App) {
             .block(Block::default().title("SSH Session").borders(Borders::ALL));
         f.render_widget(no_session, area);
     }
+}
+
+fn render_server_startup_popup(f: &mut Frame, area: Rect, app: &App) {
+    use super::app::{ServerStartupStatus, ServerStartupState};
+    
+    // Clear the background with a dim overlay and a title
+    let background = Paragraph::new("Blixard Server Setup Required")
+        .style(Style::default().fg(Color::Gray))
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::DarkGray))
+                .style(Style::default().bg(Color::Black))
+        );
+    f.render_widget(background, area);
+    
+    // Create popup area (centered, 80% width, 70% height for better visibility)
+    let popup_area = centered_rect(80, 70, area);
+    
+    match app.server_startup.status {
+        ServerStartupStatus::Prompt => {
+            if app.server_startup.show_config {
+                render_server_config_form(f, popup_area, app);
+            } else {
+                render_server_startup_prompt(f, popup_area, app);
+            }
+        }
+        ServerStartupStatus::Starting => {
+            render_server_starting(f, popup_area, app);
+        }
+        ServerStartupStatus::Success => {
+            render_server_success(f, popup_area, app);
+        }
+        ServerStartupStatus::Failed => {
+            render_server_failed(f, popup_area, app);
+        }
+    }
+}
+
+fn render_server_startup_prompt(f: &mut Frame, area: Rect, app: &App) {
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("⚠️  No Blixard Server Detected", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(""),
+        Line::from(app.server_startup.message.as_str()),
+        Line::from(""),
+        Line::from("Would you like to start a server automatically?"),
+        Line::from(""),
+        Line::from(""),
+        Line::from(vec![
+            if app.server_startup.selected_option == 0 {
+                Span::styled("▶ Yes, start with defaults", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+            } else {
+                Span::raw("  Yes, start with defaults")
+            },
+        ]),
+        Line::from(vec![
+            if app.server_startup.selected_option == 1 {
+                Span::styled("▶ No, quit TUI", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+            } else {
+                Span::raw("  No, quit TUI")
+            },
+        ]),
+        Line::from(vec![
+            if app.server_startup.selected_option == 2 {
+                Span::styled("▶ Configure server settings", Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD))
+            } else {
+                Span::raw("  Configure server settings")
+            },
+        ]),
+        Line::from(""),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Navigation: ", Style::default().fg(Color::Gray)),
+            Span::styled("↑/↓ or j/k", Style::default().fg(Color::Green)),
+            Span::styled(" | ", Style::default().fg(Color::Gray)),
+            Span::styled("Enter/Space", Style::default().fg(Color::Green)),
+            Span::styled(" to select | ", Style::default().fg(Color::Gray)),
+            Span::styled("y/n/c", Style::default().fg(Color::Green)),
+            Span::styled(" shortcuts", Style::default().fg(Color::Gray)),
+        ]),
+    ];
+
+    let popup = Paragraph::new(lines)
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .title("🚀 Blixard Server Startup")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan))
+        );
+    
+    f.render_widget(popup, area);
+}
+
+fn render_server_config_form(f: &mut Frame, area: Rect, app: &App) {
+    let config = &app.server_startup.config;
+    
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("🔧 Server Configuration", Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            if config.current_field == 0 {
+                Span::styled("▶ Node ID: ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+            } else {
+                Span::raw("  Node ID: ")
+            },
+            Span::styled(&config.node_id, Style::default().fg(Color::White)),
+        ]),
+        Line::from(vec![
+            if config.current_field == 1 {
+                Span::styled("▶ Bind Address: ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+            } else {
+                Span::raw("  Bind Address: ")
+            },
+            Span::styled(&config.bind_address, Style::default().fg(Color::White)),
+        ]),
+        Line::from(vec![
+            if config.current_field == 2 {
+                Span::styled("▶ Data Directory: ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+            } else {
+                Span::raw("  Data Directory: ")
+            },
+            Span::styled(&config.data_dir, Style::default().fg(Color::White)),
+        ]),
+        Line::from(vec![
+            if config.current_field == 3 {
+                Span::styled("▶ VM Backend: ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+            } else {
+                Span::raw("  VM Backend: ")
+            },
+            Span::styled(&config.vm_backend, Style::default().fg(Color::White)),
+        ]),
+        Line::from(""),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Navigation: ", Style::default().fg(Color::Gray)),
+            Span::styled("↑/↓ or j/k", Style::default().fg(Color::Green)),
+            Span::styled(" | ", Style::default().fg(Color::Gray)),
+            Span::styled("Enter", Style::default().fg(Color::Green)),
+            Span::styled(" to start | ", Style::default().fg(Color::Gray)),
+            Span::styled("Esc", Style::default().fg(Color::Red)),
+            Span::styled(" to go back", Style::default().fg(Color::Gray)),
+        ]),
+    ];
+
+    let popup = Paragraph::new(lines)
+        .alignment(Alignment::Left)
+        .block(
+            Block::default()
+                .title("Configure Server")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue))
+        );
+    
+    f.render_widget(popup, area);
+}
+
+fn render_server_starting(f: &mut Frame, area: Rect, app: &App) {
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("🚀 Starting Server...", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(""),
+        Line::from(app.server_startup.message.as_str()),
+        Line::from(""),
+        Line::from("Please wait while the server initializes..."),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("⏳ ", Style::default().fg(Color::Yellow)),
+            Span::raw("This may take a few moments"),
+        ]),
+    ];
+
+    let popup = Paragraph::new(lines)
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .title("Server Startup")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Yellow))
+        );
+    
+    f.render_widget(popup, area);
+}
+
+fn render_server_success(f: &mut Frame, area: Rect, app: &App) {
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("✅ Server Started Successfully!", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(""),
+        Line::from(app.server_startup.message.as_str()),
+        Line::from(""),
+        Line::from("The TUI is now connected to the blixard server."),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Press any key to continue...", Style::default().fg(Color::Green)),
+        ]),
+    ];
+
+    let popup = Paragraph::new(lines)
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .title("Success")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Green))
+        );
+    
+    f.render_widget(popup, area);
+}
+
+fn render_server_failed(f: &mut Frame, area: Rect, app: &App) {
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("❌ Server Startup Failed", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(""),
+        Line::from(app.server_startup.message.as_str()),
+        Line::from(""),
+        Line::from("Options:"),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Enter/r", Style::default().fg(Color::Green)),
+            Span::styled(" - Retry startup", Style::default().fg(Color::Gray)),
+        ]),
+        Line::from(vec![
+            Span::styled("q/Esc", Style::default().fg(Color::Red)),
+            Span::styled(" - Quit TUI", Style::default().fg(Color::Gray)),
+        ]),
+    ];
+
+    let popup = Paragraph::new(lines)
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .title("Startup Failed")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Red))
+        );
+    
+    f.render_widget(popup, area);
 }
 
 /// Helper function to create a centered rectangle
