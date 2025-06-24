@@ -1,10 +1,11 @@
 use crate::BlixardResult;
-use super::app::{VmInfo, ClusterInfo};
+use super::app::{VmInfo, ClusterInfo, ClusterResourceInfo, NodeResourceInfo, PlacementStrategy};
 use blixard_core::{
     proto::{
         cluster_service_client::ClusterServiceClient,
-        CreateVmRequest, StartVmRequest, StopVmRequest, DeleteVmRequest, GetVmStatusRequest, ListVmsRequest,
-        ClusterStatusRequest,
+        CreateVmRequest, CreateVmWithSchedulingRequest, StartVmRequest, StopVmRequest, DeleteVmRequest, 
+        GetVmStatusRequest, ListVmsRequest, ClusterStatusRequest, ClusterResourceSummaryRequest,
+        ScheduleVmPlacementRequest,
     },
     types::VmStatus,
 };
@@ -234,5 +235,132 @@ impl VmClient {
             current_node_state,
             nodes,
         })
+    }
+    
+    /// Create VM with intelligent scheduling
+    pub async fn create_vm_with_scheduling(
+        &mut self, 
+        name: &str, 
+        vcpus: u32, 
+        memory: u32, 
+        placement_strategy: PlacementStrategy
+    ) -> BlixardResult<(u64, String)> {
+        let strategy_proto = match placement_strategy {
+            PlacementStrategy::MostAvailable => 0, // PLACEMENT_STRATEGY_MOST_AVAILABLE
+            PlacementStrategy::LeastAvailable => 1, // PLACEMENT_STRATEGY_LEAST_AVAILABLE
+            PlacementStrategy::RoundRobin => 2, // PLACEMENT_STRATEGY_ROUND_ROBIN
+            PlacementStrategy::Manual => 3, // PLACEMENT_STRATEGY_MANUAL
+        };
+        
+        let request = tonic::Request::new(CreateVmWithSchedulingRequest {
+            name: name.to_string(),
+            config_path: String::new(),
+            vcpus,
+            memory_mb: memory,
+            strategy: strategy_proto,
+        });
+
+        let response = self.client.create_vm_with_scheduling(request).await
+            .map_err(|e| crate::BlixardError::Internal {
+                message: format!("Failed to create VM with scheduling: {}", e),
+            })?;
+
+        let resp = response.into_inner();
+        if !resp.success {
+            return Err(crate::BlixardError::Internal {
+                message: format!("VM creation with scheduling failed: {}", resp.message),
+            });
+        }
+
+        Ok((resp.selected_node_id, resp.placement_reason))
+    }
+    
+    /// Get cluster resource summary
+    pub async fn get_cluster_resources(&mut self) -> BlixardResult<ClusterResourceInfo> {
+        let request = tonic::Request::new(ClusterResourceSummaryRequest {});
+        
+        let response = self.client.get_cluster_resource_summary(request).await
+            .map_err(|e| crate::BlixardError::Internal {
+                message: format!("Failed to get cluster resources: {}", e),
+            })?;
+            
+        let resp = response.into_inner();
+        if !resp.success {
+            return Err(crate::BlixardError::Internal {
+                message: format!("Failed to get cluster resources: {}", resp.message),
+            });
+        }
+        
+        let summary = resp.summary.ok_or_else(|| crate::BlixardError::Internal {
+            message: "No cluster resource summary in response".to_string(),
+        })?;
+        
+        let nodes = summary.nodes
+            .into_iter()
+            .map(|node| {
+                let capabilities = node.capabilities.unwrap_or_default();
+                NodeResourceInfo {
+                    node_id: node.node_id,
+                    cpu_cores: capabilities.cpu_cores,
+                    memory_mb: capabilities.memory_mb,
+                    disk_gb: capabilities.disk_gb,
+                    used_vcpus: node.used_vcpus,
+                    used_memory_mb: node.used_memory_mb,
+                    used_disk_gb: node.used_disk_gb,
+                    running_vms: node.running_vms,
+                    features: capabilities.features,
+                }
+            })
+            .collect();
+        
+        Ok(ClusterResourceInfo {
+            total_nodes: summary.total_nodes,
+            total_vcpus: summary.total_vcpus,
+            used_vcpus: summary.used_vcpus,
+            total_memory_mb: summary.total_memory_mb,
+            used_memory_mb: summary.used_memory_mb,
+            total_disk_gb: summary.total_disk_gb,
+            used_disk_gb: summary.used_disk_gb,
+            total_running_vms: summary.total_running_vms,
+            nodes,
+        })
+    }
+    
+    /// Schedule VM placement (dry run)
+    pub async fn schedule_vm_placement(
+        &mut self,
+        name: &str,
+        vcpus: u32,
+        memory: u32,
+        placement_strategy: PlacementStrategy,
+    ) -> BlixardResult<(u64, String, Vec<u64>)> {
+        let strategy_proto = match placement_strategy {
+            PlacementStrategy::MostAvailable => 0,
+            PlacementStrategy::LeastAvailable => 1,
+            PlacementStrategy::RoundRobin => 2,
+            PlacementStrategy::Manual => 3,
+        };
+        
+        let request = tonic::Request::new(ScheduleVmPlacementRequest {
+            name: name.to_string(),
+            config_path: String::new(),
+            vcpus,
+            memory_mb: memory,
+            strategy: strategy_proto,
+        });
+        
+        let response = self.client.schedule_vm_placement(request).await
+            .map_err(|e| crate::BlixardError::Internal {
+                message: format!("Failed to schedule VM placement: {}", e),
+            })?;
+            
+        let resp = response.into_inner();
+        if !resp.success {
+            return Err(crate::BlixardError::Internal {
+                message: format!("VM placement scheduling failed: {}", resp.message),
+            });
+        }
+        
+        Ok((resp.selected_node_id, resp.placement_reason, resp.alternative_nodes))
     }
 }

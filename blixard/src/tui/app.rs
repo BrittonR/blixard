@@ -26,6 +26,7 @@ pub enum AppMode {
     Help,
     SshSession,
     RaftStatus,
+    ClusterResources, // New mode for cluster resource monitoring
     ServerStartup, // New mode for server startup popup
 }
 
@@ -82,6 +83,8 @@ pub struct App {
     pub ssh_session: Option<SshSession>,
     /// Server startup popup state
     pub server_startup: ServerStartupState,
+    /// Cluster resource information
+    pub cluster_resources: Option<ClusterResourceInfo>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,7 +92,92 @@ pub struct CreateVmForm {
     pub name: String,
     pub vcpus: String,
     pub memory: String,
+    pub placement_strategy: usize, // Index into placement strategy options
     pub current_field: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlacementStrategy {
+    MostAvailable,
+    LeastAvailable,
+    RoundRobin,
+    Manual,
+}
+
+impl PlacementStrategy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PlacementStrategy::MostAvailable => "Most Available",
+            PlacementStrategy::LeastAvailable => "Least Available (Bin Pack)",
+            PlacementStrategy::RoundRobin => "Round Robin",
+            PlacementStrategy::Manual => "Manual Selection",
+        }
+    }
+    
+    pub fn all() -> Vec<PlacementStrategy> {
+        vec![
+            PlacementStrategy::MostAvailable,
+            PlacementStrategy::LeastAvailable,
+            PlacementStrategy::RoundRobin,
+            PlacementStrategy::Manual,
+        ]
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ClusterResourceInfo {
+    pub total_nodes: u32,
+    pub total_vcpus: u32,
+    pub used_vcpus: u32,
+    pub total_memory_mb: u64,
+    pub used_memory_mb: u64,
+    pub total_disk_gb: u64,
+    pub used_disk_gb: u64,
+    pub total_running_vms: u32,
+    pub nodes: Vec<NodeResourceInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NodeResourceInfo {
+    pub node_id: u64,
+    pub cpu_cores: u32,
+    pub memory_mb: u64,
+    pub disk_gb: u64,
+    pub used_vcpus: u32,
+    pub used_memory_mb: u64,
+    pub used_disk_gb: u64,
+    pub running_vms: u32,
+    pub features: Vec<String>,
+}
+
+impl ClusterResourceInfo {
+    pub fn cpu_utilization(&self) -> f64 {
+        if self.total_vcpus > 0 {
+            (self.used_vcpus as f64 / self.total_vcpus as f64) * 100.0
+        } else {
+            0.0
+        }
+    }
+    
+    pub fn memory_utilization(&self) -> f64 {
+        if self.total_memory_mb > 0 {
+            (self.used_memory_mb as f64 / self.total_memory_mb as f64) * 100.0
+        } else {
+            0.0
+        }
+    }
+    
+    pub fn disk_utilization(&self) -> f64 {
+        if self.total_disk_gb > 0 {
+            (self.used_disk_gb as f64 / self.total_disk_gb as f64) * 100.0
+        } else {
+            0.0
+        }
+    }
+    
+    pub fn utilization_percentages(&self) -> (f64, f64, f64) {
+        (self.cpu_utilization(), self.memory_utilization(), self.disk_utilization())
+    }
 }
 
 impl Default for CreateVmForm {
@@ -98,6 +186,7 @@ impl Default for CreateVmForm {
             name: String::new(),
             vcpus: "2".to_string(),
             memory: "1024".to_string(),
+            placement_strategy: 0, // Default to MostAvailable
             current_field: 0,
         }
     }
@@ -147,6 +236,7 @@ impl App {
             ssh_info: None,
             ssh_session: None,
             server_startup: ServerStartupState::default(),
+            cluster_resources: None,
         };
         
         // Only start live logging and get cluster status if server is available
@@ -222,6 +312,7 @@ impl App {
             AppMode::Help => self.handle_help_keys(key).await?,
             AppMode::SshSession => self.handle_ssh_keys(key).await?,
             AppMode::RaftStatus => self.handle_raft_status_keys(key).await?,
+            AppMode::ClusterResources => self.handle_cluster_resources_keys(key).await?,
             AppMode::ServerStartup => self.handle_server_startup_keys(key).await?,
         }
 
@@ -297,6 +388,14 @@ impl App {
             }
             KeyCode::Char('R') => {
                 self.mode = AppMode::RaftStatus;
+            }
+            KeyCode::Char('C') => {
+                // Switch to cluster resources view
+                self.mode = AppMode::ClusterResources;
+                // Refresh cluster resources when entering this mode
+                if let Err(e) = self.refresh_cluster_resources().await {
+                    self.error_message = Some(format!("Failed to load cluster resources: {}", e));
+                }
             }
             KeyCode::Char('f') => {
                 // Follow logs for selected VM in live panel
@@ -421,7 +520,7 @@ impl App {
         if self.input_mode == InputMode::Editing {
             match key.code {
                 KeyCode::Enter => {
-                    if self.create_form.current_field < 2 {
+                    if self.create_form.current_field < 3 {
                         self.create_form.current_field += 1;
                     } else {
                         // Submit form
@@ -429,11 +528,11 @@ impl App {
                     }
                 }
                 KeyCode::Tab => {
-                    self.create_form.current_field = (self.create_form.current_field + 1) % 3;
+                    self.create_form.current_field = (self.create_form.current_field + 1) % 4;
                 }
                 KeyCode::BackTab => {
                     self.create_form.current_field = if self.create_form.current_field == 0 {
-                        2
+                        3
                     } else {
                         self.create_form.current_field - 1
                     };
@@ -451,7 +550,33 @@ impl App {
                         0 => self.create_form.name.push(c),
                         1 => if c.is_ascii_digit() { self.create_form.vcpus.push(c); }
                         2 => if c.is_ascii_digit() { self.create_form.memory.push(c); }
+                        3 => {
+                            // For placement strategy, cycle through options with arrow keys or numbers
+                            match c {
+                                '1' => self.create_form.placement_strategy = 0, // MostAvailable
+                                '2' => self.create_form.placement_strategy = 1, // LeastAvailable
+                                '3' => self.create_form.placement_strategy = 2, // RoundRobin  
+                                '4' => self.create_form.placement_strategy = 3, // Manual
+                                _ => {}
+                            }
+                        }
                         _ => {}
+                    }
+                }
+                KeyCode::Up | KeyCode::Left => {
+                    if self.create_form.current_field == 3 {
+                        // Cycle placement strategy backwards
+                        self.create_form.placement_strategy = if self.create_form.placement_strategy == 0 {
+                            3
+                        } else {
+                            self.create_form.placement_strategy - 1
+                        };
+                    }
+                }
+                KeyCode::Down | KeyCode::Right => {
+                    if self.create_form.current_field == 3 {
+                        // Cycle placement strategy forwards
+                        self.create_form.placement_strategy = (self.create_form.placement_strategy + 1) % 4;
                     }
                 }
                 _ => {}
@@ -695,6 +820,24 @@ impl App {
         Ok(())
     }
 
+    async fn handle_cluster_resources_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
+        use crossterm::event::KeyCode;
+
+        match key.code {
+            KeyCode::Char('r') => {
+                // Refresh cluster resources
+                if let Err(e) = self.refresh_cluster_resources().await {
+                    self.error_message = Some(format!("Failed to refresh cluster resources: {}", e));
+                }
+            }
+            _ => {
+                // Any other key exits cluster resources view
+                self.mode = AppMode::VmList;
+            }
+        }
+        Ok(())
+    }
+
     async fn handle_tick(&mut self) -> BlixardResult<()> {
         // Increment tick counter
         self.tick_counter += 1;
@@ -825,6 +968,34 @@ impl App {
         Ok(())
     }
 
+    pub async fn refresh_cluster_resources(&mut self) -> BlixardResult<()> {
+        if let Some(client) = &mut self.vm_client {
+            match client.get_cluster_resources().await {
+                Ok(cluster_resources) => {
+                    self.cluster_resources = Some(cluster_resources);
+                }
+                Err(e) => {
+                    // Provide a more helpful error message for common cases
+                    let error_msg = if e.to_string().contains("VM manager not initialized") {
+                        "VM manager is still initializing. Please wait a moment and try again (press 'r')".to_string()
+                    } else if e.to_string().contains("No server connection") {
+                        "Cannot connect to blixard server. Ensure a node is running".to_string()
+                    } else {
+                        format!("Failed to get cluster resources: {}", e)
+                    };
+                    
+                    return Err(crate::BlixardError::Internal { message: error_msg });
+                }
+            }
+        } else {
+            return Err(crate::BlixardError::Internal { 
+                message: "No server connection available. Start a blixard node first".to_string() 
+            });
+        }
+        
+        Ok(())
+    }
+
     async fn start_vm(&mut self, name: &str) -> BlixardResult<()> {
         if let Some(client) = &mut self.vm_client {
             match client.start_vm(name).await {
@@ -907,11 +1078,20 @@ impl App {
 
         let vcpus: u32 = self.create_form.vcpus.parse().unwrap_or(2);
         let memory: u32 = self.create_form.memory.parse().unwrap_or(1024);
+        
+        // Convert placement strategy index to PlacementStrategy enum
+        let placement_strategy = match self.create_form.placement_strategy {
+            0 => PlacementStrategy::MostAvailable,
+            1 => PlacementStrategy::LeastAvailable,
+            2 => PlacementStrategy::RoundRobin,
+            3 => PlacementStrategy::Manual,
+            _ => PlacementStrategy::MostAvailable, // Default fallback
+        };
 
         if let Some(client) = &mut self.vm_client {
-            match client.create_vm(&name, vcpus, memory).await {
-                Ok(_) => {
-                    self.status_message = Some(format!("✓ Created VM '{}'", name));
+            match client.create_vm_with_scheduling(&name, vcpus, memory, placement_strategy).await {
+                Ok((selected_node_id, placement_reason)) => {
+                    self.status_message = Some(format!("✓ Created VM '{}' on node {} ({})", name, selected_node_id, placement_reason));
                     self.error_message = None;
                     self.mode = AppMode::VmList;
                     self.input_mode = InputMode::Normal;

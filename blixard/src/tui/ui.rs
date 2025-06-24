@@ -40,6 +40,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::Help => render_help(f, chunks[2]),
         AppMode::SshSession => render_ssh_session(f, chunks[2], app),
         AppMode::RaftStatus => render_raft_status(f, chunks[2], app),
+        AppMode::ClusterResources => render_cluster_resources(f, chunks[2], app),
         AppMode::ServerStartup => {}, // This case is handled above
     }
     
@@ -53,7 +54,7 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Min(25),     // Title area
-            Constraint::Length(50),  // Status/error messages
+            Constraint::Min(60),     // Status/error messages - more flexible
         ])
         .split(area);
 
@@ -70,12 +71,14 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         let status = Paragraph::new(format!("✅ {}", msg))
             .style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
             .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true })
             .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
         f.render_widget(status, chunks[1]);
     } else if let Some(msg) = &app.error_message {
         let error = Paragraph::new(format!("❌ {}", msg))
             .style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
             .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true })
             .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)));
         f.render_widget(error, chunks[1]);
     } else {
@@ -184,6 +187,7 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
                 ("F", "Follow All"),
                 ("r", "Refresh"),
                 ("R", "Raft Status"),
+                ("C", "Cluster Resources"),
                 ("?", "Help"),
                 ("q", "Quit"),
             ]
@@ -230,6 +234,13 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
             vec![
                 ("r", "Refresh"),
                 ("Any Key", "Back"),
+            ]
+        }
+        AppMode::ClusterResources => {
+            vec![
+                ("r", "Refresh"),
+                ("Esc", "Back"),
+                ("q", "Quit"),
             ]
         }
         AppMode::ServerStartup => {
@@ -558,7 +569,7 @@ fn render_vm_create(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(13), // Form (increased to fit all fields properly)
+            Constraint::Length(16), // Form (increased to fit placement strategy field)
             Constraint::Min(0),     // Instructions
         ])
         .split(area);
@@ -585,16 +596,18 @@ fn render_create_form(f: &mut Frame, area: Rect, form: &CreateVmForm, editing: b
             Constraint::Length(3), // Name
             Constraint::Length(3), // vCPUs
             Constraint::Length(3), // Memory
+            Constraint::Length(3), // Placement Strategy
         ])
         .split(inner_area);
 
-    let fields = [
+    // Render name, vcpus, memory fields
+    let text_fields = [
         ("Name", &form.name, 0),
         ("vCPUs", &form.vcpus, 1),
         ("Memory (MB)", &form.memory, 2),
     ];
 
-    for (i, (label, value, field_index)) in fields.iter().enumerate() {
+    for (i, (label, value, field_index)) in text_fields.iter().enumerate() {
         let is_active = editing && form.current_field == *field_index;
         let border_style = if is_active {
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
@@ -622,19 +635,50 @@ fn render_create_form(f: &mut Frame, area: Rect, form: &CreateVmForm, editing: b
 
         f.render_widget(input, chunks[i]);
 
-        // Show cursor for active field
-        if is_active {
+        // Show cursor for active text fields
+        if is_active && *field_index < 3 {
             let cursor_x = chunks[i].x + value.len() as u16 + 1;
             let cursor_y = chunks[i].y + 1;
             f.set_cursor(cursor_x.min(chunks[i].x + chunks[i].width - 2), cursor_y);
         }
     }
+
+    // Render placement strategy field (dropdown-style)
+    let strategies = ["Most Available", "Least Available (Bin Pack)", "Round Robin", "Manual Selection"];
+    let strategy_is_active = editing && form.current_field == 3;
+    let strategy_border_style = if strategy_is_active {
+        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::Cyan)
+    };
+
+    let strategy_text = format!("{} ◀ ▶", strategies[form.placement_strategy]);
+    let strategy_input = Paragraph::new(strategy_text)
+        .style(if strategy_is_active {
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        })
+        .block(
+            Block::default()
+                .title("🎯 Placement Strategy")
+                .borders(Borders::ALL)
+                .border_style(strategy_border_style)
+                .title_style(if strategy_is_active {
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Cyan)
+                }),
+        );
+
+    f.render_widget(strategy_input, chunks[3]);
 }
 
 fn render_create_instructions(f: &mut Frame, area: Rect) {
     let instructions = vec![
         Line::from("Use Tab/Shift+Tab to navigate between fields"),
         Line::from("Press Enter to move to next field or submit"),
+        Line::from("Use ←/→ or 1-4 keys to select placement strategy"),
         Line::from("Press Esc to cancel and return to VM list"),
     ];
 
@@ -1327,6 +1371,165 @@ fn render_server_failed(f: &mut Frame, area: Rect, app: &App) {
         );
     
     f.render_widget(popup, area);
+}
+
+fn render_cluster_resources(f: &mut Frame, area: Rect, app: &App) {
+    let block = Block::default()
+        .title("🌐 Cluster Resources")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD));
+
+    if let Some(resources) = &app.cluster_resources {
+        // Split the area for summary and node details
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(8),  // Cluster summary
+                Constraint::Min(0),     // Node details
+            ])
+            .split(area);
+
+        // Render cluster summary
+        render_cluster_summary(f, chunks[0], resources);
+        
+        // Render node details
+        render_node_details(f, chunks[1], resources);
+    } else {
+        let no_data = Paragraph::new("No cluster resource data available.\nPress 'r' to refresh.")
+            .style(Style::default().fg(Color::Yellow))
+            .alignment(Alignment::Center)
+            .block(block);
+        f.render_widget(no_data, area);
+    }
+}
+
+fn render_cluster_summary(f: &mut Frame, area: Rect, resources: &super::app::ClusterResourceInfo) {
+    let (cpu_util, memory_util, disk_util) = resources.utilization_percentages();
+    
+    let summary_text = vec![
+        Line::from(vec![
+            Span::styled("Nodes: ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{}", resources.total_nodes), Style::default().fg(Color::White)),
+            Span::styled("   Running VMs: ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{}", resources.total_running_vms), Style::default().fg(Color::White)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("CPU: ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{}/{} vCPUs", resources.used_vcpus, resources.total_vcpus), Style::default().fg(Color::White)),
+            Span::styled(format!(" ({:.1}%)", cpu_util), 
+                if cpu_util > 80.0 { Style::default().fg(Color::Red) } 
+                else if cpu_util > 60.0 { Style::default().fg(Color::Yellow) } 
+                else { Style::default().fg(Color::Green) }
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Memory: ", Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{}/{}MB", resources.used_memory_mb, resources.total_memory_mb), Style::default().fg(Color::White)),
+            Span::styled(format!(" ({:.1}%)", memory_util),
+                if memory_util > 80.0 { Style::default().fg(Color::Red) } 
+                else if memory_util > 60.0 { Style::default().fg(Color::Yellow) } 
+                else { Style::default().fg(Color::Green) }
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Disk: ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{}/{}GB", resources.used_disk_gb, resources.total_disk_gb), Style::default().fg(Color::White)),
+            Span::styled(format!(" ({:.1}%)", disk_util),
+                if disk_util > 80.0 { Style::default().fg(Color::Red) } 
+                else if disk_util > 60.0 { Style::default().fg(Color::Yellow) } 
+                else { Style::default().fg(Color::Green) }
+            ),
+        ]),
+    ];
+
+    let summary = Paragraph::new(summary_text)
+        .block(Block::default()
+            .title("Cluster Summary")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green)));
+    
+    f.render_widget(summary, area);
+}
+
+fn render_node_details(f: &mut Frame, area: Rect, resources: &super::app::ClusterResourceInfo) {
+    let rows: Vec<Row> = resources.nodes.iter().map(|node| {
+        let cpu_util = if node.cpu_cores > 0 {
+            (node.used_vcpus as f64 / node.cpu_cores as f64) * 100.0
+        } else { 0.0 };
+        
+        let memory_util = if node.memory_mb > 0 {
+            (node.used_memory_mb as f64 / node.memory_mb as f64) * 100.0
+        } else { 0.0 };
+        
+        let disk_util = if node.disk_gb > 0 {
+            (node.used_disk_gb as f64 / node.disk_gb as f64) * 100.0
+        } else { 0.0 };
+
+        Row::new(vec![
+            Cell::from(format!("{}", node.node_id)),
+            Cell::from(format!("{}/{}", node.used_vcpus, node.cpu_cores)),
+            Cell::from(format!("{:.1}%", cpu_util)).style(
+                if cpu_util > 80.0 { Style::default().fg(Color::Red) }
+                else if cpu_util > 60.0 { Style::default().fg(Color::Yellow) }
+                else { Style::default().fg(Color::Green) }
+            ),
+            Cell::from(format!("{}/{}MB", node.used_memory_mb, node.memory_mb)),
+            Cell::from(format!("{:.1}%", memory_util)).style(
+                if memory_util > 80.0 { Style::default().fg(Color::Red) }
+                else if memory_util > 60.0 { Style::default().fg(Color::Yellow) }
+                else { Style::default().fg(Color::Green) }
+            ),
+            Cell::from(format!("{}/{}GB", node.used_disk_gb, node.disk_gb)),
+            Cell::from(format!("{:.1}%", disk_util)).style(
+                if disk_util > 80.0 { Style::default().fg(Color::Red) }
+                else if disk_util > 60.0 { Style::default().fg(Color::Yellow) }
+                else { Style::default().fg(Color::Green) }
+            ),
+            Cell::from(format!("{}", node.running_vms)),
+            Cell::from(node.features.join(",").chars().take(20).collect::<String>()),
+        ])
+    }).collect();
+
+    let table = Table::new(rows, [
+        Constraint::Length(6),   // Node ID
+        Constraint::Length(12),  // CPU Usage
+        Constraint::Length(8),   // CPU %
+        Constraint::Length(15),  // Memory Usage  
+        Constraint::Length(8),   // Memory %
+        Constraint::Length(12),  // Disk Usage
+        Constraint::Length(8),   // Disk %
+        Constraint::Length(6),   // VMs
+        Constraint::Min(15),     // Features
+    ])
+    .header(Row::new(vec![
+        Cell::from("Node").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Cell::from("CPU Usage").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Cell::from("CPU %").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Cell::from("Memory Usage").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Cell::from("Mem %").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Cell::from("Disk Usage").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Cell::from("Disk %").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Cell::from("VMs").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Cell::from("Features").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+    ]))
+    .block(Block::default()
+        .title("Node Details")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Blue)))
+    .widths(&[
+        Constraint::Length(6),   // Node ID
+        Constraint::Length(12),  // CPU Usage
+        Constraint::Length(8),   // CPU %
+        Constraint::Length(15),  // Memory Usage
+        Constraint::Length(8),   // Memory %
+        Constraint::Length(12),  // Disk Usage
+        Constraint::Length(8),   // Disk %
+        Constraint::Length(6),   // VMs
+        Constraint::Min(15),     // Features
+    ]);
+
+    f.render_widget(table, area);
 }
 
 /// Helper function to create a centered rectangle
