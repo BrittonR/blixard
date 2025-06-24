@@ -17,10 +17,6 @@ CPUQuota={{ cpu_quota }}%
 NoNewPrivileges=false
 PrivateTmp=false
 
-# Capabilities for tap interface creation
-AmbientCapabilities=CAP_NET_ADMIN
-CapabilityBoundingSet=CAP_NET_ADMIN
-
 # Restart behavior
 Restart=on-failure
 RestartSec=10s
@@ -41,7 +37,7 @@ Environment=PATH=/run/current-system/sw/bin:/usr/bin:/bin
 Environment=USER={{ user }}
 Environment=HOME={{ home }}
 
-# Note: User services don't support PID files in the same way
+# System service for VM execution
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target

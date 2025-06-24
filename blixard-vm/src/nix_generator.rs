@@ -162,6 +162,9 @@ impl NixFlakeGenerator {
         let flake_path = output_dir.join("flake.nix");
         fs::write(&flake_path, flake_content)?;
         
+        // Note: flake.lock will be created automatically by Nix when building the VM
+        // The systemd service uses --impure flag to handle untracked files
+        
         Ok(flake_path)
     }
 }

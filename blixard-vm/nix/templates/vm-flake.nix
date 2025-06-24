@@ -26,7 +26,7 @@
               
               interfaces = [ {
                 type = "tap";
-                id = "blixard-tap{{ vm_index }}";
+                id = "vm{{ vm_index }}";
                 mac = "{{ vm_mac }}";
               } ];
               
@@ -68,40 +68,34 @@
               wantedBy = [ "getty.target" ];
             };
             
-            # Network configuration using systemd-networkd
+            # Routed network configuration
             networking.useNetworkd = true;
             networking.firewall.enable = false;
             
             systemd.network.networks."10-eth" = {
               matchConfig.MACAddress = "{{ vm_mac }}";
-              # Static IP configuration based on VM index
               address = [
                 "10.0.0.{{ vm_index }}/32"
                 "fec0::{{ vm_index_hex }}/128"
               ];
               routes = [
                 {
-                  # A route to the host
                   Destination = "10.0.0.0/32";
                   GatewayOnLink = true;
                 }
                 {
-                  # Default route
                   Destination = "0.0.0.0/0";
                   Gateway = "10.0.0.0";
                   GatewayOnLink = true;
                 }
                 {
-                  # IPv6 default route
                   Destination = "::/0";
                   Gateway = "fec0::";
                   GatewayOnLink = true;
                 }
               ];
               networkConfig = {
-                # DNS servers
                 DNS = [
-                  # Quad9.net
                   "9.9.9.9"
                   "149.112.112.112"
                   "2620:fe::fe"
