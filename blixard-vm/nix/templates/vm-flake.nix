@@ -40,14 +40,20 @@
                 }
               ];
               
-              # Enable SSH port forwarding  
+              # SSH port forwarding (dynamic allocation)
+              {% if networks -%}
+              {% for network in networks -%}
+              {% if network.type == "user" and network.ssh_port -%}
               forwardPorts = [
                 {
                   from = "host";
-                  host.port = 2222;
+                  host.port = {{ network.ssh_port }};
                   guest.port = 22;
                 }
               ];
+              {% endif -%}
+              {% endfor -%}
+              {% endif %}
               
               # Console configuration using microvm.nix socket pattern
               socket = "/tmp/{{ vm_name }}-console.sock";

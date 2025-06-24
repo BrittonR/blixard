@@ -56,7 +56,9 @@ pub enum NetworkConfig {
         bridge: Option<String>,
         mac: Option<String>,
     },
-    User, // QEMU user networking (not for production)
+    User {
+        ssh_port: Option<u16>, // SSH port forwarding (None = no SSH)
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

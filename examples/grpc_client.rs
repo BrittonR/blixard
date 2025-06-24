@@ -3,7 +3,7 @@
 use blixard_core::proto::{
     cluster_service_client::ClusterServiceClient,
     HealthCheckRequest, CreateVmRequest, ListVmsRequest, ClusterStatusRequest,
-    StartVmRequest,
+    StartVmRequest, DeleteVmRequest,
 };
 
 #[tokio::main]
@@ -45,6 +45,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nTesting cluster status...");
     let response = client.get_cluster_status(ClusterStatusRequest {}).await?;
     println!("Cluster status response: {:?}", response.into_inner());
+    
+    // Test delete VM if test-delete-vm exists
+    println!("\nTesting VM deletion...");
+    let delete_response = client.delete_vm(DeleteVmRequest {
+        name: "test-delete-vm".to_string(),
+    }).await?;
+    let delete_result = delete_response.into_inner();
+    println!("Delete VM response: {:?}", delete_result);
+    
+    // Wait a moment for the delete to be processed
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+    
+    // List VMs again to see if it was deleted
+    println!("\nListing VMs after delete:");
+    let response = client.list_vms(ListVmsRequest {}).await?;
+    let vms_after = response.into_inner();
+    println!("VMs after delete: {:?}", vms_after);
     
     Ok(())
 }

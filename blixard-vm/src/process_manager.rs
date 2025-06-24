@@ -591,6 +591,16 @@ mod tests {
         let flake_path = temp_dir.path().join("test-flake");
         std::fs::create_dir_all(&flake_path).unwrap();
         
+        // Create a minimal flake.nix file
+        let flake_content = r#"
+{
+  outputs = { self }: {
+    nixosConfigurations.test-vm = {};
+  };
+}
+"#;
+        std::fs::write(flake_path.join("flake.nix"), flake_content).unwrap();
+        
         manager.start_vm("test-vm", &flake_path).await.unwrap();
         
         // Check it's running
@@ -617,6 +627,16 @@ mod tests {
         
         let flake_path = temp_dir.path().join("test-flake");
         std::fs::create_dir_all(&flake_path).unwrap();
+        
+        // Create a minimal flake.nix file
+        let flake_content = r#"
+{
+  outputs = { self }: {
+    nixosConfigurations.test-vm = {};
+  };
+}
+"#;
+        std::fs::write(flake_path.join("flake.nix"), flake_content).unwrap();
         
         // Start VM
         manager.start_vm("test-vm", &flake_path).await.unwrap();
@@ -654,9 +674,19 @@ mod tests {
         let flake_path = temp_dir.path().join("test-flake");
         std::fs::create_dir_all(&flake_path).unwrap();
         
-        // Start should fail due to spawn failure (simulating microvm command failure)
+        // Create a minimal flake.nix file
+        let flake_content = r#"
+{
+  outputs = { self }: {
+    nixosConfigurations.test-vm = {};
+  };
+}
+"#;
+        std::fs::write(flake_path.join("flake.nix"), flake_content).unwrap();
+        
+        // Start should fail due to spawn failure (simulating nix run command failure)
         let result = manager.start_vm("test-vm", &flake_path).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Failed to start VM with microvm command"));
+        assert!(result.unwrap_err().to_string().contains("Failed to start VM with nix run command"));
     }
 }

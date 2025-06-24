@@ -272,7 +272,7 @@ mod performance_benchmarks {
                 hypervisor: blixard_vm::types::Hypervisor::Qemu,
                 vcpus: (i % 4) + 1,
                 memory: ((i % 4) + 1) * 512,
-                networks: vec![blixard_vm::types::NetworkConfig::User],
+                networks: vec![blixard_vm::types::NetworkConfig::User { ssh_port: Some(2225 + i as u16) }],
                 volumes: vec![blixard_vm::types::VolumeConfig::RootDisk { size: 8192 }],
                 nixos_modules: vec![],
                 flake_modules: vec![],

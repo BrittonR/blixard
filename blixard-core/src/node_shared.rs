@@ -1055,6 +1055,100 @@ impl SharedNodeState {
             })
         }
     }
+    
+    /// Update VM status through Raft consensus
+    /// 
+    /// This method is used by the VM monitoring system to update VM status
+    /// when actual VM state changes are detected.
+    pub async fn update_vm_status_through_raft(&self, vm_name: String, status: VmStatus, node_id: u64) -> BlixardResult<()> {
+        tracing::info!("update_vm_status_through_raft called for VM '{}' to status {:?}", vm_name, status);
+        
+        // Check if we're the leader
+        let raft_status = self.get_raft_status().await?;
+        if !raft_status.is_leader {
+            // Forward to leader if we know who it is
+            if let Some(leader_id) = raft_status.leader_id {
+                tracing::info!("Forwarding VM status update to leader node {}", leader_id);
+                
+                // Get leader address
+                let peers = self.get_peers().await;
+                let leader_addr = peers.iter()
+                    .find(|p| p.id == leader_id)
+                    .map(|p| p.address.clone())
+                    .ok_or_else(|| BlixardError::ClusterError(
+                        format!("Leader node {} address not found", leader_id)
+                    ))?;
+                
+                // Forward the request to the leader
+                // Note: This would need a new gRPC method for status updates
+                // For now, we'll log and continue
+                tracing::warn!("Status update forwarding to leader not implemented yet");
+                return Ok(());
+            } else {
+                return Err(BlixardError::ClusterError("No leader elected yet".to_string()));
+            }
+        } else {
+            // We are the leader, process the status update locally
+            tracing::info!("Processing VM status update locally as leader");
+            
+            let proposal_tx = self.raft_proposal_tx.lock().await;
+            if let Some(tx) = proposal_tx.as_ref() {
+                // Create the proposal
+                let proposal_data = crate::raft_manager::ProposalData::UpdateVmStatus {
+                    vm_name: vm_name.clone(),
+                    status,
+                    node_id,
+                };
+                
+                let (response_tx, response_rx) = oneshot::channel();
+                let proposal = RaftProposal {
+                    id: uuid::Uuid::new_v4().as_bytes().to_vec(),
+                    data: proposal_data,
+                    response_tx: Some(response_tx),
+                };
+                
+                // Send the proposal
+                match tx.send(proposal) {
+                    Ok(_) => {
+                        tracing::info!("Successfully sent VM status update proposal to Raft channel");
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to send VM status update proposal: channel closed or full. Error: {:?}", e);
+                        return Err(BlixardError::Internal {
+                            message: "Failed to send VM status update proposal - Raft channel closed".to_string(),
+                        });
+                    }
+                }
+                
+                tracing::info!("Waiting for VM status update proposal response...");
+                // Wait for response with a timeout
+                let timeout = crate::config::get().timeouts.proposal_timeout_secs;
+                match tokio::time::timeout(tokio::time::Duration::from_secs(timeout), response_rx).await {
+                    Ok(Ok(result)) => {
+                        tracing::info!("Received VM status update proposal response: {:?}", result.is_ok());
+                        result?;
+                        Ok(())
+                    }
+                    Ok(Err(_)) => {
+                        tracing::error!("VM status update proposal response channel closed");
+                        Err(BlixardError::Internal {
+                            message: "VM status update proposal response channel closed".to_string(),
+                        })
+                    }
+                    Err(_) => {
+                        tracing::error!("VM status update proposal timed out after {} seconds", timeout);
+                        Err(BlixardError::Internal {
+                            message: "VM status update proposal timed out".to_string(),
+                        })
+                    }
+                }
+            } else {
+                Err(BlixardError::Internal {
+                    message: "Raft proposal sender not initialized".to_string(),
+                })
+            }
+        }
+    }
 }
 
 // Ensure SharedNodeState is Send + Sync

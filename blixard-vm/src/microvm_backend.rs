@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -47,6 +47,10 @@ pub struct MicrovmBackend {
     process_manager: VmProcessManager,
     /// In-memory cache of VM configurations
     vm_configs: Arc<RwLock<HashMap<String, vm_types::VmConfig>>>,
+    /// Port allocator for SSH forwarding
+    allocated_ports: Arc<RwLock<HashSet<u16>>>,
+    /// Next available SSH port
+    next_ssh_port: Arc<RwLock<u16>>,
 }
 
 impl MicrovmBackend {
@@ -77,18 +81,54 @@ impl MicrovmBackend {
             flake_generator,
             process_manager,
             vm_configs: Arc::new(RwLock::new(HashMap::new())),
+            allocated_ports: Arc::new(RwLock::new(HashSet::new())),
+            next_ssh_port: Arc::new(RwLock::new(2222)), // Start from 2222
         })
     }
     
-    /// Convert core VM config to our enhanced VM config
-    fn convert_config(&self, core_config: &CoreVmConfig) -> vm_types::VmConfig {
-        vm_types::VmConfig {
+    /// Allocate a unique SSH port for a VM
+    async fn allocate_ssh_port(&self) -> BlixardResult<u16> {
+        let mut allocated_ports = self.allocated_ports.write().await;
+        let mut next_port = self.next_ssh_port.write().await;
+        
+        // Find next available port starting from current next_port
+        let mut port = *next_port;
+        while allocated_ports.contains(&port) {
+            port += 1;
+            if port > 9999 { // Reasonable upper limit
+                return Err(BlixardError::VmOperationFailed {
+                    operation: "allocate_port".to_string(),
+                    details: "No available SSH ports in range 2222-9999".to_string(),
+                });
+            }
+        }
+        
+        allocated_ports.insert(port);
+        *next_port = port + 1;
+        
+        Ok(port)
+    }
+    
+    /// Release an allocated SSH port
+    async fn release_ssh_port(&self, port: u16) {
+        let mut allocated_ports = self.allocated_ports.write().await;
+        allocated_ports.remove(&port);
+    }
+    
+    /// Convert core VM config to our enhanced VM config with dynamic port allocation
+    async fn convert_config(&self, core_config: &CoreVmConfig) -> BlixardResult<vm_types::VmConfig> {
+        // Allocate SSH port for the VM
+        let ssh_port = self.allocate_ssh_port().await?;
+        
+        Ok(vm_types::VmConfig {
             name: core_config.name.clone(),
             hypervisor: vm_types::Hypervisor::Qemu,
             vcpus: core_config.vcpus,
             memory: core_config.memory,
             networks: vec![
-                vm_types::NetworkConfig::User
+                vm_types::NetworkConfig::User {
+                    ssh_port: Some(ssh_port),
+                }
             ],
             volumes: vec![
                 vm_types::VolumeConfig::RootDisk {
@@ -99,7 +139,7 @@ impl MicrovmBackend {
             flake_modules: vec![],
             kernel: None,
             init_command: None,
-        }
+        })
     }
     
     /// Get the flake directory for a VM
@@ -118,8 +158,8 @@ impl VmBackend for MicrovmBackend {
     async fn create_vm(&self, config: &CoreVmConfig, _node_id: u64) -> BlixardResult<()> {
         info!("Creating microVM '{}'", config.name);
         
-        // Convert to our enhanced config
-        let vm_config = self.convert_config(config);
+        // Convert to our enhanced config with allocated SSH port
+        let vm_config = self.convert_config(config).await?;
         
         // Generate and write the flake
         let flake_dir = self.get_vm_flake_dir(&config.name);
@@ -182,6 +222,21 @@ impl VmBackend for MicrovmBackend {
             }
         }
         
+        // Release allocated SSH port before removing config
+        {
+            let mut configs = self.vm_configs.write().await;
+            if let Some(vm_config) = configs.get(name) {
+                // Find and release SSH port
+                for network in &vm_config.networks {
+                    if let vm_types::NetworkConfig::User { ssh_port: Some(port) } = network {
+                        self.release_ssh_port(*port).await;
+                        info!("Released SSH port {} for VM '{}'", port, name);
+                    }
+                }
+            }
+            configs.remove(name);
+        }
+        
         // Remove the flake directory
         let flake_dir = self.get_vm_flake_dir(name);
         if flake_dir.exists() {
@@ -192,12 +247,6 @@ impl VmBackend for MicrovmBackend {
         let vm_data_dir = self.data_dir.join(name);
         if vm_data_dir.exists() {
             tokio::fs::remove_dir_all(&vm_data_dir).await?;
-        }
-        
-        // Remove from configuration cache
-        {
-            let mut configs = self.vm_configs.write().await;
-            configs.remove(name);
         }
         
         info!("Successfully deleted microVM '{}'", name);

@@ -92,7 +92,7 @@ mod flake_validation_tests {
                 vcpus: 2,
                 memory: 512,
                 networks: vec![
-                    NetworkConfig::User,
+                    NetworkConfig::User { ssh_port: Some(2222) },
                     NetworkConfig::Tap {
                         name: "tap0".to_string(),
                         bridge: None,
@@ -111,7 +111,7 @@ mod flake_validation_tests {
                 hypervisor: Hypervisor::Qemu,
                 vcpus: 4,
                 memory: 2048,
-                networks: vec![NetworkConfig::User],
+                networks: vec![NetworkConfig::User { ssh_port: Some(2223) }],
                 volumes: vec![
                     VolumeConfig::RootDisk { size: 10240 },
                     VolumeConfig::DataDisk {
@@ -175,7 +175,7 @@ mod flake_validation_tests {
             hypervisor: Hypervisor::Qemu,
             vcpus: 2,
             memory: 1024,
-            networks: vec![NetworkConfig::User],
+            networks: vec![NetworkConfig::User { ssh_port: Some(2224) }],
             volumes: vec![VolumeConfig::RootDisk { size: 8192 }],
             nixos_modules: vec![
                 NixModule::Inline(r#"

@@ -44,14 +44,16 @@ pub trait VmBackend: Send + Sync {
 pub struct VmManager {
     database: Arc<Database>,
     backend: Arc<dyn VmBackend>,
+    node_state: Arc<crate::node_shared::SharedNodeState>,
 }
 
 impl VmManager {
     /// Create a new VM manager with the given backend
-    pub fn new(database: Arc<Database>, backend: Arc<dyn VmBackend>) -> Self {
+    pub fn new(database: Arc<Database>, backend: Arc<dyn VmBackend>, node_state: Arc<crate::node_shared::SharedNodeState>) -> Self {
         Self {
             database,
             backend,
+            node_state,
         }
     }
     
@@ -61,13 +63,34 @@ impl VmManager {
         // before this command was forwarded to us. We only execute the actual VM operation.
         match command {
             VmCommand::Create { config, node_id } => {
-                self.backend.create_vm(&config, node_id).await
+                let result = self.backend.create_vm(&config, node_id).await;
+                
+                // Monitor VM status after creation attempt
+                if result.is_ok() {
+                    self.monitor_vm_status_after_operation(&config.name).await;
+                }
+                
+                result
             }
             VmCommand::Start { name } => {
-                self.backend.start_vm(&name).await
+                let result = self.backend.start_vm(&name).await;
+                
+                // Monitor VM status after start attempt
+                if result.is_ok() {
+                    self.monitor_vm_status_after_operation(&name).await;
+                }
+                
+                result
             }
             VmCommand::Stop { name } => {
-                self.backend.stop_vm(&name).await
+                let result = self.backend.stop_vm(&name).await;
+                
+                // Monitor VM status after stop attempt
+                if result.is_ok() {
+                    self.monitor_vm_status_after_operation(&name).await;
+                }
+                
+                result
             }
             VmCommand::Delete { name } => {
                 self.backend.delete_vm(&name).await
@@ -91,6 +114,100 @@ impl VmManager {
         let all_vms = self.backend.list_vms().await?;
         Ok(all_vms.into_iter().find(|(config, _)| config.name == name))
     }
+    
+    /// Monitor VM status after an operation and trigger status updates through Raft
+    /// 
+    /// This method polls the actual VM status from the backend and compares it with
+    /// the status stored in the database. If there's a difference, it triggers a
+    /// status update through the Raft consensus mechanism.
+    async fn monitor_vm_status_after_operation(&self, vm_name: &str) {
+        // Spawn a background task to avoid blocking the main operation
+        let backend = Arc::clone(&self.backend);
+        let database = Arc::clone(&self.database);
+        let node_state = Arc::clone(&self.node_state);
+        let name = vm_name.to_string();
+        
+        tokio::spawn(async move {
+            // Wait a moment for the VM operation to take effect
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            
+            // Poll for status changes with timeout
+            let mut attempts = 0;
+            const MAX_ATTEMPTS: u32 = 20; // 10 seconds total (500ms * 20)
+            
+            while attempts < MAX_ATTEMPTS {
+                // Get current status from backend (actual VM state)
+                let actual_status = match backend.get_vm_status(&name).await {
+                    Ok(Some(status)) => status,
+                    Ok(None) => {
+                        tracing::warn!("VM '{}' not found in backend during status monitoring", name);
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to get VM '{}' status from backend: {}", name, e);
+                        return;
+                    }
+                };
+                
+                // Get stored status from database (distributed state)
+                let stored_status = {
+                    let read_txn = match database.begin_read() {
+                        Ok(txn) => txn,
+                        Err(e) => {
+                            tracing::warn!("Failed to read database during status monitoring: {}", e);
+                            return;
+                        }
+                    };
+                    
+                    if let Ok(table) = read_txn.open_table(crate::storage::VM_STATE_TABLE) {
+                        if let Ok(Some(data)) = table.get(name.as_str()) {
+                            match bincode::deserialize::<crate::types::VmState>(data.value()) {
+                                Ok(vm_state) => Some(vm_state.status),
+                                Err(e) => {
+                                    tracing::warn!("Failed to deserialize VM state during monitoring: {}", e);
+                                    return;
+                                }
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                };
+                
+                // Check if status has changed and needs updating
+                if let Some(stored) = stored_status {
+                    if actual_status != stored {
+                        tracing::info!(
+                            "VM '{}' status changed: {:?} -> {:?} (triggering Raft update)", 
+                            name, stored, actual_status
+                        );
+                        
+                        // Trigger Raft status update
+                        match node_state.update_vm_status_through_raft(name.clone(), actual_status, node_state.config.id).await {
+                            Ok(_) => {
+                                tracing::info!("Successfully triggered status update for VM '{}' to {:?}", name, actual_status);
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to trigger status update for VM '{}': {}", name, e);
+                            }
+                        }
+                        return;
+                    } else if matches!(actual_status, VmStatus::Running | VmStatus::Stopped | VmStatus::Failed) {
+                        // VM has reached a stable state, stop monitoring
+                        tracing::debug!("VM '{}' status monitoring complete: {:?}", name, actual_status);
+                        return;
+                    }
+                }
+                
+                attempts += 1;
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            }
+            
+            tracing::warn!("VM '{}' status monitoring timed out after {} attempts", name, MAX_ATTEMPTS);
+        });
+    }
 }
 
 /// Mock VM backend for testing
@@ -99,11 +216,16 @@ impl VmManager {
 /// useful for testing the distributed systems logic without VM dependencies.
 pub struct MockVmBackend {
     database: Arc<Database>,
+    // Track simulated VM states for realistic status transitions
+    simulated_states: std::sync::RwLock<std::collections::HashMap<String, (VmStatus, std::time::Instant)>>,
 }
 
 impl MockVmBackend {
     pub fn new(database: Arc<Database>) -> Self {
-        Self { database }
+        Self { 
+            database,
+            simulated_states: std::sync::RwLock::new(std::collections::HashMap::new()),
+        }
     }
 }
 
@@ -111,16 +233,38 @@ impl MockVmBackend {
 impl VmBackend for MockVmBackend {
     async fn create_vm(&self, config: &VmConfig, node_id: u64) -> BlixardResult<()> {
         tracing::info!("Mock: Creating VM '{}' on node {}", config.name, node_id);
+        
+        // Simulate VM creation with status transition
+        // Start with "Creating", will transition to "Running" after a short delay
+        {
+            let mut states = self.simulated_states.write().unwrap();
+            states.insert(config.name.clone(), (crate::types::VmStatus::Creating, std::time::Instant::now()));
+        }
+        
         Ok(())
     }
     
     async fn start_vm(&self, name: &str) -> BlixardResult<()> {
         tracing::info!("Mock: Starting VM '{}'", name);
+        
+        // Simulate VM start with status transition to Running
+        {
+            let mut states = self.simulated_states.write().unwrap();
+            states.insert(name.to_string(), (crate::types::VmStatus::Running, std::time::Instant::now()));
+        }
+        
         Ok(())
     }
     
     async fn stop_vm(&self, name: &str) -> BlixardResult<()> {
         tracing::info!("Mock: Stopping VM '{}'", name);
+        
+        // Simulate VM stop with status transition to Stopped
+        {
+            let mut states = self.simulated_states.write().unwrap();
+            states.insert(name.to_string(), (crate::types::VmStatus::Stopped, std::time::Instant::now()));
+        }
+        
         Ok(())
     }
     
@@ -135,7 +279,31 @@ impl VmBackend for MockVmBackend {
     }
     
     async fn get_vm_status(&self, name: &str) -> BlixardResult<Option<VmStatus>> {
-        // Read from Raft-managed database for consistency
+        // Check simulated states for realistic status transitions
+        {
+            let states = self.simulated_states.read().unwrap();
+            if let Some((status, created_at)) = states.get(name) {
+                let elapsed = created_at.elapsed();
+                
+                // Simulate realistic status transitions based on time
+                let current_status = match status {
+                    crate::types::VmStatus::Creating => {
+                        // After 1 second, transition from Creating to Running
+                        if elapsed.as_secs() >= 1 {
+                            crate::types::VmStatus::Running
+                        } else {
+                            *status
+                        }
+                    }
+                    _ => *status, // Running, Stopped, etc. stay as they are
+                };
+                
+                tracing::debug!("Mock: VM '{}' status: {:?} (elapsed: {:?})", name, current_status, elapsed);
+                return Ok(Some(current_status));
+            }
+        }
+        
+        // Fallback to database if no simulated state (for existing VMs)
         let read_txn = self.database.begin_read()?;
         
         if let Ok(table) = read_txn.open_table(crate::storage::VM_STATE_TABLE) {

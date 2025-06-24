@@ -259,6 +259,26 @@ impl RaftStateMachine {
         tracing::info!("🔥 apply_vm_command called with command: {:?}", command);
         use crate::storage::VM_STATE_TABLE;
         
+        // For delete commands, we need to check ownership BEFORE database removal
+        let delete_node_id: Option<u64> = if let VmCommand::Delete { name } = command {
+            // Read the VM state before removal to determine which node owns this VM
+            let table = txn.open_table(VM_STATE_TABLE)?;
+            let node_id = match table.get(name.as_str()) {
+                Ok(Some(data)) => {
+                    // Clone the data to avoid borrow checker issues
+                    let vm_data: Vec<u8> = data.value().to_vec();
+                    match bincode::deserialize::<crate::types::VmState>(&vm_data) {
+                        Ok(vm_state) => Some(vm_state.node_id),
+                        Err(_) => None,
+                    }
+                }
+                _ => None,
+            };
+            node_id
+        } else {
+            None
+        };
+        
         {
             let mut table = txn.open_table(VM_STATE_TABLE)?;
             
@@ -371,12 +391,22 @@ impl RaftStateMachine {
             // Check if this command is for this node
             let should_execute = match command {
                 VmCommand::Create { node_id, .. } => *node_id == shared.get_id(),
+                VmCommand::Delete { .. } => {
+                    // For delete commands, use the pre-stored ownership information
+                    if let Some(owner_node_id) = delete_node_id {
+                        owner_node_id == shared.get_id()
+                    } else {
+                        // If we couldn't determine ownership, let any node try to clean up
+                        // This is safe because only the node that actually has the VM can delete it
+                        true
+                    }
+                }
                 _ => {
                     // For other commands, check if VM is assigned to this node
                     if let Ok(read_txn) = self.database.begin_read() {
                         if let Ok(table) = read_txn.open_table(VM_STATE_TABLE) {
                             match command {
-                                VmCommand::Start { name } | VmCommand::Stop { name } | VmCommand::Delete { name } => {
+                                VmCommand::Start { name } | VmCommand::Stop { name } => {
                                     if let Ok(Some(data)) = table.get(name.as_str()) {
                                         if let Ok(vm_state) = bincode::deserialize::<crate::types::VmState>(data.value()) {
                                             vm_state.node_id == shared.get_id()

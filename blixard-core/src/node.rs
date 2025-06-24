@@ -86,7 +86,7 @@ impl Node {
         // Use provided registry or default to mock backend
         let registry = registry_opt.unwrap_or_else(VmBackendRegistry::default);
         let vm_backend = self.create_vm_backend(&registry, db_arc.clone())?;
-        let vm_manager = Arc::new(VmManager::new(db_arc.clone(), vm_backend));
+        let vm_manager = Arc::new(VmManager::new(db_arc.clone(), vm_backend, self.shared.clone()));
         
         self.shared.set_vm_manager(vm_manager).await;
 
