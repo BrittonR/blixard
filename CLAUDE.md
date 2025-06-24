@@ -52,6 +52,7 @@ Recent progress:
 - ✅ **Snapshot testing** - Comprehensive test coverage for snapshot functionality
 - ✅ **Raft consensus enforcement** - Fixed VM manager and worker registration to use Raft
 - ✅ **microvm.nix Integration** - Complete Phase 1 & 2 implementation with working VM builds
+- ✅ **VM Networking & Systemd Services** - Full routed networking with multi-queue tap interfaces and user systemd services
 
 ## Development Commands
 
@@ -214,15 +215,122 @@ These tests benefit from:
 # Node management (implemented with gRPC server)
 cargo run -- node --id 1 --bind 127.0.0.1:7001 --data-dir ./data
 
-# VM management (CLI stubs, use gRPC API)
+# VM management (fully functional via gRPC and systemd)
 cargo run -- vm create --name my-vm
-cargo run -- vm start my-vm
+cargo run -- vm start --name my-vm
 cargo run -- vm list
+cargo run -- vm stop --name my-vm
+
+# Direct systemd service management
+systemctl --user {start|stop|status} blixard-vm-{vm-name}
 
 # microvm.nix testing and examples
 cargo test -p blixard-vm                    # Run microvm.nix tests
 cargo run --example vm_lifecycle            # Run VM lifecycle example
 nix build ./generated-flakes/example-vm#nixosConfigurations.example-vm.config.microvm.runner.cloud-hypervisor
+```
+
+## VM Networking Setup
+
+### Host Network Configuration
+
+For VMs to use routed networking with tap interfaces, the host system requires proper network setup:
+
+#### 1. User Group Membership
+Ensure the user is in the required groups:
+```bash
+sudo usermod -a -G kvm,blixard $USER
+# Log out and back in for group changes to take effect
+```
+
+#### 2. Tap Interface Creation
+For each VM, create a corresponding tap interface with multi-queue support:
+```bash
+# Example for vm12 (used by test-vm)
+sudo ip link delete vm12 2>/dev/null || true
+sudo ip tuntap add dev vm12 mode tap group kvm multi_queue
+sudo ip link set dev vm12 up
+sudo ip addr add "10.0.0.0/32" dev vm12
+sudo ip route add "10.0.0.12/32" dev vm12
+```
+
+#### 3. TUN/TAP Device Permissions
+Verify TUN device permissions allow group access:
+```bash
+ls -la /dev/net/tun  # Should show: crw-rw-rw- or crw-rw-r--
+```
+
+#### 4. Bulk Interface Setup Script
+Use the setup script for multiple interfaces:
+```bash
+./scripts/setup-tap-networking.sh  # Creates vm1-vm64 interfaces
+```
+
+### VM Configuration Requirements
+
+VMs using routed networking need specific configuration in their flake.nix:
+
+```nix
+microvm = {
+  hypervisor = "qemu";
+  vcpu = 2;  # Multi-queue interfaces require matching queue count
+  mem = 1024;
+  
+  interfaces = [ {
+    type = "tap";
+    id = "vm12";  # Must match host tap interface name
+    mac = "02:00:00:00:0c:01";  # Unique MAC per VM
+  } ];
+  
+  # Console socket for debugging
+  socket = "/tmp/test-vm-console.sock";
+};
+
+# Network configuration inside VM
+systemd.network.networks."10-eth" = {
+  matchConfig.MACAddress = "02:00:00:00:0c:01";
+  address = [ "10.0.0.12/32" ];  # VM's routed IP
+  routes = [
+    { Destination = "10.0.0.0/32"; GatewayOnLink = true; }
+    { Destination = "0.0.0.0/0"; Gateway = "10.0.0.0"; GatewayOnLink = true; }
+  ];
+};
+```
+
+### Common Networking Issues
+
+1. **"could not configure /dev/net/tun (vm12): Invalid argument"**
+   - **Cause**: Tap interface lacks multi-queue support or wrong group ownership
+   - **Fix**: Recreate interface with `multi_queue` flag and correct group
+
+2. **"Read-only file system" during systemd service creation**
+   - **Cause**: Code trying to access system directories for user services
+   - **Fix**: Ensure all systemd operations use `--user` and `~/.config/systemd/user/`
+
+3. **Permission denied accessing tap interface**
+   - **Cause**: User not in kvm/blixard groups or TUN device permissions
+   - **Fix**: Add user to groups and check `/dev/net/tun` permissions
+
+4. **VM boots but no network connectivity**
+   - **Cause**: Missing host routes or incorrect VM IP configuration
+   - **Fix**: Verify host routes and VM systemd.network configuration match
+
+### Debugging Network Issues
+
+```bash
+# Check tap interface status
+ip link show vm12
+cat /sys/class/net/vm12/tun_flags  # Should show multi-queue flags
+
+# Check VM systemd service status
+systemctl --user status blixard-vm-test-vm
+
+# Monitor VM console output
+journalctl --user -u blixard-vm-test-vm -f
+
+# Test connectivity
+ping 10.0.0.12
+ssh root@10.0.0.12
 ```
 
 ## Key Files
