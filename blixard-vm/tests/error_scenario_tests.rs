@@ -268,6 +268,7 @@ mod error_scenario_tests {
         
         let config = VmConfig {
             name: "template-error-test".to_string(),
+            vm_index: 1,
             hypervisor: Hypervisor::Qemu,
             vcpus: 1,
             memory: 512,

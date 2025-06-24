@@ -75,6 +75,7 @@ mod flake_validation_tests {
             // Minimal config
             VmConfig {
                 name: "minimal-vm".to_string(),
+                vm_index: 1,
                 hypervisor: Hypervisor::Qemu,
                 vcpus: 1,
                 memory: 256,
@@ -88,6 +89,7 @@ mod flake_validation_tests {
             // Config with networking
             VmConfig {
                 name: "networked-vm".to_string(),
+                vm_index: 2,
                 hypervisor: Hypervisor::Qemu,
                 vcpus: 2,
                 memory: 512,
@@ -114,6 +116,7 @@ mod flake_validation_tests {
             // Config with volumes
             VmConfig {
                 name: "storage-vm".to_string(),
+                vm_index: 3,
                 hypervisor: Hypervisor::Qemu,
                 vcpus: 4,
                 memory: 2048,
@@ -184,6 +187,7 @@ mod flake_validation_tests {
         
         let config = VmConfig {
             name: "module-test-vm".to_string(),
+            vm_index: 4,
             hypervisor: Hypervisor::Qemu,
             vcpus: 2,
             memory: 1024,

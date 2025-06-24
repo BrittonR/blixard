@@ -1,6 +1,6 @@
 //! Complete VM management demonstration using blixard
 
-use blixard_vm::{MicrovmBackend, types::NetworkConfig};
+use blixard_vm::{MicrovmBackend, types::{NetworkConfig, Hypervisor}};
 use blixard_core::{
     vm_backend::VmBackend,
     types::{VmConfig, VmStatus},
@@ -62,12 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Show connection info
             if status == Some(VmStatus::Running) {
                 println!("\n🌐 VM is running! You can:");
-                // Get IP from config
-                if let Some(network) = vm_config.networks.first() {
-                    if let NetworkConfig::Routed { ip, .. } = network {
-                        println!("  • SSH: ssh root@{}", ip);
-                    }
-                }
+                // Basic connection info (without network details)
                 println!("  • Console: socat - UNIX-CONNECT:/tmp/{}-console.sock", vm_config.name);
             }
             

@@ -47,7 +47,7 @@ fn test_vm_create_with_valid_name() {
     cmd.args(&["vm", "create", "--name", "test-vm"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("VM creation not yet implemented"));
+        .stderr(predicate::str::contains("Failed to connect to local node"));
 }
 
 #[test]
@@ -56,7 +56,7 @@ fn test_vm_list_command() {
     cmd.args(&["vm", "list"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("VM listing not yet implemented"));
+        .stderr(predicate::str::contains("Failed to connect to local node"));
 }
 
 #[test]
@@ -98,5 +98,5 @@ fn test_vm_name_edge_cases() {
     cmd.args(&["vm", "create", "--name", "test@vm"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("VM creation not yet implemented"));
+        .stderr(predicate::str::contains("Failed to connect to local node"));
 }

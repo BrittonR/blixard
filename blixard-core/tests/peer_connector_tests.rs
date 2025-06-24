@@ -106,6 +106,16 @@ impl ClusterService for MockClusterService {
         }))
     }
 
+    async fn delete_vm(
+        &self,
+        _request: Request<DeleteVmRequest>,
+    ) -> Result<Response<DeleteVmResponse>, Status> {
+        Ok(Response::new(DeleteVmResponse {
+            success: true,
+            message: String::new(),
+        }))
+    }
+
     async fn send_raft_message(
         &self,
         request: Request<RaftMessageRequest>,

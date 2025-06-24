@@ -269,6 +269,7 @@ mod performance_benchmarks {
         for i in 0..iterations {
             let config = blixard_vm::types::VmConfig {
                 name: format!("flake-bench-{}", i),
+                vm_index: (i as u32) + 1,
                 hypervisor: blixard_vm::types::Hypervisor::Qemu,
                 vcpus: (i % 4) + 1,
                 memory: ((i % 4) + 1) * 512,
