@@ -334,9 +334,9 @@ impl VmProcessManager {
         // Create systemd service file
         self.create_systemd_service(name, flake_path, config).await?;
         
-        // Start the system service (requires sudo)
+        // Start the user service
         let output = self.command_executor
-            .execute("sudo", &["systemctl", "start", &format!("blixard-vm-{}", name)], None)
+            .execute("systemctl", &["--user", "start", &format!("blixard-vm-{}", name)], None)
             .await
             .map_err(|e| BlixardError::VmOperationFailed {
                 operation: "systemd_start".to_string(),
@@ -360,9 +360,9 @@ impl VmProcessManager {
         
         let service_name = format!("blixard-vm-{}", name);
         
-        // Stop the system service (requires sudo)
+        // Stop the user service
         let output = self.command_executor
-            .execute("sudo", &["systemctl", "stop", &service_name], None)
+            .execute("systemctl", &["--user", "stop", &service_name], None)
             .await
             .map_err(|e| BlixardError::VmOperationFailed {
                 operation: "systemd_stop".to_string(),
@@ -385,7 +385,7 @@ impl VmProcessManager {
         let service_name = format!("blixard-vm-{}", name);
         
         let output = self.command_executor
-            .execute("sudo", &["systemctl", "is-active", &service_name], None)
+            .execute("systemctl", &["--user", "is-active", &service_name], None)
             .await
             .map_err(|e| BlixardError::VmOperationFailed {
                 operation: "systemd_status".to_string(),
@@ -406,10 +406,11 @@ impl VmProcessManager {
         Ok(Some(status))
     }
     
-    /// Create systemd service file for a VM (system service)
+    /// Create systemd service file for a VM (user service)
     async fn create_systemd_service(&self, name: &str, flake_path: &Path, config: &VmConfig) -> BlixardResult<()> {
         let service_name = format!("blixard-vm-{}.service", name);
-        let service_path = format!("/etc/systemd/system/{}", service_name);
+        let user_name = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
+        let service_path = format!("/home/{}/.config/systemd/user/{}", user_name, service_name);
         let user_home = std::env::var("HOME")
             .map_err(|e| BlixardError::ConfigError(format!("Failed to get HOME directory: {}", e)))?;
         
@@ -443,9 +444,13 @@ impl VmProcessManager {
                 details: format!("Failed to write temporary service file: {}", e),
             })?;
         
-        // Copy to system systemd location using sudo
+        // Ensure user systemd directory exists
+        std::fs::create_dir_all(&format!("/home/{}/.config/systemd/user", user_name))
+            .map_err(|e| BlixardError::ConfigError(format!("Failed to create user systemd directory: {}", e)))?;
+        
+        // Copy to user systemd location
         let copy_output = self.command_executor
-            .execute("sudo", &["cp", &temp_path, &service_path], None)
+            .execute("cp", &[&temp_path, &service_path], None)
             .await
             .map_err(|e| BlixardError::VmOperationFailed {
                 operation: "create_service".to_string(),
@@ -459,9 +464,9 @@ impl VmProcessManager {
             });
         }
         
-        // Reload system systemd (requires sudo)
+        // Reload user systemd
         let output = self.command_executor
-            .execute("sudo", &["systemctl", "daemon-reload"], None)
+            .execute("systemctl", &["--user", "daemon-reload"], None)
             .await
             .map_err(|e| BlixardError::VmOperationFailed {
                 operation: "daemon_reload".to_string(),
@@ -481,16 +486,15 @@ impl VmProcessManager {
     /// Remove systemd service file for a VM
     async fn remove_systemd_service(&self, name: &str) -> BlixardResult<()> {
         let service_name = format!("blixard-vm-{}.service", name);
-        let service_path = format!("/etc/systemd/system/{}", service_name);
+        let user_name = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
+        let service_path = format!("/home/{}/.config/systemd/user/{}", user_name, service_name);
         
-        // Remove service file using sudo (requires root permissions)
-        let _result = self.command_executor
-            .execute("sudo", &["rm", "-f", &service_path], None)
-            .await; // Ignore errors if file doesn't exist
+        // Remove service file
+        std::fs::remove_file(&service_path).ok(); // Ignore errors if file doesn't exist
         
-        // Reload system systemd (requires sudo)
+        // Reload user systemd
         let output = self.command_executor
-            .execute("sudo", &["systemctl", "daemon-reload"], None)
+            .execute("systemctl", &["--user", "daemon-reload"], None)
             .await
             .map_err(|e| BlixardError::VmOperationFailed {
                 operation: "daemon_reload".to_string(),

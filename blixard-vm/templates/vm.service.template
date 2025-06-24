@@ -37,7 +37,7 @@ Environment=PATH=/run/current-system/sw/bin:/usr/bin:/bin
 Environment=USER={{ user }}
 Environment=HOME={{ home }}
 
-# System service for VM execution
+# User service for VM execution (temporary workaround)
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
