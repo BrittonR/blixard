@@ -47,8 +47,7 @@
             users.users.root = {
               password = "";
               openssh.authorizedKeys.keys = [
-                # Add your SSH public key here for key-based auth
-                # "ssh-rsa AAAAB3NzaC1yc2E... your-email@example.com"
+                "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILYzh3yIsSTOYXkJMFHBKzkakoDfonm3/RED5rqMqhIO britton@framework"
               ];
             };
             
