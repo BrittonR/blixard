@@ -38,7 +38,7 @@ for i in $(seq 1 $NUM_VMS); do
     # Create tap interface if it doesn't exist
     if ! ip link show "$IFACE" >/dev/null 2>&1; then
         echo "Creating tap interface: $IFACE"
-        ip tuntap add dev "$IFACE" mode tap user "$USER"
+        ip tuntap add dev "$IFACE" mode tap group blixard
         ip link set dev "$IFACE" up
         
         # Configure host-side networking for this VM
