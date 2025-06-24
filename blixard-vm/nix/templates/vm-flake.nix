@@ -104,7 +104,10 @@
                 }
               ];
             };
-            networking.defaultGateway = "{{ network.gateway }}";
+            networking.defaultGateway = {
+              address = "{{ network.gateway }}";
+              interface = "eth0";
+            };
             networking.nameservers = [ "8.8.8.8" "1.1.1.1" ];
             {% endif -%}
             {% endfor -%}
