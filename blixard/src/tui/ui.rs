@@ -61,22 +61,22 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
     let title = Paragraph::new("🚀 Blixard VM Manager")
         .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
         .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Blue)));
+        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)));
     
     f.render_widget(title, chunks[0]);
 
     // Status/error messages
     if let Some(msg) = &app.status_message {
-        let status = Paragraph::new(format!("✓ {}", msg))
+        let status = Paragraph::new(format!("✅ {}", msg))
             .style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
             .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Green)));
+            .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
         f.render_widget(status, chunks[1]);
     } else if let Some(msg) = &app.error_message {
-        let error = Paragraph::new(format!("✗ {}", msg))
+        let error = Paragraph::new(format!("❌ {}", msg))
             .style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
             .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Red)));
+            .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)));
         f.render_widget(error, chunks[1]);
     } else {
         // Show live log following status when no other messages
@@ -85,9 +85,9 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
             None => "📡 Following: All VMs".to_string(),
         };
         let status = Paragraph::new(log_status)
-            .style(Style::default().fg(Color::Gray))
+            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC))
             .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Gray)));
+            .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)));
         f.render_widget(status, chunks[1]);
     }
 }
@@ -111,7 +111,7 @@ fn render_raft_panel(f: &mut Frame, area: Rect, app: &App) {
     );
     let node_color = match app.cluster_info.current_node_state.as_str() {
         "Leader" => Color::Green,
-        "Follower" => Color::Blue,
+        "Follower" => Color::Cyan,
         "Candidate" => Color::Yellow,
         _ => Color::Gray,
     };
@@ -124,7 +124,7 @@ fn render_raft_panel(f: &mut Frame, area: Rect, app: &App) {
 
     // Cluster information  
     let cluster_info = format!("Cluster\n{} nodes", app.cluster_info.node_count);
-    let cluster_color = if app.cluster_info.node_count > 0 { Color::Green } else { Color::Red };
+    let cluster_color = if app.cluster_info.node_count > 0 { Color::Magenta } else { Color::Red };
     let cluster_widget = Paragraph::new(cluster_info)
         .style(Style::default().fg(cluster_color).add_modifier(Modifier::BOLD))
         .alignment(Alignment::Center)
@@ -245,17 +245,17 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
         .iter()
         .flat_map(|(key, desc)| {
             vec![
-                Span::styled(*key, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::raw(": "),
-                Span::raw(*desc),
-                Span::raw(" | "),
+                Span::styled(*key, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(": ", Style::default().fg(Color::Gray)),
+                Span::styled(*desc, Style::default().fg(Color::White)),
+                Span::styled(" | ", Style::default().fg(Color::Gray)),
             ]
         })
         .collect();
 
     let footer_text = Line::from(spans);
     let footer = Paragraph::new(footer_text)
-        .block(Block::default().borders(Borders::ALL))
+        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)))
         .alignment(Alignment::Center);
 
     f.render_widget(footer, area);
@@ -299,17 +299,17 @@ fn render_vm_list(f: &mut Frame, area: Rect, app: &App) {
             // Determine if this row should be highlighted
             let is_selected = app.selected_vm.map_or(false, |selected| selected == index);
             let row_style = if is_selected {
-                Style::default().bg(Color::Blue).add_modifier(Modifier::BOLD)
+                Style::default().bg(Color::Magenta).fg(Color::White).add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
 
             Row::new(vec![
-                Cell::from(status_indicator).style(Style::default().fg(status_color)),
-                Cell::from(vm.name.clone()).style(Style::default().add_modifier(Modifier::BOLD)),
-                Cell::from(vm.vcpus.to_string()).style(Style::default().fg(Color::Cyan)),
-                Cell::from(format!("{}MB", vm.memory)).style(Style::default().fg(Color::Cyan)),
-                Cell::from(vm.node_id.to_string()).style(Style::default().fg(Color::Yellow)),
+                Cell::from(status_indicator).style(Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+                Cell::from(vm.name.clone()).style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Cell::from(vm.vcpus.to_string()).style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Cell::from(format!("{}MB", vm.memory)).style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                Cell::from(vm.node_id.to_string()).style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
             ]).style(row_style)
         })
         .collect();
@@ -331,7 +331,7 @@ fn render_vm_list(f: &mut Frame, area: Rect, app: &App) {
             Block::default()
                 .title(title)
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue))
+                .border_style(Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD))
         );
 
     f.render_widget(table, area);
@@ -558,7 +558,7 @@ fn render_vm_create(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(10), // Form
+            Constraint::Length(13), // Form (increased to fit all fields properly)
             Constraint::Min(0),     // Instructions
         ])
         .split(area);
@@ -568,6 +568,17 @@ fn render_vm_create(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_create_form(f: &mut Frame, area: Rect, form: &CreateVmForm, editing: bool) {
+    // First render the outer form block
+    let form_block = Block::default()
+        .title("🚀 Create New VM")
+        .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD));
+    
+    f.render_widget(form_block, area);
+    
+    // Then render the input fields inside the bordered area
+    let inner_area = area.inner(&Margin { vertical: 1, horizontal: 1 });
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -575,7 +586,7 @@ fn render_create_form(f: &mut Frame, area: Rect, form: &CreateVmForm, editing: b
             Constraint::Length(3), // vCPUs
             Constraint::Length(3), // Memory
         ])
-        .split(area.inner(&Margin { vertical: 1, horizontal: 1 }));
+        .split(inner_area);
 
     let fields = [
         ("Name", &form.name, 0),
@@ -586,18 +597,27 @@ fn render_create_form(f: &mut Frame, area: Rect, form: &CreateVmForm, editing: b
     for (i, (label, value, field_index)) in fields.iter().enumerate() {
         let is_active = editing && form.current_field == *field_index;
         let border_style = if is_active {
-            Style::default().fg(Color::Yellow)
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::Blue)
+            Style::default().fg(Color::Cyan)
         };
 
         let input = Paragraph::new(value.as_str())
-            .style(Style::default().fg(Color::White))
+            .style(if is_active {
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            })
             .block(
                 Block::default()
-                    .title(*label)
+                    .title(format!("🔧 {}", label))
                     .borders(Borders::ALL)
-                    .border_style(border_style),
+                    .border_style(border_style)
+                    .title_style(if is_active {
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::Cyan)
+                    }),
             );
 
         f.render_widget(input, chunks[i]);
@@ -609,13 +629,6 @@ fn render_create_form(f: &mut Frame, area: Rect, form: &CreateVmForm, editing: b
             f.set_cursor(cursor_x.min(chunks[i].x + chunks[i].width - 2), cursor_y);
         }
     }
-
-    let form_block = Block::default()
-        .title("Create New VM")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Green));
-
-    f.render_widget(form_block, area);
 }
 
 fn render_create_instructions(f: &mut Frame, area: Rect) {
@@ -683,37 +696,79 @@ fn render_vm_logs(f: &mut Frame, area: Rect, app: &App) {
 fn render_live_log_panel(f: &mut Frame, area: Rect, app: &App) {
     // Get the last few lines to fit in the panel
     let visible_lines = area.height.saturating_sub(2) as usize; // Account for borders
-    let log_lines: Vec<Line> = app
-        .live_logs
+    
+    // Filter logs based on selected VM if any
+    let filtered_logs: Vec<&String> = if let Some(vm_name) = &app.live_log_vm {
+        // Create expected service name pattern for the VM
+        let service_pattern = format!("blixard-vm-{}", vm_name);
+        
+        // Filter logs to show only those from the specific VM service
+        // plus status messages about following/system state
+        app.live_logs
+            .iter()
+            .filter(|line| {
+                // Show lines from the specific VM service (e.g., "blixard-vm-hi[123]:")
+                line.contains(&service_pattern) ||
+                // Show system status messages (Following, No services found, etc.)
+                line.starts_with("Following") || 
+                line.starts_with("🔄") || 
+                line.starts_with("No ") ||
+                line.starts_with("Failed to") ||
+                // Show lines that are general TUI messages (not from any specific VM service)
+                (!line.contains("blixard-vm-") && !line.contains("[") && !line.contains(":"))
+            })
+            .collect()
+    } else {
+        // Show all logs
+        app.live_logs.iter().collect()
+    };
+    
+    let log_lines: Vec<Line> = filtered_logs
         .iter()
         .rev() // Show most recent logs at bottom
         .take(visible_lines)
         .rev() // Reverse again to get correct order
         .map(|line| {
-            // Color-code log lines based on content
-            let style = if line.contains("error") || line.contains("ERROR") || line.contains("Failed") {
-                Style::default().fg(Color::Red)
-            } else if line.contains("warn") || line.contains("WARN") {
-                Style::default().fg(Color::Yellow)
-            } else if line.contains("info") || line.contains("INFO") || line.contains("Started") {
+            // Enhanced color-coding for better visibility
+            let style = if line.contains("error") || line.contains("ERROR") || line.contains("Failed") || line.contains("❌") {
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+            } else if line.contains("warn") || line.contains("WARN") || line.contains("⚠️") {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else if line.contains("info") || line.contains("INFO") || line.contains("Started") || line.contains("✅") {
                 Style::default().fg(Color::Green)
+            } else if line.contains("debug") || line.contains("DEBUG") {
+                Style::default().fg(Color::Gray)
+            } else if line.contains("🔄") {
+                Style::default().fg(Color::Cyan)
             } else {
                 Style::default().fg(Color::White)
             };
-            Line::from(Span::styled(line.clone(), style))
+            Line::from(Span::styled(line.to_string(), style))
         })
         .collect();
 
-    // Determine panel title based on what we're following
-    let title = match &app.live_log_vm {
-        Some(vm_name) => format!("🔄 Live Logs: {}", vm_name),
-        None => "🔄 Live Logs: All VMs".to_string(),
-    };
-
-    let panel_style = if app.live_log_receiver.is_some() {
-        Style::default().fg(Color::Green)
-    } else {
-        Style::default().fg(Color::Gray)
+    // Determine panel title and style based on what we're following
+    let (title, panel_style) = match &app.live_log_vm {
+        Some(vm_name) => {
+            let filtered_count = filtered_logs.len();
+            let total_count = app.live_logs.len();
+            (
+                format!("🔄 Live Logs: {} ({}/{})", vm_name, filtered_count, total_count),
+                if app.live_log_receiver.is_some() {
+                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Gray)
+                }
+            )
+        }
+        None => (
+            format!("🔄 Live Logs: All VMs ({})", app.live_logs.len()),
+            if app.live_log_receiver.is_some() {
+                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            }
+        )
     };
 
     let live_logs = Paragraph::new(log_lines)

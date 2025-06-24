@@ -833,6 +833,16 @@ impl App {
                     self.error_message = None;
                     // Refresh to update status
                     self.refresh_vm_list().await?;
+                    
+                    // If we're following all VMs, refresh the live log following to include the newly started VM
+                    if self.live_log_vm.is_none() && self.live_log_receiver.is_some() {
+                        if let Err(e) = self.start_live_log_following(None).await {
+                            // Don't fail the whole operation, just log the error
+                            self.live_logs.push(format!("Failed to refresh live log following: {}", e));
+                        } else {
+                            self.live_logs.push(format!("🔄 Refreshed live log following for started VM '{}'", name));
+                        }
+                    }
                 }
                 Err(e) => {
                     self.error_message = Some(format!("Failed to start VM '{}': {}", name, e));
@@ -889,7 +899,7 @@ impl App {
     }
 
     async fn create_vm(&mut self) -> BlixardResult<()> {
-        let name = self.create_form.name.trim();
+        let name = self.create_form.name.trim().to_string();
         if name.is_empty() {
             self.error_message = Some("VM name cannot be empty".to_string());
             return Ok(());
@@ -899,13 +909,23 @@ impl App {
         let memory: u32 = self.create_form.memory.parse().unwrap_or(1024);
 
         if let Some(client) = &mut self.vm_client {
-            match client.create_vm(name, vcpus, memory).await {
+            match client.create_vm(&name, vcpus, memory).await {
                 Ok(_) => {
                     self.status_message = Some(format!("✓ Created VM '{}'", name));
                     self.error_message = None;
                     self.mode = AppMode::VmList;
                     self.input_mode = InputMode::Normal;
                     self.refresh_vm_list().await?;
+                    
+                    // If we're following all VMs, refresh the live log following to include the new VM
+                    if self.live_log_vm.is_none() && self.live_log_receiver.is_some() {
+                        if let Err(e) = self.start_live_log_following(None).await {
+                            // Don't fail the whole operation, just log the error
+                            self.live_logs.push(format!("Failed to refresh live log following: {}", e));
+                        } else {
+                            self.live_logs.push(format!("🔄 Refreshed live log following for new VM '{}'", name));
+                        }
+                    }
                 }
                 Err(e) => {
                     self.error_message = Some(format!("Failed to create VM '{}': {}", name, e));
@@ -1091,11 +1111,11 @@ impl App {
                     let blixard_services: Vec<String> = services_text
                         .lines()
                         .filter_map(|line| {
-                            // Parse systemctl output format: ● service.name   loaded  state  state  description
+                            // Parse systemctl output format: service.name   loaded  state  state  description
                             let parts: Vec<&str> = line.split_whitespace().collect();
-                            if parts.len() >= 2 {
-                                // Service name is the second field (after the bullet ●)
-                                let service_name = parts[1];
+                            if !parts.is_empty() {
+                                // Service name is the first field
+                                let service_name = parts[0];
                                 if service_name.starts_with("blixard-vm-") && service_name.ends_with(".service") {
                                     // Also check that the line doesn't indicate "not-found" state
                                     if !line.contains("not-found") {
