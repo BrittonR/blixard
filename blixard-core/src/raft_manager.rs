@@ -13,6 +13,7 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::storage::{RedbRaftStorage, SnapshotData, VM_STATE_TABLE, CLUSTER_STATE_TABLE, 
     TASK_TABLE, TASK_ASSIGNMENT_TABLE, TASK_RESULT_TABLE, WORKER_TABLE, WORKER_STATUS_TABLE};
 use crate::types::{VmCommand, VmStatus};
+use crate::metrics::{self, names as metric_names, Timer};
 
 // Raft message types for cluster communication
 #[derive(Debug)]
@@ -951,6 +952,9 @@ impl RaftManager {
     }
 
     async fn handle_proposal(&self, proposal: RaftProposal) -> BlixardResult<()> {
+        let _timer = Timer::new(metric_names::RAFT_PROPOSAL_DURATION.to_string(), metrics::global().clone());
+        metrics::global().increment_counter(metric_names::RAFT_PROPOSALS_TOTAL);
+        
         let proposal_id = proposal.id.clone();
         let has_response = proposal.response_tx.is_some();
         

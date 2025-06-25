@@ -14,6 +14,8 @@ use crate::proto::cluster_service_client::ClusterServiceClient;
 use crate::proto::{HealthCheckRequest};
 use crate::node_shared::{SharedNodeState, PeerInfo};
 use crate::config;
+use crate::metrics::{self, names as metric_names, Timer};
+use crate::observability;
 
 /// Buffered message for delayed sending
 struct BufferedMessage {
@@ -162,7 +164,11 @@ impl PeerConnector {
     }
     
     /// Establish connection to a peer
+    #[tracing::instrument(level = "debug", skip(self), fields(peer_id = %peer.id))]
     pub async fn connect_to_peer(&self, peer: &PeerInfo) -> BlixardResult<()> {
+        let _timer = Timer::new(format!("peer.connect.{}", peer.id), metrics::global().clone());
+        metrics::global().increment_counter(metric_names::PEER_RECONNECT_ATTEMPTS);
+        
         // Check if we already have a connection
         {
             let connections = self.connections.read().await;
