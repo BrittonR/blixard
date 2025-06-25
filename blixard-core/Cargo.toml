@@ -33,9 +33,17 @@ slog = "2.7"
 slog-term = "2.9"
 slog-async = "2.8"
 
+# Metrics and Observability
+opentelemetry = { version = "0.20", features = ["metrics"] }
+opentelemetry_sdk = { version = "0.20", features = ["rt-tokio", "metrics"] }
+opentelemetry-otlp = { version = "0.13", features = ["metrics", "tonic"] }
+opentelemetry-prometheus = "0.13"
+prometheus = "0.13"
+
 # Networking (tonic configured conditionally below)
 prost = "0.13"
 tower = "0.4"
+hyper = { version = "0.14", features = ["server", "http1", "tcp"] }
 
 # Utilities
 uuid = { version = "1.6", features = ["v4", "serde"] }

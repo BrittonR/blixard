@@ -14,8 +14,7 @@ use crate::proto::cluster_service_client::ClusterServiceClient;
 use crate::proto::{HealthCheckRequest};
 use crate::node_shared::{SharedNodeState, PeerInfo};
 use crate::config;
-use crate::metrics::{self, names as metric_names, Timer};
-use crate::observability;
+use crate::metrics_otel_v2::{metrics, Timer, attributes};
 
 /// Buffered message for delayed sending
 struct BufferedMessage {
@@ -166,8 +165,13 @@ impl PeerConnector {
     /// Establish connection to a peer
     #[tracing::instrument(level = "debug", skip(self), fields(peer_id = %peer.id))]
     pub async fn connect_to_peer(&self, peer: &PeerInfo) -> BlixardResult<()> {
-        let _timer = Timer::new(format!("peer.connect.{}", peer.id), metrics::global().clone());
-        metrics::global().increment_counter(metric_names::PEER_RECONNECT_ATTEMPTS);
+        let metrics = metrics();
+        let peer_attrs = vec![attributes::peer_id(peer.id)];
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            peer_attrs.clone()
+        );
+        metrics.peer_reconnect_attempts.add(1, &peer_attrs);
         
         // Check if we already have a connection
         {
@@ -252,6 +256,10 @@ impl PeerConnector {
                         
                         // Update peer connection status
                         self.node.update_peer_connection(peer.id, true).await?;
+                        
+                        // Update metrics
+                        let active_connections = *self.connection_count.lock().await as i64;
+                        metrics.peer_connections_active.add(active_connections, &[]);
                         
                         tracing::info!("Connected to peer {} at {}", peer.id, peer.address);
                         
