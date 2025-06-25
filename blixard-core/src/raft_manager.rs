@@ -628,6 +628,9 @@ pub struct RaftManager {
     // Track pending proposals
     pending_proposals: Arc<RwLock<HashMap<Vec<u8>, oneshot::Sender<BlixardResult<()>>>>>,
     
+    // Track last log compaction index
+    last_compaction_index: Arc<RwLock<Option<u64>>>,
+    
     // Message sender callback - using channel instead of async closure
     outgoing_messages: mpsc::UnboundedSender<(u64, raft::prelude::Message)>,
     
@@ -699,6 +702,7 @@ impl RaftManager {
             conf_change_rx,
             conf_change_tx: conf_change_tx.clone(),
             pending_proposals: Arc::new(RwLock::new(HashMap::new())),
+            last_compaction_index: Arc::new(RwLock::new(None)),
             outgoing_messages: outgoing_tx,
             needs_replication_trigger: Arc::new(RwLock::new(false)),
         };
@@ -2149,6 +2153,43 @@ impl RaftManager {
         if last_applied_index > 0 {
             node.advance_apply_to(last_applied_index);
             info!(self.logger, "[RAFT-READY] Advanced applied index to {}", last_applied_index);
+            
+            // Check if we should trigger log compaction
+            // Compact when we have more than 1000 applied entries
+            const COMPACTION_THRESHOLD: u64 = 1000;
+            if last_applied_index > COMPACTION_THRESHOLD {
+                // Check if it's time to compact (don't compact too frequently)
+                let last_compact = *self.last_compaction_index.read().await;
+                let should_compact = match last_compact {
+                    Some(last_compact_idx) => last_applied_index - last_compact_idx > COMPACTION_THRESHOLD / 2,
+                    None => true,
+                };
+                
+                if should_compact {
+                    info!(self.logger, "[RAFT-COMPACT] Triggering log compaction";
+                        "applied_index" => last_applied_index,
+                        "last_compaction" => ?last_compact
+                    );
+                    
+                    // Create a snapshot
+                    match node.mut_store().snapshot(last_applied_index, 0) {
+                        Ok(snapshot) => {
+                            let compact_index = snapshot.get_metadata().index;
+                            
+                            // Compact the log
+                            if let Err(e) = self.storage.compact_log_before(compact_index) {
+                                warn!(self.logger, "[RAFT-COMPACT] Failed to compact log"; "error" => %e);
+                            } else {
+                                info!(self.logger, "[RAFT-COMPACT] Successfully compacted log before index {}", compact_index);
+                                *self.last_compaction_index.write().await = Some(compact_index);
+                            }
+                        }
+                        Err(e) => {
+                            warn!(self.logger, "[RAFT-COMPACT] Failed to create snapshot for compaction"; "error" => %e);
+                        }
+                    }
+                }
+            }
         }
         
         // Check the current state after processing
