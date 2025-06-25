@@ -11,6 +11,7 @@ pub mod vm_scheduler;
 pub mod peer_connector;
 pub mod config;
 pub mod metrics_otel_v2;
+pub mod metrics_server;
 
 // Test helpers are exposed for integration tests
 #[cfg(any(test, feature = "test-helpers"))]

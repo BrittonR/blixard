@@ -4,6 +4,7 @@ use raft::{Config, RawNode, GetEntriesContext};
 use slog::o;
 use crate::error::{BlixardError, BlixardResult};
 use crate::raft_codec;
+use crate::metrics_otel_v2::{metrics, Timer, attributes};
 use serde::{Serialize, Deserialize};
 
 /// Snapshot data structure containing all state machine data
@@ -50,11 +51,21 @@ pub struct RedbRaftStorage {
 
 impl raft::Storage for RedbRaftStorage {
     fn initial_state(&self) -> raft::Result<raft::RaftState> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.storage_read_duration.clone(),
+            vec![
+                attributes::table("raft_state"),
+                attributes::operation("initial_state"),
+            ],
+        );
+        
         let read_txn = self.database.begin_read()
             .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
         
         // Load hard state
         let hard_state = if let Ok(table) = read_txn.open_table(RAFT_HARD_STATE_TABLE) {
+            metrics.storage_reads.add(1, &[attributes::table("raft_hard_state")]);
             if let Ok(Some(data)) = table.get("hard_state") {
                 raft_codec::deserialize_hard_state(data.value())
                     .unwrap_or_else(|_| raft::prelude::HardState::default())
@@ -222,6 +233,15 @@ impl raft::Storage for RedbRaftStorage {
 impl RedbRaftStorage {
     /// Append entries to the log
     pub fn append(&self, entries: &[raft::prelude::Entry]) -> BlixardResult<()> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.storage_write_duration.clone(),
+            vec![
+                attributes::table("raft_log"),
+                attributes::operation("append"),
+            ],
+        );
+        
         let write_txn = self.database.begin_write()?;
         
         {
@@ -230,6 +250,7 @@ impl RedbRaftStorage {
             for entry in entries {
                 let data = raft_codec::serialize_entry(entry)?;
                 table.insert(&entry.index, data.as_slice())?;
+                metrics.storage_writes.add(1, &[attributes::table("raft_log")]);
             }
         }
         
@@ -239,12 +260,22 @@ impl RedbRaftStorage {
     
     /// Save hard state
     pub fn save_hard_state(&self, hard_state: &raft::prelude::HardState) -> BlixardResult<()> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.storage_write_duration.clone(),
+            vec![
+                attributes::table("raft_hard_state"),
+                attributes::operation("save"),
+            ],
+        );
+        
         let write_txn = self.database.begin_write()?;
         
         {
             let mut table = write_txn.open_table(RAFT_HARD_STATE_TABLE)?;
             let data = raft_codec::serialize_hard_state(hard_state)?;
             table.insert("hard_state", data.as_slice())?;
+            metrics.storage_writes.add(1, &[attributes::table("raft_hard_state")]);
         }
         
         write_txn.commit()?;

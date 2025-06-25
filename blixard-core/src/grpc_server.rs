@@ -8,6 +8,7 @@ use crate::{
     node_shared::SharedNodeState,
     types::{VmCommand, VmStatus as InternalVmStatus},
     raft_manager::{TaskSpec, ResourceRequirements},
+    metrics_otel_v2::{metrics, Timer, attributes},
     proto::{
         cluster_service_server::{ClusterService, ClusterServiceServer},
         blixard_service_server::{BlixardService, BlixardServiceServer},
@@ -25,6 +26,16 @@ use crate::{
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
+
+/// Helper macro to record gRPC errors in metrics
+macro_rules! record_grpc_error {
+    ($method:expr) => {
+        metrics().grpc_requests_failed.add(1, &[
+            attributes::method($method),
+            attributes::error(true),
+        ]);
+    };
+}
 
 /// gRPC service implementation for Blixard cluster operations
 #[derive(Clone)]
@@ -85,6 +96,16 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<JoinRequest>,
     ) -> Result<Response<JoinResponse>, Status> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("join_cluster"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("join_cluster")]);
+        
         let req = request.into_inner();
         tracing::info!("Received join request from node {} at {}", req.node_id, req.bind_address);
         
@@ -268,12 +289,23 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<LeaveRequest>,
     ) -> Result<Response<LeaveResponse>, Status> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("leave_cluster"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("leave_cluster")]);
+        
         let req = request.into_inner();
         tracing::info!("[LEAVE] Received leave request for node {}", req.node_id);
         
         // Validate the request
         if req.node_id == 0 {
             tracing::warn!("[LEAVE] Invalid node ID: 0");
+            record_grpc_error!("leave_cluster");
             return Ok(Response::new(LeaveResponse {
                 success: false,
                 message: "Invalid node ID: must be non-zero".to_string(),
@@ -408,6 +440,16 @@ impl ClusterService for BlixardGrpcService {
         &self,
         _request: Request<ClusterStatusRequest>,
     ) -> Result<Response<ClusterStatusResponse>, Status> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("get_cluster_status"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("get_cluster_status")]);
+        
         // Get cluster status from Raft configuration (authoritative source)
         let (leader_id, node_ids, term) = self.node.get_cluster_status().await
             .map_err(|e| Self::error_to_status(e))?;
@@ -470,10 +512,21 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<CreateVmRequest>,
     ) -> Result<Response<CreateVmResponse>, Status> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("create_vm"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("create_vm")]);
+        
         let req = request.into_inner();
 
         // Validate request
         if req.name.is_empty() {
+            record_grpc_error!("create_vm");
             return Ok(Response::new(CreateVmResponse {
                 success: false,
                 message: "VM name cannot be empty".to_string(),
@@ -494,17 +547,41 @@ impl ClusterService for BlixardGrpcService {
             node_id: self.node.get_id(),
         };
 
+        // Time the VM creation operation
+        let vm_timer = Timer::with_attributes(
+            metrics.vm_create_duration.clone(),
+            vec![
+                attributes::vm_name(&req.name),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.vm_create_total.add(1, &[attributes::vm_name(&req.name)]);
+
         match self.node.create_vm_through_raft(command).await {
-            Ok(_) => Ok(Response::new(CreateVmResponse {
-                success: true,
-                message: format!("VM '{}' created successfully", req.name),
-                vm_id: req.name, // Using name as ID for now
-            })),
-            Err(e) => Ok(Response::new(CreateVmResponse {
-                success: false,
-                message: format!("Failed to create VM: {}", e),
-                vm_id: String::new(),
-            })),
+            Ok(_) => {
+                // Drop the timer to record duration
+                drop(vm_timer);
+                
+                // Update VM counters
+                metrics.vm_total.add(1, &[]);
+                
+                Ok(Response::new(CreateVmResponse {
+                    success: true,
+                    message: format!("VM '{}' created successfully", req.name),
+                    vm_id: req.name, // Using name as ID for now
+                }))
+            },
+            Err(e) => {
+                drop(vm_timer);
+                record_grpc_error!("create_vm");
+                metrics.vm_create_failed.add(1, &[attributes::vm_name(&req.name)]);
+                
+                Ok(Response::new(CreateVmResponse {
+                    success: false,
+                    message: format!("Failed to create VM: {}", e),
+                    vm_id: String::new(),
+                }))
+            },
         }
     }
 
@@ -512,6 +589,16 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<StartVmRequest>,
     ) -> Result<Response<StartVmResponse>, Status> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("start_vm"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("start_vm")]);
+        
         let req = request.into_inner();
 
         let command = VmCommand::Start {
@@ -519,14 +606,20 @@ impl ClusterService for BlixardGrpcService {
         };
 
         match self.node.send_vm_operation_through_raft(command).await {
-            Ok(_) => Ok(Response::new(StartVmResponse {
-                success: true,
-                message: format!("VM '{}' start command sent", req.name),
-            })),
-            Err(e) => Ok(Response::new(StartVmResponse {
-                success: false,
-                message: format!("Failed to start VM: {}", e),
-            })),
+            Ok(_) => {
+                metrics.vm_running.add(1, &[]);
+                Ok(Response::new(StartVmResponse {
+                    success: true,
+                    message: format!("VM '{}' start command sent", req.name),
+                }))
+            },
+            Err(e) => {
+                record_grpc_error!("start_vm");
+                Ok(Response::new(StartVmResponse {
+                    success: false,
+                    message: format!("Failed to start VM: {}", e),
+                }))
+            },
         }
     }
 
@@ -534,6 +627,16 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<StopVmRequest>,
     ) -> Result<Response<StopVmResponse>, Status> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("stop_vm"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("stop_vm")]);
+        
         let req = request.into_inner();
 
         let command = VmCommand::Stop {
@@ -541,14 +644,20 @@ impl ClusterService for BlixardGrpcService {
         };
 
         match self.node.send_vm_operation_through_raft(command).await {
-            Ok(_) => Ok(Response::new(StopVmResponse {
-                success: true,
-                message: format!("VM '{}' stop command sent", req.name),
-            })),
-            Err(e) => Ok(Response::new(StopVmResponse {
-                success: false,
-                message: format!("Failed to stop VM: {}", e),
-            })),
+            Ok(_) => {
+                metrics.vm_running.add(-1, &[]);
+                Ok(Response::new(StopVmResponse {
+                    success: true,
+                    message: format!("VM '{}' stop command sent", req.name),
+                }))
+            },
+            Err(e) => {
+                record_grpc_error!("stop_vm");
+                Ok(Response::new(StopVmResponse {
+                    success: false,
+                    message: format!("Failed to stop VM: {}", e),
+                }))
+            },
         }
     }
 
@@ -556,6 +665,16 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<DeleteVmRequest>,
     ) -> Result<Response<DeleteVmResponse>, Status> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("delete_vm"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("delete_vm")]);
+        
         let req = request.into_inner();
 
         let command = VmCommand::Delete {
@@ -563,14 +682,20 @@ impl ClusterService for BlixardGrpcService {
         };
 
         match self.node.send_vm_operation_through_raft(command).await {
-            Ok(_) => Ok(Response::new(DeleteVmResponse {
-                success: true,
-                message: format!("VM '{}' delete command sent", req.name),
-            })),
-            Err(e) => Ok(Response::new(DeleteVmResponse {
-                success: false,
-                message: format!("Failed to delete VM: {}", e),
-            })),
+            Ok(_) => {
+                metrics.vm_total.add(-1, &[]);
+                Ok(Response::new(DeleteVmResponse {
+                    success: true,
+                    message: format!("VM '{}' delete command sent", req.name),
+                }))
+            },
+            Err(e) => {
+                record_grpc_error!("delete_vm");
+                Ok(Response::new(DeleteVmResponse {
+                    success: false,
+                    message: format!("Failed to delete VM: {}", e),
+                }))
+            },
         }
     }
 
@@ -578,6 +703,16 @@ impl ClusterService for BlixardGrpcService {
         &self,
         _request: Request<ListVmsRequest>,
     ) -> Result<Response<ListVmsResponse>, Status> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("list_vms"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("list_vms")]);
+        
         match self.node.list_vms().await {
             Ok(vms) => {
                 let mut vm_infos = Vec::new();
@@ -600,7 +735,10 @@ impl ClusterService for BlixardGrpcService {
 
                 Ok(Response::new(ListVmsResponse { vms: vm_infos }))
             }
-            Err(e) => Err(Self::error_to_status(e)),
+            Err(e) => {
+                record_grpc_error!("list_vms");
+                Err(Self::error_to_status(e))
+            },
         }
     }
 
@@ -608,6 +746,16 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<GetVmStatusRequest>,
     ) -> Result<Response<GetVmStatusResponse>, Status> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("get_vm_status"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("get_vm_status")]);
+        
         let req = request.into_inner();
 
         match self.node.get_vm_status(&req.name).await {
@@ -635,7 +783,10 @@ impl ClusterService for BlixardGrpcService {
                 found: false,
                 vm_info: None,
             })),
-            Err(e) => Err(Self::error_to_status(e)),
+            Err(e) => {
+                record_grpc_error!("get_vm_status");
+                Err(Self::error_to_status(e))
+            },
         }
     }
 
@@ -643,6 +794,16 @@ impl ClusterService for BlixardGrpcService {
         &self,
         _request: Request<HealthCheckRequest>,
     ) -> Result<Response<HealthCheckResponse>, Status> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("health_check"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("health_check")]);
+        
         // Simple health check - just verify node is running
         Ok(Response::new(HealthCheckResponse {
             healthy: true,
@@ -654,6 +815,16 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<RaftMessageRequest>,
     ) -> Result<Response<RaftMessageResponse>, Status> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("send_raft_message"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("send_raft_message")]);
+        
         let req = request.into_inner();
         
         // Parse Raft message from bytes
@@ -677,6 +848,16 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<TaskRequest>,
     ) -> Result<Response<TaskResponse>, Status> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("submit_task"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("submit_task")]);
+        
         let req = request.into_inner();
         
         // Create task specification
@@ -699,11 +880,14 @@ impl ClusterService for BlixardGrpcService {
                 message: format!("Task {} assigned to node {}", req.task_id, assigned_node),
                 assigned_node,
             })),
-            Err(e) => Ok(Response::new(TaskResponse {
-                accepted: false,
-                message: format!("Failed to submit task: {}", e),
-                assigned_node: 0,
-            })),
+            Err(e) => {
+                record_grpc_error!("submit_task");
+                Ok(Response::new(TaskResponse {
+                    accepted: false,
+                    message: format!("Failed to submit task: {}", e),
+                    assigned_node: 0,
+                }))
+            },
         }
     }
 
@@ -711,6 +895,16 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<TaskStatusRequest>,
     ) -> Result<Response<TaskStatusResponse>, Status> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("get_task_status"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("get_task_status")]);
+        
         let req = request.into_inner();
         
         match self.node.get_task_status(&req.task_id).await {
@@ -738,7 +932,10 @@ impl ClusterService for BlixardGrpcService {
                 error: String::new(),
                 execution_time_ms: 0,
             })),
-            Err(e) => Err(Self::error_to_status(e)),
+            Err(e) => {
+                record_grpc_error!("get_task_status");
+                Err(Self::error_to_status(e))
+            },
         }
     }
     
@@ -746,6 +943,16 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<crate::proto::CreateVmWithSchedulingRequest>,
     ) -> Result<Response<crate::proto::CreateVmWithSchedulingResponse>, Status> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("create_vm_with_scheduling"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("create_vm_with_scheduling")]);
+        
         let req = request.into_inner();
 
         // Validate request
@@ -795,14 +1002,17 @@ impl ClusterService for BlixardGrpcService {
                 placement_reason: placement.reason,
                 alternative_nodes: placement.alternative_nodes,
             })),
-            Err(e) => Ok(Response::new(crate::proto::CreateVmWithSchedulingResponse {
-                success: false,
-                message: format!("Failed to create VM with scheduling: {}", e),
-                vm_id: String::new(),
-                selected_node_id: 0,
-                placement_reason: String::new(),
-                alternative_nodes: vec![],
-            })),
+            Err(e) => {
+                record_grpc_error!("create_vm_with_scheduling");
+                Ok(Response::new(crate::proto::CreateVmWithSchedulingResponse {
+                    success: false,
+                    message: format!("Failed to create VM with scheduling: {}", e),
+                    vm_id: String::new(),
+                    selected_node_id: 0,
+                    placement_reason: String::new(),
+                    alternative_nodes: vec![],
+                }))
+            },
         }
     }
     
@@ -810,6 +1020,16 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<crate::proto::ScheduleVmPlacementRequest>,
     ) -> Result<Response<crate::proto::ScheduleVmPlacementResponse>, Status> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("schedule_vm_placement"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("schedule_vm_placement")]);
+        
         let req = request.into_inner();
 
         // Validate request
@@ -869,6 +1089,16 @@ impl ClusterService for BlixardGrpcService {
         &self,
         _request: Request<crate::proto::ClusterResourceSummaryRequest>,
     ) -> Result<Response<crate::proto::ClusterResourceSummaryResponse>, Status> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("get_cluster_resource_summary"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("get_cluster_resource_summary")]);
+        
         match self.node.get_cluster_resource_summary().await {
             Ok(summary) => {
                 // Convert internal types to proto
@@ -922,6 +1152,16 @@ impl BlixardService for BlixardGrpcService {
         &self,
         _request: Request<GetRaftStatusRequest>,
     ) -> Result<Response<GetRaftStatusResponse>, Status> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("get_raft_status"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("get_raft_status")]);
+        
         // Get Raft status from the node
         match self.node.get_raft_status().await {
             Ok(status) => {
@@ -933,7 +1173,10 @@ impl BlixardService for BlixardGrpcService {
                     state: status.state,
                 }))
             }
-            Err(e) => Err(Self::error_to_status(e)),
+            Err(e) => {
+                record_grpc_error!("get_raft_status");
+                Err(Self::error_to_status(e))
+            },
         }
     }
 
@@ -941,6 +1184,16 @@ impl BlixardService for BlixardGrpcService {
         &self,
         request: Request<ProposeTaskRequest>,
     ) -> Result<Response<ProposeTaskResponse>, Status> {
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("propose_task"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("propose_task")]);
+        
         let req = request.into_inner();
         
         // Validate task
@@ -972,10 +1225,13 @@ impl BlixardService for BlixardGrpcService {
                 success: true,
                 message: format!("Task {} proposed successfully, assigned to node {}", task.id, assigned_node),
             })),
-            Err(e) => Ok(Response::new(ProposeTaskResponse {
-                success: false,
-                message: format!("Failed to propose task: {}", e),
-            })),
+            Err(e) => {
+                record_grpc_error!("propose_task");
+                Ok(Response::new(ProposeTaskResponse {
+                    success: false,
+                    message: format!("Failed to propose task: {}", e),
+                }))
+            },
         }
     }
 }

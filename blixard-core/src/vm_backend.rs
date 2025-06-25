@@ -8,6 +8,7 @@ use uuid;
 use crate::error::{BlixardResult, BlixardError};
 use crate::types::{VmConfig, VmStatus, VmCommand};
 use crate::vm_scheduler::{VmScheduler, PlacementStrategy, PlacementDecision};
+use crate::metrics_otel_v2::{metrics, Timer, attributes};
 
 /// Abstract interface for VM backend implementations
 /// 
@@ -66,15 +67,29 @@ impl VmManager {
     
     /// Process a VM command after Raft consensus
     pub async fn process_command(&self, command: VmCommand) -> BlixardResult<()> {
+        let metrics = metrics();
+        
         // All state persistence has already been handled by the RaftStateMachine
         // before this command was forwarded to us. We only execute the actual VM operation.
         match command {
             VmCommand::Create { config, node_id } => {
+                let _timer = Timer::with_attributes(
+                    metrics.vm_create_duration.clone(),
+                    vec![
+                        attributes::vm_name(&config.name),
+                        attributes::node_id(node_id),
+                        attributes::operation("backend_create"),
+                    ],
+                );
+                
                 let result = self.backend.create_vm(&config, node_id).await;
                 
-                // Monitor VM status after creation attempt
                 if result.is_ok() {
+                    metrics.vm_total.add(1, &[]);
+                    // Monitor VM status after creation attempt
                     self.monitor_vm_status_after_operation(&config.name).await;
+                } else {
+                    metrics.vm_create_failed.add(1, &[attributes::vm_name(&config.name)]);
                 }
                 
                 result
@@ -82,8 +97,9 @@ impl VmManager {
             VmCommand::Start { name } => {
                 let result = self.backend.start_vm(&name).await;
                 
-                // Monitor VM status after start attempt
                 if result.is_ok() {
+                    metrics.vm_running.add(1, &[]);
+                    // Monitor VM status after start attempt
                     self.monitor_vm_status_after_operation(&name).await;
                 }
                 
@@ -92,15 +108,22 @@ impl VmManager {
             VmCommand::Stop { name } => {
                 let result = self.backend.stop_vm(&name).await;
                 
-                // Monitor VM status after stop attempt
                 if result.is_ok() {
+                    metrics.vm_running.add(-1, &[]);
+                    // Monitor VM status after stop attempt
                     self.monitor_vm_status_after_operation(&name).await;
                 }
                 
                 result
             }
             VmCommand::Delete { name } => {
-                self.backend.delete_vm(&name).await
+                let result = self.backend.delete_vm(&name).await;
+                
+                if result.is_ok() {
+                    metrics.vm_total.add(-1, &[]);
+                }
+                
+                result
             }
             VmCommand::UpdateStatus { name, status } => {
                 self.backend.update_vm_status(&name, status).await
