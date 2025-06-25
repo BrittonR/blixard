@@ -9,6 +9,7 @@ use crate::{
     types::{VmCommand, VmStatus as InternalVmStatus},
     raft_manager::{TaskSpec, ResourceRequirements},
     metrics_otel_v2::{metrics, Timer, attributes},
+    tracing_otel,
     proto::{
         cluster_service_server::{ClusterService, ClusterServiceServer},
         blixard_service_server::{BlixardService, BlixardServiceServer},
@@ -27,13 +28,48 @@ use crate::{
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
-/// Helper macro to record gRPC errors in metrics
+/// Helper macro to instrument gRPC methods with tracing
+macro_rules! instrument_grpc {
+    ($self:expr, $request:expr, $method:expr) => {{
+        // Extract trace context from incoming request
+        let parent_context = tracing_otel::extract_context(&$request);
+        let _guard = parent_context.attach();
+        
+        // Create span for this operation
+        let span = tracing_otel::grpc_span($method, opentelemetry::trace::SpanKind::Server);
+        let _enter = span.enter();
+        
+        // Record metrics
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method($method),
+                attributes::node_id($self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method($method)]);
+        
+        $request.into_inner()
+    }};
+}
+
+/// Helper macro to record gRPC errors in metrics and tracing
 macro_rules! record_grpc_error {
     ($method:expr) => {
         metrics().grpc_requests_failed.add(1, &[
             attributes::method($method),
             attributes::error(true),
         ]);
+        tracing::error!(error = true, "gRPC method {} failed", $method);
+    };
+    ($method:expr, $error:expr) => {
+        metrics().grpc_requests_failed.add(1, &[
+            attributes::method($method),
+            attributes::error(true),
+        ]);
+        tracing_otel::record_error($error);
+        tracing::error!(error = true, error_message = %$error, "gRPC method {} failed", $method);
     };
 }
 
@@ -96,18 +132,15 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<JoinRequest>,
     ) -> Result<Response<JoinResponse>, Status> {
-        let metrics = metrics();
-        let _timer = Timer::with_attributes(
-            metrics.grpc_request_duration.clone(),
-            vec![
-                attributes::method("join_cluster"),
-                attributes::node_id(self.node.get_id()),
-            ],
-        );
-        metrics.grpc_requests_total.add(1, &[attributes::method("join_cluster")]);
+        let req = instrument_grpc!(self, request, "join_cluster");
         
-        let req = request.into_inner();
         tracing::info!("Received join request from node {} at {}", req.node_id, req.bind_address);
+        
+        // Add request attributes to span
+        tracing_otel::add_attributes(&[
+            ("node.id", &req.node_id),
+            ("node.address", &req.bind_address),
+        ]);
         
         // Validate the request
         if req.node_id == 0 {

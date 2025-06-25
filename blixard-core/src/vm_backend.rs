@@ -9,6 +9,7 @@ use crate::error::{BlixardResult, BlixardError};
 use crate::types::{VmConfig, VmStatus, VmCommand};
 use crate::vm_scheduler::{VmScheduler, PlacementStrategy, PlacementDecision};
 use crate::metrics_otel_v2::{metrics, Timer, attributes};
+use crate::tracing_otel;
 
 /// Abstract interface for VM backend implementations
 /// 
@@ -67,12 +68,26 @@ impl VmManager {
     
     /// Process a VM command after Raft consensus
     pub async fn process_command(&self, command: VmCommand) -> BlixardResult<()> {
+        let span = tracing::span!(
+            tracing::Level::INFO,
+            "vm.process_command",
+            otel.name = "vm.process_command",
+            otel.kind = ?opentelemetry::trace::SpanKind::Internal,
+        );
+        let _enter = span.enter();
+        
         let metrics = metrics();
         
         // All state persistence has already been handled by the RaftStateMachine
         // before this command was forwarded to us. We only execute the actual VM operation.
         match command {
             VmCommand::Create { config, node_id } => {
+                tracing_otel::add_attributes(&[
+                    ("vm.name", &config.name),
+                    ("vm.operation", &"create"),
+                    ("node.id", &node_id),
+                ]);
+                
                 let _timer = Timer::with_attributes(
                     metrics.vm_create_duration.clone(),
                     vec![

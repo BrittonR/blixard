@@ -8,6 +8,7 @@ use blixard_core::{
     node::Node,
     metrics_otel_v2,
     metrics_server,
+    tracing_otel,
 };
 use blixard_vm::{MicrovmBackendFactory};
 use tokio::task::JoinHandle;
@@ -84,6 +85,24 @@ impl BlixardOrchestrator {
             })?;
         tracing::info!("Metrics initialized with Prometheus exporter");
         
+        // Initialize distributed tracing
+        // Check for OTLP endpoint in environment variable
+        let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok();
+        if let Some(endpoint) = &otlp_endpoint {
+            tracing::info!("Initializing tracing with OTLP endpoint: {}", endpoint);
+            tracing_otel::init_otlp("blixard", otlp_endpoint)
+                .map_err(|e| blixard_core::error::BlixardError::Internal {
+                    message: format!("Failed to initialize tracing: {}", e),
+                })?;
+        } else {
+            // Initialize without exporter for local development
+            tracing_otel::init_noop()
+                .map_err(|e| blixard_core::error::BlixardError::Internal {
+                    message: format!("Failed to initialize tracing: {}", e),
+                })?;
+            tracing::info!("Tracing initialized without OTLP exporter (set OTEL_EXPORTER_OTLP_ENDPOINT to enable)");
+        }
+        
         // Set up the VM backend registry
         let mut registry = VmBackendRegistry::default(); // Includes built-in mock backend
         
@@ -128,6 +147,10 @@ impl BlixardOrchestrator {
         }
         
         self.node.stop().await?;
+        
+        // Shutdown tracing to flush any pending spans
+        tracing_otel::shutdown();
+        
         tracing::info!("Blixard orchestrator stopped");
         Ok(())
     }

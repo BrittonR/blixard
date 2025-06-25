@@ -1,0 +1,235 @@
+# Example OTLP (OpenTelemetry Protocol) Configuration for Blixard
+#
+# This file shows how to configure Blixard to export metrics and traces
+# to various observability backends using OTLP.
+
+# Environment Variables for OTLP Export
+# =====================================
+
+# Basic OTLP endpoint configuration
+# Set this to your OTLP collector endpoint
+# Example: OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+
+# For specific signal endpoints (optional)
+# OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://localhost:4317
+# OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4317
+
+# Authentication (if required)
+# OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer your-token-here
+
+# Protocol selection (grpc or http/protobuf)
+# OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+
+# Cloud Provider Examples
+# =======================
+
+# AWS X-Ray with ADOT Collector
+# ------------------------------
+# export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+# export OTEL_RESOURCE_ATTRIBUTES=service.name=blixard,service.namespace=production
+# Run ADOT collector configured for X-Ray
+
+# Google Cloud Operations (Stackdriver)
+# -------------------------------------
+# export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+# export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+# Run OpenTelemetry Collector with googlecloud exporter
+
+# Azure Monitor
+# -------------
+# export OTEL_EXPORTER_OTLP_ENDPOINT=https://dc.services.visualstudio.com/v2/track
+# export OTEL_EXPORTER_OTLP_HEADERS=X-API-Key=your-instrumentation-key
+# Or use Azure Monitor OpenTelemetry Distro
+
+# Datadog
+# -------
+# export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+# export DD_API_KEY=your-api-key
+# Run Datadog Agent with OTLP receiver enabled
+
+# New Relic
+# ---------
+# export OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp.nr-data.net:4317
+# export OTEL_EXPORTER_OTLP_HEADERS=api-key=your-license-key
+
+# Honeycomb
+# ---------
+# export OTEL_EXPORTER_OTLP_ENDPOINT=https://api.honeycomb.io
+# export OTEL_EXPORTER_OTLP_HEADERS=x-honeycomb-team=your-api-key
+
+# Jaeger (self-hosted)
+# --------------------
+# export OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger-collector:4317
+
+# Local Development with OpenTelemetry Collector
+# ==============================================
+
+# docker-compose.yml example:
+---
+version: '3.8'
+services:
+  # OpenTelemetry Collector
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8888:8888"   # Prometheus metrics exposed by the collector
+      - "8889:8889"   # Prometheus exporter metrics
+      - "13133:13133" # health_check extension
+      - "55679:55679" # zpages extension
+    depends_on:
+      - jaeger
+      - prometheus
+
+  # Jaeger for traces
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "14250:14250" # gRPC
+
+  # Prometheus for metrics
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  # Grafana for dashboards
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+
+volumes:
+  grafana-storage:
+
+# OpenTelemetry Collector Configuration
+# =====================================
+# Save as otel-collector-config.yaml
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: local
+        action: upsert
+
+exporters:
+  # Export traces to Jaeger
+  jaeger:
+    endpoint: jaeger:14250
+    tls:
+      insecure: true
+
+  # Export metrics to Prometheus
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: blixard
+    const_labels:
+      deployment: local
+
+  # Debug exporter (logs to stdout)
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [jaeger, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [prometheus, debug]
+
+  extensions: [health_check, zpages]
+
+# Prometheus Configuration
+# ========================
+# Save as prometheus.yml
+
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  # Scrape OTel collector's Prometheus exporter
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8889']
+
+  # Direct scrape of Blixard nodes (for comparison)
+  - job_name: 'blixard'
+    static_configs:
+      - targets: 
+        - 'blixard-node1:8001'  # Metrics port is gRPC port + 1000
+        - 'blixard-node2:8002'
+        - 'blixard-node3:8003'
+
+# Running Blixard with OTLP Export
+# ================================
+
+# 1. Start the observability stack:
+#    docker-compose up -d
+
+# 2. Run Blixard with OTLP export:
+#    export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+#    cargo run -- node --id 1 --bind 127.0.0.1:7001
+
+# 3. Access the UIs:
+#    - Grafana: http://localhost:3000 (admin/admin)
+#    - Jaeger: http://localhost:16686
+#    - Prometheus: http://localhost:9090
+
+# Kubernetes Example
+# ==================
+
+# For Kubernetes deployments, you can use the OpenTelemetry Operator:
+# https://github.com/open-telemetry/opentelemetry-operator
+
+# Example Deployment with OTLP sidecar:
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blixard
+spec:
+  template:
+    spec:
+      containers:
+      - name: blixard
+        image: blixard:latest
+        env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://localhost:4317
+      - name: otel-collector
+        image: otel/opentelemetry-collector:latest
+        args: ["--config=/etc/otel/config.yaml"]

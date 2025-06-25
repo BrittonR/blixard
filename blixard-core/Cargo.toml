@@ -34,11 +34,12 @@ slog-term = "2.9"
 slog-async = "2.8"
 
 # Metrics and Observability
-opentelemetry = { version = "0.20", features = ["metrics"] }
-opentelemetry_sdk = { version = "0.20", features = ["rt-tokio", "metrics"] }
-opentelemetry-otlp = { version = "0.13", features = ["metrics", "tonic"] }
+opentelemetry = { version = "0.20", features = ["metrics", "trace"] }
+opentelemetry_sdk = { version = "0.20", features = ["rt-tokio", "metrics", "trace"] }
+opentelemetry-otlp = { version = "0.13", features = ["metrics", "trace", "tonic"] }
 opentelemetry-prometheus = "0.13"
 prometheus = "0.13"
+tracing-opentelemetry = "0.20"
 
 # Networking (tonic configured conditionally below)
 prost = "0.13"

@@ -15,6 +15,7 @@ use crate::proto::{HealthCheckRequest};
 use crate::node_shared::{SharedNodeState, PeerInfo};
 use crate::config;
 use crate::metrics_otel_v2::{metrics, Timer, attributes};
+use crate::tracing_otel;
 
 /// Buffered message for delayed sending
 struct BufferedMessage {
@@ -353,7 +354,8 @@ impl PeerConnector {
             for buffered in messages {
                 match crate::raft_codec::serialize_message(&buffered.message) {
                     Ok(raft_data) => {
-                        let request = RaftMessageRequest { raft_data };
+                        let mut request = tonic::Request::new(RaftMessageRequest { raft_data });
+                        tracing_otel::inject_context(&mut request);
                         
                         if let Err(e) = client.send_raft_message(request).await {
                             tracing::warn!("[PEER-CONN] Failed to send buffered message to {}: {}", peer_id, e);
@@ -380,7 +382,8 @@ impl PeerConnector {
         if let Some(mut client) = self.get_connection(to).await {
             // Serialize the message
             let raft_data = crate::raft_codec::serialize_message(&message)?;
-            let request = RaftMessageRequest { raft_data };
+            let mut request = tonic::Request::new(RaftMessageRequest { raft_data });
+            tracing_otel::inject_context(&mut request);
             
             match client.send_raft_message(request).await {
                 Ok(response) => {
@@ -477,7 +480,8 @@ impl PeerConnector {
     pub async fn check_connection_health(&self, peer_id: u64) -> bool {
         if let Some(mut client) = self.get_connection(peer_id).await {
             // Send health check request
-            let request = HealthCheckRequest {};
+            let mut request = tonic::Request::new(HealthCheckRequest {});
+            tracing_otel::inject_context(&mut request);
             match client.health_check(request).await {
                 Ok(response) => {
                     let resp = response.into_inner();
