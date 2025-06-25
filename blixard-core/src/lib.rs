@@ -16,6 +16,12 @@ pub mod metrics_otel_v2;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;
 
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod test_helpers_concurrent;
+
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod test_message_filter;
+
 // Include the generated proto code
 pub mod proto {
     tonic::include_proto!("blixard");
