@@ -8,21 +8,26 @@
 
 use std::sync::Arc;
 use std::time::Duration;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::net::SocketAddr;
 
 use madsim::time::{sleep, timeout};
-use madsim::net::Endpoint;
-use blixard_core::test_helpers::TestCluster;
+use madsim::net::{Endpoint, NetSim};
+use blixard_core::test_helpers::{TestCluster, TestNode};
+use blixard_core::proto::{SubmitTaskRequest, GetTaskStatusRequest};
+use blixard_core::raft_manager::{TaskSpec, ResourceRequirements};
 
 /// Test basic network partition - majority/minority split
 #[madsim::test]
 async fn test_network_partition_majority_minority() {
-    let mut cluster = TestCluster::new(5).await;
-    cluster.start_all_nodes().await;
+    let cluster = TestCluster::new(5).await.expect("Failed to create cluster");
     
-    // Wait for initial leader election
-    sleep(Duration::from_secs(2)).await;
-    let initial_leader = cluster.find_leader().await
+    // Wait for cluster convergence
+    cluster.wait_for_convergence(Duration::from_secs(10)).await
+        .expect("Cluster should converge");
+    
+    // Find initial leader
+    let initial_leader = cluster.get_leader_id().await
         .expect("Should have initial leader");
     
     // Create partition: nodes 1,2,3 | nodes 4,5
@@ -36,7 +41,7 @@ async fn test_network_partition_majority_minority() {
     let task_before = "task-before-partition";
     if majority_partition.contains(&initial_leader) {
         // Leader is in majority, should succeed
-        let submitted = cluster.submit_task(initial_leader, task_before, "echo", &["majority"]).await;
+        let submitted = submit_task_to_node(&cluster, initial_leader, task_before, "echo", vec!["majority".to_string()]).await;
         assert!(submitted, "Majority partition should accept tasks");
     }
     
@@ -291,20 +296,25 @@ async fn apply_network_partition(
     partition_b: &[u64]
 ) {
     // Use MadSim's network partition API
-    let net = madsim::net::NetSim::current();
+    let net = NetSim::current();
     
-    // Block all communication between partitions
-    for &node_a in partition_a {
-        for &node_b in partition_b {
-            if let (Some(addr_a), Some(addr_b)) = (
-                cluster.get_node_addr(node_a),
-                cluster.get_node_addr(node_b)
-            ) {
-                net.disconnect(addr_a, addr_b);
-                net.disconnect(addr_b, addr_a);
-            }
-        }
-    }
+    // Convert node IDs to addresses
+    let addrs_a: Vec<String> = partition_a.iter()
+        .filter_map(|&id| cluster.get_node_addr(id))
+        .map(|addr| addr.to_string())
+        .collect();
+    
+    let addrs_b: Vec<String> = partition_b.iter()
+        .filter_map(|&id| cluster.get_node_addr(id))
+        .map(|addr| addr.to_string())
+        .collect();
+    
+    // Create string slices for the partition call
+    let refs_a: Vec<&str> = addrs_a.iter().map(|s| s.as_str()).collect();
+    let refs_b: Vec<&str> = addrs_b.iter().map(|s| s.as_str()).collect();
+    
+    // Apply the partition
+    net.partition(&refs_a, &refs_b);
 }
 
 async fn apply_three_way_partition(
@@ -320,21 +330,10 @@ async fn apply_three_way_partition(
 
 async fn heal_network_partition(cluster: &TestCluster) {
     // Restore all network connections
-    let net = madsim::net::NetSim::current();
+    let net = NetSim::current();
     
-    for i in 1..=cluster.size() {
-        for j in 1..=cluster.size() {
-            if i != j {
-                if let (Some(addr_i), Some(addr_j)) = (
-                    cluster.get_node_addr(i),
-                    cluster.get_node_addr(j)
-                ) {
-                    net.connect(addr_i, addr_j);
-                    net.connect(addr_j, addr_i);
-                }
-            }
-        }
-    }
+    // Reset removes all partitions
+    net.reset();
 }
 
 async fn find_leader_in_partition(cluster: &TestCluster, partition: &[u64]) -> Option<u64> {
@@ -378,23 +377,5 @@ async fn count_all_leaders(cluster: &TestCluster) -> usize {
 impl TestCluster {
     fn get_node_addr(&self, node_id: u64) -> Option<std::net::SocketAddr> {
         self.get_node(node_id).map(|node| node.grpc_addr())
-    }
-}
-
-// MadSim network control extensions
-trait NetSimExt {
-    fn disconnect(&self, from: std::net::SocketAddr, to: std::net::SocketAddr);
-    fn connect(&self, from: std::net::SocketAddr, to: std::net::SocketAddr);
-}
-
-impl NetSimExt for madsim::net::NetSim {
-    fn disconnect(&self, from: std::net::SocketAddr, to: std::net::SocketAddr) {
-        // This would use MadSim's actual API
-        // Placeholder for the concept
-    }
-    
-    fn connect(&self, from: std::net::SocketAddr, to: std::net::SocketAddr) {
-        // This would use MadSim's actual API
-        // Placeholder for the concept
     }
 }
