@@ -321,3 +321,85 @@ message Task {
   uint32 cpu_cores = 4;
   uint64 memory_mb = 5;
 }
+
+// ===== Comprehensive Test Messages =====
+// These messages are used for comprehensive gRPC testing
+
+// Test service for comprehensive gRPC testing
+service TestService {
+  rpc Echo(EchoRequest) returns (EchoResponse);
+  rpc SendLargeMessage(LargeMessage) returns (EchoResponse);
+  rpc TimeoutTest(TimeoutRequest) returns (TimeoutResponse);
+  rpc TriggerError(ErrorRequest) returns (ErrorResponse);
+}
+
+// Streaming service for testing streaming patterns
+service StreamingService {
+  rpc ServerStream(StreamRequest) returns (stream StreamResponse);
+  rpc ClientStream(stream StreamRequest) returns (StreamResponse);
+  rpc BidiStream(stream StreamRequest) returns (stream StreamResponse);
+}
+
+message EchoRequest {
+  string message = 1;
+}
+
+message EchoResponse {
+  string message = 1;
+  uint64 timestamp = 2;
+}
+
+message StreamRequest {
+  uint32 count = 1;
+  string prefix = 2;
+  int32 delay_ms = 3;
+}
+
+message StreamResponse {
+  uint32 sequence = 1;
+  string message = 2;
+  uint64 timestamp = 3;
+}
+
+message LargeMessage {
+  bytes data = 1;
+}
+
+message TimeoutRequest {
+  uint64 sleep_ms = 1;
+}
+
+message TimeoutResponse {
+  bool completed = 1;
+}
+
+message ErrorRequest {
+  int32 error_code = 1;
+  string error_context = 2;
+  bool include_details = 3;
+}
+
+message ErrorResponse {
+  string result = 1;
+}
+
+// gRPC Health Checking Protocol (grpc.health.v1)
+// See: https://github.com/grpc/grpc/blob/master/doc/health-checking.md
+service GrpcHealth {
+  rpc Check(GrpcHealthCheckRequest) returns (GrpcHealthCheckResponse);
+  rpc Watch(GrpcHealthCheckRequest) returns (stream GrpcHealthCheckResponse);
+}
+
+message GrpcHealthCheckRequest {
+  string service = 1;
+}
+
+message GrpcHealthCheckResponse {
+  enum ServingStatus {
+    UNKNOWN = 0;
+    SERVING = 1;
+    NOT_SERVING = 2;
+    SERVICE_UNKNOWN = 3;  // Used when the requested service is unknown
+  }
+  ServingStatus status = 1;
+}

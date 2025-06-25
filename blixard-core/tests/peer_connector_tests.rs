@@ -32,6 +32,7 @@ use blixard_core::proto::{
     HealthCheckRequest, HealthCheckResponse,
     TaskRequest, TaskResponse,
     TaskStatusRequest, TaskStatusResponse,
+    DeleteVmRequest, DeleteVmResponse,
 };
 
 
@@ -106,15 +107,6 @@ impl ClusterService for MockClusterService {
         }))
     }
 
-    async fn delete_vm(
-        &self,
-        _request: Request<DeleteVmRequest>,
-    ) -> Result<Response<DeleteVmResponse>, Status> {
-        Ok(Response::new(DeleteVmResponse {
-            success: true,
-            message: String::new(),
-        }))
-    }
 
     async fn send_raft_message(
         &self,
@@ -255,6 +247,37 @@ impl ClusterService for MockClusterService {
             message: String::new(),
         }))
     }
+    
+    async fn delete_vm(
+        &self,
+        _request: Request<DeleteVmRequest>,
+    ) -> Result<Response<DeleteVmResponse>, Status> {
+        Ok(Response::new(DeleteVmResponse {
+            success: false,
+            message: "Not implemented in mock".to_string(),
+        }))
+    }
+    
+    async fn create_vm_with_scheduling(
+        &self,
+        _request: Request<blixard_core::proto::CreateVmWithSchedulingRequest>,
+    ) -> Result<Response<blixard_core::proto::CreateVmWithSchedulingResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
+    
+    async fn schedule_vm_placement(
+        &self,
+        _request: Request<blixard_core::proto::ScheduleVmPlacementRequest>,
+    ) -> Result<Response<blixard_core::proto::ScheduleVmPlacementResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
+    
+    async fn get_cluster_resource_summary(
+        &self,
+        _request: Request<blixard_core::proto::ClusterResourceSummaryRequest>,
+    ) -> Result<Response<blixard_core::proto::ClusterResourceSummaryResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
 }
 
 /// Test harness for PeerConnector tests
@@ -277,6 +300,12 @@ impl TestHarness {
         };
         let shared_state = Arc::new(SharedNodeState::new(config));
         let peer_connector = Arc::new(PeerConnector::new(shared_state.clone()));
+        
+        // Start connection maintenance task for automatic reconnection
+        let peer_connector_clone = peer_connector.clone();
+        tokio::spawn(async move {
+            peer_connector_clone.start_connection_maintenance().await;
+        });
         
         Self {
             _node_id: node_id,
@@ -487,19 +516,73 @@ mod tests {
     async fn test_buffer_overflow_protection() {
         let harness = TestHarness::new(1).await;
         
-        // Add peer but don't start server (so connection will fail)
-        harness.shared_state.add_peer(2, "127.0.0.1:59999".to_string()).await.unwrap();
+        // Start a mock peer but delay its startup to buffer messages
+        let peer_addr = get_available_addr().await;
         
-        // Send more than MAX_BUFFERED_MESSAGES (100)
+        // Add peer but don't start server yet
+        harness.shared_state.add_peer(2, peer_addr.to_string()).await.unwrap();
+        
+        // Send more than MAX_BUFFERED_MESSAGES (100 by default)
+        // Use unique indices to track which messages survive
         for i in 0..150 {
             let mut message = create_test_message(1, 2);
             message.index = i;
+            message.term = i; // Use term to double-check message identity
             let _ = harness.peer_connector.send_raft_message(2, message).await;
+            
+            // Small delay to ensure ordering
+            if i % 10 == 0 {
+                timing::robust_sleep(Duration::from_millis(1)).await;
+            }
         }
         
-        // Buffer should not grow beyond limit
-        // We can't directly inspect the buffer, but the system should not crash
-        // and memory usage should be bounded
+        // Now start the mock server to receive buffered messages
+        let mock_service = harness.start_mock_peer(2, peer_addr).await;
+        
+        // Wait for buffered messages to be delivered
+        timing::wait_for_condition_with_backoff(
+            || async {
+                // Should receive exactly MAX_BUFFERED_MESSAGES (100)
+                mock_service.get_received_messages().await.len() >= 100
+            },
+            Duration::from_secs(10),
+            Duration::from_millis(100),
+        ).await.expect("Buffered messages should be delivered");
+        
+        // Give a bit more time to ensure no additional messages arrive
+        timing::robust_sleep(Duration::from_millis(500)).await;
+        
+        let received = mock_service.get_received_messages().await;
+        
+        // VERIFY: Exactly 100 messages were delivered (buffer limit)
+        assert_eq!(received.len(), 100, 
+            "Should receive exactly MAX_BUFFERED_MESSAGES (100), but got {}", 
+            received.len());
+        
+        // VERIFY: The oldest messages (0-49) were dropped, newest (50-149) were kept
+        let indices: Vec<u64> = received.iter().map(|m| m.index).collect();
+        let min_index = indices.iter().min().copied().unwrap_or(0);
+        let max_index = indices.iter().max().copied().unwrap_or(0);
+        
+        assert!(min_index >= 50, 
+            "Oldest message index should be >= 50 (oldest dropped), but got {}", 
+            min_index);
+        assert_eq!(max_index, 149, 
+            "Newest message index should be 149, but got {}", 
+            max_index);
+        
+        // VERIFY: Messages are in order (FIFO within buffer)
+        let mut sorted_indices = indices.clone();
+        sorted_indices.sort();
+        assert_eq!(indices, sorted_indices, 
+            "Messages should be delivered in FIFO order");
+        
+        // VERIFY: Each message has matching term (double-check identity)
+        for msg in &received {
+            assert_eq!(msg.index, msg.term, 
+                "Message index {} should match term for identity verification", 
+                msg.index);
+        }
         
         harness.cleanup().await;
     }
