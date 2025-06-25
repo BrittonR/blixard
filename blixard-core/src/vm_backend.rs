@@ -111,15 +111,35 @@ impl VmManager {
     /// List all VMs (reads from Raft-managed database for consistency)
     pub async fn list_vms(&self) -> BlixardResult<Vec<(VmConfig, VmStatus)>> {
         // Read from database instead of backend to ensure Raft consistency
-        self.backend.list_vms().await
+        let read_txn = self.database.begin_read()?;
+        let mut result = Vec::new();
+        
+        if let Ok(table) = read_txn.open_table(crate::storage::VM_STATE_TABLE) {
+            for entry in table.iter()? {
+                let (_key, value) = entry?;
+                let vm_state: crate::types::VmState = bincode::deserialize(value.value())?;
+                result.push((vm_state.config, vm_state.status));
+            }
+        }
+        
+        Ok(result)
     }
     
     /// Get status of a specific VM (reads from Raft-managed database)
     pub async fn get_vm_status(&self, name: &str) -> BlixardResult<Option<(VmConfig, VmStatus)>> {
         // Read from database instead of backend to ensure Raft consistency
-        // We need to get both config and status, so we use list_vms and filter
-        let all_vms = self.backend.list_vms().await?;
-        Ok(all_vms.into_iter().find(|(config, _)| config.name == name))
+        let read_txn = self.database.begin_read()?;
+        
+        if let Ok(table) = read_txn.open_table(crate::storage::VM_STATE_TABLE) {
+            if let Ok(Some(data)) = table.get(name) {
+                let vm_state: crate::types::VmState = bincode::deserialize(data.value())?;
+                Ok(Some((vm_state.config, vm_state.status)))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
     }
     
     /// Get the IP address of a VM from the backend

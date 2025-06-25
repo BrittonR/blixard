@@ -379,6 +379,7 @@ impl ClusterService for TestRaftNode {
                 node_id: vm.node_id,
                 vcpus: vm.vcpus,
                 memory_mb: vm.memory_mb,
+                ip_address: "10.0.0.107".to_string(),
             }
         }).collect();
 
@@ -404,6 +405,7 @@ impl ClusterService for TestRaftNode {
                     node_id: vm.node_id,
                     vcpus: vm.vcpus,
                     memory_mb: vm.memory_mb,
+                    ip_address: "10.0.0.108".to_string(),
                 }),
             }))
         } else {
@@ -412,6 +414,34 @@ impl ClusterService for TestRaftNode {
                 vm_info: None,
             }))
         }
+    }
+
+    async fn delete_vm(
+        &self,
+        _request: Request<blixard_simulation::proto::DeleteVmRequest>,
+    ) -> Result<Response<blixard_simulation::proto::DeleteVmResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
+
+    async fn create_vm_with_scheduling(
+        &self,
+        _request: Request<blixard_simulation::proto::CreateVmWithSchedulingRequest>,
+    ) -> Result<Response<blixard_simulation::proto::CreateVmWithSchedulingResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
+
+    async fn schedule_vm_placement(
+        &self,
+        _request: Request<blixard_simulation::proto::ScheduleVmPlacementRequest>,
+    ) -> Result<Response<blixard_simulation::proto::ScheduleVmPlacementResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
+
+    async fn get_cluster_resource_summary(
+        &self,
+        _request: Request<blixard_simulation::proto::ClusterResourceSummaryRequest>,
+    ) -> Result<Response<blixard_simulation::proto::ClusterResourceSummaryResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
     }
 }
 

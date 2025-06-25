@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sim_dir = PathBuf::from(&out_dir).join("sim");
     std::fs::create_dir_all(&sim_dir)?;
     
-    // madsim-tonic-build handles both madsim and non-madsim cases
+    // madsim-tonic-build for madsim compatibility
     tonic_build::configure()
         .out_dir(&sim_dir)
         .compile(&["../blixard-core/proto/blixard.proto"], &["../blixard-core/proto"])?;

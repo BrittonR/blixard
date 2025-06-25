@@ -9,9 +9,9 @@ edition = "2021"
 publish = false
 
 [dependencies]
-# Import from main crate for real Raft implementation
-# We don't import blixard-core directly to avoid tonic/madsim-tonic conflicts
-# Instead, simulation tests should mock the behavior they need to test
+# Note: blixard-core dependency disabled due to tonic version conflicts with madsim-tonic
+# Simulation tests should mock the behavior they need to test
+# blixard-core = { path = "../blixard-core" }
 
 anyhow = "1.0"
 async-trait = "0.1"

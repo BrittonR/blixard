@@ -1046,6 +1046,16 @@ impl SharedNodeState {
         
         tracing::info!("[NODE-SHARED] Registering worker {} through Raft", node_id);
         
+        // Check if we're the leader before attempting registration
+        let raft_status = self.get_raft_status().await?;
+        if !raft_status.is_leader {
+            tracing::warn!("[NODE-SHARED] Worker registration attempted on non-leader node {}, leader is {:?}", 
+                raft_status.node_id, raft_status.leader_id);
+            return Err(BlixardError::ClusterError(
+                format!("Only the leader can register workers. Current leader: {:?}", raft_status.leader_id)
+            ));
+        }
+        
         // Create the proposal
         let proposal_data = ProposalData::RegisterWorker {
             node_id,

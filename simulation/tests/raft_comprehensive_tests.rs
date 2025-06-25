@@ -914,6 +914,34 @@ impl ClusterService for TestRaftNodeService {
     async fn get_vm_status(&self, _: Request<GetVmStatusRequest>) -> Result<Response<GetVmStatusResponse>, Status> {
         Err(Status::unimplemented("Not implemented"))
     }
+
+    async fn delete_vm(
+        &self,
+        _request: Request<blixard_simulation::proto::DeleteVmRequest>,
+    ) -> Result<Response<blixard_simulation::proto::DeleteVmResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
+
+    async fn create_vm_with_scheduling(
+        &self,
+        _request: Request<blixard_simulation::proto::CreateVmWithSchedulingRequest>,
+    ) -> Result<Response<blixard_simulation::proto::CreateVmWithSchedulingResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
+
+    async fn schedule_vm_placement(
+        &self,
+        _request: Request<blixard_simulation::proto::ScheduleVmPlacementRequest>,
+    ) -> Result<Response<blixard_simulation::proto::ScheduleVmPlacementResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
+
+    async fn get_cluster_resource_summary(
+        &self,
+        _request: Request<blixard_simulation::proto::ClusterResourceSummaryRequest>,
+    ) -> Result<Response<blixard_simulation::proto::ClusterResourceSummaryResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
 }
 
 // ===== Test Cases =====

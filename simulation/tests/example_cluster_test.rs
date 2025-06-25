@@ -5,7 +5,6 @@
 #![cfg(madsim)]
 
 use madsim::net::NetSim;
-use madsim::task::spawn;
 use madsim::time::{sleep, Duration};
 use std::net::SocketAddr;
 use tonic::{transport::Server, Request, Response, Status};
@@ -40,7 +39,11 @@ impl ClusterService for MockClusterService {
     ) -> Result<Response<ClusterStatusResponse>, Status> {
         Ok(Response::new(ClusterStatusResponse {
             leader_id: self.node_id,
-            nodes: vec![self.node_id],
+            nodes: vec![blixard_simulation::proto::NodeInfo {
+                id: self.node_id,
+                address: "127.0.0.1:7000".to_string(),
+                state: blixard_simulation::proto::NodeState::Leader.into(),
+            }],
             term: 1,
         }))
     }
@@ -115,11 +118,39 @@ impl ClusterService for MockClusterService {
     ) -> Result<Response<blixard_simulation::proto::GetVmStatusResponse>, Status> {
         Err(Status::unimplemented("Not implemented in mock"))
     }
+
+    async fn delete_vm(
+        &self,
+        _request: Request<blixard_simulation::proto::DeleteVmRequest>,
+    ) -> Result<Response<blixard_simulation::proto::DeleteVmResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
+
+    async fn create_vm_with_scheduling(
+        &self,
+        _request: Request<blixard_simulation::proto::CreateVmWithSchedulingRequest>,
+    ) -> Result<Response<blixard_simulation::proto::CreateVmWithSchedulingResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
+
+    async fn schedule_vm_placement(
+        &self,
+        _request: Request<blixard_simulation::proto::ScheduleVmPlacementRequest>,
+    ) -> Result<Response<blixard_simulation::proto::ScheduleVmPlacementResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
+
+    async fn get_cluster_resource_summary(
+        &self,
+        _request: Request<blixard_simulation::proto::ClusterResourceSummaryRequest>,
+    ) -> Result<Response<blixard_simulation::proto::ClusterResourceSummaryResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
 }
 
 #[madsim::test]
 async fn test_mock_cluster_health() {
-    let net = NetSim::new();
+    let net = NetSim::current();
     let handle = madsim::runtime::Handle::current();
     
     // Create nodes with different IPs
@@ -168,7 +199,7 @@ async fn test_network_partition() {
     // This test would simulate network partitions
     // For now, just a placeholder showing the pattern
     
-    let net = NetSim::new();
+    let net = NetSim::current();
     let handle = madsim::runtime::Handle::current();
     
     // Create a 3-node cluster

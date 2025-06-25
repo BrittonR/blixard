@@ -99,6 +99,7 @@ impl ClusterService for MockNode {
                 node_id: self.id,
                 vcpus: 1,
                 memory_mb: 256,
+                ip_address: "10.0.0.106".to_string(),
             })
             .collect();
             
@@ -170,6 +171,34 @@ impl ClusterService for MockNode {
         _request: tonic::Request<blixard_simulation::proto::TaskStatusRequest>,
     ) -> Result<tonic::Response<blixard_simulation::proto::TaskStatusResponse>, tonic::Status> {
         Err(tonic::Status::unimplemented("Not implemented"))
+    }
+
+    async fn delete_vm(
+        &self,
+        _request: tonic::Request<blixard_simulation::proto::DeleteVmRequest>,
+    ) -> Result<tonic::Response<blixard_simulation::proto::DeleteVmResponse>, tonic::Status> {
+        Err(tonic::Status::unimplemented("Not implemented in mock"))
+    }
+
+    async fn create_vm_with_scheduling(
+        &self,
+        _request: tonic::Request<blixard_simulation::proto::CreateVmWithSchedulingRequest>,
+    ) -> Result<tonic::Response<blixard_simulation::proto::CreateVmWithSchedulingResponse>, tonic::Status> {
+        Err(tonic::Status::unimplemented("Not implemented in mock"))
+    }
+
+    async fn schedule_vm_placement(
+        &self,
+        _request: tonic::Request<blixard_simulation::proto::ScheduleVmPlacementRequest>,
+    ) -> Result<tonic::Response<blixard_simulation::proto::ScheduleVmPlacementResponse>, tonic::Status> {
+        Err(tonic::Status::unimplemented("Not implemented in mock"))
+    }
+
+    async fn get_cluster_resource_summary(
+        &self,
+        _request: tonic::Request<blixard_simulation::proto::ClusterResourceSummaryRequest>,
+    ) -> Result<tonic::Response<blixard_simulation::proto::ClusterResourceSummaryResponse>, tonic::Status> {
+        Err(tonic::Status::unimplemented("Not implemented in mock"))
     }
 }
 
