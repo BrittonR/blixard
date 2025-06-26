@@ -1414,18 +1414,36 @@ impl BlixardService for BlixardGrpcService {
     }
 }
 
-/// Start the gRPC server
+/// Start the gRPC server with TLS and security support
 pub async fn start_grpc_server(
     node: Arc<SharedNodeState>,
     bind_address: std::net::SocketAddr,
 ) -> BlixardResult<()> {
-    let service = BlixardGrpcService::new(node);
+    let service = BlixardGrpcService::new(node.clone());
     let cluster_server = ClusterServiceServer::new(service.clone());
     let blixard_server = BlixardServiceServer::new(service);
 
     tracing::info!("Starting gRPC server on {}", bind_address);
 
-    match tonic::transport::Server::builder()
+    // Get security configuration and setup TLS if enabled
+    let mut server_builder = tonic::transport::Server::builder();
+    
+    if let Some(security_manager) = node.get_security_manager().await {
+        // Configure TLS if available
+        if let Ok(Some(tls_config)) = security_manager.get_server_tls_config().await {
+            tracing::info!("Enabling TLS for gRPC server");
+            server_builder = server_builder.tls_config(tls_config)
+                .map_err(|e| BlixardError::Security {
+                    message: format!("Failed to configure TLS: {}", e),
+                })?;
+        } else {
+            tracing::info!("TLS not configured for gRPC server");
+        }
+    } else {
+        tracing::warn!("Security manager not available - gRPC server running without security");
+    }
+
+    match server_builder
         .add_service(cluster_server)
         .add_service(blixard_server)
         .serve(bind_address)

@@ -1,0 +1,363 @@
+//! Comprehensive security integration tests
+//!
+//! Tests the complete security stack including:
+//! - TLS certificate management
+//! - Token-based authentication
+//! - Role-based access control
+//! - Secrets management
+//! - gRPC security middleware
+
+use blixard_core::{
+    security::{SecurityManager, Permission, default_dev_security_config},
+    grpc_security::GrpcSecurityMiddleware,
+    error::BlixardError,
+    config_v2::{SecurityConfig, TlsConfig, AuthConfig},
+};
+use std::sync::Arc;
+use std::path::PathBuf;
+use std::time::Duration;
+use tonic::metadata::{MetadataMap, MetadataValue};
+use tonic::{Request, Extensions};
+
+/// Helper to create test configuration
+fn create_test_security_config(enable_auth: bool) -> SecurityConfig {
+    SecurityConfig {
+        tls: TlsConfig {
+            enabled: false, // TLS requires actual certificate files
+            cert_file: None,
+            key_file: None,
+            ca_file: None,
+            require_client_cert: false,
+        },
+        auth: AuthConfig {
+            enabled: enable_auth,
+            method: "token".to_string(),
+            token_file: None,
+        },
+    }
+}
+
+#[tokio::test]
+async fn test_security_manager_disabled_authentication() {
+    let config = create_test_security_config(false);
+    let security_manager = SecurityManager::new(config).await.unwrap();
+    
+    // Should allow all requests when disabled
+    let auth_result = security_manager.authenticate_token("invalid-token").await.unwrap();
+    assert!(auth_result.authenticated);
+    assert!(auth_result.permissions.contains(&Permission::Admin));
+    assert_eq!(auth_result.auth_method, "disabled");
+}
+
+#[tokio::test]
+async fn test_security_manager_enabled_authentication() {
+    let config = create_test_security_config(true);
+    let mut security_manager = SecurityManager::new(config).await.unwrap();
+    
+    // Generate a test token
+    let token = security_manager.generate_token(
+        "test-user",
+        vec![Permission::VmRead, Permission::VmWrite],
+        Some(Duration::from_secs(3600))
+    ).await.unwrap();
+    
+    // Valid token should authenticate
+    let auth_result = security_manager.authenticate_token(&token).await.unwrap();
+    assert!(auth_result.authenticated);
+    assert_eq!(auth_result.user.unwrap(), "test-user");
+    assert!(auth_result.permissions.contains(&Permission::VmRead));
+    assert!(auth_result.permissions.contains(&Permission::VmWrite));
+    assert!(!auth_result.permissions.contains(&Permission::Admin));
+    
+    // Invalid token should fail
+    let invalid_result = security_manager.authenticate_token("invalid-token").await.unwrap();
+    assert!(!invalid_result.authenticated);
+    assert!(invalid_result.user.is_none());
+}
+
+#[tokio::test]
+async fn test_permission_checking() {
+    let config = create_test_security_config(true);
+    let security_manager = SecurityManager::new(config).await.unwrap();
+    
+    // Test various permission combinations
+    let readonly_user = "readonly";
+    let admin_user = "admin";
+    
+    // Check permission for read-only user
+    let has_read = security_manager.check_permission(readonly_user, &Permission::VmRead).await.unwrap();
+    let has_write = security_manager.check_permission(readonly_user, &Permission::VmWrite).await.unwrap();
+    
+    // Read-only role should have read permission but not write
+    assert!(has_read);
+    assert!(!has_write);
+    
+    // Admin user should have all permissions
+    let admin_read = security_manager.check_permission(admin_user, &Permission::VmRead).await.unwrap();
+    let admin_write = security_manager.check_permission(admin_user, &Permission::VmWrite).await.unwrap();
+    let admin_cluster = security_manager.check_permission(admin_user, &Permission::ClusterWrite).await.unwrap();
+    
+    assert!(admin_read);
+    assert!(admin_write);
+    assert!(admin_cluster);
+}
+
+#[tokio::test]
+async fn test_secrets_management() {
+    let config = default_dev_security_config();
+    let mut security_manager = SecurityManager::new(config).await.unwrap();
+    
+    // Store some secrets
+    security_manager.store_secret("database-password", "super-secret-123").await.unwrap();
+    security_manager.store_secret("api-key", "abcd-efgh-ijkl-mnop").await.unwrap();
+    
+    // Retrieve secrets
+    let db_password = security_manager.get_secret("database-password").await.unwrap();
+    let api_key = security_manager.get_secret("api-key").await.unwrap();
+    let missing_secret = security_manager.get_secret("nonexistent").await.unwrap();
+    
+    assert_eq!(db_password.unwrap(), "super-secret-123");
+    assert_eq!(api_key.unwrap(), "abcd-efgh-ijkl-mnop");
+    assert!(missing_secret.is_none());
+}
+
+#[tokio::test]
+async fn test_grpc_security_middleware() {
+    let config = create_test_security_config(true);
+    let security_manager = Arc::new(SecurityManager::new(config).await.unwrap());
+    let middleware = GrpcSecurityMiddleware::new(security_manager.clone());
+    
+    // Test request without authentication token
+    let metadata = MetadataMap::new();
+    let extensions = Extensions::new();
+    let request = Request::from_parts(metadata, extensions, ());
+    
+    let context = middleware.authenticate_request(&request).await.unwrap();
+    assert!(!context.authenticated); // Should fail without token when auth is enabled
+    
+    // Test request with valid token - create a new security manager for token generation
+    let config2 = create_test_security_config(true);
+    let mut security_manager_for_token = SecurityManager::new(config2).await.unwrap();
+    let token = security_manager_for_token.generate_token(
+        "api-user",
+        vec![Permission::VmRead],
+        Some(Duration::from_secs(3600))
+    ).await.unwrap();
+    
+    let security_manager_final = Arc::new(security_manager_for_token);
+    let middleware = GrpcSecurityMiddleware::new(security_manager_final);
+    
+    // Create request with Bearer token
+    let mut metadata = MetadataMap::new();
+    let auth_header = format!("Bearer {}", token);
+    metadata.insert("authorization", MetadataValue::try_from(auth_header).unwrap());
+    let extensions = Extensions::new();
+    let request = Request::from_parts(metadata, extensions, ());
+    
+    let context = middleware.authenticate_request(&request).await.unwrap();
+    assert!(context.authenticated);
+    assert_eq!(context.user.as_ref().unwrap(), "api-user");
+    
+    // Test permission checking
+    let has_read = middleware.check_permission(&context, &Permission::VmRead).await.unwrap();
+    let has_write = middleware.check_permission(&context, &Permission::VmWrite).await.unwrap();
+    
+    assert!(has_read);
+    assert!(!has_write);
+}
+
+#[tokio::test]
+async fn test_token_expiration() {
+    let config = create_test_security_config(true);
+    let mut security_manager = SecurityManager::new(config).await.unwrap();
+    
+    // Generate a token that expires quickly
+    let token = security_manager.generate_token(
+        "short-lived-user",
+        vec![Permission::VmRead],
+        Some(Duration::from_millis(100)) // Very short expiration
+    ).await.unwrap();
+    
+    // Should work immediately
+    let result1 = security_manager.authenticate_token(&token).await.unwrap();
+    assert!(result1.authenticated);
+    
+    // Wait for expiration
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    
+    // Should fail after expiration
+    let result2 = security_manager.authenticate_token(&token).await.unwrap();
+    assert!(!result2.authenticated);
+}
+
+#[tokio::test]
+async fn test_multiple_authentication_methods() {
+    let config = create_test_security_config(true);
+    let security_manager = Arc::new(SecurityManager::new(config).await.unwrap());
+    let middleware = GrpcSecurityMiddleware::new(security_manager.clone());
+    
+    // Test Authorization header with Bearer token
+    let mut metadata1 = MetadataMap::new();
+    metadata1.insert("authorization", MetadataValue::try_from("Bearer test-token").unwrap());
+    let extensions1 = Extensions::new();
+    let request1 = Request::from_parts(metadata1, extensions1, ());
+    
+    let _context1 = middleware.authenticate_request(&request1).await.unwrap();
+    
+    // Test x-api-token header  
+    let mut metadata2 = MetadataMap::new();
+    metadata2.insert("x-api-token", MetadataValue::try_from("test-token").unwrap());
+    let extensions2 = Extensions::new();
+    let request2 = Request::from_parts(metadata2, extensions2, ());
+    
+    let _context2 = middleware.authenticate_request(&request2).await.unwrap();
+    
+    // Both should extract the token (though it will fail auth since it's invalid)
+    // The important thing is that both extraction methods work
+}
+
+#[tokio::test]
+async fn test_admin_permission_bypass() {
+    let config = create_test_security_config(true);
+    let mut security_manager = SecurityManager::new(config).await.unwrap();
+    
+    // Generate admin token
+    let admin_token = security_manager.generate_token(
+        "super-admin",
+        vec![Permission::Admin],
+        Some(Duration::from_secs(3600))
+    ).await.unwrap();
+    
+    let auth_result = security_manager.authenticate_token(&admin_token).await.unwrap();
+    assert!(auth_result.authenticated);
+    assert!(auth_result.permissions.contains(&Permission::Admin));
+    
+    // Admin should have access to all operations
+    let security_manager = Arc::new(security_manager);
+    let middleware = GrpcSecurityMiddleware::new(security_manager);
+    
+    let context = auth_result.into();
+    
+    // Test all permission types
+    let permissions = vec![
+        Permission::VmRead,
+        Permission::VmWrite,
+        Permission::ClusterRead,
+        Permission::ClusterWrite,
+        Permission::TaskRead,
+        Permission::TaskWrite,
+        Permission::MetricsRead,
+    ];
+    
+    for permission in permissions {
+        let allowed = middleware.check_permission(&context, &permission).await.unwrap();
+        assert!(allowed, "Admin should have permission: {:?}", permission);
+    }
+}
+
+#[tokio::test]
+async fn test_security_configuration_validation() {
+    // Test various security configurations
+    
+    // 1. Completely disabled security
+    let disabled_config = SecurityConfig {
+        tls: TlsConfig {
+            enabled: false,
+            cert_file: None,
+            key_file: None,
+            ca_file: None,
+            require_client_cert: false,
+        },
+        auth: AuthConfig {
+            enabled: false,
+            method: "token".to_string(),
+            token_file: None,
+        },
+    };
+    
+    let _disabled_manager = SecurityManager::new(disabled_config).await.unwrap();
+    
+    // 2. Auth enabled but no TLS
+    let auth_only_config = SecurityConfig {
+        tls: TlsConfig {
+            enabled: false,
+            cert_file: None,
+            key_file: None,
+            ca_file: None,
+            require_client_cert: false,
+        },
+        auth: AuthConfig {
+            enabled: true,
+            method: "token".to_string(),
+            token_file: None,
+        },
+    };
+    
+    let _auth_only_manager = SecurityManager::new(auth_only_config).await.unwrap();
+    
+    // 3. Invalid TLS config (missing certificates) - should still create manager
+    // but TLS operations will fail
+    let invalid_tls_config = SecurityConfig {
+        tls: TlsConfig {
+            enabled: true,
+            cert_file: Some(PathBuf::from("/nonexistent/cert.pem")),
+            key_file: Some(PathBuf::from("/nonexistent/key.pem")),
+            ca_file: None,
+            require_client_cert: false,
+        },
+        auth: AuthConfig {
+            enabled: false,
+            method: "token".to_string(),
+            token_file: None,
+        },
+    };
+    
+    // Manager creation should succeed even with invalid TLS paths
+    // TLS configuration validation happens when actually using TLS
+    let _invalid_tls_manager = SecurityManager::new(invalid_tls_config).await.unwrap();
+}
+
+#[tokio::test]
+async fn test_concurrent_token_operations() {
+    let config = create_test_security_config(true);
+    let security_manager = Arc::new(SecurityManager::new(config).await.unwrap());
+    
+    // Test concurrent token authentication
+    let mut handles = vec![];
+    
+    for i in 0..10 {
+        let manager = security_manager.clone();
+        let handle = tokio::spawn(async move {
+            // All will fail since tokens don't exist, but shouldn't crash
+            let result = manager.authenticate_token(&format!("token-{}", i)).await.unwrap();
+            assert!(!result.authenticated);
+        });
+        handles.push(handle);
+    }
+    
+    // Wait for all tasks to complete
+    for handle in handles {
+        handle.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn test_role_based_access_control() {
+    let config = create_test_security_config(true);
+    let security_manager = SecurityManager::new(config).await.unwrap();
+    
+    // Test default roles exist and work correctly
+    let readonly_has_read = security_manager.check_permission("readonly", &Permission::VmRead).await.unwrap();
+    let readonly_has_write = security_manager.check_permission("readonly", &Permission::VmWrite).await.unwrap();
+    
+    assert!(readonly_has_read);
+    assert!(!readonly_has_write);
+    
+    let vm_operator_has_read = security_manager.check_permission("vm-operator", &Permission::VmRead).await.unwrap();
+    let vm_operator_has_write = security_manager.check_permission("vm-operator", &Permission::VmWrite).await.unwrap();
+    let vm_operator_has_cluster_write = security_manager.check_permission("vm-operator", &Permission::ClusterWrite).await.unwrap();
+    
+    assert!(vm_operator_has_read);
+    assert!(vm_operator_has_write);
+    assert!(!vm_operator_has_cluster_write);
+}

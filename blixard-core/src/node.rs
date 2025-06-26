@@ -95,6 +95,11 @@ impl Node {
         let quota_manager = Arc::new(crate::quota_manager::QuotaManager::new(storage).await?);
         self.shared.set_quota_manager(quota_manager).await;
 
+        // Initialize security manager
+        let config = crate::config_global::get();
+        let security_manager = Arc::new(crate::security::SecurityManager::new(config.security.clone()).await?);
+        self.shared.set_security_manager(security_manager).await;
+
         // Initialize Raft manager
         // If join_addr is provided, don't bootstrap as single node
         let peers = if let Some(_join_addr) = &self.shared.config.join_addr {

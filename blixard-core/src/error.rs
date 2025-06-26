@@ -67,6 +67,9 @@ pub enum BlixardError {
 
     #[error("Scheduling error: {message}")]
     SchedulingError { message: String },
+
+    #[error("Security error: {message}")]
+    Security { message: String },
 }
 
 pub type Result<T> = std::result::Result<T, BlixardError>;

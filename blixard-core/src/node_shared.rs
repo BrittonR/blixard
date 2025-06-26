@@ -105,6 +105,9 @@ pub struct SharedNodeState {
     // Quota manager for resource enforcement
     quota_manager: RwLock<Option<Arc<crate::quota_manager::QuotaManager>>>,
     
+    // Security manager for authentication and authorization
+    security_manager: RwLock<Option<Arc<crate::security::SecurityManager>>>,
+    
     // Track running state
     is_running: RwLock<bool>,
     
@@ -138,6 +141,7 @@ impl SharedNodeState {
             raft_conf_change_tx: Mutex::new(None),
             vm_manager: RwLock::new(None),
             quota_manager: RwLock::new(None),
+            security_manager: RwLock::new(None),
             is_running: RwLock::new(false),
             is_initialized: RwLock::new(false),
             raft_status: RwLock::new(RaftStatus {
@@ -193,6 +197,16 @@ impl SharedNodeState {
     /// Get the quota manager
     pub async fn get_quota_manager(&self) -> Option<Arc<crate::quota_manager::QuotaManager>> {
         self.quota_manager.read().await.clone()
+    }
+
+    /// Set the security manager
+    pub async fn set_security_manager(&self, security_manager: Arc<crate::security::SecurityManager>) {
+        *self.security_manager.write().await = Some(security_manager);
+    }
+
+    /// Get the security manager
+    pub async fn get_security_manager(&self) -> Option<Arc<crate::security::SecurityManager>> {
+        self.security_manager.read().await.clone()
     }
     
     /// Get the VM manager
