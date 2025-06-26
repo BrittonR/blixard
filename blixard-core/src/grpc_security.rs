@@ -127,7 +127,7 @@ macro_rules! authenticate_grpc {
             return Err(tonic::Status::permission_denied(format!("Permission denied: {:?}", $permission)));
         }
         
-        security_context
+        Ok(security_context)
     }};
 }
 

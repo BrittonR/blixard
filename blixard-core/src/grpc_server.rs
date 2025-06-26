@@ -11,6 +11,8 @@ use crate::{
     metrics_otel_v2::{metrics, Timer, attributes},
     tracing_otel,
     resource_quotas::{ResourceRequest, ApiOperation, QuotaViolation},
+    grpc_security::{GrpcSecurityMiddleware, SecurityContext},
+    security::Permission,
     proto::{
         cluster_service_server::{ClusterService, ClusterServiceServer},
         blixard_service_server::{BlixardService, BlixardServiceServer},
@@ -25,6 +27,7 @@ use crate::{
         ScheduleVmPlacementResponse, ClusterResourceSummaryRequest, ClusterResourceSummaryResponse,
         PlacementStrategy, ClusterResourceSummary, NodeResourceUsage, WorkerCapabilities,
     },
+    authenticate_grpc, optional_authenticate_grpc,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -78,12 +81,60 @@ macro_rules! record_grpc_error {
 #[derive(Clone)]
 pub struct BlixardGrpcService {
     node: Arc<SharedNodeState>,
+    security_middleware: Option<GrpcSecurityMiddleware>,
 }
 
 impl BlixardGrpcService {
     /// Create a new gRPC service instance
     pub fn new(node: Arc<SharedNodeState>) -> Self {
-        Self { node }
+        Self { 
+            node,
+            security_middleware: None,
+        }
+    }
+    
+    /// Create a new gRPC service instance with security middleware
+    pub async fn with_security(node: Arc<SharedNodeState>) -> Self {
+        let security_middleware = if let Some(security_manager) = node.get_security_manager().await {
+            Some(GrpcSecurityMiddleware::new(security_manager))
+        } else {
+            None
+        };
+        
+        Self {
+            node,
+            security_middleware,
+        }
+    }
+    
+    /// Helper method to authenticate requests
+    async fn authenticate<T>(&self, request: &Request<T>, permission: Permission) -> Result<SecurityContext, Status> {
+        if let Some(ref middleware) = self.security_middleware {
+            authenticate_grpc!(middleware, request, permission)
+        } else {
+            // If no middleware, create a default admin context (development mode)
+            Ok(SecurityContext {
+                authenticated: true,
+                user: Some("system".to_string()),
+                permissions: vec![Permission::Admin],
+                auth_method: "none".to_string(),
+            })
+        }
+    }
+    
+    /// Helper method for optional authentication
+    async fn optional_authenticate<T>(&self, request: &Request<T>) -> Option<SecurityContext> {
+        if let Some(ref middleware) = self.security_middleware {
+            optional_authenticate_grpc!(middleware, request)
+        } else {
+            // If no middleware, create a default admin context
+            Some(SecurityContext {
+                authenticated: true,
+                user: Some("system".to_string()),
+                permissions: vec![Permission::Admin],
+                auth_method: "none".to_string(),
+            })
+        }
     }
 
     /// Extract tenant ID from gRPC request metadata
@@ -206,6 +257,9 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<JoinRequest>,
     ) -> Result<Response<JoinResponse>, Status> {
+        // Authenticate and authorize the request
+        let _security_context = self.authenticate(&request, Permission::ClusterWrite).await?;
+        
         // Check rate limits for cluster join before processing
         let tenant_id = Self::extract_tenant_id(&request);
         if let Some(quota_manager) = self.node.get_quota_manager().await {
@@ -407,6 +461,9 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<LeaveRequest>,
     ) -> Result<Response<LeaveResponse>, Status> {
+        // Authenticate and authorize the request
+        let _security_context = self.authenticate(&request, Permission::ClusterWrite).await?;
+        
         let metrics = metrics();
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
@@ -558,6 +615,9 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<ClusterStatusRequest>,
     ) -> Result<Response<ClusterStatusResponse>, Status> {
+        // Authenticate and authorize the request
+        let _security_context = self.authenticate(&request, Permission::ClusterRead).await?;
+        
         // Check rate limits for status queries
         let tenant_id = Self::extract_tenant_id(&request);
         if let Some(quota_manager) = self.node.get_quota_manager().await {
@@ -640,6 +700,9 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<CreateVmRequest>,
     ) -> Result<Response<CreateVmResponse>, Status> {
+        // Authenticate and authorize the request
+        let _security_context = self.authenticate(&request, Permission::VmWrite).await?;
+        
         let metrics = metrics();
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
@@ -734,6 +797,9 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<StartVmRequest>,
     ) -> Result<Response<StartVmResponse>, Status> {
+        // Authenticate and authorize the request
+        let _security_context = self.authenticate(&request, Permission::VmWrite).await?;
+        
         let metrics = metrics();
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
@@ -772,6 +838,9 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<StopVmRequest>,
     ) -> Result<Response<StopVmResponse>, Status> {
+        // Authenticate and authorize the request
+        let _security_context = self.authenticate(&request, Permission::VmWrite).await?;
+        
         let metrics = metrics();
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
@@ -810,6 +879,9 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<DeleteVmRequest>,
     ) -> Result<Response<DeleteVmResponse>, Status> {
+        // Authenticate and authorize the request
+        let _security_context = self.authenticate(&request, Permission::VmWrite).await?;
+        
         let metrics = metrics();
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
@@ -860,8 +932,11 @@ impl ClusterService for BlixardGrpcService {
 
     async fn list_vms(
         &self,
-        _request: Request<ListVmsRequest>,
+        request: Request<ListVmsRequest>,
     ) -> Result<Response<ListVmsResponse>, Status> {
+        // Authenticate and authorize the request
+        let _security_context = self.authenticate(&request, Permission::VmRead).await?;
+        
         let metrics = metrics();
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
@@ -905,6 +980,9 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<GetVmStatusRequest>,
     ) -> Result<Response<GetVmStatusResponse>, Status> {
+        // Authenticate and authorize the request
+        let _security_context = self.authenticate(&request, Permission::VmRead).await?;
+        
         let metrics = metrics();
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
@@ -951,8 +1029,11 @@ impl ClusterService for BlixardGrpcService {
 
     async fn health_check(
         &self,
-        _request: Request<HealthCheckRequest>,
+        request: Request<HealthCheckRequest>,
     ) -> Result<Response<HealthCheckResponse>, Status> {
+        // Health checks might be anonymous, so use optional authentication
+        let _security_context = self.optional_authenticate(&request).await;
+        
         let metrics = metrics();
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
@@ -974,6 +1055,9 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<RaftMessageRequest>,
     ) -> Result<Response<RaftMessageResponse>, Status> {
+        // Raft messages require cluster write permission
+        let _security_context = self.authenticate(&request, Permission::ClusterWrite).await?;
+        
         let metrics = metrics();
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
@@ -1007,6 +1091,9 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<TaskRequest>,
     ) -> Result<Response<TaskResponse>, Status> {
+        // Task submission requires task write permission
+        let _security_context = self.authenticate(&request, Permission::TaskWrite).await?;
+        
         let metrics = metrics();
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
@@ -1054,6 +1141,9 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<TaskStatusRequest>,
     ) -> Result<Response<TaskStatusResponse>, Status> {
+        // Task status requires task read permission
+        let _security_context = self.authenticate(&request, Permission::TaskRead).await?;
+        
         let metrics = metrics();
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
@@ -1102,6 +1192,9 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<crate::proto::CreateVmWithSchedulingRequest>,
     ) -> Result<Response<crate::proto::CreateVmWithSchedulingResponse>, Status> {
+        // Authenticate and authorize the request
+        let _security_context = self.authenticate(&request, Permission::VmWrite).await?;
+        
         let metrics = metrics();
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
@@ -1198,6 +1291,9 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<crate::proto::ScheduleVmPlacementRequest>,
     ) -> Result<Response<crate::proto::ScheduleVmPlacementResponse>, Status> {
+        // Authenticate and authorize the request
+        let _security_context = self.authenticate(&request, Permission::VmRead).await?;
+        
         let metrics = metrics();
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
@@ -1265,8 +1361,11 @@ impl ClusterService for BlixardGrpcService {
     
     async fn get_cluster_resource_summary(
         &self,
-        _request: Request<crate::proto::ClusterResourceSummaryRequest>,
+        request: Request<crate::proto::ClusterResourceSummaryRequest>,
     ) -> Result<Response<crate::proto::ClusterResourceSummaryResponse>, Status> {
+        // Authenticate and authorize the request
+        let _security_context = self.authenticate(&request, Permission::ClusterRead).await?;
+        
         let metrics = metrics();
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
@@ -1328,8 +1427,11 @@ impl ClusterService for BlixardGrpcService {
 impl BlixardService for BlixardGrpcService {
     async fn get_raft_status(
         &self,
-        _request: Request<GetRaftStatusRequest>,
+        request: Request<GetRaftStatusRequest>,
     ) -> Result<Response<GetRaftStatusResponse>, Status> {
+        // Authenticate and authorize the request
+        let _security_context = self.authenticate(&request, Permission::ClusterRead).await?;
+        
         let metrics = metrics();
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
@@ -1362,6 +1464,9 @@ impl BlixardService for BlixardGrpcService {
         &self,
         request: Request<ProposeTaskRequest>,
     ) -> Result<Response<ProposeTaskResponse>, Status> {
+        // Authenticate and authorize the request
+        let _security_context = self.authenticate(&request, Permission::TaskWrite).await?;
+        
         let metrics = metrics();
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
@@ -1419,7 +1524,7 @@ pub async fn start_grpc_server(
     node: Arc<SharedNodeState>,
     bind_address: std::net::SocketAddr,
 ) -> BlixardResult<()> {
-    let service = BlixardGrpcService::new(node.clone());
+    let service = BlixardGrpcService::with_security(node.clone()).await;
     let cluster_server = ClusterServiceServer::new(service.clone());
     let blixard_server = BlixardServiceServer::new(service);
 
