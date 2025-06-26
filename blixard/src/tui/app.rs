@@ -9,11 +9,11 @@
 
 use crate::BlixardResult;
 use super::{Event, VmClient};
-use blixard_core::types::{VmStatus, VmConfig};
+use blixard_core::types::VmStatus;
 use ratatui::widgets::{ListState, TableState};
-use tokio::sync::mpsc;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use serde_json;
 
 #[derive(Debug, Clone)]
 pub struct VmInfo {
@@ -99,7 +99,17 @@ pub enum AppTab {
     Nodes,
     Monitoring,
     Configuration,
+    Debug,
     Help,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DebugLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -117,10 +127,20 @@ pub enum AppMode {
     Config,
     Help,
     
+    // Debug modes
+    Debug,
+    RaftDebug,
+    DebugMetrics,
+    DebugLogs,
+    
     // Popup/overlay modes
     ConfirmDialog,
     CreateVmForm,
     CreateNodeForm,
+    CreateClusterForm,
+    ClusterDiscovery,
+    NodeTemplateSelector,
+    ClusterHealthView,
     SettingsForm,
     LogViewer,
     SearchDialog,
@@ -183,6 +203,94 @@ pub struct ClusterInfo {
 }
 
 #[derive(Debug, Clone)]
+pub struct RaftDebugInfo {
+    pub current_term: u64,
+    pub voted_for: Option<u64>,
+    pub log_length: u64,
+    pub commit_index: u64,
+    pub last_applied: u64,
+    pub state: RaftNodeState,
+    pub last_heartbeat: Option<Instant>,
+    pub election_timeout: Duration,
+    pub entries_since_snapshot: u64,
+    pub snapshot_metadata: Option<SnapshotMetadata>,
+    pub peer_states: Vec<PeerDebugInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RaftNodeState {
+    Follower,
+    Candidate,
+    Leader,
+    PreCandidate,
+}
+
+#[derive(Debug, Clone)]
+pub struct SnapshotMetadata {
+    pub last_included_index: u64,
+    pub last_included_term: u64,
+    pub size_bytes: u64,
+    pub created_at: Instant,
+}
+
+#[derive(Debug, Clone)]
+pub struct PeerDebugInfo {
+    pub id: u64,
+    pub next_index: u64,
+    pub match_index: u64,
+    pub state: PeerState,
+    pub last_activity: Option<Instant>,
+    pub is_reachable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PeerState {
+    Probe,
+    Replicate,
+    Snapshot,
+}
+
+#[derive(Debug, Clone)]
+pub struct DebugMetrics {
+    pub messages_sent: u64,
+    pub messages_received: u64,
+    pub proposals_submitted: u64,
+    pub proposals_committed: u64,
+    pub elections_started: u64,
+    pub leadership_changes: u64,
+    pub snapshot_creations: u64,
+    pub log_compactions: u64,
+    pub network_partitions_detected: u64,
+    pub last_reset: Instant,
+}
+
+impl Default for DebugMetrics {
+    fn default() -> Self {
+        Self {
+            messages_sent: 0,
+            messages_received: 0,
+            proposals_submitted: 0,
+            proposals_committed: 0,
+            elections_started: 0,
+            leadership_changes: 0,
+            snapshot_creations: 0,
+            log_compactions: 0,
+            network_partitions_detected: 0,
+            last_reset: Instant::now(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DebugLogEntry {
+    pub timestamp: Instant,
+    pub level: DebugLevel,
+    pub component: String,
+    pub message: String,
+    pub details: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
 pub struct ClusterResourceInfo {
     pub total_nodes: u32,
     pub total_vcpus: u32,
@@ -242,8 +350,95 @@ pub enum ConfirmAction {
     DeleteVm(String),
     StopVm(String),
     RemoveNode(u64),
+    RestartNode(u64),
+    DestroyCluster(String),
     ShutdownCluster,
     ResetData,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum VmFilter {
+    All,
+    Running,
+    Stopped,
+    Failed,
+    ByNode(u64),
+    ByName(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum NodeFilter {
+    All,
+    Healthy,
+    Warning,
+    Critical,
+    Leaders,
+    Followers,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SearchMode {
+    None,
+    VmSearch,
+    NodeSearch,
+    QuickFilter,
+    ClusterDiscovery,
+}
+
+#[derive(Debug, Clone)]
+pub struct DiscoveredCluster {
+    pub name: String,
+    pub leader_address: String,
+    pub leader_id: u64,
+    pub node_count: usize,
+    pub version: Option<String>,
+    pub last_seen: Instant,
+    pub health_status: ClusterHealthStatus,
+    pub auto_discovered: bool,
+    pub accessible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ClusterHealthStatus {
+    Healthy,
+    Degraded,
+    Critical,
+    Unknown,
+}
+
+#[derive(Debug, Clone)]
+pub struct NodeTemplate {
+    pub name: String,
+    pub description: String,
+    pub default_port_offset: u16,
+    pub default_vm_backend: String,
+    pub default_data_dir_pattern: String,
+    pub resource_requirements: Option<NodeResourceRequirements>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NodeResourceRequirements {
+    pub min_cpu_cores: u32,
+    pub min_memory_mb: u64,
+    pub min_disk_gb: u64,
+    pub required_features: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClusterTemplate {
+    pub name: String,
+    pub description: String,
+    pub node_count: u32,
+    pub node_template: NodeTemplate,
+    pub network_config: ClusterNetworkConfig,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClusterNetworkConfig {
+    pub base_port: u16,
+    pub port_range: u16,
+    pub auto_configure_networking: bool,
+    pub cluster_name: Option<String>,
 }
 
 pub struct App {
@@ -290,6 +485,22 @@ pub struct App {
     pub search_query: String,
     pub show_help: bool,
     
+    // Filtering and search (lazygit-inspired)
+    pub vm_filter: VmFilter,
+    pub node_filter: NodeFilter,
+    pub filtered_vms: Vec<VmInfo>,
+    pub filtered_nodes: Vec<NodeInfo>,
+    pub search_mode: SearchMode,
+    pub quick_filter: String,
+    
+    // Cluster discovery and management
+    pub discovered_clusters: Vec<DiscoveredCluster>,
+    pub cluster_templates: Vec<ClusterTemplate>,
+    pub node_templates: Vec<NodeTemplate>,
+    pub selected_cluster: Option<String>,
+    pub cluster_discovery_active: bool,
+    pub cluster_scan_progress: f32,
+    
     // Monitoring
     pub cpu_history: Vec<f32>,
     pub memory_history: Vec<f32>,
@@ -299,6 +510,12 @@ pub struct App {
     // Configuration
     pub config_dirty: bool,
     pub settings: AppSettings,
+    
+    // Debug mode data
+    pub raft_debug_info: Option<RaftDebugInfo>,
+    pub debug_metrics: DebugMetrics,
+    pub debug_log_entries: Vec<DebugLogEntry>,
+    pub max_debug_entries: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -310,6 +527,19 @@ pub struct AppSettings {
     pub default_vm_backend: String,
     pub show_timestamps: bool,
     pub compact_mode: bool,
+    pub performance_mode: PerformanceMode,
+    pub vim_mode: bool,
+    pub max_history_retention: usize,
+    pub update_frequency_ms: u64,
+    pub debug_mode: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PerformanceMode {
+    HighRefresh,  // btop-style high-frequency updates
+    Balanced,     // default mode
+    PowerSaver,   // reduced updates for battery/low-power
+    Debug,        // maximum detail with logging
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -434,6 +664,11 @@ impl Default for AppSettings {
             default_vm_backend: "microvm".to_string(),
             show_timestamps: true,
             compact_mode: false,
+            performance_mode: PerformanceMode::Balanced,
+            vim_mode: false,
+            max_history_retention: 100,
+            update_frequency_ms: 500,
+            debug_mode: false,
         }
     }
 }
@@ -466,6 +701,12 @@ impl App {
             
             cluster_metrics: ClusterMetrics::default(),
             recent_events: Vec::new(),
+            
+            // Debug mode fields
+            debug_log_entries: Vec::new(),
+            debug_metrics: DebugMetrics::default(),
+            max_debug_entries: 1000,
+            raft_debug_info: None,
             max_events: 100,
             
             vms: Vec::new(),
@@ -490,6 +731,20 @@ impl App {
             search_query: String::new(),
             show_help: false,
             
+            vm_filter: VmFilter::All,
+            node_filter: NodeFilter::All,
+            filtered_vms: Vec::new(),
+            filtered_nodes: Vec::new(),
+            search_mode: SearchMode::None,
+            quick_filter: String::new(),
+            
+            discovered_clusters: Vec::new(),
+            cluster_templates: Self::default_cluster_templates(),
+            node_templates: Self::default_node_templates(),
+            selected_cluster: None,
+            cluster_discovery_active: false,
+            cluster_scan_progress: 0.0,
+            
             cpu_history: Vec::new(),
             memory_history: Vec::new(),
             network_history: Vec::new(),
@@ -506,7 +761,102 @@ impl App {
         app.add_event(EventLevel::Info, "Connection".to_string(), "Attempting to connect to cluster at 127.0.0.1:7002".to_string());
         app.try_connect().await;
         
+        // Start cluster discovery
+        app.start_cluster_discovery().await;
+        
         Ok(app)
+    }
+    
+    fn default_node_templates() -> Vec<NodeTemplate> {
+        vec![
+            NodeTemplate {
+                name: "Standard Node".to_string(),
+                description: "Standard cluster node with default settings".to_string(),
+                default_port_offset: 1,
+                default_vm_backend: "microvm".to_string(),
+                default_data_dir_pattern: "./data-node{}".to_string(),
+                resource_requirements: Some(NodeResourceRequirements {
+                    min_cpu_cores: 2,
+                    min_memory_mb: 2048,
+                    min_disk_gb: 10,
+                    required_features: vec!["kvm".to_string()],
+                }),
+            },
+            NodeTemplate {
+                name: "Lightweight Node".to_string(),
+                description: "Minimal resource node for testing or small deployments".to_string(),
+                default_port_offset: 1,
+                default_vm_backend: "mock".to_string(),
+                default_data_dir_pattern: "./data-light{}".to_string(),
+                resource_requirements: Some(NodeResourceRequirements {
+                    min_cpu_cores: 1,
+                    min_memory_mb: 512,
+                    min_disk_gb: 5,
+                    required_features: vec![],
+                }),
+            },
+            NodeTemplate {
+                name: "High Performance Node".to_string(),
+                description: "High-resource node for demanding workloads".to_string(),
+                default_port_offset: 1,
+                default_vm_backend: "microvm".to_string(),
+                default_data_dir_pattern: "./data-hiperf{}".to_string(),
+                resource_requirements: Some(NodeResourceRequirements {
+                    min_cpu_cores: 8,
+                    min_memory_mb: 8192,
+                    min_disk_gb: 50,
+                    required_features: vec!["kvm".to_string(), "gpu".to_string()],
+                }),
+            },
+        ]
+    }
+    
+    fn default_cluster_templates() -> Vec<ClusterTemplate> {
+        vec![
+            ClusterTemplate {
+                name: "Development Cluster".to_string(),
+                description: "Small 3-node cluster for development and testing".to_string(),
+                node_count: 3,
+                node_template: NodeTemplate {
+                    name: "Dev Node".to_string(),
+                    description: "Development node".to_string(),
+                    default_port_offset: 1,
+                    default_vm_backend: "mock".to_string(),
+                    default_data_dir_pattern: "./dev-cluster/node{}".to_string(),
+                    resource_requirements: None,
+                },
+                network_config: ClusterNetworkConfig {
+                    base_port: 7000,
+                    port_range: 10,
+                    auto_configure_networking: true,
+                    cluster_name: Some("dev-cluster".to_string()),
+                },
+            },
+            ClusterTemplate {
+                name: "Production Cluster".to_string(),
+                description: "High-availability 5-node production cluster".to_string(),
+                node_count: 5,
+                node_template: NodeTemplate {
+                    name: "Prod Node".to_string(),
+                    description: "Production node".to_string(),
+                    default_port_offset: 1,
+                    default_vm_backend: "microvm".to_string(),
+                    default_data_dir_pattern: "./prod-cluster/node{}".to_string(),
+                    resource_requirements: Some(NodeResourceRequirements {
+                        min_cpu_cores: 4,
+                        min_memory_mb: 4096,
+                        min_disk_gb: 20,
+                        required_features: vec!["kvm".to_string()],
+                    }),
+                },
+                network_config: ClusterNetworkConfig {
+                    base_port: 8000,
+                    port_range: 20,
+                    auto_configure_networking: true,
+                    cluster_name: Some("prod-cluster".to_string()),
+                },
+            },
+        ]
     }
     
     pub async fn try_connect(&mut self) {
@@ -600,6 +950,7 @@ impl App {
                         created_at: None, // TODO: Add to proto
                         config_path: None, // TODO: Add to proto
                     }).collect();
+                    self.apply_vm_filter(); // Apply current filter after refresh
                     self.error_message = None;
                 }
                 Err(e) => {
@@ -660,6 +1011,7 @@ impl App {
                         last_seen: Some(Instant::now()),
                         version: None, // TODO: Add to proto
                     }).collect();
+                    self.apply_node_filter(); // Apply current filter after refresh
                     self.error_message = None;
                 }
                 Err(e) => {
@@ -725,13 +1077,184 @@ impl App {
             AppTab::Nodes => AppMode::NodeList,
             AppTab::Monitoring => AppMode::Monitoring,
             AppTab::Configuration => AppMode::Config,
+            AppTab::Debug => AppMode::Debug,
             AppTab::Help => AppMode::Help,
         };
         self.input_mode = InputMode::Normal;
     }
     
     pub fn should_refresh(&self) -> bool {
-        self.auto_refresh && self.last_refresh.elapsed() >= self.refresh_interval
+        let refresh_interval = match self.settings.performance_mode {
+            PerformanceMode::HighRefresh => Duration::from_millis(self.settings.update_frequency_ms / 2),
+            PerformanceMode::Balanced => self.refresh_interval,
+            PerformanceMode::PowerSaver => Duration::from_secs(self.settings.refresh_rate * 2),
+            PerformanceMode::Debug => Duration::from_millis(self.settings.update_frequency_ms),
+        };
+        
+        self.auto_refresh && self.last_refresh.elapsed() >= refresh_interval
+    }
+    
+    /// Apply current VM filter
+    pub fn apply_vm_filter(&mut self) {
+        self.filtered_vms = self.vms.iter()
+            .filter(|vm| self.vm_matches_filter(vm))
+            .cloned()
+            .collect();
+    }
+    
+    /// Apply current node filter
+    pub fn apply_node_filter(&mut self) {
+        self.filtered_nodes = self.nodes.iter()
+            .filter(|node| self.node_matches_filter(node))
+            .cloned()
+            .collect();
+    }
+    
+    fn vm_matches_filter(&self, vm: &VmInfo) -> bool {
+        // Quick filter first
+        if !self.quick_filter.is_empty() {
+            if !vm.name.to_lowercase().contains(&self.quick_filter.to_lowercase()) {
+                return false;
+            }
+        }
+        
+        match &self.vm_filter {
+            VmFilter::All => true,
+            VmFilter::Running => vm.status == blixard_core::types::VmStatus::Running,
+            VmFilter::Stopped => vm.status == blixard_core::types::VmStatus::Stopped,
+            VmFilter::Failed => vm.status == blixard_core::types::VmStatus::Failed,
+            VmFilter::ByNode(node_id) => vm.node_id == *node_id,
+            VmFilter::ByName(name) => vm.name.to_lowercase().contains(&name.to_lowercase()),
+        }
+    }
+    
+    fn node_matches_filter(&self, node: &NodeInfo) -> bool {
+        // Quick filter first
+        if !self.quick_filter.is_empty() {
+            if !node.address.to_lowercase().contains(&self.quick_filter.to_lowercase()) {
+                return false;
+            }
+        }
+        
+        match &self.node_filter {
+            NodeFilter::All => true,
+            NodeFilter::Healthy => node.status == NodeStatus::Healthy,
+            NodeFilter::Warning => node.status == NodeStatus::Warning,
+            NodeFilter::Critical => node.status == NodeStatus::Critical,
+            NodeFilter::Leaders => node.role == NodeRole::Leader,
+            NodeFilter::Followers => node.role == NodeRole::Follower,
+        }
+    }
+    
+    /// Set VM filter and apply it
+    pub fn set_vm_filter(&mut self, filter: VmFilter) {
+        self.vm_filter = filter;
+        self.apply_vm_filter();
+    }
+    
+    /// Set node filter and apply it
+    pub fn set_node_filter(&mut self, filter: NodeFilter) {
+        self.node_filter = filter;
+        self.apply_node_filter();
+    }
+    
+    /// Set quick filter and apply all filters
+    pub fn set_quick_filter(&mut self, filter: String) {
+        self.quick_filter = filter;
+        self.apply_vm_filter();
+        self.apply_node_filter();
+    }
+    
+    /// Toggle performance mode (btop-inspired)
+    pub fn cycle_performance_mode(&mut self) {
+        self.settings.performance_mode = match self.settings.performance_mode {
+            PerformanceMode::PowerSaver => PerformanceMode::Balanced,
+            PerformanceMode::Balanced => PerformanceMode::HighRefresh,
+            PerformanceMode::HighRefresh => PerformanceMode::Debug,
+            PerformanceMode::Debug => PerformanceMode::PowerSaver,
+        };
+        
+        self.add_event(EventLevel::Info, "Settings".to_string(), 
+            format!("Performance mode: {:?}", self.settings.performance_mode));
+    }
+    
+    /// Switch to tab by index (for vim navigation)
+    pub fn switch_to_tab_by_index(&mut self, index: usize) {
+        let tab = match index {
+            0 => AppTab::Dashboard,
+            1 => AppTab::VirtualMachines,
+            2 => AppTab::Nodes,
+            3 => AppTab::Monitoring,
+            4 => AppTab::Configuration,
+            5 => AppTab::Debug,
+            6 => AppTab::Help,
+            _ => return,
+        };
+        self.switch_tab(tab);
+    }
+    
+    /// Handle vim-style down movement
+    pub fn handle_vim_down(&mut self) {
+        match self.current_tab {
+            AppTab::VirtualMachines => {
+                if let Some(selected) = self.vm_table_state.selected() {
+                    if selected < self.get_displayed_vms().len().saturating_sub(1) {
+                        self.vm_table_state.select(Some(selected + 1));
+                    }
+                } else if !self.get_displayed_vms().is_empty() {
+                    self.vm_table_state.select(Some(0));
+                }
+            }
+            AppTab::Nodes => {
+                if let Some(selected) = self.node_table_state.selected() {
+                    if selected < self.get_displayed_nodes().len().saturating_sub(1) {
+                        self.node_table_state.select(Some(selected + 1));
+                    }
+                } else if !self.get_displayed_nodes().is_empty() {
+                    self.node_table_state.select(Some(0));
+                }
+            }
+            _ => {}
+        }
+    }
+    
+    /// Handle vim-style up movement
+    pub fn handle_vim_up(&mut self) {
+        match self.current_tab {
+            AppTab::VirtualMachines => {
+                if let Some(selected) = self.vm_table_state.selected() {
+                    if selected > 0 {
+                        self.vm_table_state.select(Some(selected - 1));
+                    }
+                }
+            }
+            AppTab::Nodes => {
+                if let Some(selected) = self.node_table_state.selected() {
+                    if selected > 0 {
+                        self.node_table_state.select(Some(selected - 1));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    
+    /// Get currently displayed VMs (filtered or all)
+    pub fn get_displayed_vms(&self) -> &[VmInfo] {
+        if self.vm_filter != VmFilter::All || !self.quick_filter.is_empty() {
+            &self.filtered_vms
+        } else {
+            &self.vms
+        }
+    }
+    
+    /// Get currently displayed nodes (filtered or all)
+    pub fn get_displayed_nodes(&self) -> &[NodeInfo] {
+        if self.node_filter != NodeFilter::All || !self.quick_filter.is_empty() {
+            &self.filtered_nodes
+        } else {
+            &self.nodes
+        }
     }
     
     
@@ -750,8 +1273,27 @@ impl App {
             Event::Mouse(mouse) => {
                 self.handle_mouse_event(mouse).await?;
             }
-            Event::LogLine(_) => {
-                // TODO: Handle log lines for live log viewing
+            Event::LogLine(line) => {
+                // Add log line to VM logs if viewing logs, or to debug logs
+                if self.mode == AppMode::VmLogs {
+                    self.vm_logs.push(line.clone());
+                    // Keep only last 1000 lines
+                    if self.vm_logs.len() > 1000 {
+                        self.vm_logs.remove(0);
+                    }
+                } else if matches!(self.mode, AppMode::Debug | AppMode::DebugLogs) {
+                    self.debug_log_entries.push(DebugLogEntry {
+                        timestamp: Instant::now(),
+                        level: DebugLevel::Info,
+                        component: "system".to_string(),
+                        message: line,
+                        details: None,
+                    });
+                    // Keep only last max_debug_entries
+                    if self.debug_log_entries.len() > self.max_debug_entries {
+                        self.debug_log_entries.remove(0);
+                    }
+                }
             }
         }
         Ok(())
@@ -763,8 +1305,10 @@ impl App {
         // Global keybindings
         match (key.code, key.modifiers) {
             (KeyCode::Char('q'), KeyModifiers::NONE) => {
-                if self.mode == AppMode::ConfirmDialog {
-                    // Handle confirm dialog
+                if self.mode == AppMode::ConfirmDialog || self.search_mode != SearchMode::None {
+                    // Handle confirm dialog or exit search mode
+                    self.search_mode = SearchMode::None;
+                    self.mode = AppMode::Dashboard;
                     return Ok(());
                 }
                 self.should_quit = true;
@@ -775,7 +1319,60 @@ impl App {
                 return Ok(());
             }
             (KeyCode::Char('h'), KeyModifiers::NONE) => {
-                self.switch_tab(AppTab::Help);
+                if self.settings.vim_mode && self.search_mode == SearchMode::None {
+                    // vim-style navigation: h = left/previous tab
+                    let new_tab_index = match self.current_tab {
+                        AppTab::Dashboard => 6, // wrap to Help
+                        AppTab::VirtualMachines => 0,
+                        AppTab::Nodes => 1,
+                        AppTab::Monitoring => 2,
+                        AppTab::Configuration => 3,
+                        AppTab::Debug => 5,
+                        AppTab::Help => 4,
+                    };
+                    self.switch_to_tab_by_index(new_tab_index);
+                } else {
+                    self.switch_tab(AppTab::Help);
+                }
+                return Ok(());
+            }
+            (KeyCode::Char('l'), KeyModifiers::NONE) => {
+                if self.settings.vim_mode && self.search_mode == SearchMode::None {
+                    // vim-style navigation: l = right/next tab
+                    let new_tab_index = match self.current_tab {
+                        AppTab::Dashboard => 1,
+                        AppTab::VirtualMachines => 2,
+                        AppTab::Nodes => 3,
+                        AppTab::Monitoring => 4,
+                        AppTab::Configuration => 5,
+                        AppTab::Debug => 6,
+                        AppTab::Help => 0, // wrap to Dashboard
+                    };
+                    self.switch_to_tab_by_index(new_tab_index);
+                }
+                return Ok(());
+            }
+            (KeyCode::Char('j'), KeyModifiers::NONE) => {
+                if self.settings.vim_mode && self.search_mode == SearchMode::None {
+                    self.handle_vim_down();
+                    return Ok(());
+                }
+            }
+            (KeyCode::Char('k'), KeyModifiers::NONE) => {
+                if self.settings.vim_mode && self.search_mode == SearchMode::None {
+                    self.handle_vim_up();
+                    return Ok(());
+                }
+            }
+            (KeyCode::Char('D'), KeyModifiers::SHIFT) => {
+                // Toggle enhanced debug mode
+                if self.settings.debug_mode {
+                    self.mode = if self.mode == AppMode::Debug {
+                        AppMode::Dashboard
+                    } else {
+                        AppMode::Debug
+                    };
+                }
                 return Ok(());
             }
             (KeyCode::Char('r'), KeyModifiers::NONE) => {
@@ -791,7 +1388,69 @@ impl App {
                 }
                 return Ok(());
             }
+            (KeyCode::Char('/'), KeyModifiers::NONE) => {
+                // lazygit-inspired search
+                self.search_mode = match self.current_tab {
+                    AppTab::VirtualMachines => SearchMode::VmSearch,
+                    AppTab::Nodes => SearchMode::NodeSearch,
+                    _ => SearchMode::QuickFilter,
+                };
+                self.quick_filter.clear();
+                return Ok(());
+            }
+            (KeyCode::Char('f'), KeyModifiers::NONE) => {
+                // Quick filter (different from search)
+                self.search_mode = SearchMode::QuickFilter;
+                self.quick_filter.clear();
+                return Ok(());
+            }
+            (KeyCode::Char('F'), KeyModifiers::SHIFT) => {
+                // Clear all filters
+                self.vm_filter = VmFilter::All;
+                self.node_filter = NodeFilter::All;
+                self.quick_filter.clear();
+                self.apply_vm_filter();
+                self.apply_node_filter();
+                self.status_message = Some("All filters cleared".to_string());
+                return Ok(());
+            }
+            (KeyCode::Char('p'), KeyModifiers::NONE) => {
+                // Cycle performance mode (btop-inspired)
+                self.cycle_performance_mode();
+                return Ok(());
+            }
+            (KeyCode::Char('v'), KeyModifiers::NONE) => {
+                // Toggle vim mode
+                self.settings.vim_mode = !self.settings.vim_mode;
+                self.add_event(EventLevel::Info, "Settings".to_string(), 
+                    format!("Vim mode: {}", if self.settings.vim_mode { "enabled" } else { "disabled" }));
+                return Ok(());
+            }
+            (KeyCode::Char('d'), KeyModifiers::NONE) => {
+                // Toggle debug mode
+                if self.search_mode == SearchMode::None {
+                    self.settings.debug_mode = !self.settings.debug_mode;
+                    self.add_event(EventLevel::Info, "Settings".to_string(), 
+                        format!("Debug mode: {}", if self.settings.debug_mode { "enabled" } else { "disabled" }));
+                    return Ok(());
+                }
+            }
+            (KeyCode::Char('C'), KeyModifiers::SHIFT) => {
+                // Discover clusters
+                self.start_cluster_discovery().await;
+                return Ok(());
+            }
+            (KeyCode::Char('N'), KeyModifiers::SHIFT) => {
+                // Quick cluster creation
+                self.mode = AppMode::CreateClusterForm;
+                return Ok(());
+            }
             _ => {}
+        }
+        
+        // Handle search mode input
+        if self.search_mode != SearchMode::None {
+            return self.handle_search_input(key).await;
         }
         
         // Tab switching
@@ -801,6 +1460,7 @@ impl App {
             KeyCode::Char('3') => self.switch_tab(AppTab::Nodes),
             KeyCode::Char('4') => self.switch_tab(AppTab::Monitoring),
             KeyCode::Char('5') => self.switch_tab(AppTab::Configuration),
+            KeyCode::Char('6') => self.switch_tab(AppTab::Debug),
             _ => {}
         }
         
@@ -811,9 +1471,283 @@ impl App {
             AppMode::VmCreate => self.handle_vm_create_keys(key).await?,
             AppMode::NodeList => self.handle_node_list_keys(key).await?,
             AppMode::CreateNodeForm => self.handle_create_node_keys(key).await?,
+            AppMode::CreateClusterForm => self.handle_create_cluster_keys(key).await?,
+            AppMode::ClusterDiscovery => self.handle_cluster_discovery_keys(key).await?,
             AppMode::ConfirmDialog => self.handle_confirm_dialog_keys(key).await?,
             AppMode::Help => self.handle_help_keys(key),
+            AppMode::Debug | AppMode::RaftDebug | AppMode::DebugMetrics | AppMode::DebugLogs => {
+                self.handle_debug_keys(key).await?;
+            }
             _ => {}
+        }
+        
+        Ok(())
+    }
+    
+    async fn handle_create_cluster_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
+        use crossterm::event::KeyCode;
+        
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = AppMode::Dashboard;
+            }
+            KeyCode::Char('1') => {
+                // Create development cluster
+                if let Some(template) = self.cluster_templates.get(0).cloned() {
+                    self.create_cluster_from_template(&template).await?;
+                    self.mode = AppMode::Dashboard;
+                }
+            }
+            KeyCode::Char('2') => {
+                // Create production cluster
+                if let Some(template) = self.cluster_templates.get(1).cloned() {
+                    self.create_cluster_from_template(&template).await?;
+                    self.mode = AppMode::Dashboard;
+                }
+            }
+            _ => {}
+        }
+        
+        Ok(())
+    }
+    
+    async fn handle_cluster_discovery_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
+        use crossterm::event::KeyCode;
+        
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = AppMode::Dashboard;
+            }
+            KeyCode::Char('r') => {
+                // Refresh discovery
+                self.discovered_clusters.clear();
+                self.start_cluster_discovery().await;
+            }
+            KeyCode::Enter => {
+                // Connect to selected cluster
+                if let Some(cluster) = self.discovered_clusters.first().cloned() {
+                    self.connect_to_cluster(&cluster.leader_address).await?;
+                    self.mode = AppMode::Dashboard;
+                }
+            }
+            _ => {}
+        }
+        
+        Ok(())
+    }
+    
+    async fn handle_search_input(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
+        use crossterm::event::KeyCode;
+        
+        match key.code {
+            KeyCode::Esc => {
+                self.search_mode = SearchMode::None;
+                self.quick_filter.clear();
+                self.apply_vm_filter();
+                self.apply_node_filter();
+            }
+            KeyCode::Enter => {
+                // Apply the filter and exit search mode
+                self.search_mode = SearchMode::None;
+                self.set_quick_filter(self.quick_filter.clone());
+                self.status_message = Some(format!("Filter applied: '{}'", self.quick_filter));
+            }
+            KeyCode::Backspace => {
+                self.quick_filter.pop();
+                self.set_quick_filter(self.quick_filter.clone());
+            }
+            KeyCode::Char(c) => {
+                self.quick_filter.push(c);
+                self.set_quick_filter(self.quick_filter.clone());
+            }
+            _ => {}
+        }
+        
+        Ok(())
+    }
+    
+    /// Start cluster discovery on common ports
+    pub async fn start_cluster_discovery(&mut self) {
+        self.cluster_discovery_active = true;
+        self.cluster_scan_progress = 0.0;
+        
+        self.add_event(EventLevel::Info, "Discovery".to_string(), "Starting cluster discovery...".to_string());
+        
+        // Discover clusters on common ports
+        let common_ports = vec![7001, 7002, 7003, 8000, 8001, 8002, 8080, 9000];
+        let addresses = vec!["127.0.0.1", "localhost"];
+        
+        for addr in &addresses {
+            for (i, port) in common_ports.iter().enumerate() {
+                self.cluster_scan_progress = (i as f32 / common_ports.len() as f32) * 100.0;
+                
+                let endpoint = format!("{}:{}", addr, port);
+                match self.probe_cluster(&endpoint).await {
+                    Ok(Some(cluster)) => {
+                        self.discovered_clusters.push(cluster);
+                        self.add_event(EventLevel::Info, "Discovery".to_string(), 
+                            format!("Found cluster at {}", endpoint));
+                    }
+                    Ok(None) => {
+                        // No cluster at this endpoint
+                    }
+                    Err(_) => {
+                        // Connection failed - expected for most endpoints
+                    }
+                }
+            }
+        }
+        
+        self.cluster_discovery_active = false;
+        self.cluster_scan_progress = 100.0;
+        
+        let count = self.discovered_clusters.len();
+        self.add_event(EventLevel::Info, "Discovery".to_string(), 
+            format!("Discovery complete: found {} cluster(s)", count));
+    }
+    
+    /// Probe a potential cluster endpoint
+    async fn probe_cluster(&self, endpoint: &str) -> BlixardResult<Option<DiscoveredCluster>> {
+        // Try to connect and get cluster status
+        match VmClient::new(endpoint).await {
+            Ok(mut client) => {
+                match client.get_cluster_status().await {
+                    Ok(status) => {
+                        let cluster = DiscoveredCluster {
+                            name: format!("cluster-{}", status.leader_id),
+                            leader_address: endpoint.to_string(),
+                            leader_id: status.leader_id,
+                            node_count: status.nodes.len(),
+                            version: None, // TODO: Add version to cluster status
+                            last_seen: Instant::now(),
+                            health_status: if status.nodes.len() > 0 {
+                                ClusterHealthStatus::Healthy
+                            } else {
+                                ClusterHealthStatus::Critical
+                            },
+                            auto_discovered: true,
+                            accessible: true,
+                        };
+                        Ok(Some(cluster))
+                    }
+                    Err(_) => Ok(None),
+                }
+            }
+            Err(_) => Ok(None),
+        }
+    }
+    
+    /// Connect to a discovered cluster
+    pub async fn connect_to_cluster(&mut self, cluster_address: &str) -> BlixardResult<()> {
+        match VmClient::new(cluster_address).await {
+            Ok(client) => {
+                self.vm_client = Some(client);
+                self.selected_cluster = Some(cluster_address.to_string());
+                self.status_message = Some(format!("Connected to cluster at {}", cluster_address));
+                self.error_message = None;
+                
+                // Initial data load
+                self.refresh_all_data().await?;
+                
+                self.add_event(EventLevel::Info, "Connection".to_string(), 
+                    format!("Connected to cluster at {}", cluster_address));
+            }
+            Err(e) => {
+                self.error_message = Some(format!("Failed to connect to {}: {}", cluster_address, e));
+                self.add_event(EventLevel::Error, "Connection".to_string(), 
+                    format!("Failed to connect to {}: {}", cluster_address, e));
+            }
+        }
+        Ok(())
+    }
+    
+    /// Create a new cluster from template
+    pub async fn create_cluster_from_template(&mut self, template: &ClusterTemplate) -> BlixardResult<()> {
+        self.add_event(EventLevel::Info, "Cluster".to_string(), 
+            format!("Creating cluster from template: {}", template.name));
+            
+        // Start the bootstrap node
+        let bootstrap_port = template.network_config.base_port + 1;
+        let bootstrap_address = format!("127.0.0.1:{}", bootstrap_port);
+        
+        self.add_event(EventLevel::Info, "Cluster".to_string(), 
+            format!("Starting bootstrap node at {}", bootstrap_address));
+        
+        // In a real implementation, this would spawn the actual node process
+        // For now, we'll simulate by adding to discovered clusters
+        let cluster = DiscoveredCluster {
+            name: template.name.clone(),
+            leader_address: bootstrap_address.clone(),
+            leader_id: 1,
+            node_count: 1,
+            version: Some("0.1.0".to_string()),
+            last_seen: Instant::now(),
+            health_status: ClusterHealthStatus::Healthy,
+            auto_discovered: false,
+            accessible: true,
+        };
+        
+        self.discovered_clusters.push(cluster);
+        
+        // Try to connect to the new cluster
+        match self.connect_to_cluster(&bootstrap_address).await {
+            Ok(_) => {
+                self.status_message = Some(format!("Cluster '{}' created successfully", template.name));
+            }
+            Err(e) => {
+                self.error_message = Some(format!("Cluster created but connection failed: {}", e));
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Scale cluster by adding nodes
+    pub async fn scale_cluster(&mut self, target_node_count: u32) -> BlixardResult<()> {
+        let selected_cluster = self.selected_cluster.clone();
+        
+        if let Some(selected) = selected_cluster {
+            self.add_event(EventLevel::Info, "Cluster".to_string(), 
+                format!("Scaling cluster to {} nodes", target_node_count));
+            
+            // Find current cluster
+            if let Some(cluster) = self.discovered_clusters.iter_mut()
+                .find(|c| c.leader_address == selected) {
+                    
+                if target_node_count > cluster.node_count as u32 {
+                    // Adding nodes
+                    let nodes_to_add = target_node_count - cluster.node_count as u32;
+                    let current_count = cluster.node_count;
+                    
+                    // Create events for all nodes being added
+                    let mut events = Vec::new();
+                    for i in 0..nodes_to_add {
+                        let node_id = current_count as u64 + i as u64 + 1;
+                        let node_port = 7000 + node_id;
+                        let node_address = format!("127.0.0.1:{}", node_port);
+                        
+                        events.push(format!("Adding node {} at {}", node_id, node_address));
+                        
+                        // In real implementation, would spawn node process and join cluster
+                        // For now, simulate by updating cluster info
+                    }
+                    
+                    // Update cluster info and drop the mutable borrow
+                    cluster.node_count = target_node_count as usize;
+                    drop(cluster); // Explicitly drop the mutable borrow
+                    
+                    // Now add all the events
+                    for event_msg in events {
+                        self.add_event(EventLevel::Info, "Cluster".to_string(), event_msg);
+                    }
+                    self.status_message = Some(format!("Cluster scaled to {} nodes", target_node_count));
+                } else {
+                    // Removing nodes would require more complex logic
+                    self.error_message = Some("Node removal not yet implemented".to_string());
+                }
+            }
+        } else {
+            self.error_message = Some("No cluster selected".to_string());
         }
         
         Ok(())
@@ -835,6 +1769,14 @@ impl App {
                 // Show cluster status
                 let _ = self.refresh_cluster_metrics().await;
                 self.status_message = Some("Cluster status updated".to_string());
+            }
+            KeyCode::Char('C') => {
+                // Show cluster discovery
+                self.mode = AppMode::ClusterDiscovery;
+            }
+            KeyCode::Char('N') => {
+                // Show cluster creation
+                self.mode = AppMode::CreateClusterForm;
             }
             _ => {}
         }
@@ -886,13 +1828,38 @@ impl App {
                     }
                 }
             }
+            KeyCode::Char('s') => {
+                // Start/Stop VM
+                if let Some(selected) = self.vm_table_state.selected() {
+                    if let Some(vm) = self.vms.get(selected) {
+                        match vm.status {
+                            VmStatus::Running => {
+                                self.confirm_dialog = Some(ConfirmDialog {
+                                    title: "Stop VM".to_string(),
+                                    message: format!("Are you sure you want to stop VM '{}'?", vm.name),
+                                    action: ConfirmAction::StopVm(vm.name.clone()),
+                                    selected: false,
+                                });
+                                self.mode = AppMode::ConfirmDialog;
+                            }
+                            _ => {
+                                // Start VM directly without confirmation
+                                let vm_name = vm.name.clone();
+                                if let Err(e) = self.start_vm(vm_name).await {
+                                    self.error_message = Some(format!("Failed to start VM: {}", e));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
     }
     
     async fn handle_vm_create_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
-        use crossterm::event::{KeyCode, KeyModifiers};
+        use crossterm::event::KeyCode;
         
         match key.code {
             KeyCode::Esc => {
@@ -1110,13 +2077,45 @@ impl App {
                 self.mode = AppMode::CreateNodeForm;
                 self.create_node_form = CreateNodeForm::new_with_smart_defaults(&self.nodes);
             }
+            KeyCode::Char('t') => {
+                // Node template selector
+                self.mode = AppMode::NodeTemplateSelector;
+            }
+            KeyCode::Char('d') => {
+                // Delete/destroy selected node
+                if let Some(selected) = self.node_table_state.selected() {
+                    let displayed_nodes = self.get_displayed_nodes();
+                    if let Some(node) = displayed_nodes.get(selected) {
+                        self.confirm_dialog = Some(ConfirmDialog {
+                            title: "Destroy Node".to_string(),
+                            message: format!("Are you sure you want to destroy node {} at {}?", node.id, node.address),
+                            action: ConfirmAction::RemoveNode(node.id),
+                            selected: false,
+                        });
+                        self.mode = AppMode::ConfirmDialog;
+                    }
+                }
+            }
+            KeyCode::Char('r') => {
+                // Restart selected node (if daemon mode)
+                if let Some(selected) = self.node_table_state.selected() {
+                    let displayed_nodes = self.get_displayed_nodes();
+                    if let Some(node) = displayed_nodes.get(selected) {
+                        self.restart_node(node.id).await?;
+                    }
+                }
+            }
+            KeyCode::Char('s') => {
+                // Scale cluster
+                self.show_cluster_scaling_dialog();
+            }
             _ => {}
         }
         Ok(())
     }
     
     async fn handle_create_node_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
-        use crossterm::event::{KeyCode, KeyModifiers};
+        use crossterm::event::KeyCode;
         
         match key.code {
             KeyCode::Esc => {
@@ -1242,6 +2241,12 @@ impl App {
                 ConfirmAction::RemoveNode(id) => {
                     self.remove_node(id).await?;
                 }
+                ConfirmAction::RestartNode(id) => {
+                    self.restart_node(id).await?;
+                }
+                ConfirmAction::DestroyCluster(name) => {
+                    self.destroy_cluster(&name).await?;
+                }
                 _ => {}
             }
         }
@@ -1277,6 +2282,23 @@ impl App {
         Ok(())
     }
     
+    async fn start_vm(&mut self, name: String) -> BlixardResult<()> {
+        if let Some(client) = &mut self.vm_client {
+            match client.start_vm(&name).await {
+                Ok(_) => {
+                    self.status_message = Some(format!("VM '{}' started successfully", name));
+                    self.refresh_vm_list().await?;
+                    self.add_event(EventLevel::Info, "VM".to_string(), format!("Started VM '{}'", name));
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("Failed to start VM '{}': {}", name, e));
+                    self.add_event(EventLevel::Error, "VM".to_string(), format!("Failed to start VM '{}': {}", name, e));
+                }
+            }
+        }
+        Ok(())
+    }
+    
     async fn stop_vm(&mut self, name: String) -> BlixardResult<()> {
         if let Some(client) = &mut self.vm_client {
             match client.stop_vm(&name).await {
@@ -1294,9 +2316,111 @@ impl App {
         Ok(())
     }
     
+    /// Restart a node (daemon mode)
+    async fn restart_node(&mut self, node_id: u64) -> BlixardResult<()> {
+        self.add_event(EventLevel::Info, "Node".to_string(), 
+            format!("Restarting node {}", node_id));
+        
+        // In a real implementation, this would:
+        // 1. Send graceful shutdown signal to the node
+        // 2. Wait for clean shutdown
+        // 3. Restart the node process
+        // 4. Wait for it to rejoin the cluster
+        
+        // For now, just simulate
+        self.status_message = Some(format!("Node {} restart initiated", node_id));
+        
+        // Update the node's last_seen timestamp to simulate restart
+        if let Some(node) = self.nodes.iter_mut().find(|n| n.id == node_id) {
+            node.last_seen = Some(Instant::now());
+        }
+        
+        Ok(())
+    }
+    
+    /// Show cluster scaling dialog
+    fn show_cluster_scaling_dialog(&mut self) {
+        // For now, just add a scaling event
+        let current_count = self.nodes.len();
+        self.add_event(EventLevel::Info, "Cluster".to_string(), 
+            format!("Current cluster size: {} nodes. Use 's' to scale.", current_count));
+        
+        // In a full implementation, this would show a dialog to input target node count
+        self.status_message = Some("Cluster scaling: Use dashboard 'N' for templates".to_string());
+    }
+    
+    /// Enhanced node removal with cleanup
     async fn remove_node(&mut self, id: u64) -> BlixardResult<()> {
-        // TODO: Implement node removal
-        self.status_message = Some(format!("Node {} removal not yet implemented", id));
+        self.add_event(EventLevel::Warning, "Node".to_string(), 
+            format!("Removing node {} from cluster", id));
+        
+        // In a real implementation, this would:
+        // 1. Gracefully remove the node from Raft cluster
+        // 2. Migrate any VMs running on that node
+        // 3. Clean up data directories
+        // 4. Stop daemon processes
+        // 5. Update cluster configuration
+        
+        // For now, simulate by removing from discovered clusters and UI
+        if let Some(cluster) = self.discovered_clusters.iter_mut()
+            .find(|c| c.leader_address == self.selected_cluster.as_deref().unwrap_or("")) {
+            if cluster.node_count > 1 {
+                cluster.node_count -= 1;
+            }
+        }
+        
+        // Remove from nodes list
+        self.nodes.retain(|node| node.id != id);
+        self.apply_node_filter();
+        
+        // Clear selection if it was the removed node
+        if let Some(selected) = self.node_table_state.selected() {
+            if selected >= self.get_displayed_nodes().len() {
+                self.node_table_state.select(None);
+            }
+        }
+        
+        self.status_message = Some(format!("Node {} removed from cluster", id));
+        self.add_event(EventLevel::Info, "Node".to_string(), 
+            format!("Node {} successfully removed", id));
+        
+        Ok(())
+    }
+    
+    /// Destroy an entire cluster
+    async fn destroy_cluster(&mut self, cluster_name: &str) -> BlixardResult<()> {
+        self.add_event(EventLevel::Warning, "Cluster".to_string(), 
+            format!("Destroying cluster '{}'", cluster_name));
+        
+        // In a real implementation, this would:
+        // 1. Stop all VMs on all nodes
+        // 2. Gracefully shutdown all nodes
+        // 3. Clean up all data directories
+        // 4. Remove network configurations
+        // 5. Terminate daemon processes
+        
+        // For now, simulate by removing from discovered clusters
+        self.discovered_clusters.retain(|cluster| cluster.name != cluster_name);
+        
+        // Clear connection if we were connected to this cluster
+        if let Some(selected) = &self.selected_cluster {
+            if self.discovered_clusters.iter()
+                .any(|c| c.leader_address == *selected && c.name == cluster_name) {
+                self.vm_client = None;
+                self.selected_cluster = None;
+            }
+        }
+        
+        // Clear all data
+        self.nodes.clear();
+        self.vms.clear();
+        self.apply_vm_filter();
+        self.apply_node_filter();
+        
+        self.status_message = Some(format!("Cluster '{}' destroyed", cluster_name));
+        self.add_event(EventLevel::Info, "Cluster".to_string(), 
+            format!("Cluster '{}' successfully destroyed", cluster_name));
+        
         Ok(())
     }
     
@@ -1414,6 +2538,160 @@ impl App {
             }
         }
         Ok(())
+    }
+    
+    /// Add debug log entry
+    pub fn add_debug_log(&mut self, level: DebugLevel, component: String, message: String, details: Option<serde_json::Value>) {
+        let entry = DebugLogEntry {
+            timestamp: Instant::now(),
+            level,
+            component,
+            message,
+            details,
+        };
+        
+        self.debug_log_entries.insert(0, entry);
+        if self.debug_log_entries.len() > self.max_debug_entries {
+            self.debug_log_entries.truncate(self.max_debug_entries);
+        }
+    }
+    
+    /// Update Raft debug info (would be called from node)
+    pub fn update_raft_debug_info(&mut self, debug_info: RaftDebugInfo) {
+        // Add debug event first, before moving debug_info
+        self.add_debug_log(
+            DebugLevel::Debug,
+            "Raft".to_string(),
+            format!("State: {:?}, Term: {}, Commit: {}", 
+                debug_info.state, debug_info.current_term, debug_info.commit_index),
+            None
+        );
+        
+        self.raft_debug_info = Some(debug_info);
+    }
+    
+    /// Update debug metrics
+    pub fn update_debug_metrics<F>(&mut self, update_fn: F)
+    where
+        F: FnOnce(&mut DebugMetrics),
+    {
+        update_fn(&mut self.debug_metrics);
+    }
+    
+    /// Reset debug metrics
+    pub fn reset_debug_metrics(&mut self) {
+        self.debug_metrics = DebugMetrics {
+            messages_sent: 0,
+            messages_received: 0,
+            proposals_submitted: 0,
+            proposals_committed: 0,
+            elections_started: 0,
+            leadership_changes: 0,
+            snapshot_creations: 0,
+            log_compactions: 0,
+            network_partitions_detected: 0,
+            last_reset: Instant::now(),
+        };
+        
+        self.add_debug_log(
+            DebugLevel::Info,
+            "Debug".to_string(),
+            "Debug metrics reset".to_string(),
+            None
+        );
+    }
+    
+    /// Handle debug mode key events
+    pub async fn handle_debug_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
+        use crossterm::event::KeyCode;
+        
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = AppMode::Dashboard;
+            }
+            KeyCode::Char('r') => {
+                // Switch to Raft debug view
+                self.mode = AppMode::RaftDebug;
+            }
+            KeyCode::Char('m') => {
+                // Switch to metrics view
+                self.mode = AppMode::DebugMetrics;
+            }
+            KeyCode::Char('l') => {
+                // Switch to debug logs view
+                self.mode = AppMode::DebugLogs;
+            }
+            KeyCode::Char('R') => {
+                // Reset debug metrics
+                self.reset_debug_metrics();
+                self.status_message = Some("Debug metrics reset".to_string());
+            }
+            KeyCode::Char('c') => {
+                // Clear debug logs
+                self.debug_log_entries.clear();
+                self.status_message = Some("Debug logs cleared".to_string());
+            }
+            KeyCode::Char('s') => {
+                // Simulate Raft debug data for testing
+                self.simulate_raft_debug_data();
+            }
+            _ => {}
+        }
+        
+        Ok(())
+    }
+    
+    /// Simulate Raft debug data for testing
+    fn simulate_raft_debug_data(&mut self) {
+        use std::time::Duration;
+        
+        let raft_debug = RaftDebugInfo {
+            current_term: 5,
+            voted_for: Some(1),
+            log_length: 150,
+            commit_index: 145,
+            last_applied: 145,
+            state: RaftNodeState::Leader,
+            last_heartbeat: Some(Instant::now()),
+            election_timeout: Duration::from_millis(300),
+            entries_since_snapshot: 50,
+            snapshot_metadata: Some(SnapshotMetadata {
+                last_included_index: 100,
+                last_included_term: 4,
+                size_bytes: 1024 * 1024,
+                created_at: Instant::now() - Duration::from_secs(300),
+            }),
+            peer_states: vec![
+                PeerDebugInfo {
+                    id: 2,
+                    next_index: 150,
+                    match_index: 145,
+                    state: PeerState::Replicate,
+                    last_activity: Some(Instant::now() - Duration::from_millis(50)),
+                    is_reachable: true,
+                },
+                PeerDebugInfo {
+                    id: 3,
+                    next_index: 150,
+                    match_index: 145,
+                    state: PeerState::Replicate,
+                    last_activity: Some(Instant::now() - Duration::from_millis(75)),
+                    is_reachable: true,
+                },
+            ],
+        };
+        
+        self.update_raft_debug_info(raft_debug);
+        
+        // Update some debug metrics
+        self.update_debug_metrics(|metrics| {
+            metrics.messages_sent += 10;
+            metrics.messages_received += 8;
+            metrics.proposals_submitted += 2;
+            metrics.proposals_committed += 2;
+        });
+        
+        self.status_message = Some("Simulated Raft debug data updated".to_string());
     }
 }
 

@@ -12,6 +12,7 @@ pub enum Event {
 
 /// Event handler for the TUI
 pub struct EventHandler {
+    #[allow(dead_code)]
     sender: mpsc::UnboundedSender<Event>,
     receiver: mpsc::UnboundedReceiver<Event>,
     last_tick: Instant,

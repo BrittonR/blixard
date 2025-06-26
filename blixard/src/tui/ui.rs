@@ -10,22 +10,20 @@
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
+    text::{Line, Span},
     widgets::{
         Block, Borders, Paragraph, Wrap, Table, Row, Cell, Gauge, List, ListItem,
-        Clear, Tabs, BarChart, Dataset, Axis, GraphType, Sparkline,
+        Clear, Tabs, Sparkline,
     },
     Frame,
-    symbols,
 };
 
-use super::app_v2::{
-    App, AppTab, AppMode, VmInfo, NodeInfo, NodeStatus, NodeRole, 
-    EventLevel, PlacementStrategy, CreateVmForm, CreateNodeForm, ConfirmDialog,
-    CreateVmField, CreateNodeField
+use super::app::{
+    App, AppTab, AppMode, NodeRole, 
+    CreateVmField, CreateNodeField, RaftDebugInfo, 
+    RaftNodeState, DebugLevel
 };
 use blixard_core::types::VmStatus;
-use std::time::Instant;
 
 // Color scheme for modern UI
 const PRIMARY_COLOR: Color = Color::Cyan;
@@ -60,6 +58,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppTab::Nodes => render_node_management(f, chunks[1], app),
         AppTab::Monitoring => render_monitoring(f, chunks[1], app),
         AppTab::Configuration => render_configuration(f, chunks[1], app),
+        AppTab::Debug => render_debug(f, chunks[1], app),
         AppTab::Help => render_help(f, chunks[1], app),
     }
     
@@ -70,9 +69,16 @@ pub fn render(f: &mut Frame, app: &App) {
     match app.mode {
         AppMode::CreateVmForm => render_create_vm_form(f, app),
         AppMode::CreateNodeForm => render_create_node_form(f, app),
+        AppMode::CreateClusterForm => render_create_cluster_form(f, app),
+        AppMode::ClusterDiscovery => render_cluster_discovery(f, app),
         AppMode::ConfirmDialog => render_confirm_dialog(f, app),
         AppMode::LogViewer => render_log_viewer(f, app),
         _ => {}
+    }
+    
+    // Render search overlay if in search mode
+    if app.search_mode != super::app::SearchMode::None {
+        render_search_overlay(f, app);
     }
 }
 
@@ -83,6 +89,7 @@ fn render_tab_bar(f: &mut Frame, area: Rect, app: &App) {
         "🔗 Nodes",
         "📈 Monitoring",
         "⚙️ Config",
+        "🐛 Debug",
         "❓ Help"
     ];
     
@@ -92,7 +99,8 @@ fn render_tab_bar(f: &mut Frame, area: Rect, app: &App) {
         AppTab::Nodes => 2,
         AppTab::Monitoring => 3,
         AppTab::Configuration => 4,
-        AppTab::Help => 5,
+        AppTab::Debug => 5,
+        AppTab::Help => 6,
     };
     
     let tabs = Tabs::new(titles)
@@ -279,7 +287,7 @@ fn render_vm_status_card(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(paragraph, area);
 }
 
-fn render_quick_actions_card(f: &mut Frame, area: Rect, app: &App) {
+fn render_quick_actions_card(f: &mut Frame, area: Rect, _app: &App) {
     let actions = vec![
         "⌨️ Shortcuts:",
         "",
@@ -390,7 +398,7 @@ fn render_vm_management(f: &mut Frame, area: Rect, app: &App) {
     render_vm_table(f, chunks[1], app);
 }
 
-fn render_vm_toolbar(f: &mut Frame, area: Rect, app: &App) {
+fn render_vm_toolbar(f: &mut Frame, area: Rect, _app: &App) {
     let content = vec![
         Line::from(vec![
             Span::styled("VM Management", Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)),
@@ -427,7 +435,8 @@ fn render_vm_table(f: &mut Frame, area: Rect, app: &App) {
         Cell::from("Uptime").style(Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)),
     ]);
     
-    let rows: Vec<Row> = app.vms.iter().map(|vm| {
+    let displayed_vms = app.get_displayed_vms();
+    let rows: Vec<Row> = displayed_vms.iter().map(|vm| {
         let status_style = match vm.status {
             VmStatus::Running => Style::default().fg(SUCCESS_COLOR),
             VmStatus::Stopped => Style::default().fg(WARNING_COLOR),
@@ -461,7 +470,7 @@ fn render_vm_table(f: &mut Frame, area: Rect, app: &App) {
     .header(header)
     .block(Block::default()
         .borders(Borders::ALL)
-        .title(format!("🖥️ Virtual Machines ({} total)", app.vms.len()))
+        .title(get_vm_table_title(app))
         .border_style(Style::default().fg(PRIMARY_COLOR)))
     .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
     .highlight_symbol(">> ");
@@ -482,7 +491,7 @@ fn render_node_management(f: &mut Frame, area: Rect, app: &App) {
     render_node_table(f, chunks[1], app);
 }
 
-fn render_node_toolbar(f: &mut Frame, area: Rect, app: &App) {
+fn render_node_toolbar(f: &mut Frame, area: Rect, _app: &App) {
     let content = vec![
         Line::from(vec![
             Span::styled("Node Management", Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)),
@@ -517,7 +526,8 @@ fn render_node_table(f: &mut Frame, area: Rect, app: &App) {
         Cell::from("Last Seen").style(Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)),
     ]);
     
-    let rows: Vec<Row> = app.nodes.iter().map(|node| {
+    let displayed_nodes = app.get_displayed_nodes();
+    let rows: Vec<Row> = displayed_nodes.iter().map(|node| {
         let status_style = Style::default().fg(node.status.color());
         
         let role_text = match node.role {
@@ -564,7 +574,7 @@ fn render_node_table(f: &mut Frame, area: Rect, app: &App) {
     .header(header)
     .block(Block::default()
         .borders(Borders::ALL)
-        .title(format!("🔗 Cluster Nodes ({} total)", app.nodes.len()))
+        .title(get_node_table_title(app))
         .border_style(Style::default().fg(PRIMARY_COLOR)))
     .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
     .highlight_symbol(">> ");
@@ -642,7 +652,7 @@ fn render_memory_chart(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(sparkline, area);
 }
 
-fn render_performance_metrics(f: &mut Frame, area: Rect, app: &App) {
+fn render_performance_metrics(f: &mut Frame, area: Rect, _app: &App) {
     let content = vec![
         Line::from("📈 Performance Metrics"),
         Line::from(""),
@@ -678,7 +688,7 @@ fn render_performance_metrics(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(paragraph, area);
 }
 
-fn render_configuration(f: &mut Frame, area: Rect, app: &App) {
+fn render_configuration(f: &mut Frame, area: Rect, _app: &App) {
     let content = vec![
         Line::from("⚙️ Configuration Management"),
         Line::from(""),
@@ -713,15 +723,203 @@ fn render_configuration(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(paragraph, area);
 }
 
-fn render_help(f: &mut Frame, area: Rect, app: &App) {
+fn render_debug(f: &mut Frame, area: Rect, app: &App) {
+    match app.mode {
+        AppMode::RaftDebug => render_raft_debug(f, area, app),
+        AppMode::DebugMetrics => render_debug_metrics(f, area, app),
+        AppMode::DebugLogs => render_debug_logs(f, area, app),
+        _ => render_debug_overview(f, area, app),
+    }
+}
+
+fn render_debug_overview(f: &mut Frame, area: Rect, app: &App) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(8),  // Debug mode selector
+            Constraint::Min(0),     // Content area
+        ])
+        .split(area);
+    
+    // Debug mode selector
+    render_debug_mode_selector(f, chunks[0], app);
+    
+    // Debug overview content
+    let content_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(50), // Raft status
+            Constraint::Percentage(50), // Debug metrics summary
+        ])
+        .split(chunks[1]);
+    
+    render_raft_status_summary(f, content_chunks[0], app);
+    render_debug_metrics_summary(f, content_chunks[1], app);
+}
+
+fn render_debug_mode_selector(f: &mut Frame, area: Rect, _app: &App) {
     let content = vec![
-        Line::from("❓ Blixard TUI Help"),
+        Line::from(vec![
+            Span::styled("🐛 Debug Mode", Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)),
+            Span::styled(" - Advanced cluster diagnostics", Style::default().fg(TEXT_COLOR)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("r", Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD)),
+            Span::styled(" Raft Debug", Style::default().fg(TEXT_COLOR)),
+            Span::styled(" | ", Style::default().fg(TEXT_COLOR)),
+            Span::styled("m", Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD)),
+            Span::styled(" Metrics", Style::default().fg(TEXT_COLOR)),
+            Span::styled(" | ", Style::default().fg(TEXT_COLOR)),
+            Span::styled("l", Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD)),
+            Span::styled(" Logs", Style::default().fg(TEXT_COLOR)),
+            Span::styled(" | ", Style::default().fg(TEXT_COLOR)),
+            Span::styled("s", Style::default().fg(WARNING_COLOR).add_modifier(Modifier::BOLD)),
+            Span::styled(" Simulate", Style::default().fg(TEXT_COLOR)),
+        ]),
+        Line::from(vec![
+            Span::styled("R", Style::default().fg(ERROR_COLOR).add_modifier(Modifier::BOLD)),
+            Span::styled(" Reset Metrics", Style::default().fg(TEXT_COLOR)),
+            Span::styled(" | ", Style::default().fg(TEXT_COLOR)),
+            Span::styled("c", Style::default().fg(ERROR_COLOR).add_modifier(Modifier::BOLD)),
+            Span::styled(" Clear Logs", Style::default().fg(TEXT_COLOR)),
+            Span::styled(" | ", Style::default().fg(TEXT_COLOR)),
+            Span::styled("Esc", Style::default().fg(INFO_COLOR).add_modifier(Modifier::BOLD)),
+            Span::styled(" Exit Debug", Style::default().fg(TEXT_COLOR)),
+        ]),
+    ];
+    
+    let paragraph = Paragraph::new(content)
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .title("🐛 Debug Controls")
+            .border_style(Style::default().fg(PRIMARY_COLOR)))
+        .wrap(Wrap { trim: true });
+    
+    f.render_widget(paragraph, area);
+}
+
+fn render_raft_status_summary(f: &mut Frame, area: Rect, app: &App) {
+    let content = if let Some(ref raft_info) = app.raft_debug_info {
+        vec![
+            Line::from(vec![
+                Span::styled("State: ", Style::default().fg(TEXT_COLOR)),
+                Span::styled(format!("{:?}", raft_info.state), 
+                           get_raft_state_style(&raft_info.state)),
+            ]),
+            Line::from(vec![
+                Span::styled("Term: ", Style::default().fg(TEXT_COLOR)),
+                Span::styled(raft_info.current_term.to_string(), Style::default().fg(PRIMARY_COLOR)),
+            ]),
+            Line::from(vec![
+                Span::styled("Log Length: ", Style::default().fg(TEXT_COLOR)),
+                Span::styled(raft_info.log_length.to_string(), Style::default().fg(INFO_COLOR)),
+            ]),
+            Line::from(vec![
+                Span::styled("Commit Index: ", Style::default().fg(TEXT_COLOR)),
+                Span::styled(raft_info.commit_index.to_string(), Style::default().fg(SUCCESS_COLOR)),
+            ]),
+            Line::from(vec![
+                Span::styled("Last Applied: ", Style::default().fg(TEXT_COLOR)),
+                Span::styled(raft_info.last_applied.to_string(), Style::default().fg(SUCCESS_COLOR)),
+            ]),
+            Line::from(vec![
+                Span::styled("Peers: ", Style::default().fg(TEXT_COLOR)),
+                Span::styled(raft_info.peer_states.len().to_string(), Style::default().fg(SECONDARY_COLOR)),
+            ]),
+        ]
+    } else {
+        vec![
+            Line::from("No Raft debug info available"),
+            Line::from(""),
+            Line::from("Press 's' to simulate debug data"),
+        ]
+    };
+    
+    let paragraph = Paragraph::new(content)
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .title("⚙️ Raft Status")
+            .border_style(Style::default().fg(PRIMARY_COLOR)))
+        .wrap(Wrap { trim: true });
+    
+    f.render_widget(paragraph, area);
+}
+
+fn render_debug_metrics_summary(f: &mut Frame, area: Rect, app: &App) {
+    let metrics = &app.debug_metrics;
+    let uptime = metrics.last_reset.elapsed();
+    
+    let content = vec![
+        Line::from(vec![
+            Span::styled("Messages Sent: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(metrics.messages_sent.to_string(), Style::default().fg(SUCCESS_COLOR)),
+        ]),
+        Line::from(vec![
+            Span::styled("Messages Received: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(metrics.messages_received.to_string(), Style::default().fg(SUCCESS_COLOR)),
+        ]),
+        Line::from(vec![
+            Span::styled("Proposals: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(format!("{}/{}", metrics.proposals_committed, metrics.proposals_submitted), 
+                       Style::default().fg(PRIMARY_COLOR)),
+        ]),
+        Line::from(vec![
+            Span::styled("Elections: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(metrics.elections_started.to_string(), Style::default().fg(WARNING_COLOR)),
+        ]),
+        Line::from(vec![
+            Span::styled("Leadership Changes: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(metrics.leadership_changes.to_string(), Style::default().fg(WARNING_COLOR)),
+        ]),
+        Line::from(vec![
+            Span::styled("Uptime: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(format!("{:.1}s", uptime.as_secs_f64()), Style::default().fg(INFO_COLOR)),
+        ]),
+    ];
+    
+    let paragraph = Paragraph::new(content)
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .title("📈 Debug Metrics")
+            .border_style(Style::default().fg(PRIMARY_COLOR)))
+        .wrap(Wrap { trim: true });
+    
+    f.render_widget(paragraph, area);
+}
+
+fn get_raft_state_style(state: &RaftNodeState) -> Style {
+    match state {
+        RaftNodeState::Leader => Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD),
+        RaftNodeState::Follower => Style::default().fg(PRIMARY_COLOR),
+        RaftNodeState::Candidate => Style::default().fg(WARNING_COLOR).add_modifier(Modifier::BOLD),
+        RaftNodeState::PreCandidate => Style::default().fg(WARNING_COLOR),
+    }
+}
+
+fn render_help(f: &mut Frame, area: Rect, _app: &App) {
+    let content = vec![
+        Line::from("❓ Blixard TUI Help - Enhanced Edition"),
         Line::from(""),
         Line::from("🔥 Global Shortcuts:"),
         Line::from("  q / Ctrl+C   - Quit application"),
         Line::from("  h            - Show this help"),
         Line::from("  r            - Refresh all data"),
-        Line::from("  1-5          - Switch between tabs"),
+        Line::from("  1-6          - Switch between tabs (6 = Debug mode)"),
+        Line::from("  p            - Cycle performance mode (PowerSaver → Balanced → HighRefresh → Debug)"),
+        Line::from("  v            - Toggle vim mode (hjkl navigation)"),
+        Line::from("  d            - Toggle debug mode"),
+        Line::from(""),
+        Line::from("🔍 Search & Filtering (lazygit-inspired):"),
+        Line::from("  /            - Enter search mode (context-aware)"),
+        Line::from("  f            - Quick filter mode"),
+        Line::from("  Shift+F      - Clear all filters"),
+        Line::from("  In search:   Type to filter, Enter to apply, Esc to cancel"),
+        Line::from(""),
+        Line::from("🎮 Vim Mode (when enabled):"),
+        Line::from("  h/l          - Switch tabs left/right"),
+        Line::from("  j/k          - Navigate down/up in lists"),
+        Line::from("  All standard navigation still works (arrow keys, mouse)"),
         Line::from(""),
         Line::from("🖱️ Mouse Support:"),
         Line::from("  Left Click   - Switch tabs / Select items"),
@@ -734,26 +932,60 @@ fn render_help(f: &mut Frame, area: Rect, app: &App) {
         Line::from("  c            - Create new VM"),
         Line::from("  n            - Add new node"),
         Line::from("  s            - Show cluster status"),
+        Line::from("  C            - Discover clusters"),
+        Line::from("  N            - Create new cluster"),
         Line::from(""),
         Line::from("🖥️ VM Management:"),
         Line::from("  c            - Create VM"),
         Line::from("  Enter        - View VM details"),
         Line::from("  d            - Delete VM"),
-        Line::from("  ↑/↓          - Navigate list"),
+        Line::from("  /            - Search VMs by name"),
+        Line::from("  f            - Quick filter VMs"),
+        Line::from("  ↑/↓ or j/k   - Navigate list"),
         Line::from(""),
         Line::from("🔗 Node Management:"),
         Line::from("  a            - Add node"),
-        Line::from("  s            - Start daemon"),
+        Line::from("  t            - Select from node templates"),
+        Line::from("  d            - Destroy selected node"),
+        Line::from("  r            - Restart selected node"),
+        Line::from("  s            - Scale cluster"),
         Line::from("  Enter        - View node details"),
-        Line::from("  ↑/↓          - Navigate list"),
+        Line::from("  /            - Search nodes by address"),
+        Line::from("  f            - Quick filter nodes"),
+        Line::from("  ↑/↓ or j/k   - Navigate list"),
         Line::from(""),
-        Line::from("💡 Tips:"),
+        Line::from("⚡ Performance Modes (btop-inspired):"),
+        Line::from("  PowerSaver   - Reduced refresh rate for battery saving"),
+        Line::from("  Balanced     - Default refresh rate (2 seconds)"),
+        Line::from("  HighRefresh  - Fast updates for monitoring"),
+        Line::from("  Debug        - Maximum detail with logging"),
+        Line::from(""),
+        Line::from("🏗️ Cluster Management:"),
+        Line::from("  Shift+C      - Discover clusters on the network"),
+        Line::from("  Shift+N      - Quick cluster creation from templates"),
+        Line::from("  In Discovery - Enter to connect, R to refresh"),
+        Line::from("  In Creation  - 1-2 to select template"),
+        Line::from(""),
+        Line::from("🐛 Debug Mode (Tab 6):"),
+        Line::from("  r            - Raft state visualization"),
+        Line::from("  m            - Debug metrics detail"),
+        Line::from("  l            - Debug logs viewer"),
+        Line::from("  s            - Simulate debug data"),
+        Line::from("  R            - Reset debug metrics"),
+        Line::from("  c            - Clear debug logs"),
+        Line::from("  Esc          - Exit debug mode"),
+        Line::from(""),
+        Line::from("💡 Pro Tips:"),
         Line::from("  • Mouse compatible! Click anywhere to interact"),
         Line::from("  • Watch live shortcuts in bottom-right corner"),
-        Line::from("  • Use daemon mode (-d) for background nodes"),
-        Line::from("  • Monitor real-time metrics in Monitoring tab"),
-        Line::from("  • Configure quotas and security in Config tab"),
-        Line::from("  • All data refreshes automatically every 2 seconds"),
+        Line::from("  • Filter indicators show in table titles"),
+        Line::from("  • Status bar shows performance mode and active features"),
+        Line::from("  • Search is live - results update as you type"),
+        Line::from("  • All navigation methods work together (vim + mouse + arrows)"),
+        Line::from("  • Cluster discovery scans common ports automatically"),
+        Line::from("  • Templates provide quick cluster deployment"),
+        Line::from("  • Debug mode provides real-time Raft state visualization"),
+        Line::from("  • Hot-reload development: ./scripts/dev-workflow.sh start"),
     ];
     
     let paragraph = Paragraph::new(content)
@@ -791,12 +1023,21 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
     let vm_count = format!("VMs: {}/{}", app.cluster_metrics.running_vms, app.cluster_metrics.total_vms);
     let node_count = format!("Nodes: {}/{}", app.cluster_metrics.healthy_nodes, app.cluster_metrics.total_nodes);
     
+    // Add performance and mode indicators
+    let perf_mode = format!("Perf: {:?}", app.settings.performance_mode);
+    let mode_indicators = format!("{}{}{}",
+        if app.settings.vim_mode { " VIM" } else { "" },
+        if app.settings.debug_mode { " DEBUG" } else { "" },
+        if app.search_mode != super::app::SearchMode::None { " SEARCH" } else { "" }
+    );
+    
     let status_text = if let Some(msg) = &app.status_message {
         format!("✅ {}", msg)
     } else if let Some(msg) = &app.error_message {
         format!("❌ {}", msg)
     } else {
-        format!("{} | {} | {} | {}", connection_status, leader_info, vm_count, node_count)
+        format!("{} | {} | {} | {} | {}{}", 
+            connection_status, leader_info, vm_count, node_count, perf_mode, mode_indicators)
     };
     
     let status_style = if app.error_message.is_some() {
@@ -826,22 +1067,88 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn get_current_shortcuts(app: &App) -> String {
+    if app.search_mode != super::app::SearchMode::None {
+        return "Type to filter  Enter Apply  Esc Cancel".to_string();
+    }
+    
+    let vim_suffix = if app.settings.vim_mode { "  hjkl Nav" } else { "" };
+    
     match app.mode {
         AppMode::VmList => {
-            "↑↓ Select  Enter View  C Create  D Delete  Q Quit".to_string()
+            format!("↑↓ Select  Enter View  C Create  / Search  F Filter{}", vim_suffix)
         }
         AppMode::NodeList => {
-            "↑↓ Select  Enter View  A Add  Q Quit".to_string()
+            format!("↑↓ Select  Enter View  A Add  / Search  F Filter{}", vim_suffix)
         }
         AppMode::CreateVmForm | AppMode::CreateNodeForm => {
             "Tab Next  Shift+Tab Prev  Enter Submit  Esc Cancel".to_string()
+        }
+        AppMode::CreateClusterForm => {
+            "1-2 Select Template  Esc Cancel".to_string()
+        }
+        AppMode::ClusterDiscovery => {
+            "Enter Connect  R Refresh  Esc Close".to_string()
         }
         AppMode::ConfirmDialog => {
             "←→ Toggle  Enter Confirm  Esc Cancel".to_string()
         }
         _ => {
-            "1-5 Tabs  R Refresh  H Help  Q Quit  Mouse Click".to_string()
+            format!("1-5 Tabs  R Refresh  P Perf  V Vim  Shift+C Discover{}", vim_suffix)
         }
+    }
+}
+
+/// Get VM table title with filter info
+fn get_vm_table_title(app: &App) -> String {
+    let total = app.vms.len();
+    let displayed = app.get_displayed_vms().len();
+    
+    let filter_info = match &app.vm_filter {
+        super::app::VmFilter::All => {
+            if app.quick_filter.is_empty() {
+                String::new()
+            } else {
+                format!(" [filter: {}]", app.quick_filter)
+            }
+        }
+        super::app::VmFilter::Running => " [running]".to_string(),
+        super::app::VmFilter::Stopped => " [stopped]".to_string(),
+        super::app::VmFilter::Failed => " [failed]".to_string(),
+        super::app::VmFilter::ByNode(id) => format!(" [node: {}]", id),
+        super::app::VmFilter::ByName(name) => format!(" [name: {}]", name),
+    };
+    
+    if displayed == total {
+        format!("🖥️ Virtual Machines ({} total){}", total, filter_info)
+    } else {
+        format!("🖥️ Virtual Machines ({}/{} shown){}", displayed, total, filter_info)
+    }
+}
+
+/// Get node table title with filter info
+fn get_node_table_title(app: &App) -> String {
+    let total = app.nodes.len();
+    let displayed = app.get_displayed_nodes().len();
+    
+    let filter_info = match &app.node_filter {
+        super::app::NodeFilter::All => {
+            if app.quick_filter.is_empty() {
+                String::new()
+            } else {
+                format!(" [filter: {}]", app.quick_filter)
+            }
+        }
+        super::app::NodeFilter::Healthy => " [healthy]".to_string(),
+        super::app::NodeFilter::Warning => " [warning]".to_string(),
+        super::app::NodeFilter::Critical => " [critical]".to_string(),
+        super::app::NodeFilter::Leaders => " [leaders]".to_string(),
+        super::app::NodeFilter::Followers => " [followers]".to_string(),
+    };
+    
+    if displayed == total {
+        format!("🔗 Cluster Nodes ({} total){}", total, filter_info)
+    } else {
+        format!("🔗 Cluster Nodes ({}/{} shown){}", displayed, total, filter_info)
     }
 }
 
@@ -1130,7 +1437,7 @@ fn render_confirm_dialog(f: &mut Frame, app: &App) {
     }
 }
 
-fn render_log_viewer(f: &mut Frame, app: &App) {
+fn render_log_viewer(f: &mut Frame, _app: &App) {
     let area = centered_rect(90, 80, f.size());
     f.render_widget(Clear, area);
     
@@ -1170,3 +1477,445 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         ])
         .split(popup_layout[1])[1]
 }
+
+/// Render search/filter overlay (lazygit-inspired)
+fn render_search_overlay(f: &mut Frame, app: &App) {
+    // Small search bar at the bottom
+    let size = f.size();
+    let search_area = Rect {
+        x: size.width / 4,
+        y: size.height - 4,
+        width: size.width / 2,
+        height: 3,
+    };
+    
+    f.render_widget(Clear, search_area);
+    
+    let search_title = match app.search_mode {
+        super::app::SearchMode::VmSearch => "🔍 Search VMs",
+        super::app::SearchMode::NodeSearch => "🔍 Search Nodes", 
+        super::app::SearchMode::QuickFilter => "🔍 Quick Filter",
+        _ => "🔍 Search",
+    };
+    
+    let search_text = format!("{}: {}", search_title, app.quick_filter);
+    let search_widget = Paragraph::new(search_text)
+        .style(Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD))
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(WARNING_COLOR)))
+        .alignment(Alignment::Left);
+    
+    f.render_widget(search_widget, search_area);
+}
+
+/// Render cluster discovery dialog
+fn render_cluster_discovery(f: &mut Frame, app: &super::app::App) {
+    let area = centered_rect(80, 24, f.size());
+    f.render_widget(Clear, area);
+    
+    let block = Block::default()
+        .title("🔍 Cluster Discovery")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(PRIMARY_COLOR));
+    
+    f.render_widget(block, area);
+    
+    let inner_area = area.inner(&Margin { vertical: 1, horizontal: 2 });
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Progress bar
+            Constraint::Min(0),    // Cluster list
+            Constraint::Length(3), // Instructions
+        ])
+        .split(inner_area);
+    
+    // Progress bar
+    let progress = if app.cluster_discovery_active {
+        app.cluster_scan_progress as u16
+    } else {
+        100
+    };
+    
+    let progress_bar = Gauge::default()
+        .block(Block::default().borders(Borders::ALL).title("Scanning Progress"))
+        .gauge_style(Style::default().fg(PRIMARY_COLOR))
+        .percent(progress)
+        .label(format!("{}%", progress));
+    
+    f.render_widget(progress_bar, chunks[0]);
+    
+    // Cluster list
+    let clusters: Vec<ListItem> = app.discovered_clusters
+        .iter()
+        .map(|cluster| {
+            let status_icon = match cluster.health_status {
+                super::app::ClusterHealthStatus::Healthy => "🟢",
+                super::app::ClusterHealthStatus::Degraded => "🟡",
+                super::app::ClusterHealthStatus::Critical => "🔴",
+                super::app::ClusterHealthStatus::Unknown => "⚪",
+            };
+            
+            let discovery_icon = if cluster.auto_discovered { "🔍" } else { "🏗️" };
+            
+            let content = format!("{} {} {} - {} ({} nodes) {}",
+                status_icon,
+                discovery_icon,
+                cluster.name,
+                cluster.leader_address,
+                cluster.node_count,
+                if cluster.accessible { "✓" } else { "✗" }
+            );
+            
+            ListItem::new(content)
+                .style(Style::default().fg(if cluster.accessible { TEXT_COLOR } else { Color::Gray }))
+        })
+        .collect();
+    
+    let cluster_list = List::new(clusters)
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .title(format!("Discovered Clusters ({})", app.discovered_clusters.len())))
+        .style(Style::default().fg(TEXT_COLOR));
+    
+    f.render_widget(cluster_list, chunks[1]);
+    
+    // Instructions
+    let instructions = if app.cluster_discovery_active {
+        "Scanning for clusters... Please wait."
+    } else {
+        "Enter: Connect | R: Refresh | Esc: Close"
+    };
+    
+    let instruction_widget = Paragraph::new(instructions)
+        .style(Style::default().fg(INFO_COLOR))
+        .block(Block::default().borders(Borders::ALL))
+        .alignment(Alignment::Center);
+    
+    f.render_widget(instruction_widget, chunks[2]);
+}
+
+/// Render cluster creation form
+fn render_create_cluster_form(f: &mut Frame, app: &super::app::App) {
+    let area = centered_rect(70, 20, f.size());
+    f.render_widget(Clear, area);
+    
+    let block = Block::default()
+        .title("🏗️ Create New Cluster")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(PRIMARY_COLOR));
+    
+    f.render_widget(block, area);
+    
+    let inner_area = area.inner(&Margin { vertical: 1, horizontal: 2 });
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2), // Title
+            Constraint::Min(0),    // Template list
+            Constraint::Length(3), // Instructions
+        ])
+        .split(inner_area);
+    
+    // Title
+    let title = Paragraph::new("Select a cluster template to create:")
+        .style(Style::default().fg(TEXT_COLOR))
+        .alignment(Alignment::Center);
+    f.render_widget(title, chunks[0]);
+    
+    // Template list
+    let templates: Vec<ListItem> = app.cluster_templates
+        .iter()
+        .enumerate()
+        .map(|(i, template)| {
+            let content = format!("{}. {} - {} ({} nodes)",
+                i + 1,
+                template.name,
+                template.description,
+                template.node_count
+            );
+            
+            ListItem::new(vec![
+                Line::from(content),
+                Line::from(format!("   Port: {}, Backend: {}", 
+                    template.network_config.base_port,
+                    template.node_template.default_vm_backend
+                )),
+            ])
+        })
+        .collect();
+    
+    let template_list = List::new(templates)
+        .block(Block::default().borders(Borders::ALL))
+        .style(Style::default().fg(TEXT_COLOR));
+    
+    f.render_widget(template_list, chunks[1]);
+    
+    // Instructions
+    let instructions = "1-2: Select Template | Esc: Cancel";
+    let instruction_widget = Paragraph::new(instructions)
+        .style(Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD))
+        .block(Block::default().borders(Borders::ALL))
+        .alignment(Alignment::Center);
+    
+    f.render_widget(instruction_widget, chunks[2]);
+}
+
+fn render_raft_debug(f: &mut Frame, area: Rect, app: &App) {
+    if let Some(ref raft_info) = app.raft_debug_info {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(10), // Raft state overview
+                Constraint::Min(0),     // Peer states
+            ])
+            .split(area);
+        
+        render_raft_state_detail(f, chunks[0], raft_info);
+        render_peer_states(f, chunks[1], raft_info);
+    } else {
+        let content = Paragraph::new("No Raft debug information available.\\n\\nPress 's' to simulate debug data.")
+            .block(Block::default()
+                .borders(Borders::ALL)
+                .title("⚙️ Raft Debug")
+                .border_style(Style::default().fg(PRIMARY_COLOR)))
+            .alignment(Alignment::Center);
+        
+        f.render_widget(content, area);
+    }
+}
+
+fn render_raft_state_detail(f: &mut Frame, area: Rect, raft_info: &RaftDebugInfo) {
+    let content = vec![
+        Line::from(vec![
+            Span::styled("Raft Node State: ", Style::default().fg(TEXT_COLOR).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{:?}", raft_info.state), get_raft_state_style(&raft_info.state)),
+        ]),
+        Line::from(vec![
+            Span::styled("Current Term: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(raft_info.current_term.to_string(), Style::default().fg(PRIMARY_COLOR)),
+            Span::styled(" | Voted For: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(
+                raft_info.voted_for.map_or("None".to_string(), |id| id.to_string()),
+                Style::default().fg(INFO_COLOR)
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Log: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(format!("Length={}", raft_info.log_length), Style::default().fg(INFO_COLOR)),
+            Span::styled(" | Commit=", Style::default().fg(TEXT_COLOR)),
+            Span::styled(raft_info.commit_index.to_string(), Style::default().fg(SUCCESS_COLOR)),
+            Span::styled(" | Applied=", Style::default().fg(TEXT_COLOR)),
+            Span::styled(raft_info.last_applied.to_string(), Style::default().fg(SUCCESS_COLOR)),
+        ]),
+        Line::from(vec![
+            Span::styled("Election Timeout: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(format!("{:.0}ms", raft_info.election_timeout.as_millis()), 
+                       Style::default().fg(WARNING_COLOR)),
+        ]),
+    ];
+    
+    let content = if let Some(ref snapshot) = raft_info.snapshot_metadata {
+        let mut lines = content;
+        lines.push(Line::from(vec![
+            Span::styled("Snapshot: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(format!("Index={} Term={} Size={}KB", 
+                snapshot.last_included_index, 
+                snapshot.last_included_term, 
+                snapshot.size_bytes / 1024
+            ), Style::default().fg(SECONDARY_COLOR)),
+        ]));
+        lines
+    } else {
+        content
+    };
+    
+    let paragraph = Paragraph::new(content)
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .title("⚙️ Raft State Detail")
+            .border_style(Style::default().fg(PRIMARY_COLOR)))
+        .wrap(Wrap { trim: true });
+    
+    f.render_widget(paragraph, area);
+}
+
+fn render_peer_states(f: &mut Frame, area: Rect, raft_info: &RaftDebugInfo) {
+    let header = Row::new(vec![
+        Cell::from("Peer ID").style(Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)),
+        Cell::from("Next Index").style(Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)),
+        Cell::from("Match Index").style(Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)),
+        Cell::from("State").style(Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)),
+        Cell::from("Last Activity").style(Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)),
+        Cell::from("Reachable").style(Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)),
+    ]);
+    
+    let rows: Vec<Row> = raft_info.peer_states.iter().map(|peer| {
+        let reachable_style = if peer.is_reachable {
+            Style::default().fg(SUCCESS_COLOR)
+        } else {
+            Style::default().fg(ERROR_COLOR)
+        };
+        
+        let last_activity = peer.last_activity
+            .map(|instant| {
+                let elapsed = instant.elapsed();
+                if elapsed.as_secs() < 60 {
+                    format!("{:.1}s ago", elapsed.as_secs_f64())
+                } else {
+                    format!("{:.0}m ago", elapsed.as_secs() / 60)
+                }
+            })
+            .unwrap_or_else(|| "Never".to_string());
+        
+        Row::new(vec![
+            Cell::from(peer.id.to_string()),
+            Cell::from(peer.next_index.to_string()),
+            Cell::from(peer.match_index.to_string()),
+            Cell::from(format!("{:?}", peer.state)),
+            Cell::from(last_activity),
+            Cell::from(if peer.is_reachable { "✓" } else { "✗" }).style(reachable_style),
+        ])
+    }).collect();
+    
+    let table = Table::new(rows, [
+        Constraint::Min(8),   // Peer ID
+        Constraint::Min(12),  // Next Index
+        Constraint::Min(12),  // Match Index
+        Constraint::Min(10),  // State
+        Constraint::Min(15),  // Last Activity
+        Constraint::Min(10),  // Reachable
+    ])
+    .header(header)
+    .block(Block::default()
+        .borders(Borders::ALL)
+        .title("🔗 Peer States")
+        .border_style(Style::default().fg(PRIMARY_COLOR)));
+    
+    f.render_widget(table, area);
+}
+
+fn render_debug_metrics(f: &mut Frame, area: Rect, app: &App) {
+    let metrics = &app.debug_metrics;
+    let uptime = metrics.last_reset.elapsed();
+    
+    let content = vec![
+        Line::from(vec![
+            Span::styled("Debug Metrics - Uptime: ", Style::default().fg(TEXT_COLOR).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{:.1}s", uptime.as_secs_f64()), Style::default().fg(INFO_COLOR)),
+        ]),
+        Line::from(""),
+        Line::from("📨 Message Statistics:"),
+        Line::from(vec![
+            Span::styled("  Sent: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(metrics.messages_sent.to_string(), Style::default().fg(SUCCESS_COLOR)),
+            Span::styled(" | Received: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(metrics.messages_received.to_string(), Style::default().fg(SUCCESS_COLOR)),
+        ]),
+        Line::from(""),
+        Line::from("📄 Proposal Statistics:"),
+        Line::from(vec![
+            Span::styled("  Submitted: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(metrics.proposals_submitted.to_string(), Style::default().fg(PRIMARY_COLOR)),
+            Span::styled(" | Committed: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(metrics.proposals_committed.to_string(), Style::default().fg(SUCCESS_COLOR)),
+        ]),
+        Line::from(vec![
+            Span::styled("  Success Rate: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(
+                if metrics.proposals_submitted > 0 {
+                    format!("{:.1}%", 
+                        (metrics.proposals_committed as f64 / metrics.proposals_submitted as f64) * 100.0)
+                } else {
+                    "N/A".to_string()
+                },
+                Style::default().fg(if metrics.proposals_committed == metrics.proposals_submitted {
+                    SUCCESS_COLOR
+                } else {
+                    WARNING_COLOR
+                })
+            ),
+        ]),
+        Line::from(""),
+        Line::from("🗳️ Election Statistics:"),
+        Line::from(vec![
+            Span::styled("  Elections Started: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(metrics.elections_started.to_string(), Style::default().fg(WARNING_COLOR)),
+            Span::styled(" | Leadership Changes: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(metrics.leadership_changes.to_string(), Style::default().fg(WARNING_COLOR)),
+        ]),
+        Line::from(""),
+        Line::from("💾 Storage Statistics:"),
+        Line::from(vec![
+            Span::styled("  Snapshots Created: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(metrics.snapshot_creations.to_string(), Style::default().fg(SECONDARY_COLOR)),
+            Span::styled(" | Log Compactions: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(metrics.log_compactions.to_string(), Style::default().fg(SECONDARY_COLOR)),
+        ]),
+        Line::from(""),
+        Line::from("🌐 Network Statistics:"),
+        Line::from(vec![
+            Span::styled("  Partitions Detected: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(metrics.network_partitions_detected.to_string(), 
+                       if metrics.network_partitions_detected > 0 { ERROR_COLOR } else { SUCCESS_COLOR }),
+        ]),
+    ];
+    
+    let paragraph = Paragraph::new(content)
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .title("📈 Debug Metrics Detail")
+            .border_style(Style::default().fg(PRIMARY_COLOR)))
+        .wrap(Wrap { trim: true });
+    
+    f.render_widget(paragraph, area);
+}
+
+fn render_debug_logs(f: &mut Frame, area: Rect, app: &App) {
+    let logs: Vec<ListItem> = app.debug_log_entries
+        .iter()
+        .take(20) // Show last 20 log entries
+        .map(|entry| {
+            let elapsed = entry.timestamp.elapsed();
+            let time_str = if elapsed.as_secs() < 60 {
+                format!("{:.1}s", elapsed.as_secs_f64())
+            } else {
+                format!("{:.0}m", elapsed.as_secs() / 60)
+            };
+            
+            let level_icon = match entry.level {
+                DebugLevel::Trace => "🔍",
+                DebugLevel::Debug => "🐛",
+                DebugLevel::Info => "ℹ️",
+                DebugLevel::Warn => "⚠️",
+                DebugLevel::Error => "❌",
+            };
+            
+            let level_color = match entry.level {
+                DebugLevel::Trace => Color::Gray,
+                DebugLevel::Debug => Color::Cyan,
+                DebugLevel::Info => Color::Blue,
+                DebugLevel::Warn => Color::Yellow,
+                DebugLevel::Error => Color::Red,
+            };
+            
+            let content = format!("{} [{}] {} [{:?}]: {}", 
+                level_icon, time_str, entry.component, entry.level, entry.message
+            );
+            
+            ListItem::new(content)
+                .style(Style::default().fg(level_color))
+        })
+        .collect();
+    
+    let logs_list = List::new(logs)
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .title(format!("📜 Debug Logs ({} entries)", app.debug_log_entries.len()))
+            .border_style(Style::default().fg(PRIMARY_COLOR)))
+        .style(Style::default().fg(TEXT_COLOR));
+    
+    f.render_widget(logs_list, area);
+}
+

@@ -1,0 +1,191 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "TUI: Start Development Environment",
+            "type": "shell",
+            "command": "./scripts/dev-workflow.sh",
+            "args": ["start"],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": [],
+            "runOptions": {
+                "runOn": "folderOpen"
+            }
+        },
+        {
+            "label": "TUI: Hot Reload Only",
+            "type": "shell",
+            "command": "./scripts/dev-workflow.sh",
+            "args": ["hot-reload"],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "TUI: Run Tests",
+            "type": "shell",
+            "command": "./scripts/dev-workflow.sh",
+            "args": ["run-tests"],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "TUI: Watch Tests",
+            "type": "shell",
+            "command": "./scripts/dev-workflow.sh",
+            "args": ["test-watch"],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "TUI: Show Status",
+            "type": "shell",
+            "command": "./scripts/dev-workflow.sh",
+            "args": ["status"],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "TUI: Show Logs",
+            "type": "shell",
+            "command": "./scripts/dev-workflow.sh",
+            "args": ["logs"],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "TUI: Stop Environment",
+            "type": "shell",
+            "command": "./scripts/dev-workflow.sh",
+            "args": ["stop"],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "TUI: Run Integration Tests",
+            "type": "shell",
+            "command": "./scripts/test-tui-integration.sh",
+            "args": ["--tui-only"],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build Project",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["build"],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": [
+                "$rustc"
+            ]
+        },
+        {
+            "label": "Run TUI",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["run", "--", "tui"],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "new",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Test TUI Components",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["test", "--test", "tui_integration_tests"],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": [
+                "$rustc"
+            ]
+        }
+    ]
+}

@@ -1,5 +1,5 @@
 use crate::BlixardResult;
-use super::app_v2::{VmInfo, PlacementStrategy, ClusterInfo, ClusterResourceInfo, NodeResourceInfo, ClusterNodeInfo};
+use super::app::{VmInfo, PlacementStrategy, ClusterInfo, ClusterResourceInfo, NodeResourceInfo, ClusterNodeInfo};
 use blixard_core::{
     proto::{
         cluster_service_client::ClusterServiceClient,

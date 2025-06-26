@@ -893,59 +893,6 @@ async fn handle_reset_command(
     Ok(())
 }
 
-#[cfg(not(madsim))]
-async fn start_server_background(
-    node_id: u64,
-    bind_addr: String,
-    data_dir: String,
-    vm_backend: String,
-) -> BlixardResult<()> {
-    // Parse bind address
-    let bind_address = bind_addr.parse::<SocketAddr>()
-        .map_err(|e| BlixardError::ConfigError(format!("Invalid bind address: {}", e)))?;
-    
-    // Create node configuration (same structure as the main node command)
-    let node_config = NodeConfig {
-        id: node_id,
-        bind_addr: bind_address,
-        data_dir: data_dir.clone(),
-        join_addr: None, // No peers for auto-started server
-        use_tailscale: false,
-        vm_backend: vm_backend.clone(),
-    };
-    
-    // Create default config
-    let config = ConfigBuilder::new()
-        .node_id(node_id)
-        .bind_address(bind_addr.clone())
-        .data_dir(data_dir)
-        .vm_backend(vm_backend.clone())
-        .build()
-        .map_err(|e| BlixardError::ConfigError(format!("Failed to build config: {}", e)))?;
-    
-    // Create orchestrator configuration
-    let orchestrator_config = OrchestratorConfig {
-        node_config,
-        vm_backend_type: vm_backend,
-        config: config.clone(),
-    };
-
-    // Create and initialize the orchestrator (same as main node command)
-    let mut orchestrator = BlixardOrchestrator::new(orchestrator_config).await?;
-    orchestrator.initialize(config).await?;
-    orchestrator.start().await?;
-    
-    // Get shared state for gRPC server
-    let shared_state = orchestrator.node().shared();
-    let actual_bind_address = orchestrator.bind_address();
-
-    // Keep orchestrator alive while running gRPC server
-    let _orchestrator = orchestrator;
-    
-    // Start gRPC server (this will run indefinitely)
-    start_grpc_server(shared_state, actual_bind_address).await
-}
-
 
 #[cfg(not(madsim))]
 async fn handle_tui_command() -> BlixardResult<()> {
@@ -978,7 +925,7 @@ async fn handle_tui_command() -> BlixardResult<()> {
     })?;
 
     // Create modern app and event handler
-    let mut app = tui::app_v2::App::new().await?;
+    let mut app = tui::app::App::new().await?;
     let mut event_handler = tui::events::EventHandler::new(250); // 250ms tick rate
 
     // Initial data refresh
@@ -987,7 +934,7 @@ async fn handle_tui_command() -> BlixardResult<()> {
     // Main loop
     let result = loop {
         // Draw modern UI
-        terminal.draw(|f| tui::ui_v2::render(f, &app)).map_err(|e| {
+        terminal.draw(|f| tui::ui::render(f, &app)).map_err(|e| {
             BlixardError::Internal {
                 message: format!("Failed to draw terminal: {}", e),
             }
