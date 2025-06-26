@@ -13,7 +13,7 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::proto::cluster_service_client::ClusterServiceClient;
 use crate::proto::{HealthCheckRequest};
 use crate::node_shared::{SharedNodeState, PeerInfo};
-use crate::config;
+use crate::config_global;
 use crate::metrics_otel_v2::{metrics, Timer, attributes};
 use crate::tracing_otel;
 
@@ -92,7 +92,7 @@ impl ConnectionState {
         self.consecutive_failures += 1;
         
         // Check if we should open the circuit
-        let failure_threshold = config::get().peer.failure_threshold;
+        let failure_threshold = config_global::get().cluster.peer.failure_threshold;
         if self.consecutive_failures >= failure_threshold {
             if self.circuit_state != CircuitState::Open {
                 tracing::warn!("Opening circuit breaker after {} consecutive failures", 
@@ -186,7 +186,7 @@ impl PeerConnector {
         // Check connection pool limit
         {
             let count = self.connection_count.lock().await;
-            let max_connections = config::get().peer.max_connections;
+            let max_connections = config_global::get().cluster.peer.max_connections;
             if *count >= max_connections {
                 tracing::warn!("Connection pool limit reached ({}/{}), cannot connect to peer {}", 
                     count, max_connections, peer.id);
@@ -252,7 +252,7 @@ impl PeerConnector {
                         {
                             let mut count = self.connection_count.lock().await;
                             *count += 1;
-                            tracing::debug!("[PEER-CONN] Connection count: {}/{}", count, config::get().peer.max_connections);
+                            tracing::debug!("[PEER-CONN] Connection count: {}/{}", count, config_global::get().cluster.peer.max_connections);
                         }
                         
                         // Update peer connection status
@@ -327,7 +327,7 @@ impl PeerConnector {
             let mut count = self.connection_count.lock().await;
             if *count > 0 {
                 *count -= 1;
-                tracing::debug!("[PEER-CONN] Connection count: {}/{}", count, config::get().peer.max_connections);
+                tracing::debug!("[PEER-CONN] Connection count: {}/{}", count, config_global::get().cluster.peer.max_connections);
             }
         }
         
@@ -461,7 +461,7 @@ impl PeerConnector {
         let queue = buffer.entry(to).or_insert_with(VecDeque::new);
         
         // Limit buffer size to prevent memory issues
-        let max_buffered_messages = config::get().peer.max_buffered_messages;
+        let max_buffered_messages = config_global::get().cluster.peer.max_buffered_messages;
         if queue.len() >= max_buffered_messages {
             tracing::warn!("[PEER-CONN] Message buffer full for node {}, dropping oldest message", to);
             queue.pop_front();

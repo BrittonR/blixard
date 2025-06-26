@@ -9,6 +9,8 @@ use blixard_core::{
     metrics_otel_v2,
     metrics_server,
     tracing_otel,
+    config_v2::Config,
+    config_global,
 };
 use blixard_vm::{MicrovmBackendFactory};
 use tokio::task::JoinHandle;
@@ -20,6 +22,8 @@ pub struct OrchestratorConfig {
     pub node_config: NodeConfig,
     /// VM backend type to use ("mock", "microvm", "docker", etc.)
     pub vm_backend_type: String,
+    /// Full configuration object
+    pub config: Config,
 }
 
 /// Main orchestrator that coordinates between distributed systems and VM management
@@ -75,8 +79,12 @@ impl BlixardOrchestrator {
     }
     
     /// Initialize the node and start all services
-    pub async fn initialize(&mut self) -> BlixardResult<()> {
+    pub async fn initialize(&mut self, config: Config) -> BlixardResult<()> {
         tracing::info!("Initializing Blixard orchestrator services");
+        
+        // Initialize global configuration
+        config_global::init(config)?;
+        tracing::info!("Global configuration initialized");
         
         // Initialize metrics with Prometheus exporter
         metrics_otel_v2::init_prometheus()
@@ -85,22 +93,13 @@ impl BlixardOrchestrator {
             })?;
         tracing::info!("Metrics initialized with Prometheus exporter");
         
-        // Initialize distributed tracing
-        // Check for OTLP endpoint in environment variable
+        // Distributed tracing is already initialized in main.rs
+        // Just log the current configuration
         let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok();
-        if let Some(endpoint) = &otlp_endpoint {
-            tracing::info!("Initializing tracing with OTLP endpoint: {}", endpoint);
-            tracing_otel::init_otlp("blixard", otlp_endpoint)
-                .map_err(|e| blixard_core::error::BlixardError::Internal {
-                    message: format!("Failed to initialize tracing: {}", e),
-                })?;
+        if otlp_endpoint.is_some() {
+            tracing::info!("Distributed tracing enabled with OTLP exporter");
         } else {
-            // Initialize without exporter for local development
-            tracing_otel::init_noop()
-                .map_err(|e| blixard_core::error::BlixardError::Internal {
-                    message: format!("Failed to initialize tracing: {}", e),
-                })?;
-            tracing::info!("Tracing initialized without OTLP exporter (set OTEL_EXPORTER_OTLP_ENDPOINT to enable)");
+            tracing::info!("Distributed tracing available but no OTLP exporter configured");
         }
         
         // Set up the VM backend registry

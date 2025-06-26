@@ -5,7 +5,7 @@ use blixard_core::{
     tracing_otel,
     metrics_otel_v2,
     proto::{
-        blixard_service_client::BlixardServiceClient,
+        cluster_service_client::ClusterServiceClient,
         CreateVmRequest,
     },
 };
@@ -25,8 +25,9 @@ async fn test_tracing_initialization() {
     // Log within the span
     tracing::info!("Test event within span");
     
-    // Span should be recorded (even though we're using noop exporter)
-    assert!(tracing::Span::current().is_enabled());
+    // We should have a current span
+    let current = tracing::Span::current();
+    assert!(!current.is_none());
 }
 
 #[tokio::test]
@@ -35,20 +36,18 @@ async fn test_distributed_tracing_propagation() {
     let _ = metrics_otel_v2::init_noop();
     let _ = tracing_otel::init_noop();
     
-    // Create a test cluster
-    let mut cluster = TestCluster::new();
+    // Create a test cluster with 3 nodes
+    let mut cluster = TestCluster::new(3).await.unwrap();
     
-    // Start three nodes
-    let node1 = cluster.add_node(1, 7201).await.unwrap();
-    let _node2 = cluster.add_node(2, 7202).await.unwrap();
-    let _node3 = cluster.add_node(3, 7203).await.unwrap();
+    // Get the nodes
+    let nodes = cluster.nodes();
     
     // Give cluster time to elect a leader
     sleep(Duration::from_secs(2)).await;
     
     // Make a gRPC request to create a VM
     let addr = format!("http://127.0.0.1:{}", 7201);
-    let mut client = BlixardServiceClient::connect(addr).await.unwrap();
+    let mut client = ClusterServiceClient::connect(addr).await.unwrap();
     
     // Create root span for the test
     let root_span = tracing::span!(

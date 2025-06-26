@@ -1,0 +1,119 @@
+# Production Blixard Configuration
+# Optimized for production deployments
+
+[node]
+# Production nodes should have explicit IDs
+# id = 1
+bind_address = "0.0.0.0:7001"
+data_dir = "/var/lib/blixard/data"
+vm_backend = "microvm"
+debug = false
+
+[cluster.raft]
+# More conservative timeouts for production
+election_tick = 20
+heartbeat_tick = 4
+max_uncommitted_size = 2147483648  # 2GB
+max_inflight_msgs = 512
+compaction_threshold = 5000
+snapshot_interval = 50000
+conf_change_timeout = "10s"
+proposal_timeout = "30s"
+max_restarts = 10
+restart_delay = "5s"
+
+[cluster.peer]
+max_connections = 500
+pool_size = 20
+connection_timeout = "10s"
+reconnect_delay = "5s"
+health_check_interval = "30s"
+failure_threshold = 10
+max_buffered_messages = 1000
+enable_pooling = true
+
+[cluster.worker]
+# Production defaults assume larger machines
+default_cpu_cores = 16
+default_memory_mb = 32768  # 32GB
+default_disk_gb = 500
+resource_update_interval = "1m"
+health_check_timeout = "10s"
+
+[storage]
+db_name = "blixard.db"
+cache_size_mb = 2048  # 2GB cache
+compression = true
+sync_mode = "full"  # Maximum durability
+
+[storage.backup]
+enabled = true
+backup_dir = "/var/lib/blixard/backups"
+interval = "6h"
+max_backups = 14  # 2 weeks of backups
+
+[network.grpc]
+max_message_size = 134217728  # 128MB
+keepalive_interval = "30s"
+keepalive_timeout = "20s"
+tcp_nodelay = true
+# Let it auto-detect CPU count
+# worker_threads = 
+
+[network.metrics]
+enabled = true
+port_offset = 1000
+path = "/metrics"
+
+[vm.defaults]
+vcpus = 4
+memory_mb = 4096
+disk_gb = 50
+hypervisor = "cloud-hypervisor"
+
+[vm.scheduler]
+default_strategy = "most_available"
+enable_anti_affinity = true
+overcommit_ratio = 1.1  # Conservative overcommit
+rebalance_interval = "30m"
+
+[vm.limits]
+max_vms_per_node = 200
+max_total_vcpus = 1024
+max_total_memory_mb = 524288  # 512GB
+max_total_disk_gb = 16384     # 16TB
+
+[observability.logging]
+level = "info"
+format = "json"  # Structured logs for production
+timestamps = true
+file = "/var/log/blixard/blixard.log"
+
+[observability.logging.rotation]
+enabled = true
+max_size_mb = 500
+max_files = 30
+
+[observability.metrics]
+enabled = true
+prefix = "blixard"
+runtime_metrics = true
+
+[observability.tracing]
+enabled = true
+# Configure OTLP endpoint for your environment
+otlp_endpoint = "http://otel-collector:4317"
+service_name = "blixard"
+sampling_ratio = 0.1  # Sample 10% in production
+span_events = false   # Reduce overhead
+
+[security.tls]
+enabled = true
+cert_file = "/etc/blixard/certs/server.crt"
+key_file = "/etc/blixard/certs/server.key"
+ca_file = "/etc/blixard/certs/ca.crt"
+require_client_cert = true
+
+[security.auth]
+enabled = true
+method = "mtls"  # Use mutual TLS in production

@@ -1,0 +1,109 @@
+# Development Blixard Configuration
+# Optimized for local development and testing
+
+[node]
+bind_address = "127.0.0.1:7001"
+data_dir = "./dev-data"
+vm_backend = "mock"
+debug = true
+
+[cluster]
+# Often bootstrap single node for dev
+bootstrap = true
+
+[cluster.raft]
+# Faster timeouts for development
+election_tick = 5
+heartbeat_tick = 1
+max_uncommitted_size = 536870912  # 512MB
+max_inflight_msgs = 128
+compaction_threshold = 100
+snapshot_interval = 1000
+conf_change_timeout = "2s"
+proposal_timeout = "5s"
+max_restarts = 3
+restart_delay = "500ms"
+
+[cluster.peer]
+max_connections = 10
+pool_size = 2
+connection_timeout = "2s"
+reconnect_delay = "500ms"
+health_check_interval = "5s"
+failure_threshold = 3
+max_buffered_messages = 50
+enable_pooling = false  # Simpler for debugging
+
+[cluster.worker]
+# Smaller defaults for development
+default_cpu_cores = 2
+default_memory_mb = 4096
+default_disk_gb = 50
+resource_update_interval = "10s"
+health_check_timeout = "2s"
+
+[storage]
+db_name = "blixard-dev.db"
+cache_size_mb = 256
+compression = false  # Faster without compression
+sync_mode = "none"   # Faster but less durable
+
+[storage.backup]
+enabled = false
+
+[network.grpc]
+max_message_size = 33554432  # 32MB
+keepalive_interval = "5s"
+keepalive_timeout = "5s"
+tcp_nodelay = true
+worker_threads = 2
+
+[network.metrics]
+enabled = true
+port_offset = 1000
+path = "/metrics"
+
+[vm.defaults]
+vcpus = 1
+memory_mb = 1024
+disk_gb = 10
+hypervisor = "qemu"
+
+[vm.scheduler]
+default_strategy = "round_robin"  # Predictable for testing
+enable_anti_affinity = false
+overcommit_ratio = 2.0  # Allow heavy overcommit in dev
+rebalance_interval = "1m"
+
+[vm.limits]
+max_vms_per_node = 20
+max_total_vcpus = 32
+max_total_memory_mb = 16384  # 16GB
+max_total_disk_gb = 500
+
+[observability.logging]
+level = "debug"  # Verbose logging for development
+format = "pretty"
+timestamps = true
+
+[observability.logging.rotation]
+enabled = false
+
+[observability.metrics]
+enabled = true
+prefix = "blixard_dev"
+runtime_metrics = true
+
+[observability.tracing]
+enabled = true
+# Local Jaeger instance
+otlp_endpoint = "http://localhost:4317"
+service_name = "blixard-dev"
+sampling_ratio = 1.0  # Sample everything in dev
+span_events = true
+
+[security.tls]
+enabled = false
+
+[security.auth]
+enabled = false

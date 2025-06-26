@@ -217,11 +217,11 @@ impl ClusterService for BlixardGrpcService {
                 tracing::info!("[JOIN] Configuration change proposed to Raft for node {}", req.node_id);
                 
                 // Also propose worker registration for the joining node
-                let worker_defaults = crate::config::get().worker;
+                let config = crate::config_global::get();
                 let capabilities = crate::raft_manager::WorkerCapabilities {
-                    cpu_cores: worker_defaults.cpu_cores,
-                    memory_mb: worker_defaults.memory_mb,
-                    disk_gb: worker_defaults.disk_gb,
+                    cpu_cores: config.cluster.worker.default_cpu_cores,
+                    memory_mb: config.cluster.worker.default_memory_mb,
+                    disk_gb: config.cluster.worker.default_disk_gb,
                     features: vec!["microvm".to_string()],
                 };
                 
@@ -1249,7 +1249,7 @@ impl BlixardService for BlixardGrpcService {
                 disk_gb: 0, // Not in proto Task, default to 0
                 required_features: vec![], // Not in proto Task, default to empty
             },
-            timeout_secs: crate::config::get().task.default_timeout_secs,
+            timeout_secs: 300, // Default 5 minute timeout
         };
         
         // Submit task through Raft consensus

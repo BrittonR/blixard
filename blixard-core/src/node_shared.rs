@@ -461,7 +461,7 @@ impl SharedNodeState {
                 
                 tracing::info!("Waiting for VM proposal response...");
                 // Wait for response with a timeout
-                let timeout = crate::config::get().timeouts.proposal_timeout_secs;
+                let timeout = crate::config_global::get().cluster.raft.proposal_timeout.as_secs();
                 match tokio::time::timeout(tokio::time::Duration::from_secs(timeout), response_rx).await {
                     Ok(Ok(result)) => {
                         tracing::info!("Received VM proposal response: {:?}", result.is_ok());
@@ -635,7 +635,7 @@ impl SharedNodeState {
             }
             
             // Wait for response
-            let timeout = crate::config::get().timeouts.proposal_timeout_secs;
+            let timeout = crate::config_global::get().cluster.raft.proposal_timeout.as_secs();
             match tokio::time::timeout(tokio::time::Duration::from_secs(timeout), response_rx).await {
                 Ok(Ok(result)) => {
                     result?;
@@ -762,7 +762,7 @@ impl SharedNodeState {
             
             tracing::info!("Waiting for proposal response...");
             // Wait for response with a timeout
-            let timeout = crate::config::get().timeouts.proposal_timeout_secs;
+            let timeout = crate::config_global::get().cluster.raft.proposal_timeout.as_secs();
             match tokio::time::timeout(tokio::time::Duration::from_secs(timeout), response_rx).await {
                 Ok(Ok(result)) => {
                     tracing::info!("Received proposal response: {:?}", result.is_ok());
@@ -976,7 +976,7 @@ impl SharedNodeState {
                 }
             }
             
-            let timeout = crate::config::get().timeouts.conf_change_timeout_secs;
+            let timeout = crate::config_global::get().cluster.raft.conf_change_timeout.as_secs();
             tracing::info!("[NODE-SHARED] Waiting for conf change response from Raft (timeout: {}s)", timeout);
             // Wait for the configuration change to be committed
             // Use a timeout to prevent indefinite blocking
@@ -1086,7 +1086,7 @@ impl SharedNodeState {
             }
             
             // Wait for the proposal to be committed
-            let timeout = crate::config::get().timeouts.proposal_timeout_secs;
+            let timeout = crate::config_global::get().cluster.raft.proposal_timeout.as_secs();
             match tokio::time::timeout(tokio::time::Duration::from_secs(timeout), response_rx).await {
                 Ok(Ok(result)) => {
                     match result {
@@ -1186,7 +1186,7 @@ impl SharedNodeState {
                 
                 tracing::info!("Waiting for VM status update proposal response...");
                 // Wait for response with a timeout
-                let timeout = crate::config::get().timeouts.proposal_timeout_secs;
+                let timeout = crate::config_global::get().cluster.raft.proposal_timeout.as_secs();
                 match tokio::time::timeout(tokio::time::Duration::from_secs(timeout), response_rx).await {
                     Ok(Ok(result)) => {
                         tracing::info!("Received VM status update proposal response: {:?}", result.is_ok());

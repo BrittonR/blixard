@@ -177,9 +177,9 @@ impl Node {
         let shared_weak = Arc::downgrade(&self.shared);
         let raft_handle = tokio::spawn(async move {
             let mut restart_count = 0;
-            let raft_config = crate::config::get().raft;
-            let max_restarts = raft_config.max_restarts;
-            let restart_delay_ms = raft_config.restart_delay_ms;
+            let config = crate::config_global::get();
+            let max_restarts = config.cluster.raft.max_restarts;
+            let restart_delay_ms = config.cluster.raft.restart_delay.as_millis() as u64;
             
             // Run the initial Raft manager
             match raft_manager.run().await {
@@ -278,7 +278,7 @@ impl Node {
         // If we have a join address, send join request after initialization
         if let Some(join_addr) = self.shared.config.join_addr.clone() {
             // Give the Raft manager a moment to start
-            let join_delay = crate::config::get().timeouts.join_request_delay_ms;
+            let join_delay = 100u64; // Fixed 100ms delay for join requests
             tokio::time::sleep(tokio::time::Duration::from_millis(join_delay)).await;
             
             // Pre-connect to the join address to ensure bidirectional connectivity
@@ -607,7 +607,7 @@ impl Node {
         }
         
         // Default from configuration if detection fails
-        crate::config::get().resource.default_memory_mb
+        crate::config_global::get().cluster.worker.default_memory_mb
     }
     
     /// Estimate available disk space in GB
@@ -622,7 +622,7 @@ impl Node {
         
         // Create directory if it doesn't exist and return default
         let _ = std::fs::create_dir_all(data_dir);
-        crate::config::get().resource.default_disk_gb
+        crate::config_global::get().cluster.worker.default_disk_gb
     }
     
     /// Initialize VM backend with custom registry (for applications to register backends)

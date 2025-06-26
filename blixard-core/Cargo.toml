@@ -58,6 +58,11 @@ scopeguard = "1.2"
 num_cpus = "1.16"
 static_assertions = "1.1"
 
+# Configuration
+toml = "0.8"
+humantime-serde = "1.1"
+notify = "6.1"
+
 # VM management dependencies  
 tera = "1.19"
 

@@ -6,6 +6,7 @@ use blixard::{
     BlixardError, BlixardResult, NodeConfig,
 };
 use blixard::orchestrator::OrchestratorConfig;
+use blixard_core::config_v2::{Config, ConfigBuilder};
 
 mod tui;
 
@@ -16,6 +17,10 @@ use blixard_core::grpc_server::start_grpc_server;
 #[command(name = "blixard")]
 #[command(about = "Distributed microVM orchestration platform", long_about = None)]
 struct Cli {
+    /// Path to configuration file (TOML format)
+    #[arg(short, long, global = true)]
+    config: Option<String>,
+    
     #[command(subcommand)]
     command: Commands,
 }
@@ -188,55 +193,81 @@ async fn main() -> BlixardResult<()> {
     
     match cli.command {
         Commands::Node { id, bind, data_dir, vm_config_dir: _, vm_data_dir: _, mock_vm, vm_backend, peers } => {
-            // Parse bind address
-            let bind_address: SocketAddr = bind.parse()
-                .map_err(|e| BlixardError::ConfigError(
-                    format!("Invalid bind address '{}': {}", bind, e)
-                ))?;
-
-            // Parse join address from peers (use the first peer)
-            let join_addr = if let Some(peers_str) = peers {
-                let peer_addrs: Vec<&str> = peers_str.split(',').collect();
-                if !peer_addrs.is_empty() {
-                    // Validate that it's a valid socket address
-                    let _: SocketAddr = peer_addrs[0].parse()
-                        .map_err(|e| BlixardError::ConfigError(
-                            format!("Invalid peer address '{}': {}", peer_addrs[0], e)
-                        ))?;
-                    Some(peer_addrs[0].to_string())
+            // Load configuration from file or create from CLI args
+            let mut config = if let Some(config_path) = cli.config {
+                // Load from TOML file
+                let path = std::path::Path::new(&config_path);
+                Config::from_file(path)?
+            } else {
+                // Create from CLI arguments
+                let join_addr = if let Some(peers_str) = peers {
+                    let peer_addrs: Vec<&str> = peers_str.split(',').collect();
+                    if !peer_addrs.is_empty() {
+                        // Validate that it's a valid socket address
+                        let _: SocketAddr = peer_addrs[0].parse()
+                            .map_err(|e| BlixardError::ConfigError(
+                                format!("Invalid peer address '{}': {}", peer_addrs[0], e)
+                            ))?;
+                        Some(peer_addrs[0].to_string())
+                    } else {
+                        None
+                    }
                 } else {
                     None
+                };
+                
+                // Determine VM backend type (mock_vm flag overrides explicit backend selection)
+                let vm_backend_type = if mock_vm {
+                    "mock".to_string()
+                } else {
+                    vm_backend
+                };
+                
+                let mut builder = ConfigBuilder::new()
+                    .node_id(id)
+                    .bind_address(bind)
+                    .data_dir(data_dir)
+                    .vm_backend(vm_backend_type);
+                
+                if let Some(addr) = join_addr {
+                    builder = builder.join_address(addr);
                 }
-            } else {
-                None
-            };
-
-            // Determine VM backend type (mock_vm flag overrides explicit backend selection)
-            let vm_backend_type = if mock_vm {
-                "mock".to_string()
-            } else {
-                vm_backend
+                
+                builder.build()
+                    .map_err(|e| BlixardError::ConfigError(format!("Failed to build config: {}", e)))?
             };
             
-            // Create node configuration
+            // Apply environment variable overrides
+            config.apply_env_overrides();
+            
+            // Validate configuration
+            config.validate()?;
+            
+            // Convert to old NodeConfig for compatibility
+            let bind_address: SocketAddr = config.node.bind_address.parse()
+                .map_err(|e| BlixardError::ConfigError(
+                    format!("Invalid bind address '{}': {}", config.node.bind_address, e)
+                ))?;
+            
             let node_config = NodeConfig {
-                id,
+                id: config.node.id.unwrap_or(id),
                 bind_addr: bind_address,
-                data_dir,
-                join_addr,
+                data_dir: config.node.data_dir.to_string_lossy().to_string(),
+                join_addr: config.cluster.join_address.clone(),
                 use_tailscale: false,
-                vm_backend: vm_backend_type.clone(),
+                vm_backend: config.node.vm_backend.clone(),
             };
             
             // Create orchestrator configuration
             let orchestrator_config = OrchestratorConfig {
                 node_config,
-                vm_backend_type,
+                vm_backend_type: config.node.vm_backend.clone(),
+                config: config.clone(),
             };
 
             // Create and initialize the orchestrator
             let mut orchestrator = BlixardOrchestrator::new(orchestrator_config).await?;
-            orchestrator.initialize().await?;
+            orchestrator.initialize(config).await?;
             orchestrator.start().await?;
             
             // Get shared state for gRPC server
@@ -817,21 +848,31 @@ async fn start_server_background(
     let node_config = NodeConfig {
         id: node_id,
         bind_addr: bind_address,
-        data_dir,
+        data_dir: data_dir.clone(),
         join_addr: None, // No peers for auto-started server
         use_tailscale: false,
         vm_backend: vm_backend.clone(),
     };
     
+    // Create default config
+    let config = ConfigBuilder::new()
+        .node_id(node_id)
+        .bind_address(bind_addr.clone())
+        .data_dir(data_dir)
+        .vm_backend(vm_backend.clone())
+        .build()
+        .map_err(|e| BlixardError::ConfigError(format!("Failed to build config: {}", e)))?;
+    
     // Create orchestrator configuration
     let orchestrator_config = OrchestratorConfig {
         node_config,
         vm_backend_type: vm_backend,
+        config: config.clone(),
     };
 
     // Create and initialize the orchestrator (same as main node command)
     let mut orchestrator = BlixardOrchestrator::new(orchestrator_config).await?;
-    orchestrator.initialize().await?;
+    orchestrator.initialize(config).await?;
     orchestrator.start().await?;
     
     // Get shared state for gRPC server

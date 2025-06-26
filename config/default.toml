@@ -1,0 +1,243 @@
+# Default Blixard Configuration
+# This file contains all configurable options with their default values
+
+[node]
+# Node ID (optional - can be set via CLI or auto-generated)
+# id = 1
+
+# Bind address for gRPC server
+bind_address = "127.0.0.1:7001"
+
+# Data directory for storage
+data_dir = "./data"
+
+# VM backend type (mock, microvm, docker)
+vm_backend = "mock"
+
+# Enable debug mode
+debug = false
+
+[cluster]
+# Bootstrap as single-node cluster
+bootstrap = false
+
+# Address of existing cluster to join
+# join_address = "127.0.0.1:7001"
+
+[cluster.raft]
+# Raft timing configuration (in ticks)
+election_tick = 10
+heartbeat_tick = 2
+
+# Maximum size of uncommitted entries (1GB)
+max_uncommitted_size = 1073741824
+
+# Maximum inflight messages
+max_inflight_msgs = 256
+
+# Log compaction threshold
+compaction_threshold = 1000
+
+# Snapshot interval
+snapshot_interval = 10000
+
+# Configuration change timeout
+conf_change_timeout = "5s"
+
+# Proposal timeout
+proposal_timeout = "10s"
+
+# Maximum restart attempts
+max_restarts = 5
+
+# Restart base delay
+restart_delay = "1s"
+
+[cluster.peer]
+# Maximum concurrent connections
+max_connections = 100
+
+# Connection pool size per peer
+pool_size = 10
+
+# Connection timeout
+connection_timeout = "5s"
+
+# Reconnection delay
+reconnect_delay = "1s"
+
+# Health check interval
+health_check_interval = "10s"
+
+# Failure threshold before marking unhealthy
+failure_threshold = 5
+
+# Maximum buffered messages per peer
+max_buffered_messages = 100
+
+# Enable connection pooling
+enable_pooling = true
+
+[cluster.worker]
+# Default resources for workers
+default_cpu_cores = 4
+default_memory_mb = 8192
+default_disk_gb = 100
+
+# Resource update interval
+resource_update_interval = "30s"
+
+# Health check timeout
+health_check_timeout = "5s"
+
+[storage]
+# Database file name
+db_name = "blixard.db"
+
+# Cache size in MB
+cache_size_mb = 512
+
+# Enable compression
+compression = true
+
+# Sync mode (none, normal, full)
+sync_mode = "normal"
+
+[storage.backup]
+# Enable automatic backups
+enabled = false
+
+# Backup directory
+backup_dir = "./backups"
+
+# Backup interval
+interval = "1h"
+
+# Maximum backups to retain
+max_backups = 7
+
+[network.grpc]
+# Maximum message size (64MB)
+max_message_size = 67108864
+
+# Keep-alive interval
+keepalive_interval = "10s"
+
+# Keep-alive timeout
+keepalive_timeout = "10s"
+
+# Enable TCP nodelay
+tcp_nodelay = true
+
+# Number of worker threads (defaults to CPU count)
+# worker_threads = 4
+
+[network.metrics]
+# Enable metrics server
+enabled = true
+
+# Port offset from gRPC port
+port_offset = 1000
+
+# Metrics path
+path = "/metrics"
+
+[vm.defaults]
+# Default VM settings
+vcpus = 2
+memory_mb = 2048
+disk_gb = 20
+hypervisor = "qemu"
+
+[vm.scheduler]
+# Default placement strategy (most_available, least_available, round_robin, manual)
+default_strategy = "most_available"
+
+# Enable anti-affinity rules
+enable_anti_affinity = true
+
+# Resource overcommit ratio
+overcommit_ratio = 1.2
+
+# Rebalance interval
+rebalance_interval = "5m"
+
+[vm.limits]
+# Maximum VMs per node
+max_vms_per_node = 100
+
+# Maximum total resources
+max_total_vcpus = 512
+max_total_memory_mb = 131072  # 128GB
+max_total_disk_gb = 4096      # 4TB
+
+[observability.logging]
+# Log level (trace, debug, info, warn, error)
+level = "info"
+
+# Log format (pretty, json)
+format = "pretty"
+
+# Enable timestamps
+timestamps = true
+
+# Log file (optional)
+# file = "/var/log/blixard/blixard.log"
+
+[observability.logging.rotation]
+# Enable log rotation
+enabled = false
+
+# Maximum file size in MB
+max_size_mb = 100
+
+# Maximum number of files
+max_files = 10
+
+[observability.metrics]
+# Enable metrics collection
+enabled = true
+
+# Metric prefix
+prefix = "blixard"
+
+# Include runtime metrics
+runtime_metrics = true
+
+[observability.tracing]
+# Enable distributed tracing
+enabled = false
+
+# OTLP endpoint (can also be set via OTEL_EXPORTER_OTLP_ENDPOINT)
+# otlp_endpoint = "http://localhost:4317"
+
+# Service name
+service_name = "blixard"
+
+# Sampling ratio (0.0 - 1.0)
+sampling_ratio = 1.0
+
+# Include span events
+span_events = true
+
+[security.tls]
+# Enable TLS
+enabled = false
+
+# Certificate files
+# cert_file = "/etc/blixard/certs/server.crt"
+# key_file = "/etc/blixard/certs/server.key"
+# ca_file = "/etc/blixard/certs/ca.crt"
+
+# Require client certificates
+require_client_cert = false
+
+[security.auth]
+# Enable authentication
+enabled = false
+
+# Authentication method (token, mtls)
+method = "token"
+
+# Token file for token auth
+# token_file = "/etc/blixard/tokens/auth.token"
