@@ -144,6 +144,7 @@ pub enum AppMode {
     SettingsForm,
     LogViewer,
     SearchDialog,
+    BatchNodeCreation,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -473,6 +474,7 @@ pub struct App {
     pub node_table_state: TableState,
     pub selected_node: Option<u64>,
     pub daemon_processes: HashMap<u64, u32>, // node_id -> PID
+    pub batch_node_count: String,
     
     // Forms and dialogs
     pub create_vm_form: CreateVmForm,
@@ -721,6 +723,7 @@ impl App {
             node_table_state: TableState::default(),
             selected_node: None,
             daemon_processes: HashMap::new(),
+            batch_node_count: "3".to_string(),
             
             create_vm_form: CreateVmForm::default(),
             create_node_form: CreateNodeForm::default(),
@@ -758,7 +761,7 @@ impl App {
         app.add_event(EventLevel::Info, "TUI".to_string(), "Blixard TUI starting up".to_string());
         
         // Try to connect to local server
-        app.add_event(EventLevel::Info, "Connection".to_string(), "Attempting to connect to cluster at 127.0.0.1:7002".to_string());
+        app.add_event(EventLevel::Info, "Connection".to_string(), "Attempting to connect to cluster at 127.0.0.1:7001".to_string());
         app.try_connect().await;
         
         // Start cluster discovery
@@ -860,7 +863,7 @@ impl App {
     }
     
     pub async fn try_connect(&mut self) {
-        match VmClient::new("127.0.0.1:7002").await {
+        match VmClient::new("127.0.0.1:7001").await {
             Ok(client) => {
                 self.vm_client = Some(client);
                 self.status_message = Some("Connected to cluster".to_string());
@@ -1478,6 +1481,7 @@ impl App {
             AppMode::Debug | AppMode::RaftDebug | AppMode::DebugMetrics | AppMode::DebugLogs => {
                 self.handle_debug_keys(key).await?;
             }
+            AppMode::BatchNodeCreation => self.handle_batch_node_creation_keys(key).await?,
             _ => {}
         }
         
@@ -1604,6 +1608,106 @@ impl App {
         let count = self.discovered_clusters.len();
         self.add_event(EventLevel::Info, "Discovery".to_string(), 
             format!("Discovery complete: found {} cluster(s)", count));
+    }
+    
+    /// Discover and auto-join local nodes
+    pub async fn auto_discover_nodes(&mut self) -> BlixardResult<()> {
+        self.add_event(EventLevel::Info, "Discovery".to_string(), "Starting local node discovery...".to_string());
+        self.status_message = Some("Scanning for local nodes...".to_string());
+        
+        // Common ports where nodes might be running
+        let ports_to_scan = vec![7001, 7002, 7003, 7004, 7005, 7006, 7007, 7008, 7009, 7010];
+        let mut found_nodes = Vec::new();
+        
+        // First, find nodes that are running
+        for port in &ports_to_scan {
+            let endpoint = format!("127.0.0.1:{}", port);
+            match VmClient::new(&endpoint).await {
+                Ok(mut client) => {
+                    // Try to get cluster status to verify it's a real node
+                    if let Ok(status) = client.get_cluster_status().await {
+                        found_nodes.push((port, status));
+                        self.add_event(EventLevel::Info, "Discovery".to_string(), 
+                            format!("Found running node at port {}", port));
+                    }
+                }
+                Err(_) => {
+                    // No node at this port, continue scanning
+                }
+            }
+        }
+        
+        if found_nodes.is_empty() {
+            self.status_message = Some("No local nodes found. Start a node first with: cargo run -- node --id 1 --bind 127.0.0.1:7001".to_string());
+            self.add_event(EventLevel::Warning, "Discovery".to_string(), "No running nodes found on common ports".to_string());
+            return Ok(());
+        }
+        
+        // Connect to the first found node if not already connected
+        if self.vm_client.is_none() && !found_nodes.is_empty() {
+            let (port, _) = &found_nodes[0];
+            let endpoint = format!("127.0.0.1:{}", port);
+            self.connect_to_cluster(&endpoint).await?;
+        }
+        
+        // Store the count before moving found_nodes
+        let found_count = found_nodes.len();
+        
+        // Now add any nodes that aren't already in the cluster
+        if self.vm_client.is_some() {
+            // Get cluster status first
+            let cluster_status = match self.vm_client.as_mut().unwrap().get_cluster_status().await {
+                Ok(status) => status,
+                Err(e) => {
+                    self.add_event(EventLevel::Error, "Discovery".to_string(), 
+                        format!("Failed to get cluster status: {}", e));
+                    return Ok(());
+                }
+            };
+            
+            let existing_node_ids: Vec<u64> = cluster_status.nodes.iter().map(|n| n.id).collect();
+            
+            // Find the next available node ID
+            let mut next_id = 2;
+            while existing_node_ids.contains(&next_id) {
+                next_id += 1;
+            }
+            
+            // Auto-join nodes that aren't already in the cluster
+            for (port, status) in found_nodes {
+                let bind_addr = format!("127.0.0.1:{}", port);
+                
+                // Check if this node is already in the cluster
+                let already_in_cluster = cluster_status.nodes.iter()
+                    .any(|n| n.address == bind_addr || n.id == status.leader_id);
+                
+                if !already_in_cluster && *port != 7001 { // Don't try to join the leader to itself
+                    self.add_event(EventLevel::Info, "Discovery".to_string(), 
+                        format!("Auto-joining node at port {} with ID {}", port, next_id));
+                    
+                    // Call join_cluster on the client
+                    let join_result = self.vm_client.as_mut().unwrap().join_cluster(next_id, &bind_addr).await;
+                    
+                    match join_result {
+                        Ok(msg) => {
+                            self.add_event(EventLevel::Info, "Node".to_string(), 
+                                format!("Node {} joined: {}", next_id, msg));
+                            next_id += 1;
+                        }
+                        Err(e) => {
+                            self.add_event(EventLevel::Warning, "Node".to_string(), 
+                                format!("Failed to auto-join node at {}: {}", bind_addr, e));
+                        }
+                    }
+                }
+            }
+            
+            // Refresh node list to show the updated cluster
+            self.refresh_node_list().await?;
+        }
+        
+        self.status_message = Some(format!("Discovery complete: found {} local nodes", found_count));
+        Ok(())
     }
     
     /// Probe a potential cluster endpoint
@@ -1734,7 +1838,7 @@ impl App {
                     
                     // Update cluster info and drop the mutable borrow
                     cluster.node_count = target_node_count as usize;
-                    drop(cluster); // Explicitly drop the mutable borrow
+                    let _ = cluster; // Explicitly drop the mutable borrow
                     
                     // Now add all the events
                     for event_msg in events {
@@ -1777,6 +1881,10 @@ impl App {
             KeyCode::Char('N') => {
                 // Show cluster creation
                 self.mode = AppMode::CreateClusterForm;
+            }
+            KeyCode::Char('+') => {
+                // Quick add node with next available ID and port
+                self.quick_add_node().await?;
             }
             _ => {}
         }
@@ -2109,6 +2217,19 @@ impl App {
                 // Scale cluster
                 self.show_cluster_scaling_dialog();
             }
+            KeyCode::Char('b') => {
+                // Batch add nodes
+                self.mode = AppMode::BatchNodeCreation;
+                self.batch_node_count = "3".to_string(); // Default to 3 nodes
+            }
+            KeyCode::Char('+') => {
+                // Quick add single node
+                self.quick_add_node().await?;
+            }
+            KeyCode::Char('D') => {
+                // Auto-discover and join local nodes
+                self.auto_discover_nodes().await?;
+            }
             _ => {}
         }
         Ok(())
@@ -2313,6 +2434,122 @@ impl App {
                 }
             }
         }
+        Ok(())
+    }
+    
+    async fn handle_batch_node_creation_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
+        use crossterm::event::KeyCode;
+        
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = AppMode::NodeList;
+                self.batch_node_count = "3".to_string();
+            }
+            KeyCode::Enter => {
+                // Execute batch creation
+                if let Ok(count) = self.batch_node_count.parse::<u32>() {
+                    if count > 0 && count <= 10 {
+                        self.batch_add_nodes(count).await?;
+                        self.mode = AppMode::NodeList;
+                    } else {
+                        self.error_message = Some("Node count must be between 1 and 10".to_string());
+                    }
+                } else {
+                    self.error_message = Some("Invalid node count".to_string());
+                }
+            }
+            KeyCode::Backspace => {
+                self.batch_node_count.pop();
+            }
+            KeyCode::Char(c) if c.is_numeric() => {
+                if self.batch_node_count.len() < 2 {
+                    self.batch_node_count.push(c);
+                }
+            }
+            _ => {}
+        }
+        
+        Ok(())
+    }
+    
+    /// Batch add multiple nodes at once
+    async fn batch_add_nodes(&mut self, count: u32) -> BlixardResult<()> {
+        let start_id = if self.nodes.is_empty() {
+            2
+        } else {
+            self.nodes.iter().map(|n| n.id).max().unwrap_or(1) + 1
+        };
+        
+        let mut successful_adds = 0;
+        let mut failed_adds = Vec::new();
+        
+        for i in 0..count {
+            let node_id = start_id + i as u64;
+            let port = 7000 + node_id;
+            let bind_address = format!("127.0.0.1:{}", port);
+            
+            if let Some(client) = &mut self.vm_client {
+                match client.join_cluster(node_id, &bind_address).await {
+                    Ok(_) => {
+                        successful_adds += 1;
+                        self.add_event(EventLevel::Info, "Node".to_string(), 
+                            format!("Added node {} at {}", node_id, bind_address));
+                    }
+                    Err(e) => {
+                        failed_adds.push((node_id, e.to_string()));
+                        self.add_event(EventLevel::Error, "Node".to_string(), 
+                            format!("Failed to add node {}: {}", node_id, e));
+                    }
+                }
+            }
+        }
+        
+        if successful_adds > 0 {
+            self.refresh_node_list().await?;
+            self.status_message = Some(format!("Successfully added {} nodes", successful_adds));
+        }
+        
+        if !failed_adds.is_empty() {
+            let failed_list = failed_adds.iter()
+                .map(|(id, _)| format!("{}", id))
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.error_message = Some(format!("Failed to add nodes: {}", failed_list));
+        }
+        
+        Ok(())
+    }
+    
+    /// Quick add node with auto-generated settings
+    async fn quick_add_node(&mut self) -> BlixardResult<()> {
+        // Find the next available node ID
+        let next_node_id = if self.nodes.is_empty() {
+            2 // Start with node 2 (assuming node 1 is the initial node)
+        } else {
+            self.nodes.iter().map(|n| n.id).max().unwrap_or(1) + 1
+        };
+        
+        // Generate port based on node ID (7000 + node_id)
+        let port = 7000 + next_node_id;
+        let bind_address = format!("127.0.0.1:{}", port);
+        
+        // Try to join the cluster
+        if let Some(client) = &mut self.vm_client {
+            match client.join_cluster(next_node_id, &bind_address).await {
+                Ok(message) => {
+                    self.status_message = Some(format!("Quick added node {} at {}: {}", next_node_id, bind_address, message));
+                    self.add_event(EventLevel::Info, "Node".to_string(), format!("Quick added node {} at {}", next_node_id, bind_address));
+                    self.refresh_node_list().await?;
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("Failed to quick add node: {}", e));
+                    self.add_event(EventLevel::Error, "Node".to_string(), format!("Failed to quick add node {}: {}", next_node_id, e));
+                }
+            }
+        } else {
+            self.error_message = Some("Not connected to cluster".to_string());
+        }
+        
         Ok(())
     }
     

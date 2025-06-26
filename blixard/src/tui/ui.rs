@@ -73,6 +73,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::ClusterDiscovery => render_cluster_discovery(f, app),
         AppMode::ConfirmDialog => render_confirm_dialog(f, app),
         AppMode::LogViewer => render_log_viewer(f, app),
+        AppMode::BatchNodeCreation => render_batch_node_creation_dialog(f, app),
         _ => {}
     }
     
@@ -931,6 +932,7 @@ fn render_help(f: &mut Frame, area: Rect, _app: &App) {
         Line::from("📊 Dashboard:"),
         Line::from("  c            - Create new VM"),
         Line::from("  n            - Add new node"),
+        Line::from("  +            - Quick add node (auto-config)"),
         Line::from("  s            - Show cluster status"),
         Line::from("  C            - Discover clusters"),
         Line::from("  N            - Create new cluster"),
@@ -944,7 +946,10 @@ fn render_help(f: &mut Frame, area: Rect, _app: &App) {
         Line::from("  ↑/↓ or j/k   - Navigate list"),
         Line::from(""),
         Line::from("🔗 Node Management:"),
-        Line::from("  a            - Add node"),
+        Line::from("  a            - Add node (manual)"),
+        Line::from("  +            - Quick add single node"),
+        Line::from("  b            - Batch add multiple nodes"),
+        Line::from("  D            - Auto-discover local nodes"),
         Line::from("  t            - Select from node templates"),
         Line::from("  d            - Destroy selected node"),
         Line::from("  r            - Restart selected node"),
@@ -1435,6 +1440,79 @@ fn render_confirm_dialog(f: &mut Frame, app: &App) {
         f.render_widget(no_button, button_chunks[0]);
         f.render_widget(yes_button, button_chunks[1]);
     }
+}
+
+fn render_batch_node_creation_dialog(f: &mut Frame, app: &App) {
+    let area = centered_rect(50, 30, f.size());
+    
+    f.render_widget(Clear, area);
+    
+    let block = Block::default()
+        .title(" 🔢 Batch Add Nodes ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow));
+    
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    
+    // Create layout for the dialog content
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(2)
+        .constraints([
+            Constraint::Length(2),  // Instruction
+            Constraint::Length(3),  // Input field
+            Constraint::Length(2),  // Status
+            Constraint::Min(1),     // Spacer
+            Constraint::Length(2),  // Help text
+        ])
+        .split(inner);
+    
+    // Instruction
+    let instruction = Paragraph::new("How many nodes would you like to add?")
+        .style(Style::default().fg(Color::White))
+        .alignment(Alignment::Center);
+    f.render_widget(instruction, chunks[0]);
+    
+    // Input field
+    let input_text = format!("{}_", app.batch_node_count);
+    let input = Paragraph::new(input_text)
+        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Gray)))
+        .alignment(Alignment::Center);
+    f.render_widget(input, chunks[1]);
+    
+    // Status message
+    let status = if let Some(ref msg) = app.error_message {
+        Paragraph::new(msg.as_str())
+            .style(Style::default().fg(Color::Red))
+            .alignment(Alignment::Center)
+    } else {
+        let next_id = if app.nodes.is_empty() {
+            2
+        } else {
+            app.nodes.iter().map(|n| n.id).max().unwrap_or(1) + 1
+        };
+        let count = app.batch_node_count.parse::<u32>().unwrap_or(0);
+        let end_id = next_id + count as u64 - 1;
+        let msg = if count > 0 {
+            format!("Will create nodes {} through {}", next_id, end_id)
+        } else {
+            String::new()
+        };
+        Paragraph::new(msg)
+            .style(Style::default().fg(Color::Green))
+            .alignment(Alignment::Center)
+    };
+    f.render_widget(status, chunks[2]);
+    
+    // Help text
+    let help = Paragraph::new("Enter: Create nodes | Esc: Cancel")
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    f.render_widget(help, chunks[4]);
 }
 
 fn render_log_viewer(f: &mut Frame, _app: &App) {
