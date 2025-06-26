@@ -1,7 +1,9 @@
-pub mod app;
-pub mod ui;
 pub mod events;
 pub mod vm_client;
+
+// Modern TUI implementation  
+pub mod app_v2;
+pub mod ui_v2;
 
 pub use events::Event;
 pub use vm_client::VmClient;

@@ -94,7 +94,8 @@ enum Commands {
         force: bool,
     },
     /// Launch TUI (Terminal User Interface) for VM management
-    Tui,
+    Tui {
+    },
 }
 
 #[derive(clap::Subcommand)]
@@ -362,7 +363,7 @@ async fn main() -> BlixardResult<()> {
         Commands::Reset { data_dir, vm_config_dir, vm_data_dir, force } => {
             handle_reset_command(&data_dir, &vm_config_dir, &vm_data_dir, force).await?;
         }
-        Commands::Tui => {
+        Commands::Tui {} => {
             handle_tui_command().await?;
         }
     }
@@ -945,6 +946,7 @@ async fn start_server_background(
     start_grpc_server(shared_state, actual_bind_address).await
 }
 
+
 #[cfg(not(madsim))]
 async fn handle_tui_command() -> BlixardResult<()> {
     use crossterm::{
@@ -974,19 +976,17 @@ async fn handle_tui_command() -> BlixardResult<()> {
         message: format!("Failed to create terminal: {}", e),
     })?;
 
-    // Create app and event handler
-    let mut app = tui::app::App::new().await?;
+    // Create modern app and event handler
+    let mut app = tui::app_v2::App::new().await?;
     let mut event_handler = tui::events::EventHandler::new(250); // 250ms tick rate
 
-    // Only refresh VM list if we have a server connection
-    if app.vm_client.is_some() {
-        app.refresh_vm_list().await?;
-    }
+    // Initial data refresh
+    let _ = app.refresh_all_data().await;
 
     // Main loop
     let result = loop {
-        // Draw UI
-        terminal.draw(|f| tui::ui::render(f, &app)).map_err(|e| {
+        // Draw modern UI
+        terminal.draw(|f| tui::ui_v2::render(f, &app)).map_err(|e| {
             BlixardError::Internal {
                 message: format!("Failed to draw terminal: {}", e),
             }
@@ -1026,6 +1026,12 @@ async fn handle_tui_command() -> BlixardResult<()> {
     })?;
 
     result
+}
+
+#[cfg(madsim)]
+async fn handle_modern_tui_command() -> BlixardResult<()> {
+    eprintln!("Modern TUI is not available in simulation mode");
+    std::process::exit(1);
 }
 
 #[cfg(madsim)]

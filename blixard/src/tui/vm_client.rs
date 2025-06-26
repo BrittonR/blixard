@@ -1,5 +1,5 @@
 use crate::BlixardResult;
-use super::app::{VmInfo, ClusterInfo, ClusterResourceInfo, NodeResourceInfo, PlacementStrategy};
+use super::app_v2::{VmInfo, PlacementStrategy, ClusterInfo, ClusterResourceInfo, NodeResourceInfo, ClusterNodeInfo};
 use blixard_core::{
     proto::{
         cluster_service_client::ClusterServiceClient,
@@ -61,6 +61,9 @@ impl VmClient {
                 uptime: None, // TODO: Get from VM status
                 cpu_usage: None, // TODO: Get from VM metrics
                 memory_usage: None, // TODO: Get from VM metrics
+                placement_strategy: None, // TODO: Add to proto
+                created_at: None, // TODO: Add to proto
+                config_path: None, // TODO: Add to proto
             });
         }
 
@@ -187,6 +190,9 @@ impl VmClient {
             uptime: None, // TODO: Get from VM status
             cpu_usage: None, // TODO: Get from VM metrics
             memory_usage: None, // TODO: Get from VM metrics
+            placement_strategy: None, // TODO: Add to proto
+            created_at: None, // TODO: Add to proto
+            config_path: None, // TODO: Add to proto
         }))
     }
 
@@ -201,7 +207,7 @@ impl VmClient {
         let status = response.into_inner();
         
         // Map all nodes with detailed info
-        let nodes: Vec<crate::tui::app::NodeInfo> = status.nodes
+        let nodes: Vec<ClusterNodeInfo> = status.nodes
             .iter()
             .map(|node| {
                 let state_name = match node.state {
@@ -211,7 +217,7 @@ impl VmClient {
                     3 => "Leader",
                     _ => "Invalid",
                 };
-                crate::tui::app::NodeInfo {
+                ClusterNodeInfo {
                     id: node.id,
                     address: node.address.clone(),
                     state: state_name.to_string(),
