@@ -26,8 +26,11 @@ pub struct VmInfo {
     pub uptime: Option<String>,
     pub cpu_usage: Option<f32>,
     pub memory_usage: Option<f32>,
+    #[allow(dead_code)]
     pub placement_strategy: Option<String>,
+    #[allow(dead_code)]
     pub created_at: Option<String>,
+    #[allow(dead_code)]
     pub config_path: Option<String>,
 }
 
@@ -41,6 +44,7 @@ pub struct NodeInfo {
     pub memory_usage: f32,
     pub vm_count: u32,
     pub last_seen: Option<Instant>,
+    #[allow(dead_code)]
     pub version: Option<String>,
 }
 
@@ -49,6 +53,7 @@ pub enum NodeStatus {
     Healthy,
     Warning,
     Critical,
+    #[allow(dead_code)]
     Offline,
 }
 
@@ -56,7 +61,9 @@ pub enum NodeStatus {
 pub enum NodeRole {
     Leader,
     Follower,
+    #[allow(dead_code)]
     Candidate,
+    #[allow(dead_code)]
     Unknown,
 }
 
@@ -72,6 +79,7 @@ pub struct ClusterMetrics {
     pub used_memory: u64,
     pub leader_id: Option<u64>,
     pub raft_term: u64,
+    #[allow(dead_code)]
     pub last_updated: Instant,
 }
 
@@ -81,6 +89,7 @@ pub struct SystemEvent {
     pub level: EventLevel,
     pub source: String,
     pub message: String,
+    #[allow(dead_code)]
     pub details: Option<String>,
 }
 
@@ -1150,12 +1159,14 @@ impl App {
     }
     
     /// Set VM filter and apply it
+    #[allow(dead_code)]
     pub fn set_vm_filter(&mut self, filter: VmFilter) {
         self.vm_filter = filter;
         self.apply_vm_filter();
     }
     
     /// Set node filter and apply it
+    #[allow(dead_code)]
     pub fn set_node_filter(&mut self, filter: NodeFilter) {
         self.node_filter = filter;
         self.apply_node_filter();
@@ -1807,6 +1818,7 @@ impl App {
     }
     
     /// Scale cluster by adding nodes
+    #[allow(dead_code)]
     pub async fn scale_cluster(&mut self, target_node_count: u32) -> BlixardResult<()> {
         let selected_cluster = self.selected_cluster.clone();
         
@@ -2933,6 +2945,7 @@ impl App {
 }
 
 impl PlacementStrategy {
+    #[allow(dead_code)]
     pub fn as_str(&self) -> &'static str {
         match self {
             PlacementStrategy::MostAvailable => "Most Available",

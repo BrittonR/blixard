@@ -23,7 +23,7 @@ async fn test_node_can_be_shared_via_arc() {
             vm_backend: "mock".to_string(),
     };
     
-    let mut node = Node::new(config);
+    let node = Node::new(config);
     let shared = node.shared();
     
     // This should work now - we can share the state across threads

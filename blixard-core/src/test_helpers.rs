@@ -377,7 +377,7 @@ impl TestNodeBuilder {
         let addr: SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
         
         // Initialize global config for tests if not already done
-        use crate::config_v2::{Config, ConfigBuilder};
+        use crate::config_v2::ConfigBuilder;
         use crate::config_global;
         
         if !config_global::is_initialized() {

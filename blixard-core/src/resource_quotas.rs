@@ -8,8 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
-use crate::error::{BlixardError, BlixardResult};
+use std::time::SystemTime;
 
 /// Tenant identifier for resource quota management
 pub type TenantId = String;

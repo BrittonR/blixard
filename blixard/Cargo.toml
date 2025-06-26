@@ -48,6 +48,9 @@ crossterm = "0.28"
 default = []
 test-helpers = ["blixard-core/test-helpers"]
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(madsim)'] }
+
 [[bin]]
 name = "blixard"
 path = "src/main.rs"

@@ -358,7 +358,7 @@ mod flake_validation_tests {
 /// Tests for flake template correctness
 #[cfg(test)]
 mod template_tests {
-    use super::*;
+    
     
     /// Test that the vm-flake.nix template is syntactically correct
     #[tokio::test]

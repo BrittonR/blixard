@@ -9,10 +9,9 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 
 use crate::{
-    error::{BlixardError, BlixardResult},
+    error::BlixardResult,
     test_helpers::{TestCluster, TestNode},
     proto::cluster_service_client::ClusterServiceClient,
-    node_shared::SharedNodeState,
 };
 use tonic::transport::Channel;
 
@@ -94,7 +93,7 @@ impl ConcurrentTestCluster {
     pub async fn shutdown(self) {
         // Only shutdown if this is the last reference
         if let Ok(inner) = Arc::try_unwrap(self.inner) {
-            let mut cluster = inner.into_inner();
+            let cluster = inner.into_inner();
             cluster.shutdown().await;
         }
     }

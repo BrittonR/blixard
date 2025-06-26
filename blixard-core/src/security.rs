@@ -10,13 +10,12 @@
 use crate::error::{BlixardError, BlixardResult};
 use crate::config_v2::{SecurityConfig, TlsConfig, AuthConfig};
 use std::sync::Arc;
-use std::path::{Path, PathBuf};
-use std::fs;
+use std::path::Path;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 use tokio::sync::RwLock;
 use tonic::transport::{Certificate, Identity, ServerTlsConfig, ClientTlsConfig};
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn};
 
 /// Security manager for handling all security operations
 #[derive(Debug)]
@@ -670,7 +669,7 @@ pub fn default_dev_security_config() -> SecurityConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
+    
     
     #[tokio::test]
     async fn test_security_manager_creation() {

@@ -1,7 +1,7 @@
 use blixard_vm::MicrovmBackend;
 use blixard_core::{
     vm_backend::VmBackend,
-    types::{VmConfig, VmStatus},
+    types::VmConfig,
 };
 use std::time::{Duration, Instant};
 use tempfile::TempDir;

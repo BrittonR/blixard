@@ -2,7 +2,7 @@
 
 use blixard_core::proto::{
     cluster_service_client::ClusterServiceClient,
-    CreateVmRequest, StartVmRequest,
+    CreateVmRequest,
 };
 
 #[tokio::main]

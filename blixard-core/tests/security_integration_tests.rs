@@ -10,7 +10,6 @@
 use blixard_core::{
     security::{SecurityManager, Permission, default_dev_security_config},
     grpc_security::GrpcSecurityMiddleware,
-    error::BlixardError,
     config_v2::{SecurityConfig, TlsConfig, AuthConfig},
 };
 use std::sync::Arc;

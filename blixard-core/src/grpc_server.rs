@@ -10,7 +10,7 @@ use crate::{
     raft_manager::{TaskSpec, ResourceRequirements},
     metrics_otel::{metrics, Timer, attributes},
     tracing_otel,
-    resource_quotas::{ResourceRequest, ApiOperation, QuotaViolation},
+    resource_quotas::{ResourceRequest, ApiOperation},
     grpc_security::{GrpcSecurityMiddleware, SecurityContext},
     security::Permission,
     proto::{
@@ -23,9 +23,6 @@ use crate::{
         ClusterStatusResponse, RaftMessageRequest, RaftMessageResponse, TaskRequest, TaskResponse,
         TaskStatusRequest, TaskStatusResponse, TaskStatus,
         GetRaftStatusRequest, GetRaftStatusResponse, ProposeTaskRequest, ProposeTaskResponse,
-        CreateVmWithSchedulingRequest, CreateVmWithSchedulingResponse, ScheduleVmPlacementRequest,
-        ScheduleVmPlacementResponse, ClusterResourceSummaryRequest, ClusterResourceSummaryResponse,
-        PlacementStrategy, ClusterResourceSummary, NodeResourceUsage, WorkerCapabilities,
     },
     authenticate_grpc, optional_authenticate_grpc,
 };

@@ -7,6 +7,7 @@ pub enum Event {
     Key(KeyEvent),
     Mouse(MouseEvent),
     Tick,
+    #[allow(dead_code)]
     LogLine(String),
 }
 
@@ -67,6 +68,7 @@ impl EventHandler {
     }
 
     /// Get a sender for custom events
+    #[allow(dead_code)]
     pub fn sender(&self) -> mpsc::UnboundedSender<Event> {
         self.sender.clone()
     }

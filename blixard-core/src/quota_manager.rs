@@ -6,16 +6,15 @@
 //! - Provides rate limiting for API operations
 //! - Manages per-tenant and per-node limits
 
-use crate::error::{BlixardError, BlixardResult};
+use crate::error::BlixardResult;
 use crate::resource_quotas::*;
 use crate::storage::Storage;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::time::{interval, Interval};
-use tracing::{debug, warn, error, info};
-use serde::{Deserialize, Serialize};
+use tracing::{debug, warn, info};
 
 /// Time window for rate limiting calculations
 const RATE_LIMIT_WINDOW_SECS: u64 = 60;

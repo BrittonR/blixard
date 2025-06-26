@@ -153,6 +153,7 @@ impl VmClient {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn get_vm_status(&mut self, name: &str) -> BlixardResult<Option<VmInfo>> {
         let request = tonic::Request::new(GetVmStatusRequest {
             name: name.to_string(),
@@ -244,6 +245,7 @@ impl VmClient {
     }
     
     /// Create VM with intelligent scheduling
+    #[allow(dead_code)]
     pub async fn create_vm_with_scheduling(
         &mut self, 
         name: &str, 
@@ -282,6 +284,7 @@ impl VmClient {
     }
     
     /// Get cluster resource summary
+    #[allow(dead_code)]
     pub async fn get_cluster_resources(&mut self) -> BlixardResult<ClusterResourceInfo> {
         let request = tonic::Request::new(ClusterResourceSummaryRequest {});
         
@@ -333,6 +336,7 @@ impl VmClient {
     }
     
     /// Schedule VM placement (dry run)
+    #[allow(dead_code)]
     pub async fn schedule_vm_placement(
         &mut self,
         name: &str,

@@ -32,6 +32,7 @@ const SUCCESS_COLOR: Color = Color::Green;
 const WARNING_COLOR: Color = Color::Yellow;
 const ERROR_COLOR: Color = Color::Red;
 const INFO_COLOR: Color = Color::Magenta;
+#[allow(dead_code)]
 const BACKGROUND_COLOR: Color = Color::Black;
 const TEXT_COLOR: Color = Color::White;
 

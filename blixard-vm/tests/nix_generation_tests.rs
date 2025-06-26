@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
     use blixard_vm::types::*;
-    use blixard_vm::{BlixardResult, NixFlakeGenerator};
-    use std::path::PathBuf;
+    use blixard_vm::NixFlakeGenerator;
+    
     use tempfile::TempDir;
 
     #[test]

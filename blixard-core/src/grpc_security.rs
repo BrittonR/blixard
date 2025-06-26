@@ -8,8 +8,8 @@
 use crate::security::{SecurityManager, AuthResult, Permission, extract_auth_token};
 use crate::error::{BlixardError, BlixardResult};
 use std::sync::Arc;
-use tonic::{Request, Response, Status, Extensions};
-use tracing::{debug, warn, info};
+use tonic::{Request, Status};
+use tracing::{debug, warn};
 
 /// Security middleware for gRPC services
 #[derive(Clone)]
@@ -160,7 +160,7 @@ impl From<AuthResult> for SecurityContext {
 mod tests {
     use super::*;
     use crate::security::{default_dev_security_config, Permission};
-    use tonic::metadata::{MetadataMap, MetadataValue};
+    use tonic::metadata::MetadataMap;
     
     #[tokio::test]
     async fn test_authentication_middleware() {
@@ -169,7 +169,7 @@ mod tests {
         let middleware = GrpcSecurityMiddleware::new(security_manager);
         
         // Create a mock request without authentication
-        let mut metadata = MetadataMap::new();
+        let metadata = MetadataMap::new();
         let request = Request::from_parts(metadata, Extensions::new(), ());
         
         // Should succeed with disabled authentication

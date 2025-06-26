@@ -107,8 +107,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nStarting metrics server on http://0.0.0.0:9090/metrics");
     
     use std::net::SocketAddr;
-    use tokio::net::TcpListener;
-    use hyper::{Body, Request, Response, Server, StatusCode};
+    
+    use hyper::{Body, Request, Response, Server};
     use hyper::service::{make_service_fn, service_fn};
     
     async fn serve_metrics(_req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
