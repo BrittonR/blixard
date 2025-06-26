@@ -21,7 +21,8 @@ use ratatui::{
 
 use super::app_v2::{
     App, AppTab, AppMode, VmInfo, NodeInfo, NodeStatus, NodeRole, 
-    EventLevel, PlacementStrategy, CreateVmForm, CreateNodeForm, ConfirmDialog
+    EventLevel, PlacementStrategy, CreateVmForm, CreateNodeForm, ConfirmDialog,
+    CreateVmField, CreateNodeField
 };
 use blixard_core::types::VmStatus;
 use std::time::Instant;
@@ -722,6 +723,13 @@ fn render_help(f: &mut Frame, area: Rect, app: &App) {
         Line::from("  r            - Refresh all data"),
         Line::from("  1-5          - Switch between tabs"),
         Line::from(""),
+        Line::from("🖱️ Mouse Support:"),
+        Line::from("  Left Click   - Switch tabs / Select items"),
+        Line::from("  Scroll Up    - Navigate up in lists"),
+        Line::from("  Scroll Down  - Navigate down in lists"),
+        Line::from("  Click Tabs   - Switch between sections"),
+        Line::from("  Click Lists  - Select VMs/Nodes"),
+        Line::from(""),
         Line::from("📊 Dashboard:"),
         Line::from("  c            - Create new VM"),
         Line::from("  n            - Add new node"),
@@ -740,6 +748,8 @@ fn render_help(f: &mut Frame, area: Rect, app: &App) {
         Line::from("  ↑/↓          - Navigate list"),
         Line::from(""),
         Line::from("💡 Tips:"),
+        Line::from("  • Mouse compatible! Click anywhere to interact"),
+        Line::from("  • Watch live shortcuts in bottom-right corner"),
         Line::from("  • Use daemon mode (-d) for background nodes"),
         Line::from("  • Monitor real-time metrics in Monitoring tab"),
         Line::from("  • Configure quotas and security in Config tab"),
@@ -757,6 +767,16 @@ fn render_help(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
+    // Split status bar into left (status) and right (shortcuts)
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(70),  // Status info
+            Constraint::Percentage(30),  // Shortcuts
+        ])
+        .split(area);
+    
+    // Left side: Status information
     let connection_status = if app.vm_client.is_some() {
         "🟢 Connected"
     } else {
@@ -787,18 +807,48 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         Style::default().fg(TEXT_COLOR)
     };
     
-    let paragraph = Paragraph::new(status_text)
+    let status_paragraph = Paragraph::new(status_text)
         .style(status_style)
-        .block(Block::default().borders(Borders::ALL))
-        .alignment(Alignment::Center);
+        .block(Block::default().borders(Borders::ALL).title("Status"))
+        .alignment(Alignment::Left);
     
-    f.render_widget(paragraph, area);
+    f.render_widget(status_paragraph, chunks[0]);
+    
+    // Right side: Keyboard shortcuts
+    let shortcuts = get_current_shortcuts(app);
+    let shortcuts_paragraph = Paragraph::new(shortcuts)
+        .style(Style::default().fg(Color::Gray))
+        .block(Block::default().borders(Borders::ALL).title("Keys"))
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: true });
+    
+    f.render_widget(shortcuts_paragraph, chunks[1]);
+}
+
+fn get_current_shortcuts(app: &App) -> String {
+    match app.mode {
+        AppMode::VmList => {
+            "↑↓ Select  Enter View  C Create  D Delete  Q Quit".to_string()
+        }
+        AppMode::NodeList => {
+            "↑↓ Select  Enter View  A Add  Q Quit".to_string()
+        }
+        AppMode::CreateVmForm | AppMode::CreateNodeForm => {
+            "Tab Next  Shift+Tab Prev  Enter Submit  Esc Cancel".to_string()
+        }
+        AppMode::ConfirmDialog => {
+            "←→ Toggle  Enter Confirm  Esc Cancel".to_string()
+        }
+        _ => {
+            "1-5 Tabs  R Refresh  H Help  Q Quit  Mouse Click".to_string()
+        }
+    }
 }
 
 // Popup/Overlay rendering functions
 
 fn render_create_vm_form(f: &mut Frame, app: &App) {
-    let area = centered_rect(60, 20, f.size());
+    let area = centered_rect(80, 24, f.size());
     f.render_widget(Clear, area);
     
     let block = Block::default()
@@ -808,31 +858,213 @@ fn render_create_vm_form(f: &mut Frame, app: &App) {
     
     f.render_widget(block, area);
     
-    // TODO: Implement form fields
-    let content = Paragraph::new("VM Creation Form\n\nPress Esc to cancel")
-        .block(Block::default().borders(Borders::NONE))
-        .alignment(Alignment::Center);
+    let inner_area = area.inner(&Margin { vertical: 1, horizontal: 2 });
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2), // Name field
+            Constraint::Length(2), // vCPUs field
+            Constraint::Length(2), // Memory field
+            Constraint::Length(2), // Config Path field
+            Constraint::Length(2), // Placement Strategy field
+            Constraint::Length(2), // Node ID field
+            Constraint::Length(2), // Auto Start field
+            Constraint::Length(3), // Submit button
+            Constraint::Min(0),    // Remaining space
+        ])
+        .split(inner_area);
     
-    f.render_widget(content, area.inner(&Margin { vertical: 1, horizontal: 1 }));
+    let form = &app.create_vm_form;
+    
+    // Name field
+    let name_style = if form.current_field == CreateVmField::Name {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let name_field = Paragraph::new(form.name.as_str())
+        .style(name_style)
+        .block(Block::default().borders(Borders::ALL).title("VM Name *"));
+    f.render_widget(name_field, chunks[0]);
+    
+    // vCPUs field
+    let vcpus_style = if form.current_field == CreateVmField::Vcpus {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let vcpus_field = Paragraph::new(form.vcpus.as_str())
+        .style(vcpus_style)
+        .block(Block::default().borders(Borders::ALL).title("vCPUs *"));
+    f.render_widget(vcpus_field, chunks[1]);
+    
+    // Memory field
+    let memory_style = if form.current_field == CreateVmField::Memory {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let memory_field = Paragraph::new(form.memory.as_str())
+        .style(memory_style)
+        .block(Block::default().borders(Borders::ALL).title("Memory (MB) *"));
+    f.render_widget(memory_field, chunks[2]);
+    
+    // Config Path field
+    let config_style = if form.current_field == CreateVmField::ConfigPath {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let config_field = Paragraph::new(form.config_path.as_str())
+        .style(config_style)
+        .block(Block::default().borders(Borders::ALL).title("Config Path (optional)"));
+    f.render_widget(config_field, chunks[3]);
+    
+    // Placement Strategy field
+    let strategy_style = if form.current_field == CreateVmField::PlacementStrategy {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let strategy_text = format!("{:?}", form.placement_strategy);
+    let strategy_field = Paragraph::new(strategy_text)
+        .style(strategy_style)
+        .block(Block::default().borders(Borders::ALL).title("Placement Strategy (↑↓ to change)"));
+    f.render_widget(strategy_field, chunks[4]);
+    
+    // Node ID field
+    let node_id_style = if form.current_field == CreateVmField::NodeId {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let node_id_display = form.node_id.map(|id| id.to_string()).unwrap_or_else(|| "".to_string());
+    let node_id_field = Paragraph::new(node_id_display)
+        .style(node_id_style)
+        .block(Block::default().borders(Borders::ALL).title("Node ID (optional, leave empty for auto)"));
+    f.render_widget(node_id_field, chunks[5]);
+    
+    // Auto Start field
+    let auto_start_style = if form.current_field == CreateVmField::AutoStart {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let auto_start_text = if form.auto_start { "Yes" } else { "No" };
+    let auto_start_field = Paragraph::new(auto_start_text)
+        .style(auto_start_style)
+        .block(Block::default().borders(Borders::ALL).title("Auto Start (↑↓ to toggle)"));
+    f.render_widget(auto_start_field, chunks[6]);
+    
+    // Submit button
+    let submit_button = Paragraph::new("[ Press Enter to Create VM ]")
+        .style(Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD))
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::ALL));
+    f.render_widget(submit_button, chunks[7]);
 }
 
 fn render_create_node_form(f: &mut Frame, app: &App) {
-    let area = centered_rect(60, 20, f.size());
+    let area = centered_rect(80, 20, f.size());
     f.render_widget(Clear, area);
     
     let block = Block::default()
-        .title("🔗 Add New Node")
+        .title("🔗 Join Node to Cluster")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(PRIMARY_COLOR));
     
     f.render_widget(block, area);
     
-    // TODO: Implement form fields
-    let content = Paragraph::new("Node Creation Form\n\nPress Esc to cancel")
-        .block(Block::default().borders(Borders::NONE))
-        .alignment(Alignment::Center);
+    let inner_area = area.inner(&Margin { vertical: 1, horizontal: 2 });
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2), // Node ID field
+            Constraint::Length(2), // Bind Address field
+            Constraint::Length(2), // Data Dir field
+            Constraint::Length(2), // Peers field
+            Constraint::Length(2), // VM Backend field
+            Constraint::Length(2), // Daemon Mode field
+            Constraint::Length(3), // Submit button
+            Constraint::Min(0),    // Remaining space
+        ])
+        .split(inner_area);
     
-    f.render_widget(content, area.inner(&Margin { vertical: 1, horizontal: 1 }));
+    let form = &app.create_node_form;
+    
+    // Node ID field
+    let id_style = if form.current_field == CreateNodeField::Id {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let id_field = Paragraph::new(form.id.as_str())
+        .style(id_style)
+        .block(Block::default().borders(Borders::ALL).title("Node ID *"));
+    f.render_widget(id_field, chunks[0]);
+    
+    // Bind Address field
+    let bind_style = if form.current_field == CreateNodeField::BindAddress {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let bind_field = Paragraph::new(form.bind_address.as_str())
+        .style(bind_style)
+        .block(Block::default().borders(Borders::ALL).title("Bind Address * (host:port, e.g. 127.0.0.1:7003)"));
+    f.render_widget(bind_field, chunks[1]);
+    
+    // Data Dir field
+    let data_dir_style = if form.current_field == CreateNodeField::DataDir {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let data_dir_field = Paragraph::new(form.data_dir.as_str())
+        .style(data_dir_style)
+        .block(Block::default().borders(Borders::ALL).title("Data Directory (optional)"));
+    f.render_widget(data_dir_field, chunks[2]);
+    
+    // Peers field
+    let peers_style = if form.current_field == CreateNodeField::Peers {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let peers_field = Paragraph::new(form.peers.as_str())
+        .style(peers_style)
+        .block(Block::default().borders(Borders::ALL).title("Peers (optional, comma-separated addresses)"));
+    f.render_widget(peers_field, chunks[3]);
+    
+    // VM Backend field
+    let backend_style = if form.current_field == CreateNodeField::VmBackend {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let backend_field = Paragraph::new(form.vm_backend.as_str())
+        .style(backend_style)
+        .block(Block::default().borders(Borders::ALL).title("VM Backend (microvm, mock, etc.)"));
+    f.render_widget(backend_field, chunks[4]);
+    
+    // Daemon Mode field
+    let daemon_style = if form.current_field == CreateNodeField::DaemonMode {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let daemon_text = if form.daemon_mode { "Yes" } else { "No" };
+    let daemon_field = Paragraph::new(daemon_text)
+        .style(daemon_style)
+        .block(Block::default().borders(Borders::ALL).title("Daemon Mode (↑↓ to toggle)"));
+    f.render_widget(daemon_field, chunks[5]);
+    
+    // Submit button
+    let submit_button = Paragraph::new("[ Press Enter to Join Cluster ]")
+        .style(Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD))
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::ALL));
+    f.render_widget(submit_button, chunks[6]);
 }
 
 fn render_confirm_dialog(f: &mut Frame, app: &App) {

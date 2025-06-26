@@ -1,10 +1,11 @@
-use crossterm::event::{self, Event as CrosstermEvent, KeyEvent};
+use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, MouseEvent};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone)]
 pub enum Event {
     Key(KeyEvent),
+    Mouse(MouseEvent),
     Tick,
     LogLine(String),
 }
@@ -43,6 +44,7 @@ impl EventHandler {
                 message: format!("Failed to read event: {}", e),
             })? {
                 CrosstermEvent::Key(key) => return Ok(Event::Key(key)),
+                CrosstermEvent::Mouse(mouse) => return Ok(Event::Mouse(mouse)),
                 _ => {}
             }
         }

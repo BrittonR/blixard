@@ -349,7 +349,31 @@ impl Default for ClusterMetrics {
 impl Default for CreateVmForm {
     fn default() -> Self {
         Self {
-            name: String::new(),
+            name: "my-vm".to_string(),
+            vcpus: "2".to_string(),
+            memory: "1024".to_string(),
+            config_path: String::new(),
+            placement_strategy: PlacementStrategy::MostAvailable,
+            node_id: None,
+            auto_start: true,
+            current_field: CreateVmField::Name,
+        }
+    }
+}
+
+impl CreateVmForm {
+    pub fn new_with_smart_defaults(existing_vms: &[VmInfo]) -> Self {
+        // Generate a unique VM name
+        let mut name_counter = 1;
+        let mut vm_name = format!("vm-{}", name_counter);
+        
+        while existing_vms.iter().any(|vm| vm.name == vm_name) {
+            name_counter += 1;
+            vm_name = format!("vm-{}", name_counter);
+        }
+        
+        Self {
+            name: vm_name,
             vcpus: "2".to_string(),
             memory: "1024".to_string(),
             config_path: String::new(),
@@ -364,12 +388,37 @@ impl Default for CreateVmForm {
 impl Default for CreateNodeForm {
     fn default() -> Self {
         Self {
-            id: String::new(),
-            bind_address: "127.0.0.1:7001".to_string(),
-            data_dir: "./data".to_string(),
-            peers: String::new(),
+            id: "2".to_string(),
+            bind_address: "127.0.0.1:7003".to_string(),
+            data_dir: "./data-node2".to_string(),
+            peers: "127.0.0.1:7002".to_string(),
             vm_backend: "microvm".to_string(),
-            daemon_mode: true,
+            daemon_mode: false,
+            current_field: CreateNodeField::Id,
+        }
+    }
+}
+
+impl CreateNodeForm {
+    pub fn new_with_smart_defaults(existing_nodes: &[NodeInfo]) -> Self {
+        // Generate next available node ID
+        let mut node_id = 2; // Start with 2 since 1 is usually the leader
+        while existing_nodes.iter().any(|node| node.id == node_id) {
+            node_id += 1;
+        }
+        
+        // Generate corresponding port (7000 + node_id)
+        let port = 7000 + node_id;
+        let bind_address = format!("127.0.0.1:{}", port);
+        let data_dir = format!("./data-node{}", node_id);
+        
+        Self {
+            id: node_id.to_string(),
+            bind_address,
+            data_dir,
+            peers: "127.0.0.1:7002".to_string(), // Default to connecting to leader
+            vm_backend: "microvm".to_string(),
+            daemon_mode: false,
             current_field: CreateNodeField::Id,
         }
     }
@@ -450,48 +499,86 @@ impl App {
             settings: AppSettings::default(),
         };
         
+        // Add startup event
+        app.add_event(EventLevel::Info, "TUI".to_string(), "Blixard TUI starting up".to_string());
+        
         // Try to connect to local server
+        app.add_event(EventLevel::Info, "Connection".to_string(), "Attempting to connect to cluster at 127.0.0.1:7002".to_string());
         app.try_connect().await;
         
         Ok(app)
     }
     
     pub async fn try_connect(&mut self) {
-        match VmClient::new("127.0.0.1:7001").await {
+        match VmClient::new("127.0.0.1:7002").await {
             Ok(client) => {
                 self.vm_client = Some(client);
                 self.status_message = Some("Connected to cluster".to_string());
                 self.error_message = None;
+                self.add_event(EventLevel::Info, "Connection".to_string(), "Successfully connected to cluster".to_string());
                 
                 // Initial data load
-                let _ = self.refresh_all_data().await;
+                match self.refresh_all_data().await {
+                    Ok(_) => {
+                        self.add_event(EventLevel::Info, "Data".to_string(), "Initial data refresh completed".to_string());
+                    }
+                    Err(e) => {
+                        self.add_event(EventLevel::Error, "Data".to_string(), format!("Initial data refresh failed: {}", e));
+                    }
+                }
             }
             Err(e) => {
                 self.vm_client = None;
                 self.error_message = Some(format!("Failed to connect: {}", e));
                 self.status_message = None;
+                self.add_event(EventLevel::Error, "Connection".to_string(), format!("Failed to connect to cluster: {}", e));
             }
         }
     }
     
     pub async fn refresh_all_data(&mut self) -> BlixardResult<()> {
         if self.vm_client.is_none() {
+            self.add_event(EventLevel::Warning, "Data".to_string(), "Cannot refresh data - no connection to cluster".to_string());
             return Ok(());
         }
         
+        let mut errors = Vec::new();
+        
         // Refresh VMs
-        self.refresh_vm_list().await?;
+        if let Err(e) = self.refresh_vm_list().await {
+            errors.push(format!("VM list: {}", e));
+        }
         
         // Refresh cluster metrics
-        self.refresh_cluster_metrics().await?;
+        if let Err(e) = self.refresh_cluster_metrics().await {
+            errors.push(format!("Cluster metrics: {}", e));
+        }
         
         // Refresh nodes
-        self.refresh_node_list().await?;
+        if let Err(e) = self.refresh_node_list().await {
+            errors.push(format!("Node list: {}", e));
+        }
         
         // Update history
         self.update_metrics_history();
         
         self.last_refresh = Instant::now();
+        
+        if !errors.is_empty() {
+            let error_msg = format!("Data refresh errors: {}", errors.join(", "));
+            self.add_event(EventLevel::Warning, "Data".to_string(), error_msg.clone());
+            return Err(crate::BlixardError::Internal { message: error_msg });
+        }
+        
+        // Log successful refresh with data counts
+        self.add_event(EventLevel::Info, "Data".to_string(), 
+            format!("Refreshed: {} VMs, {} nodes, leader={:?}", 
+                self.vms.len(), 
+                self.nodes.len(), 
+                self.cluster_metrics.leader_id
+            )
+        );
+        
         Ok(())
     }
     
@@ -516,7 +603,9 @@ impl App {
                     self.error_message = None;
                 }
                 Err(e) => {
-                    self.error_message = Some(format!("Failed to refresh VMs: {}", e));
+                    let error_msg = format!("Failed to refresh VMs: {}", e);
+                    self.error_message = Some(error_msg.clone());
+                    return Err(crate::BlixardError::Internal { message: error_msg });
                 }
             }
         }
@@ -543,7 +632,9 @@ impl App {
                     self.error_message = None;
                 }
                 Err(e) => {
-                    self.error_message = Some(format!("Failed to refresh cluster: {}", e));
+                    let error_msg = format!("Failed to refresh cluster: {}", e);
+                    self.error_message = Some(error_msg.clone());
+                    return Err(crate::BlixardError::Internal { message: error_msg });
                 }
             }
         }
@@ -572,7 +663,9 @@ impl App {
                     self.error_message = None;
                 }
                 Err(e) => {
-                    self.error_message = Some(format!("Failed to refresh nodes: {}", e));
+                    let error_msg = format!("Failed to refresh nodes: {}", e);
+                    self.error_message = Some(error_msg.clone());
+                    return Err(crate::BlixardError::Internal { message: error_msg });
                 }
             }
         }
@@ -646,11 +739,16 @@ impl App {
         match event {
             Event::Tick => {
                 if self.should_refresh() {
-                    let _ = self.refresh_all_data().await;
+                    if let Err(e) = self.refresh_all_data().await {
+                        self.add_event(EventLevel::Error, "Refresh".to_string(), format!("Auto-refresh failed: {}", e));
+                    }
                 }
             }
             Event::Key(key) => {
                 self.handle_key_event(key).await?;
+            }
+            Event::Mouse(mouse) => {
+                self.handle_mouse_event(mouse).await?;
             }
             Event::LogLine(_) => {
                 // TODO: Handle log lines for live log viewing
@@ -681,8 +779,16 @@ impl App {
                 return Ok(());
             }
             (KeyCode::Char('r'), KeyModifiers::NONE) => {
-                let _ = self.refresh_all_data().await;
-                self.status_message = Some("Data refreshed".to_string());
+                match self.refresh_all_data().await {
+                    Ok(_) => {
+                        self.status_message = Some("Data refreshed successfully".to_string());
+                        self.error_message = None;
+                    }
+                    Err(e) => {
+                        self.error_message = Some(format!("Refresh failed: {}", e));
+                        self.status_message = None;
+                    }
+                }
                 return Ok(());
             }
             _ => {}
@@ -719,11 +825,11 @@ impl App {
         match key.code {
             KeyCode::Char('c') => {
                 self.mode = AppMode::CreateVmForm;
-                self.create_vm_form = CreateVmForm::default();
+                self.create_vm_form = CreateVmForm::new_with_smart_defaults(&self.vms);
             }
             KeyCode::Char('n') => {
                 self.mode = AppMode::CreateNodeForm;
-                self.create_node_form = CreateNodeForm::default();
+                self.create_node_form = CreateNodeForm::new_with_smart_defaults(&self.nodes);
             }
             KeyCode::Char('s') => {
                 // Show cluster status
@@ -765,7 +871,7 @@ impl App {
             }
             KeyCode::Char('c') => {
                 self.mode = AppMode::CreateVmForm;
-                self.create_vm_form = CreateVmForm::default();
+                self.create_vm_form = CreateVmForm::new_with_smart_defaults(&self.vms);
             }
             KeyCode::Char('d') => {
                 if let Some(selected) = self.vm_table_state.selected() {
@@ -786,15 +892,197 @@ impl App {
     }
     
     async fn handle_vm_create_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
-        use crossterm::event::KeyCode;
+        use crossterm::event::{KeyCode, KeyModifiers};
         
-        // TODO: Implement VM creation form handling
         match key.code {
             KeyCode::Esc => {
                 self.mode = AppMode::VmList;
+                self.create_vm_form = CreateVmForm::default(); // Reset form
+            }
+            KeyCode::Tab => {
+                // Move to next field
+                self.create_vm_form.current_field = match self.create_vm_form.current_field {
+                    CreateVmField::Name => CreateVmField::Vcpus,
+                    CreateVmField::Vcpus => CreateVmField::Memory,
+                    CreateVmField::Memory => CreateVmField::ConfigPath,
+                    CreateVmField::ConfigPath => CreateVmField::PlacementStrategy,
+                    CreateVmField::PlacementStrategy => CreateVmField::NodeId,
+                    CreateVmField::NodeId => CreateVmField::AutoStart,
+                    CreateVmField::AutoStart => CreateVmField::Name,
+                };
+            }
+            KeyCode::BackTab => {
+                // Move to previous field (Shift+Tab)
+                self.create_vm_form.current_field = match self.create_vm_form.current_field {
+                    CreateVmField::Name => CreateVmField::AutoStart,
+                    CreateVmField::Vcpus => CreateVmField::Name,
+                    CreateVmField::Memory => CreateVmField::Vcpus,
+                    CreateVmField::ConfigPath => CreateVmField::Memory,
+                    CreateVmField::PlacementStrategy => CreateVmField::ConfigPath,
+                    CreateVmField::NodeId => CreateVmField::PlacementStrategy,
+                    CreateVmField::AutoStart => CreateVmField::NodeId,
+                };
+            }
+            KeyCode::Enter => {
+                // Submit form
+                self.submit_vm_form().await?;
+            }
+            KeyCode::Char(c) => {
+                match self.create_vm_form.current_field {
+                    CreateVmField::Name => {
+                        self.create_vm_form.name.push(c);
+                    }
+                    CreateVmField::Vcpus => {
+                        if c.is_ascii_digit() {
+                            self.create_vm_form.vcpus.push(c);
+                        }
+                    }
+                    CreateVmField::Memory => {
+                        if c.is_ascii_digit() {
+                            self.create_vm_form.memory.push(c);
+                        }
+                    }
+                    CreateVmField::ConfigPath => {
+                        self.create_vm_form.config_path.push(c);
+                    }
+                    CreateVmField::NodeId => {
+                        if c.is_ascii_digit() {
+                            let mut node_id_str = self.create_vm_form.node_id.map(|id| id.to_string()).unwrap_or_default();
+                            node_id_str.push(c);
+                            if let Ok(parsed) = node_id_str.parse::<u64>() {
+                                self.create_vm_form.node_id = Some(parsed);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            KeyCode::Backspace => {
+                match self.create_vm_form.current_field {
+                    CreateVmField::Name => {
+                        self.create_vm_form.name.pop();
+                    }
+                    CreateVmField::Vcpus => {
+                        self.create_vm_form.vcpus.pop();
+                    }
+                    CreateVmField::Memory => {
+                        self.create_vm_form.memory.pop();
+                    }
+                    CreateVmField::ConfigPath => {
+                        self.create_vm_form.config_path.pop();
+                    }
+                    CreateVmField::NodeId => {
+                        self.create_vm_form.node_id = None;
+                    }
+                    _ => {}
+                }
+            }
+            KeyCode::Up | KeyCode::Down => {
+                if self.create_vm_form.current_field == CreateVmField::PlacementStrategy {
+                    // Cycle through placement strategies
+                    let strategies = PlacementStrategy::all();
+                    let current_index = strategies.iter().position(|s| *s == self.create_vm_form.placement_strategy).unwrap_or(0);
+                    let new_index = if key.code == KeyCode::Up {
+                        if current_index == 0 { strategies.len() - 1 } else { current_index - 1 }
+                    } else {
+                        (current_index + 1) % strategies.len()
+                    };
+                    self.create_vm_form.placement_strategy = strategies[new_index].clone();
+                } else if self.create_vm_form.current_field == CreateVmField::AutoStart {
+                    // Toggle auto start
+                    self.create_vm_form.auto_start = !self.create_vm_form.auto_start;
+                }
             }
             _ => {}
         }
+        Ok(())
+    }
+    
+    async fn submit_vm_form(&mut self) -> BlixardResult<()> {
+        // Validate form
+        if self.create_vm_form.name.is_empty() {
+            self.error_message = Some("VM name is required".to_string());
+            return Ok(());
+        }
+        
+        let vcpus = match self.create_vm_form.vcpus.parse::<u32>() {
+            Ok(v) if v > 0 => v,
+            _ => {
+                self.error_message = Some("vCPUs must be a positive number".to_string());
+                return Ok(());
+            }
+        };
+        
+        let memory = match self.create_vm_form.memory.parse::<u32>() {
+            Ok(m) if m > 0 => m,
+            _ => {
+                self.error_message = Some("Memory must be a positive number (MB)".to_string());
+                return Ok(());
+            }
+        };
+        
+        // Create VM
+        if let Some(client) = &mut self.vm_client {
+            match client.create_vm(&self.create_vm_form.name, vcpus, memory).await {
+                Ok(_) => {
+                    self.status_message = Some(format!("VM '{}' created successfully", self.create_vm_form.name));
+                    self.create_vm_form = CreateVmForm::default(); // Reset form
+                    self.mode = AppMode::VmList;
+                    self.refresh_vm_list().await?;
+                    self.add_event(EventLevel::Info, "VM".to_string(), format!("Created VM '{}'", self.create_vm_form.name));
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("Failed to create VM: {}", e));
+                    self.add_event(EventLevel::Error, "VM".to_string(), format!("Failed to create VM '{}': {}", self.create_vm_form.name, e));
+                }
+            }
+        } else {
+            self.error_message = Some("Not connected to cluster".to_string());
+        }
+        
+        Ok(())
+    }
+    
+    async fn submit_node_form(&mut self) -> BlixardResult<()> {
+        // Validate form
+        let node_id = match self.create_node_form.id.parse::<u64>() {
+            Ok(id) if id > 0 => id,
+            _ => {
+                self.error_message = Some("Node ID must be a positive number".to_string());
+                return Ok(());
+            }
+        };
+        
+        if self.create_node_form.bind_address.is_empty() {
+            self.error_message = Some("Bind address is required".to_string());
+            return Ok(());
+        }
+        
+        // Validate bind address format (basic check)
+        if !self.create_node_form.bind_address.contains(':') {
+            self.error_message = Some("Bind address must include port (e.g., 127.0.0.1:7003)".to_string());
+            return Ok(());
+        }
+        
+        // Join cluster (this is what "creating a node" means in cluster context)
+        if let Some(client) = &mut self.vm_client {
+            match client.join_cluster(node_id, &self.create_node_form.bind_address).await {
+                Ok(message) => {
+                    self.status_message = Some(format!("Node {} joined cluster: {}", node_id, message));
+                    self.create_node_form = CreateNodeForm::default(); // Reset form
+                    self.mode = AppMode::NodeList;
+                    self.refresh_node_list().await?;
+                    self.add_event(EventLevel::Info, "Node".to_string(), format!("Node {} joined cluster", node_id));
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("Failed to join cluster: {}", e));
+                    self.add_event(EventLevel::Error, "Node".to_string(), format!("Failed to join cluster: {}", e));
+                }
+            }
+        } else {
+            self.error_message = Some("Not connected to cluster".to_string());
+        }
+        
         Ok(())
     }
     
@@ -820,7 +1108,7 @@ impl App {
             }
             KeyCode::Char('a') => {
                 self.mode = AppMode::CreateNodeForm;
-                self.create_node_form = CreateNodeForm::default();
+                self.create_node_form = CreateNodeForm::new_with_smart_defaults(&self.nodes);
             }
             _ => {}
         }
@@ -828,12 +1116,88 @@ impl App {
     }
     
     async fn handle_create_node_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
-        use crossterm::event::KeyCode;
+        use crossterm::event::{KeyCode, KeyModifiers};
         
-        // TODO: Implement node creation form handling
         match key.code {
             KeyCode::Esc => {
                 self.mode = AppMode::NodeList;
+                self.create_node_form = CreateNodeForm::default(); // Reset form
+            }
+            KeyCode::Tab => {
+                // Move to next field
+                self.create_node_form.current_field = match self.create_node_form.current_field {
+                    CreateNodeField::Id => CreateNodeField::BindAddress,
+                    CreateNodeField::BindAddress => CreateNodeField::DataDir,
+                    CreateNodeField::DataDir => CreateNodeField::Peers,
+                    CreateNodeField::Peers => CreateNodeField::VmBackend,
+                    CreateNodeField::VmBackend => CreateNodeField::DaemonMode,
+                    CreateNodeField::DaemonMode => CreateNodeField::Id,
+                };
+            }
+            KeyCode::BackTab => {
+                // Move to previous field (Shift+Tab)
+                self.create_node_form.current_field = match self.create_node_form.current_field {
+                    CreateNodeField::Id => CreateNodeField::DaemonMode,
+                    CreateNodeField::BindAddress => CreateNodeField::Id,
+                    CreateNodeField::DataDir => CreateNodeField::BindAddress,
+                    CreateNodeField::Peers => CreateNodeField::DataDir,
+                    CreateNodeField::VmBackend => CreateNodeField::Peers,
+                    CreateNodeField::DaemonMode => CreateNodeField::VmBackend,
+                };
+            }
+            KeyCode::Enter => {
+                // Submit form
+                self.submit_node_form().await?;
+            }
+            KeyCode::Char(c) => {
+                match self.create_node_form.current_field {
+                    CreateNodeField::Id => {
+                        if c.is_ascii_digit() {
+                            self.create_node_form.id.push(c);
+                        }
+                    }
+                    CreateNodeField::BindAddress => {
+                        self.create_node_form.bind_address.push(c);
+                    }
+                    CreateNodeField::DataDir => {
+                        self.create_node_form.data_dir.push(c);
+                    }
+                    CreateNodeField::Peers => {
+                        self.create_node_form.peers.push(c);
+                    }
+                    CreateNodeField::VmBackend => {
+                        if c.is_ascii_alphabetic() || c == '_' {
+                            self.create_node_form.vm_backend.push(c);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            KeyCode::Backspace => {
+                match self.create_node_form.current_field {
+                    CreateNodeField::Id => {
+                        self.create_node_form.id.pop();
+                    }
+                    CreateNodeField::BindAddress => {
+                        self.create_node_form.bind_address.pop();
+                    }
+                    CreateNodeField::DataDir => {
+                        self.create_node_form.data_dir.pop();
+                    }
+                    CreateNodeField::Peers => {
+                        self.create_node_form.peers.pop();
+                    }
+                    CreateNodeField::VmBackend => {
+                        self.create_node_form.vm_backend.pop();
+                    }
+                    _ => {}
+                }
+            }
+            KeyCode::Up | KeyCode::Down => {
+                if self.create_node_form.current_field == CreateNodeField::DaemonMode {
+                    // Toggle daemon mode
+                    self.create_node_form.daemon_mode = !self.create_node_form.daemon_mode;
+                }
             }
             _ => {}
         }
@@ -933,6 +1297,122 @@ impl App {
     async fn remove_node(&mut self, id: u64) -> BlixardResult<()> {
         // TODO: Implement node removal
         self.status_message = Some(format!("Node {} removal not yet implemented", id));
+        Ok(())
+    }
+    
+    async fn handle_mouse_event(&mut self, mouse: crossterm::event::MouseEvent) -> BlixardResult<()> {
+        use crossterm::event::{MouseEventKind, MouseButton};
+        
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.handle_left_click(mouse.column, mouse.row).await?;
+            }
+            MouseEventKind::ScrollUp => {
+                self.handle_scroll(true).await?;
+            }
+            MouseEventKind::ScrollDown => {
+                self.handle_scroll(false).await?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    
+    async fn handle_left_click(&mut self, column: u16, row: u16) -> BlixardResult<()> {
+        // Tab bar is typically at row 1-2, so check if click is in tab area
+        if row <= 2 {
+            self.handle_tab_click(column).await?;
+        } else {
+            // Handle clicks within current tab content
+            match self.current_tab {
+                AppTab::VirtualMachines => {
+                    self.handle_vm_list_click(column, row).await?;
+                }
+                AppTab::Nodes => {
+                    self.handle_node_list_click(column, row).await?;
+                }
+                _ => {
+                    // For other tabs, just show click coordinates in status
+                    self.status_message = Some(format!("Clicked at ({}, {})", column, row));
+                }
+            }
+        }
+        Ok(())
+    }
+    
+    async fn handle_tab_click(&mut self, column: u16) -> BlixardResult<()> {
+        // Rough tab width calculation - adjust based on tab titles
+        let tab_width = 15; // Approximate width per tab
+        let tab_index = column / tab_width;
+        
+        let new_tab = match tab_index {
+            0 => AppTab::Dashboard,
+            1 => AppTab::VirtualMachines,
+            2 => AppTab::Nodes,
+            3 => AppTab::Monitoring,
+            4 => AppTab::Configuration,
+            5 => AppTab::Help,
+            _ => return Ok(()), // Invalid tab area
+        };
+        
+        self.switch_tab(new_tab);
+        self.status_message = Some("Switched tab via mouse click".to_string());
+        Ok(())
+    }
+    
+    async fn handle_vm_list_click(&mut self, _column: u16, row: u16) -> BlixardResult<()> {
+        // VM table typically starts around row 4-5, accounting for headers
+        if row >= 5 && !self.vms.is_empty() {
+            let vm_index = (row - 5) as usize;
+            if vm_index < self.vms.len() {
+                self.vm_table_state.select(Some(vm_index));
+                self.status_message = Some(format!("Selected VM: {}", self.vms[vm_index].name));
+            }
+        }
+        Ok(())
+    }
+    
+    async fn handle_node_list_click(&mut self, _column: u16, row: u16) -> BlixardResult<()> {
+        // Node table typically starts around row 4-5, accounting for headers
+        if row >= 5 && !self.nodes.is_empty() {
+            let node_index = (row - 5) as usize;
+            if node_index < self.nodes.len() {
+                self.node_table_state.select(Some(node_index));
+                self.status_message = Some(format!("Selected Node: {}", self.nodes[node_index].id));
+            }
+        }
+        Ok(())
+    }
+    
+    async fn handle_scroll(&mut self, scroll_up: bool) -> BlixardResult<()> {
+        match self.current_tab {
+            AppTab::VirtualMachines => {
+                if let Some(selected) = self.vm_table_state.selected() {
+                    if scroll_up && selected > 0 {
+                        self.vm_table_state.select(Some(selected - 1));
+                    } else if !scroll_up && selected < self.vms.len().saturating_sub(1) {
+                        self.vm_table_state.select(Some(selected + 1));
+                    }
+                } else if !self.vms.is_empty() {
+                    self.vm_table_state.select(Some(0));
+                }
+            }
+            AppTab::Nodes => {
+                if let Some(selected) = self.node_table_state.selected() {
+                    if scroll_up && selected > 0 {
+                        self.node_table_state.select(Some(selected - 1));
+                    } else if !scroll_up && selected < self.nodes.len().saturating_sub(1) {
+                        self.node_table_state.select(Some(selected + 1));
+                    }
+                } else if !self.nodes.is_empty() {
+                    self.node_table_state.select(Some(0));
+                }
+            }
+            _ => {
+                // For other tabs, scroll through recent events or do nothing
+                self.status_message = Some(format!("Scrolled {} in current view", if scroll_up { "up" } else { "down" }));
+            }
+        }
         Ok(())
     }
 }

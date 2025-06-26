@@ -951,6 +951,7 @@ async fn start_server_background(
 async fn handle_tui_command() -> BlixardResult<()> {
     use crossterm::{
         execute,
+        event::{EnableMouseCapture, DisableMouseCapture},
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     };
     use ratatui::{
@@ -965,7 +966,7 @@ async fn handle_tui_command() -> BlixardResult<()> {
     })?;
     
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen).map_err(|e| {
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture).map_err(|e| {
         BlixardError::Internal {
             message: format!("Failed to setup terminal: {}", e),
         }
@@ -1016,7 +1017,8 @@ async fn handle_tui_command() -> BlixardResult<()> {
     
     execute!(
         terminal.backend_mut(),
-        LeaveAlternateScreen
+        LeaveAlternateScreen,
+        DisableMouseCapture
     ).map_err(|e| BlixardError::Internal {
         message: format!("Failed to restore terminal: {}", e),
     })?;

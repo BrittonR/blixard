@@ -369,4 +369,28 @@ impl VmClient {
         
         Ok((resp.selected_node_id, resp.placement_reason, resp.alternative_nodes))
     }
+    
+    /// Join a node to the cluster
+    pub async fn join_cluster(&mut self, node_id: u64, bind_address: &str) -> BlixardResult<String> {
+        use blixard_core::proto::JoinRequest;
+        
+        let request = tonic::Request::new(JoinRequest {
+            node_id,
+            bind_address: bind_address.to_string(),
+        });
+        
+        let response = self.client.join_cluster(request).await
+            .map_err(|e| crate::BlixardError::Internal {
+                message: format!("Failed to join cluster: {}", e),
+            })?;
+            
+        let resp = response.into_inner();
+        if !resp.success {
+            return Err(crate::BlixardError::Internal {
+                message: format!("Join cluster failed: {}", resp.message),
+            });
+        }
+        
+        Ok(resp.message)
+    }
 }
