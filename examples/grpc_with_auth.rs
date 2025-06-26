@@ -44,7 +44,7 @@ async fn main() -> BlixardResult<()> {
     let mut request_with_auth = Request::new(ListVmsRequest {});
     request_with_auth.metadata_mut().insert(
         "authorization",
-        MetadataValue::from_str("Bearer my-api-token-123").unwrap(),
+        MetadataValue::try_from("Bearer my-api-token-123").unwrap(),
     );
     
     match client.list_vms(request_with_auth).await {
@@ -69,11 +69,11 @@ async fn main() -> BlixardResult<()> {
     // Set both authentication and tenant ID
     request_with_tenant.metadata_mut().insert(
         "authorization",
-        MetadataValue::from_str("Bearer my-api-token-123").unwrap(),
+        MetadataValue::try_from("Bearer my-api-token-123").unwrap(),
     );
     request_with_tenant.metadata_mut().insert(
         "tenant-id",
-        MetadataValue::from_str("customer-123").unwrap(),
+        MetadataValue::try_from("customer-123").unwrap(),
     );
     
     match client.create_vm(request_with_tenant).await {
