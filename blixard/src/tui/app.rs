@@ -149,11 +149,13 @@ pub enum AppMode {
     CreateClusterForm,
     ClusterDiscovery,
     NodeTemplateSelector,
+    VmTemplateSelector,
     ClusterHealthView,
     SettingsForm,
     LogViewer,
     SearchDialog,
     BatchNodeCreation,
+    BatchVmCreation,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -298,6 +300,27 @@ pub struct DebugLogEntry {
     pub component: String,
     pub message: String,
     pub details: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct VmTemplate {
+    pub name: String,
+    pub description: String,
+    pub vcpus: u32,
+    pub memory: u32,
+    pub disk_gb: u32,
+    pub template_type: VmTemplateType,
+    pub features: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum VmTemplateType {
+    Development,
+    WebServer,
+    Database,
+    Container,
+    LoadBalancer,
+    Custom,
 }
 
 #[derive(Debug, Clone)]
@@ -508,6 +531,7 @@ pub struct App {
     pub discovered_clusters: Vec<DiscoveredCluster>,
     pub cluster_templates: Vec<ClusterTemplate>,
     pub node_templates: Vec<NodeTemplate>,
+    pub vm_templates: Vec<VmTemplate>,
     pub selected_cluster: Option<String>,
     pub cluster_discovery_active: bool,
     pub cluster_scan_progress: f32,
@@ -753,6 +777,7 @@ impl App {
             discovered_clusters: Vec::new(),
             cluster_templates: Self::default_cluster_templates(),
             node_templates: Self::default_node_templates(),
+            vm_templates: Self::default_vm_templates(),
             selected_cluster: None,
             cluster_discovery_active: false,
             cluster_scan_progress: 0.0,
@@ -867,6 +892,56 @@ impl App {
                     auto_configure_networking: true,
                     cluster_name: Some("prod-cluster".to_string()),
                 },
+            },
+        ]
+    }
+    
+    fn default_vm_templates() -> Vec<VmTemplate> {
+        vec![
+            VmTemplate {
+                name: "Micro VM".to_string(),
+                description: "Minimal VM for lightweight services".to_string(),
+                vcpus: 1,
+                memory: 512,
+                disk_gb: 5,
+                template_type: VmTemplateType::Development,
+                features: vec![],
+            },
+            VmTemplate {
+                name: "Web Server".to_string(),
+                description: "Optimized for web services and APIs".to_string(),
+                vcpus: 2,
+                memory: 2048,
+                disk_gb: 20,
+                template_type: VmTemplateType::WebServer,
+                features: vec!["nginx".to_string(), "ssl".to_string()],
+            },
+            VmTemplate {
+                name: "Database Server".to_string(),
+                description: "Configured for database workloads".to_string(),
+                vcpus: 4,
+                memory: 4096,
+                disk_gb: 50,
+                template_type: VmTemplateType::Database,
+                features: vec!["ssd".to_string(), "backup".to_string()],
+            },
+            VmTemplate {
+                name: "Container Host".to_string(),
+                description: "Docker/Podman container runtime".to_string(),
+                vcpus: 2,
+                memory: 2048,
+                disk_gb: 30,
+                template_type: VmTemplateType::Container,
+                features: vec!["docker".to_string(), "containerd".to_string()],
+            },
+            VmTemplate {
+                name: "Load Balancer".to_string(),
+                description: "High-performance load balancing".to_string(),
+                vcpus: 2,
+                memory: 1024,
+                disk_gb: 10,
+                template_type: VmTemplateType::LoadBalancer,
+                features: vec!["haproxy".to_string(), "keepalived".to_string()],
             },
         ]
     }
@@ -1493,6 +1568,8 @@ impl App {
                 self.handle_debug_keys(key).await?;
             }
             AppMode::BatchNodeCreation => self.handle_batch_node_creation_keys(key).await?,
+            AppMode::VmTemplateSelector => self.handle_vm_template_selector_keys(key).await?,
+            AppMode::BatchVmCreation => self.handle_batch_vm_creation_keys(key).await?,
             _ => {}
         }
         
@@ -1721,6 +1798,118 @@ impl App {
         Ok(())
     }
     
+    /// Quick create VM with micro template
+    pub async fn quick_create_vm(&mut self) -> BlixardResult<()> {
+        if let Some(client) = &mut self.vm_client {
+            // Generate unique VM name
+            let vm_number = self.vms.len() + 1;
+            let vm_name = format!("vm-{}", vm_number);
+            
+            // Use micro template settings
+            let template = &self.vm_templates[0]; // Micro VM template
+            
+            self.add_event(EventLevel::Info, "VM".to_string(), 
+                format!("Quick creating VM '{}' from '{}' template", vm_name, template.name));
+            
+            match client.create_vm(&vm_name, template.vcpus, template.memory).await {
+                Ok(_) => {
+                    self.add_event(EventLevel::Info, "VM".to_string(), 
+                        format!("VM '{}' created successfully", vm_name));
+                    self.status_message = Some(format!("Created VM '{}' ({}vcpu, {}MB)", 
+                        vm_name, template.vcpus, template.memory));
+                    
+                    // Refresh VM list
+                    self.refresh_vm_list().await?;
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("Failed to create VM: {}", e));
+                    self.add_event(EventLevel::Error, "VM".to_string(), 
+                        format!("Failed to create VM '{}': {}", vm_name, e));
+                }
+            }
+        } else {
+            self.error_message = Some("Not connected to cluster".to_string());
+        }
+        
+        Ok(())
+    }
+    
+    /// Batch create VMs
+    pub async fn batch_create_vms(&mut self, count: u32) -> BlixardResult<()> {
+        if let Some(client) = &mut self.vm_client {
+            let template = &self.vm_templates[0]; // Use micro template for batch
+            let mut successful = 0;
+            let mut failed = Vec::new();
+            
+            for i in 0..count {
+                let vm_name = format!("batch-vm-{}", self.vms.len() + i as usize + 1);
+                
+                match client.create_vm(&vm_name, template.vcpus, template.memory).await {
+                    Ok(_) => {
+                        successful += 1;
+                        self.add_event(EventLevel::Info, "VM".to_string(), 
+                            format!("Created VM '{}'", vm_name));
+                    }
+                    Err(e) => {
+                        failed.push((vm_name, e.to_string()));
+                    }
+                }
+            }
+            
+            // Refresh VM list
+            self.refresh_vm_list().await?;
+            
+            if successful > 0 {
+                self.status_message = Some(format!("Batch created {} VMs successfully", successful));
+            }
+            
+            if !failed.is_empty() {
+                self.error_message = Some(format!("{} VMs failed to create", failed.len()));
+                for (name, err) in failed {
+                    self.add_event(EventLevel::Error, "VM".to_string(), 
+                        format!("Failed to create '{}': {}", name, err));
+                }
+            }
+        } else {
+            self.error_message = Some("Not connected to cluster".to_string());
+        }
+        
+        Ok(())
+    }
+    
+    /// Create VM from template
+    pub async fn create_vm_from_template(&mut self, template: &VmTemplate) -> BlixardResult<()> {
+        if let Some(client) = &mut self.vm_client {
+            // Generate unique VM name
+            let vm_number = self.vms.len() + 1;
+            let vm_name = format!("{}-{}", template.name.to_lowercase().replace(' ', "-"), vm_number);
+            
+            self.add_event(EventLevel::Info, "VM".to_string(), 
+                format!("Creating VM '{}' from template '{}'", vm_name, template.name));
+            
+            match client.create_vm(&vm_name, template.vcpus, template.memory).await {
+                Ok(_) => {
+                    self.add_event(EventLevel::Info, "VM".to_string(), 
+                        format!("VM '{}' created successfully", vm_name));
+                    self.status_message = Some(format!("Created {} VM '{}' ({}vcpu, {}MB)", 
+                        template.name, vm_name, template.vcpus, template.memory));
+                    
+                    // Refresh VM list
+                    self.refresh_vm_list().await?;
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("Failed to create VM: {}", e));
+                    self.add_event(EventLevel::Error, "VM".to_string(), 
+                        format!("Failed to create VM '{}': {}", vm_name, e));
+                }
+            }
+        } else {
+            self.error_message = Some("Not connected to cluster".to_string());
+        }
+        
+        Ok(())
+    }
+    
     /// Probe a potential cluster endpoint
     async fn probe_cluster(&self, endpoint: &str) -> BlixardResult<Option<DiscoveredCluster>> {
         // Try to connect and get cluster status
@@ -1922,6 +2111,19 @@ impl App {
                 } else if !self.vms.is_empty() {
                     self.vm_table_state.select(Some(0));
                 }
+            }
+            KeyCode::Char('t') => {
+                // Show VM template selector
+                self.mode = AppMode::VmTemplateSelector;
+            }
+            KeyCode::Char('+') => {
+                // Quick create VM with micro template
+                self.quick_create_vm().await?;
+            }
+            KeyCode::Char('b') => {
+                // Batch create VMs
+                self.mode = AppMode::BatchVmCreation;
+                self.batch_node_count = "3".to_string(); // Reuse field for VM count
             }
             KeyCode::Enter => {
                 if let Some(selected) = self.vm_table_state.selected() {
@@ -2446,6 +2648,84 @@ impl App {
                 }
             }
         }
+        Ok(())
+    }
+    
+    async fn handle_vm_template_selector_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
+        use crossterm::event::KeyCode;
+        
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = AppMode::VmList;
+            }
+            KeyCode::Char('1') => {
+                if let Some(template) = self.vm_templates.get(0).cloned() {
+                    self.create_vm_from_template(&template).await?;
+                    self.mode = AppMode::VmList;
+                }
+            }
+            KeyCode::Char('2') => {
+                if let Some(template) = self.vm_templates.get(1).cloned() {
+                    self.create_vm_from_template(&template).await?;
+                    self.mode = AppMode::VmList;
+                }
+            }
+            KeyCode::Char('3') => {
+                if let Some(template) = self.vm_templates.get(2).cloned() {
+                    self.create_vm_from_template(&template).await?;
+                    self.mode = AppMode::VmList;
+                }
+            }
+            KeyCode::Char('4') => {
+                if let Some(template) = self.vm_templates.get(3).cloned() {
+                    self.create_vm_from_template(&template).await?;
+                    self.mode = AppMode::VmList;
+                }
+            }
+            KeyCode::Char('5') => {
+                if let Some(template) = self.vm_templates.get(4).cloned() {
+                    self.create_vm_from_template(&template).await?;
+                    self.mode = AppMode::VmList;
+                }
+            }
+            _ => {}
+        }
+        
+        Ok(())
+    }
+    
+    async fn handle_batch_vm_creation_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
+        use crossterm::event::KeyCode;
+        
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = AppMode::VmList;
+                self.batch_node_count = "3".to_string(); // Reset
+            }
+            KeyCode::Enter => {
+                // Parse count and create VMs
+                if let Ok(count) = self.batch_node_count.parse::<u32>() {
+                    if count > 0 && count <= 10 {
+                        self.batch_create_vms(count).await?;
+                        self.mode = AppMode::VmList;
+                    } else {
+                        self.error_message = Some("Count must be between 1 and 10".to_string());
+                    }
+                } else {
+                    self.error_message = Some("Invalid number".to_string());
+                }
+            }
+            KeyCode::Char(c) if c.is_ascii_digit() => {
+                if self.batch_node_count.len() < 2 {
+                    self.batch_node_count.push(c);
+                }
+            }
+            KeyCode::Backspace => {
+                self.batch_node_count.pop();
+            }
+            _ => {}
+        }
+        
         Ok(())
     }
     

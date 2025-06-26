@@ -75,6 +75,8 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::ConfirmDialog => render_confirm_dialog(f, app),
         AppMode::LogViewer => render_log_viewer(f, app),
         AppMode::BatchNodeCreation => render_batch_node_creation_dialog(f, app),
+        AppMode::VmTemplateSelector => render_vm_template_selector(f, app),
+        AppMode::BatchVmCreation => render_batch_vm_creation_dialog(f, app),
         _ => {}
     }
     
@@ -939,7 +941,11 @@ fn render_help(f: &mut Frame, area: Rect, _app: &App) {
         Line::from("  N            - Create new cluster"),
         Line::from(""),
         Line::from("🖥️ VM Management:"),
-        Line::from("  c            - Create VM"),
+        Line::from("  c            - Create VM (manual)"),
+        Line::from("  t            - Select from VM templates"),
+        Line::from("  +            - Quick create micro VM"),
+        Line::from("  b            - Batch create multiple VMs"),
+        Line::from("  s            - Start/stop selected VM"),
         Line::from("  Enter        - View VM details"),
         Line::from("  d            - Delete VM"),
         Line::from("  /            - Search VMs by name"),
@@ -1997,4 +2003,115 @@ fn render_debug_logs(f: &mut Frame, area: Rect, app: &App) {
     
     f.render_widget(logs_list, area);
 }
+
+fn render_vm_template_selector(f: &mut Frame, app: &App) {
+    let area = centered_rect(60, 70, f.size());
+    f.render_widget(Clear, area);
+    
+    let block = Block::default()
+        .title("🖥️ VM Template Selector")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(PRIMARY_COLOR));
+    
+    f.render_widget(block, area);
+    
+    let inner_area = area.inner(&Margin { vertical: 1, horizontal: 1 });
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),  // Instructions
+            Constraint::Min(0),     // Templates
+        ])
+        .split(inner_area);
+    
+    // Instructions
+    let instructions = Paragraph::new("Press number to select template, Esc to cancel")
+        .style(Style::default().fg(INFO_COLOR))
+        .alignment(Alignment::Center);
+    f.render_widget(instructions, chunks[0]);
+    
+    // Template list
+    let template_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            app.vm_templates.iter()
+                .map(|_| Constraint::Length(4))
+                .collect::<Vec<_>>()
+        )
+        .split(chunks[1]);
+    
+    for (i, (template, chunk)) in app.vm_templates.iter().zip(template_chunks.iter()).enumerate() {
+        let template_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(SECONDARY_COLOR))
+            .title(format!("{}. {}", i + 1, template.name));
+        
+        let content = vec![
+            Line::from(vec![
+                Span::raw("📝 "),
+                Span::styled(&template.description, Style::default().fg(TEXT_COLOR)),
+            ]),
+            Line::from(vec![
+                Span::raw("💻 "),
+                Span::styled(
+                    format!("{} vCPUs, {} MB RAM, {} GB disk", 
+                        template.vcpus, template.memory, template.disk_gb),
+                    Style::default().fg(INFO_COLOR)
+                ),
+            ]),
+        ];
+        
+        let paragraph = Paragraph::new(content)
+            .block(template_block)
+            .wrap(Wrap { trim: true });
+        
+        f.render_widget(paragraph, *chunk);
+    }
+}
+
+fn render_batch_vm_creation_dialog(f: &mut Frame, app: &App) {
+    let area = centered_rect(40, 10, f.size());
+    f.render_widget(Clear, area);
+    
+    let block = Block::default()
+        .title("🖥️ Batch VM Creation")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(PRIMARY_COLOR));
+    
+    f.render_widget(block, area);
+    
+    let inner_area = area.inner(&Margin { vertical: 1, horizontal: 1 });
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),  // Label
+            Constraint::Length(3),  // Input
+            Constraint::Length(1),  // Help
+        ])
+        .split(inner_area);
+    
+    // Label
+    let label = Paragraph::new("How many VMs to create? (1-10)")
+        .style(Style::default().fg(TEXT_COLOR))
+        .alignment(Alignment::Center);
+    f.render_widget(label, chunks[0]);
+    
+    // Input field
+    let input_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(SUCCESS_COLOR));
+    
+    let input = Paragraph::new(app.batch_node_count.as_str())
+        .style(Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD))
+        .block(input_block)
+        .alignment(Alignment::Center);
+    f.render_widget(input, chunks[1]);
+    
+    // Help text
+    let help = Paragraph::new("Press Enter to create, Esc to cancel")
+        .style(Style::default().fg(INFO_COLOR))
+        .alignment(Alignment::Center);
+    f.render_widget(help, chunks[2]);
+}
+
 
