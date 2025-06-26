@@ -769,6 +769,39 @@ impl Config {
             self.observability.tracing.enabled = true;
             self.observability.tracing.otlp_endpoint = Some(endpoint);
         }
+        
+        // Security configuration
+        if let Ok(enabled) = std::env::var("BLIXARD_TLS_ENABLED") {
+            if let Ok(enabled) = enabled.parse() {
+                self.security.tls.enabled = enabled;
+            }
+        }
+        if let Ok(cert_file) = std::env::var("BLIXARD_TLS_CERT_FILE") {
+            self.security.tls.cert_file = Some(PathBuf::from(cert_file));
+        }
+        if let Ok(key_file) = std::env::var("BLIXARD_TLS_KEY_FILE") {
+            self.security.tls.key_file = Some(PathBuf::from(key_file));
+        }
+        if let Ok(ca_file) = std::env::var("BLIXARD_TLS_CA_FILE") {
+            self.security.tls.ca_file = Some(PathBuf::from(ca_file));
+        }
+        if let Ok(require) = std::env::var("BLIXARD_TLS_REQUIRE_CLIENT_CERT") {
+            if let Ok(require) = require.parse() {
+                self.security.tls.require_client_cert = require;
+            }
+        }
+        
+        if let Ok(enabled) = std::env::var("BLIXARD_AUTH_ENABLED") {
+            if let Ok(enabled) = enabled.parse() {
+                self.security.auth.enabled = enabled;
+            }
+        }
+        if let Ok(method) = std::env::var("BLIXARD_AUTH_METHOD") {
+            self.security.auth.method = method;
+        }
+        if let Ok(token_file) = std::env::var("BLIXARD_AUTH_TOKEN_FILE") {
+            self.security.auth.token_file = Some(PathBuf::from(token_file));
+        }
     }
     
     /// Validate configuration
@@ -803,6 +836,32 @@ impl Config {
             _ => return Err(BlixardError::ConfigError(
                 format!("Invalid log level: {}", self.observability.logging.level)
             )),
+        }
+        
+        // Validate security configuration
+        if self.security.tls.enabled {
+            // If TLS is enabled, certificate and key files should be specified
+            if self.security.tls.cert_file.is_none() || self.security.tls.key_file.is_none() {
+                return Err(BlixardError::ConfigError(
+                    "TLS enabled but cert_file or key_file not specified".to_string()
+                ));
+            }
+        }
+        
+        // Validate authentication method
+        if self.security.auth.enabled {
+            match self.security.auth.method.as_str() {
+                "token" | "mtls" => {},
+                _ => return Err(BlixardError::ConfigError(
+                    format!("Invalid authentication method: {}", self.security.auth.method)
+                )),
+            }
+            
+            // If using token auth, warn if no token file is specified
+            if self.security.auth.method == "token" && self.security.auth.token_file.is_none() {
+                // This is not an error since tokens can be generated dynamically,
+                // but in production you'd typically want a token file
+            }
         }
         
         Ok(())
@@ -932,6 +991,47 @@ impl ConfigBuilder {
     
     pub fn log_level(mut self, level: impl Into<String>) -> Self {
         self.config.observability.logging.level = level.into();
+        self
+    }
+    
+    /// Security configuration methods
+    pub fn security_tls_enabled(mut self, enabled: bool) -> Self {
+        self.config.security.tls.enabled = enabled;
+        self
+    }
+    
+    pub fn security_tls_cert(mut self, cert_file: impl Into<PathBuf>) -> Self {
+        self.config.security.tls.cert_file = Some(cert_file.into());
+        self
+    }
+    
+    pub fn security_tls_key(mut self, key_file: impl Into<PathBuf>) -> Self {
+        self.config.security.tls.key_file = Some(key_file.into());
+        self
+    }
+    
+    pub fn security_tls_ca(mut self, ca_file: impl Into<PathBuf>) -> Self {
+        self.config.security.tls.ca_file = Some(ca_file.into());
+        self
+    }
+    
+    pub fn security_tls_require_client_cert(mut self, require: bool) -> Self {
+        self.config.security.tls.require_client_cert = require;
+        self
+    }
+    
+    pub fn security_auth_enabled(mut self, enabled: bool) -> Self {
+        self.config.security.auth.enabled = enabled;
+        self
+    }
+    
+    pub fn security_auth_method(mut self, method: impl Into<String>) -> Self {
+        self.config.security.auth.method = method.into();
+        self
+    }
+    
+    pub fn security_auth_token_file(mut self, token_file: impl Into<PathBuf>) -> Self {
+        self.config.security.auth.token_file = Some(token_file.into());
         self
     }
     
