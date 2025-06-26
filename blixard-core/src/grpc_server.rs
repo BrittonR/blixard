@@ -10,6 +10,7 @@ use crate::{
     raft_manager::{TaskSpec, ResourceRequirements},
     metrics_otel_v2::{metrics, Timer, attributes},
     tracing_otel,
+    resource_quotas::{ResourceRequest, ApiOperation, QuotaViolation},
     proto::{
         cluster_service_server::{ClusterService, ClusterServiceServer},
         blixard_service_server::{BlixardService, BlixardServiceServer},
@@ -85,6 +86,79 @@ impl BlixardGrpcService {
         Self { node }
     }
 
+    /// Extract tenant ID from gRPC request metadata
+    fn extract_tenant_id<T>(request: &Request<T>) -> String {
+        // Try to extract tenant ID from metadata
+        if let Some(tenant_value) = request.metadata().get("tenant-id") {
+            if let Ok(tenant_str) = tenant_value.to_str() {
+                return tenant_str.to_string();
+            }
+        }
+        
+        // Default tenant if not specified
+        "default".to_string()
+    }
+
+    /// Check quota limits before VM creation
+    async fn check_vm_quota(
+        &self,
+        tenant_id: &str,
+        vm_config: &crate::types::VmConfig,
+        target_node_id: Option<u64>,
+    ) -> Result<(), Status> {
+        let quota_manager = match self.node.get_quota_manager().await {
+            Some(qm) => qm,
+            None => {
+                tracing::warn!("Quota manager not available, skipping quota checks");
+                return Ok(());
+            }
+        };
+
+        // Check API rate limits
+        if let Err(violation) = quota_manager.check_rate_limit(&tenant_id, &ApiOperation::VmCreate).await {
+            return Err(Status::resource_exhausted(format!(
+                "Rate limit exceeded: {}", violation
+            )));
+        }
+
+        // Record the API request
+        quota_manager.record_api_request(&tenant_id, &ApiOperation::VmCreate).await;
+
+        // Check resource quotas
+        let resource_request = ResourceRequest {
+            tenant_id: tenant_id.to_string(),
+            node_id: target_node_id,
+            vcpus: vm_config.vcpus,
+            memory_mb: vm_config.memory as u64,
+            disk_gb: 5, // Default disk requirement - TODO: make configurable
+            timestamp: std::time::SystemTime::now(),
+        };
+
+        if let Err(violation) = quota_manager.check_resource_quota(&resource_request).await {
+            return Err(Status::resource_exhausted(format!(
+                "Resource quota exceeded: {}", violation
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Update resource usage after VM creation/deletion
+    async fn update_resource_usage(
+        &self,
+        tenant_id: &str,
+        vcpus: i32,
+        memory_mb: i64,
+        disk_gb: i64,
+        node_id: u64,
+    ) {
+        if let Some(quota_manager) = self.node.get_quota_manager().await {
+            if let Err(e) = quota_manager.update_resource_usage(&tenant_id, vcpus, memory_mb, disk_gb, node_id).await {
+                tracing::error!("Failed to update resource usage: {}", e);
+            }
+        }
+    }
+
     /// Convert internal VM status to proto VM state
     fn vm_status_to_proto(status: &InternalVmStatus) -> VmState {
         match status {
@@ -132,6 +206,17 @@ impl ClusterService for BlixardGrpcService {
         &self,
         request: Request<JoinRequest>,
     ) -> Result<Response<JoinResponse>, Status> {
+        // Check rate limits for cluster join before processing
+        let tenant_id = Self::extract_tenant_id(&request);
+        if let Some(quota_manager) = self.node.get_quota_manager().await {
+            if let Err(violation) = quota_manager.check_rate_limit(&tenant_id, &ApiOperation::ClusterJoin).await {
+                return Err(Status::resource_exhausted(format!(
+                    "Rate limit exceeded: {}", violation
+                )));
+            }
+            quota_manager.record_api_request(&tenant_id, &ApiOperation::ClusterJoin).await;
+        }
+        
         let req = instrument_grpc!(self, request, "join_cluster");
         
         tracing::info!("Received join request from node {} at {}", req.node_id, req.bind_address);
@@ -471,8 +556,18 @@ impl ClusterService for BlixardGrpcService {
 
     async fn get_cluster_status(
         &self,
-        _request: Request<ClusterStatusRequest>,
+        request: Request<ClusterStatusRequest>,
     ) -> Result<Response<ClusterStatusResponse>, Status> {
+        // Check rate limits for status queries
+        let tenant_id = Self::extract_tenant_id(&request);
+        if let Some(quota_manager) = self.node.get_quota_manager().await {
+            if let Err(violation) = quota_manager.check_rate_limit(&tenant_id, &ApiOperation::StatusQuery).await {
+                return Err(Status::resource_exhausted(format!(
+                    "Rate limit exceeded: {}", violation
+                )));
+            }
+            quota_manager.record_api_request(&tenant_id, &ApiOperation::StatusQuery).await;
+        }
         let metrics = metrics();
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
@@ -555,6 +650,8 @@ impl ClusterService for BlixardGrpcService {
         );
         metrics.grpc_requests_total.add(1, &[attributes::method("create_vm")]);
         
+        // Extract tenant ID from request metadata
+        let tenant_id = Self::extract_tenant_id(&request);
         let req = request.into_inner();
 
         // Validate request
@@ -567,13 +664,19 @@ impl ClusterService for BlixardGrpcService {
             }));
         }
 
-        // Create VM through Raft consensus
+        // Create VM config for quota validation
         let vm_config = crate::types::VmConfig {
             name: req.name.clone(),
             config_path: req.config_path,
             vcpus: req.vcpus,
             memory: req.memory_mb,
         };
+
+        // Check quota limits before creating VM
+        if let Err(status) = self.check_vm_quota(&tenant_id, &vm_config, Some(self.node.get_id())).await {
+            record_grpc_error!("create_vm");
+            return Err(status);
+        }
         
         let command = VmCommand::Create {
             config: vm_config,
@@ -597,6 +700,15 @@ impl ClusterService for BlixardGrpcService {
                 
                 // Update VM counters
                 metrics.vm_total.add(1, &[]);
+                
+                // Update resource usage after successful VM creation
+                self.update_resource_usage(
+                    &tenant_id,
+                    req.vcpus as i32,
+                    req.memory_mb as i64,
+                    5, // Default disk GB
+                    self.node.get_id(),
+                ).await;
                 
                 Ok(Response::new(CreateVmResponse {
                     success: true,
@@ -707,6 +819,20 @@ impl ClusterService for BlixardGrpcService {
             ],
         );
         metrics.grpc_requests_total.add(1, &[attributes::method("delete_vm")]);
+        
+        // Extract tenant ID and check rate limits
+        let tenant_id = Self::extract_tenant_id(&request);
+        if let Some(quota_manager) = self.node.get_quota_manager().await {
+            // Check API rate limits for VM deletion
+            if let Err(violation) = quota_manager.check_rate_limit(&tenant_id, &ApiOperation::VmDelete).await {
+                record_grpc_error!("delete_vm");
+                return Err(Status::resource_exhausted(format!(
+                    "Rate limit exceeded: {}", violation
+                )));
+            }
+            // Record the API request
+            quota_manager.record_api_request(&tenant_id, &ApiOperation::VmDelete).await;
+        }
         
         let req = request.into_inner();
 
@@ -986,6 +1112,8 @@ impl ClusterService for BlixardGrpcService {
         );
         metrics.grpc_requests_total.add(1, &[attributes::method("create_vm_with_scheduling")]);
         
+        // Extract tenant ID from request metadata
+        let tenant_id = Self::extract_tenant_id(&request);
         let req = request.into_inner();
 
         // Validate request
@@ -1025,16 +1153,33 @@ impl ClusterService for BlixardGrpcService {
             memory: req.memory_mb,
         };
 
+        // Check quota limits before creating VM (no specific node yet)
+        if let Err(status) = self.check_vm_quota(&tenant_id, &vm_config, None).await {
+            record_grpc_error!("create_vm_with_scheduling");
+            return Err(status);
+        }
+
         // Create VM with scheduling through VM manager
         match self.node.create_vm_with_scheduling(vm_config, strategy).await {
-            Ok(placement) => Ok(Response::new(crate::proto::CreateVmWithSchedulingResponse {
-                success: true,
-                message: format!("VM '{}' scheduled and created successfully", req.name),
-                vm_id: req.name,
-                selected_node_id: placement.selected_node_id,
-                placement_reason: placement.reason,
-                alternative_nodes: placement.alternative_nodes,
-            })),
+            Ok(placement) => {
+                // Update resource usage after successful VM creation
+                self.update_resource_usage(
+                    &tenant_id,
+                    req.vcpus as i32,
+                    req.memory_mb as i64,
+                    5, // Default disk GB
+                    placement.selected_node_id,
+                ).await;
+                
+                Ok(Response::new(crate::proto::CreateVmWithSchedulingResponse {
+                    success: true,
+                    message: format!("VM '{}' scheduled and created successfully", req.name),
+                    vm_id: req.name,
+                    selected_node_id: placement.selected_node_id,
+                    placement_reason: placement.reason,
+                    alternative_nodes: placement.alternative_nodes,
+                }))
+            }
             Err(e) => {
                 record_grpc_error!("create_vm_with_scheduling");
                 Ok(Response::new(crate::proto::CreateVmWithSchedulingResponse {

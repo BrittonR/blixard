@@ -15,6 +15,8 @@ pub mod config_global;
 pub mod metrics_otel_v2;
 pub mod metrics_server;
 pub mod tracing_otel;
+pub mod resource_quotas;
+pub mod quota_manager;
 
 // Test helpers are exposed for integration tests
 #[cfg(any(test, feature = "test-helpers"))]

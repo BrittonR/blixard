@@ -90,6 +90,11 @@ impl Node {
         
         self.shared.set_vm_manager(vm_manager).await;
 
+        // Initialize quota manager
+        let storage = Arc::new(crate::storage::RedbRaftStorage { database: db_arc.clone() });
+        let quota_manager = Arc::new(crate::quota_manager::QuotaManager::new(storage).await?);
+        self.shared.set_quota_manager(quota_manager).await;
+
         // Initialize Raft manager
         // If join_addr is provided, don't bootstrap as single node
         let peers = if let Some(_join_addr) = &self.shared.config.join_addr {

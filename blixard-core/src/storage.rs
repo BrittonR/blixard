@@ -45,7 +45,10 @@ pub const TASK_RESULT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new
 pub const WORKER_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("workers");
 pub const WORKER_STATUS_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("worker_status");
 
-#[derive(Clone)]
+// Quota management tables
+pub const TENANT_QUOTA_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("tenant_quotas");
+
+#[derive(Clone, Debug)]
 pub struct RedbRaftStorage {
     pub database: Arc<Database>,
 }
@@ -640,6 +643,72 @@ impl RedbRaftStorage {
         tracing::info!("Compacted log entries before index {}", index);
         Ok(())
     }
+    
+    /// Save tenant quota to storage
+    pub fn save_tenant_quota(&self, quota: &crate::resource_quotas::TenantQuota) -> BlixardResult<()> {
+        let write_txn = self.database.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TENANT_QUOTA_TABLE)?;
+            let serialized = bincode::serialize(quota)
+                .map_err(|e| BlixardError::Serialization {
+                    operation: "serialize tenant quota".to_string(),
+                    source: Box::new(e),
+                })?;
+            table.insert(quota.tenant_id.as_str(), serialized.as_slice())?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+    
+    /// Get tenant quota from storage
+    pub fn get_tenant_quota(&self, tenant_id: &str) -> BlixardResult<Option<crate::resource_quotas::TenantQuota>> {
+        let read_txn = self.database.begin_read()?;
+        
+        if let Ok(table) = read_txn.open_table(TENANT_QUOTA_TABLE) {
+            if let Ok(Some(data)) = table.get(tenant_id) {
+                let quota = bincode::deserialize(data.value())
+                    .map_err(|e| BlixardError::Serialization {
+                        operation: "deserialize tenant quota".to_string(),
+                        source: Box::new(e),
+                    })?;
+                return Ok(Some(quota));
+            }
+        }
+        
+        Ok(None)
+    }
+    
+    /// Get all tenant quotas from storage
+    pub fn get_all_quotas(&self) -> BlixardResult<Vec<crate::resource_quotas::TenantQuota>> {
+        let read_txn = self.database.begin_read()?;
+        let mut quotas = Vec::new();
+        
+        if let Ok(table) = read_txn.open_table(TENANT_QUOTA_TABLE) {
+            for entry in table.iter()? {
+                if let Ok((_, data)) = entry {
+                    match bincode::deserialize(data.value()) {
+                        Ok(quota) => quotas.push(quota),
+                        Err(e) => {
+                            tracing::warn!("Failed to deserialize quota: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(quotas)
+    }
+    
+    /// Delete tenant quota from storage
+    pub fn delete_tenant_quota(&self, tenant_id: &str) -> BlixardResult<()> {
+        let write_txn = self.database.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TENANT_QUOTA_TABLE)?;
+            table.remove(tenant_id)?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
 }
 
 /// Initialize all required database tables
@@ -657,6 +726,7 @@ pub fn init_database_tables(database: &Arc<Database>) -> BlixardResult<()> {
     let _ = write_txn.open_table(TASK_RESULT_TABLE)?;
     let _ = write_txn.open_table(WORKER_TABLE)?;
     let _ = write_txn.open_table(WORKER_STATUS_TABLE)?;
+    let _ = write_txn.open_table(TENANT_QUOTA_TABLE)?;
     
     write_txn.commit()?;
     Ok(())
@@ -686,4 +756,40 @@ pub fn init_raft(
             source: Box::new(e),
         }
     })
+}
+
+/// Storage trait for quota operations
+#[async_trait::async_trait]
+pub trait Storage: Send + Sync + std::fmt::Debug {
+    /// Save tenant quota to storage
+    async fn save_tenant_quota(&self, quota: &crate::resource_quotas::TenantQuota) -> BlixardResult<()>;
+    
+    /// Get tenant quota from storage
+    async fn get_tenant_quota(&self, tenant_id: &str) -> BlixardResult<Option<crate::resource_quotas::TenantQuota>>;
+    
+    /// Get all tenant quotas from storage
+    async fn get_all_quotas(&self) -> BlixardResult<Vec<crate::resource_quotas::TenantQuota>>;
+    
+    /// Delete tenant quota from storage
+    async fn delete_tenant_quota(&self, tenant_id: &str) -> BlixardResult<()>;
+}
+
+/// Implement Storage trait for RedbRaftStorage
+#[async_trait::async_trait]
+impl Storage for RedbRaftStorage {
+    async fn save_tenant_quota(&self, quota: &crate::resource_quotas::TenantQuota) -> BlixardResult<()> {
+        self.save_tenant_quota(quota)
+    }
+    
+    async fn get_tenant_quota(&self, tenant_id: &str) -> BlixardResult<Option<crate::resource_quotas::TenantQuota>> {
+        self.get_tenant_quota(tenant_id)
+    }
+    
+    async fn get_all_quotas(&self) -> BlixardResult<Vec<crate::resource_quotas::TenantQuota>> {
+        self.get_all_quotas()
+    }
+    
+    async fn delete_tenant_quota(&self, tenant_id: &str) -> BlixardResult<()> {
+        self.delete_tenant_quota(tenant_id)
+    }
 }
