@@ -12,7 +12,7 @@ pub mod peer_connector;
 pub mod config_v2;
 pub mod config_watcher;
 pub mod config_global;
-pub mod metrics_otel_v2;
+pub mod metrics_otel;
 pub mod metrics_server;
 pub mod tracing_otel;
 pub mod resource_quotas;

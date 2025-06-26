@@ -1,7 +1,7 @@
 #![cfg(feature = "test-helpers")]
 
 use blixard_core::test_helpers::TestCluster;
-use blixard_core::metrics_otel_v2;
+use blixard_core::metrics_otel;
 use blixard_core::types::{VmConfig, VmCommand};
 use blixard_core::raft_manager::{TaskSpec, ResourceRequirements};
 use std::time::Duration;
@@ -9,7 +9,7 @@ use tokio::time::sleep;
 
 #[tokio::test]
 async fn test_comprehensive_grpc_metrics_instrumentation() {
-    let _ = metrics_otel_v2::init_noop();
+    let _ = metrics_otel::init_noop();
     
     // Create a single-node cluster
     let mut cluster = TestCluster::builder()

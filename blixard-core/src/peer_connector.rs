@@ -14,7 +14,7 @@ use crate::proto::cluster_service_client::ClusterServiceClient;
 use crate::proto::{HealthCheckRequest};
 use crate::node_shared::{SharedNodeState, PeerInfo};
 use crate::config_global;
-use crate::metrics_otel_v2::{metrics, Timer, attributes};
+use crate::metrics_otel::{metrics, Timer, attributes};
 use crate::tracing_otel;
 
 /// Buffered message for delayed sending

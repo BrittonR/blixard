@@ -1,11 +1,11 @@
 //! Integration test for OpenTelemetry metrics
 
-use blixard_core::metrics_otel_v2::{self, metrics, Timer, attributes};
+use blixard_core::metrics_otel::{self, metrics, Timer, attributes};
 
 #[tokio::test]
 async fn test_metrics_recording() {
     // Initialize metrics (or skip if already initialized)
-    let _ = metrics_otel_v2::init_prometheus();
+    let _ = metrics_otel::init_prometheus();
     
     let metrics = metrics();
     
@@ -29,7 +29,7 @@ async fn test_metrics_recording() {
     metrics.vm_running.add(2, &[]);
     
     // Get Prometheus text output
-    let metrics_text = metrics_otel_v2::prometheus_metrics();
+    let metrics_text = metrics_otel::prometheus_metrics();
     
     // Verify metrics are present
     assert!(metrics_text.contains("raft_proposals_total"));

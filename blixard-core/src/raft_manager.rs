@@ -13,7 +13,7 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::storage::{RedbRaftStorage, SnapshotData, VM_STATE_TABLE, CLUSTER_STATE_TABLE, 
     TASK_TABLE, TASK_ASSIGNMENT_TABLE, TASK_RESULT_TABLE, WORKER_TABLE, WORKER_STATUS_TABLE};
 use crate::types::{VmCommand, VmStatus};
-use crate::metrics_otel_v2::{metrics, Timer, attributes};
+use crate::metrics_otel::{metrics, Timer, attributes};
 
 // Raft message types for cluster communication
 #[derive(Debug)]

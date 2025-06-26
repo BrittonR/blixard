@@ -6,6 +6,7 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::types::VmConfig;
 use crate::raft_manager::{WorkerCapabilities, WorkerStatus};
 use crate::storage::{WORKER_TABLE, WORKER_STATUS_TABLE, VM_STATE_TABLE};
+use crate::metrics_otel;
 
 /// VM placement strategy for determining where to place VMs
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,11 +131,16 @@ impl VmScheduler {
         vm_config: &VmConfig,
         strategy: PlacementStrategy,
     ) -> BlixardResult<PlacementDecision> {
+        let start_time = std::time::Instant::now();
         let requirements = VmResourceRequirements::from(vm_config);
+        let strategy_name = format!("{:?}", strategy);
         
         // Handle manual placement first
         if let PlacementStrategy::Manual { node_id } = strategy {
-            return self.validate_manual_placement(node_id, &requirements).await;
+            let result = self.validate_manual_placement(node_id, &requirements).await;
+            let duration = start_time.elapsed().as_secs_f64();
+            metrics_otel::record_vm_placement_attempt(&strategy_name, result.is_ok(), duration);
+            return result;
         }
         
         // Get current cluster resource usage
@@ -182,11 +188,17 @@ impl VmScheduler {
             selected_node.available_disk_gb()
         );
         
-        Ok(PlacementDecision {
+        let decision = PlacementDecision {
             selected_node_id: selected_node.node_id,
             reason,
             alternative_nodes,
-        })
+        };
+        
+        // Record successful placement metrics
+        let duration = start_time.elapsed().as_secs_f64();
+        metrics_otel::record_vm_placement_attempt(&strategy_name, true, duration);
+        
+        Ok(decision)
     }
     
     /// Validate that a manual placement is feasible
@@ -404,6 +416,14 @@ impl VmScheduler {
             summary.total_disk_gb += usage.capabilities.disk_gb;
             summary.used_disk_gb += usage.used_disk_gb;
             summary.total_running_vms += usage.running_vms;
+        }
+        
+        // Update cluster-wide resource metrics
+        metrics_otel::update_cluster_resource_metrics(&summary);
+        
+        // Update per-node resource metrics  
+        for usage in &node_usage {
+            metrics_otel::update_node_resource_metrics(usage.node_id, usage);
         }
         
         Ok(summary)

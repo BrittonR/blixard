@@ -3,7 +3,7 @@
 use blixard_core::{
     config_v2::{Config, ConfigBuilder},
     config_global,
-    metrics_otel_v2::{metrics, init_prometheus},
+    metrics_otel::{metrics, init_prometheus},
     metrics_server,
 };
 use std::time::Duration;

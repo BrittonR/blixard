@@ -177,7 +177,7 @@ mod tests {
     #[tokio::test]
     async fn test_concurrent_cluster_clone() {
         // Initialize metrics
-        let _ = crate::metrics_otel_v2::init_noop();
+        let _ = crate::metrics_otel::init_noop();
         
         let cluster = ConcurrentTestClusterBuilder::new()
             .with_nodes(2)
@@ -201,7 +201,7 @@ mod tests {
     #[tokio::test]
     async fn test_concurrent_node_addition() {
         // Initialize metrics
-        let _ = crate::metrics_otel_v2::init_noop();
+        let _ = crate::metrics_otel::init_noop();
         
         let cluster = ConcurrentTestClusterBuilder::new()
             .with_nodes(1)

@@ -7,7 +7,7 @@ use std::time::Duration;
 #[tokio::test]
 async fn test_simple_two_node_join() {
     // Initialize metrics for test
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     // Start with a single node
     let mut cluster = TestCluster::builder()
@@ -60,7 +60,7 @@ async fn test_simple_two_node_join() {
 #[tokio::test]
 async fn test_concurrent_node_joins() {
     // Initialize metrics for test
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     // Start with a single node
     let mut cluster = TestCluster::builder()
@@ -115,7 +115,7 @@ async fn test_concurrent_node_joins() {
 #[tokio::test]
 async fn test_join_with_network_delays() {
     // Initialize metrics for test
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     // This test would require network simulation capabilities
     // For now, just test basic join with artificial delays

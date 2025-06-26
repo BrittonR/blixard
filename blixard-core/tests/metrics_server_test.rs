@@ -3,7 +3,7 @@
 use blixard_core::{
     config_v2::ConfigBuilder,
     config_global,
-    metrics_otel_v2::{init_prometheus, metrics},
+    metrics_otel::{init_prometheus, metrics},
     metrics_server,
 };
 use std::time::Duration;
@@ -49,7 +49,7 @@ async fn test_metrics_server_basic() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test]
 fn test_prometheus_metrics_format() {
-    use blixard_core::metrics_otel_v2::prometheus_metrics;
+    use blixard_core::metrics_otel::prometheus_metrics;
     
     // Initialize metrics if not already done
     let _ = init_prometheus();

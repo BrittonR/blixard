@@ -37,7 +37,7 @@ async fn check_for_split_brain(cluster: &TestCluster) -> Result<bool, String> {
 /// This is NOT a true network partition test
 #[tokio::test]
 async fn test_clean_removal_not_partition() {
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     let mut cluster = TestCluster::builder()
         .with_nodes(5)
@@ -99,7 +99,7 @@ async fn test_clean_removal_not_partition() {
 #[tokio::test]
 #[ignore = "Requires message interception capability"]
 async fn test_true_network_partition() {
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     let cluster = TestCluster::builder()
         .with_nodes(5)
@@ -138,7 +138,7 @@ async fn test_true_network_partition() {
 /// Test partition tolerance - minority partition cannot make progress
 #[tokio::test]
 async fn test_minority_partition_cannot_write() {
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     let cluster = TestCluster::builder()
         .with_nodes(5)
@@ -207,7 +207,7 @@ async fn test_minority_partition_cannot_write() {
 /// Test partition healing and reconciliation
 #[tokio::test]
 async fn test_partition_healing() {
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     let cluster = TestCluster::builder()
         .with_nodes(5)

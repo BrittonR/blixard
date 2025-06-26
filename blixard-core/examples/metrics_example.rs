@@ -5,7 +5,7 @@
 //! - Use metrics in application code
 //! - Export metrics for monitoring
 
-use blixard_core::metrics_otel_v2::{self, metrics, Timer, attributes};
+use blixard_core::metrics_otel::{self, metrics, Timer, attributes};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -16,7 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Initialize metrics with Prometheus exporter
     println!("Initializing metrics with Prometheus exporter");
-    metrics_otel_v2::init_prometheus()?;
+    metrics_otel::init_prometheus()?;
     
     // Get metrics instance
     let metrics = metrics();
@@ -112,7 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     use hyper::service::{make_service_fn, service_fn};
     
     async fn serve_metrics(_req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-        let metrics_text = metrics_otel_v2::prometheus_metrics();
+        let metrics_text = metrics_otel::prometheus_metrics();
         Ok(Response::new(Body::from(metrics_text)))
     }
     

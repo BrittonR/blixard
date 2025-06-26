@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 #[tokio::test]
 async fn test_10_node_cluster_formation() {
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     println!("Creating 10-node cluster...");
     let start = Instant::now();
@@ -62,7 +62,7 @@ async fn test_10_node_cluster_formation() {
 
 #[tokio::test]
 async fn test_incremental_growth_to_20_nodes() {
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     println!("Starting with 5-node cluster...");
     let mut cluster = TestCluster::builder()
@@ -131,7 +131,7 @@ async fn test_incremental_growth_to_20_nodes() {
 
 #[tokio::test]
 async fn test_large_cluster_concurrent_operations() {
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     println!("Creating concurrent 15-node cluster...");
     let cluster = ConcurrentTestClusterBuilder::new()
@@ -244,7 +244,7 @@ async fn test_large_cluster_concurrent_operations() {
 #[tokio::test]
 #[ignore = "Stress test - takes a long time"]
 async fn test_50_node_cluster_stress() {
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     println!("Creating 50-node cluster (this will take a while)...");
     let start = Instant::now();

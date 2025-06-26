@@ -6,7 +6,7 @@ use blixard_core::{
     types::NodeConfig,
     vm_backend::{VmManager, VmBackendRegistry},
     node::Node,
-    metrics_otel_v2,
+    metrics_otel,
     metrics_server,
     tracing_otel,
     config_v2::Config,
@@ -87,7 +87,7 @@ impl BlixardOrchestrator {
         tracing::info!("Global configuration initialized");
         
         // Initialize metrics with Prometheus exporter
-        metrics_otel_v2::init_prometheus()
+        metrics_otel::init_prometheus()
             .map_err(|e| blixard_core::error::BlixardError::Internal {
                 message: format!("Failed to initialize metrics: {}", e),
             })?;

@@ -7,7 +7,7 @@ use std::time::Duration;
 #[tokio::test]
 async fn test_leader_change_during_join() {
     // Initialize metrics for test
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     // Start with 3 nodes to allow leader changes
     let cluster = ConcurrentTestClusterBuilder::new()
@@ -116,7 +116,7 @@ async fn test_leader_change_during_join() {
 #[tokio::test]
 async fn test_concurrent_operations_on_different_nodes() {
     // Initialize metrics for test
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     let cluster = ConcurrentTestClusterBuilder::new()
         .with_nodes(3)
@@ -208,7 +208,7 @@ async fn test_concurrent_operations_on_different_nodes() {
 #[tokio::test]
 async fn test_concurrent_cluster_joins() {
     // Initialize metrics for test
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     let cluster = ConcurrentTestClusterBuilder::new()
         .with_nodes(1)

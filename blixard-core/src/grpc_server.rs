@@ -8,7 +8,7 @@ use crate::{
     node_shared::SharedNodeState,
     types::{VmCommand, VmStatus as InternalVmStatus},
     raft_manager::{TaskSpec, ResourceRequirements},
-    metrics_otel_v2::{metrics, Timer, attributes},
+    metrics_otel::{metrics, Timer, attributes},
     tracing_otel,
     resource_quotas::{ResourceRequest, ApiOperation, QuotaViolation},
     grpc_security::{GrpcSecurityMiddleware, SecurityContext},
@@ -764,6 +764,9 @@ impl ClusterService for BlixardGrpcService {
                 // Update VM counters
                 metrics.vm_total.add(1, &[]);
                 
+                // Record VM operation metrics
+                crate::metrics_otel::record_vm_operation("create", true);
+                
                 // Update resource usage after successful VM creation
                 self.update_resource_usage(
                     &tenant_id,
@@ -783,6 +786,9 @@ impl ClusterService for BlixardGrpcService {
                 drop(vm_timer);
                 record_grpc_error!("create_vm");
                 metrics.vm_create_failed.add(1, &[attributes::vm_name(&req.name)]);
+                
+                // Record failed VM operation metrics
+                crate::metrics_otel::record_vm_operation("create", false);
                 
                 Ok(Response::new(CreateVmResponse {
                     success: false,
@@ -819,6 +825,7 @@ impl ClusterService for BlixardGrpcService {
         match self.node.send_vm_operation_through_raft(command).await {
             Ok(_) => {
                 metrics.vm_running.add(1, &[]);
+                crate::metrics_otel::record_vm_operation("start", true);
                 Ok(Response::new(StartVmResponse {
                     success: true,
                     message: format!("VM '{}' start command sent", req.name),
@@ -826,6 +833,7 @@ impl ClusterService for BlixardGrpcService {
             },
             Err(e) => {
                 record_grpc_error!("start_vm");
+                crate::metrics_otel::record_vm_operation("start", false);
                 Ok(Response::new(StartVmResponse {
                     success: false,
                     message: format!("Failed to start VM: {}", e),
@@ -860,6 +868,7 @@ impl ClusterService for BlixardGrpcService {
         match self.node.send_vm_operation_through_raft(command).await {
             Ok(_) => {
                 metrics.vm_running.add(-1, &[]);
+                crate::metrics_otel::record_vm_operation("stop", true);
                 Ok(Response::new(StopVmResponse {
                     success: true,
                     message: format!("VM '{}' stop command sent", req.name),
@@ -867,6 +876,7 @@ impl ClusterService for BlixardGrpcService {
             },
             Err(e) => {
                 record_grpc_error!("stop_vm");
+                crate::metrics_otel::record_vm_operation("stop", false);
                 Ok(Response::new(StopVmResponse {
                     success: false,
                     message: format!("Failed to stop VM: {}", e),
@@ -915,6 +925,7 @@ impl ClusterService for BlixardGrpcService {
         match self.node.send_vm_operation_through_raft(command).await {
             Ok(_) => {
                 metrics.vm_total.add(-1, &[]);
+                crate::metrics_otel::record_vm_operation("delete", true);
                 Ok(Response::new(DeleteVmResponse {
                     success: true,
                     message: format!("VM '{}' delete command sent", req.name),
@@ -922,6 +933,7 @@ impl ClusterService for BlixardGrpcService {
             },
             Err(e) => {
                 record_grpc_error!("delete_vm");
+                crate::metrics_otel::record_vm_operation("delete", false);
                 Ok(Response::new(DeleteVmResponse {
                     success: false,
                     message: format!("Failed to delete VM: {}", e),

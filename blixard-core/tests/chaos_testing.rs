@@ -82,7 +82,7 @@ impl ChaosAgent {
 
 #[tokio::test]
 async fn test_node_joins_with_random_failures() {
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     println!("Testing node joins with random failures...");
     
@@ -170,7 +170,7 @@ async fn test_node_joins_with_random_failures() {
 
 #[tokio::test]
 async fn test_leader_failures_during_operations() {
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     println!("Testing operations with leader failures...");
     
@@ -297,7 +297,7 @@ async fn test_leader_failures_during_operations() {
 
 #[tokio::test]
 async fn test_random_network_delays_and_failures() {
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     println!("Testing with random network delays (simulated)...");
     
@@ -383,7 +383,7 @@ async fn test_random_network_delays_and_failures() {
 
 #[tokio::test]
 async fn test_cascading_failures() {
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     println!("Testing cascading node failures...");
     

@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod test_metrics_integration {
     use blixard_core::test_helpers::{TestCluster, init_test};
-    use blixard_core::metrics_otel_v2;
+    use blixard_core::metrics_otel;
     use blixard_core::types::{VmConfig, VmCommand};
     use blixard_core::raft_manager::{TaskSpec, ResourceRequirements};
     use std::time::Duration;
@@ -10,7 +10,7 @@ mod test_metrics_integration {
     #[tokio::test]
     async fn test_comprehensive_metrics_instrumentation() {
         init_test();
-        let _ = metrics_otel_v2::init_noop();
+        let _ = metrics_otel::init_noop();
         
         // Create a single-node cluster
         let mut cluster = TestCluster::builder()
@@ -111,7 +111,7 @@ mod test_metrics_integration {
         sleep(Duration::from_millis(100)).await;
         
         // Verify metrics were recorded
-        let metrics = metrics_otel_v2::metrics();
+        let metrics = metrics_otel::metrics();
         
         // Note: We can't easily verify the actual metric values in unit tests
         // because the OpenTelemetry metrics are exported asynchronously.

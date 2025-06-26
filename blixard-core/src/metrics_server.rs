@@ -8,7 +8,7 @@ use std::convert::Infallible;
 use hyper::{Body, Request, Response, Server, StatusCode};
 use hyper::service::{make_service_fn, service_fn};
 use crate::error::BlixardResult;
-use crate::metrics_otel_v2::prometheus_metrics;
+use crate::metrics_otel::prometheus_metrics;
 
 /// Handle HTTP requests to the metrics server
 async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {

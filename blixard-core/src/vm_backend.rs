@@ -8,7 +8,7 @@ use uuid;
 use crate::error::{BlixardResult, BlixardError};
 use crate::types::{VmConfig, VmStatus, VmCommand};
 use crate::vm_scheduler::{VmScheduler, PlacementStrategy, PlacementDecision};
-use crate::metrics_otel_v2::{metrics, Timer, attributes};
+use crate::metrics_otel::{metrics, Timer, attributes};
 use crate::tracing_otel;
 
 /// Abstract interface for VM backend implementations

@@ -7,7 +7,7 @@ use std::time::Duration;
 #[tokio::test]
 async fn test_rapid_sequential_joins() {
     // Initialize metrics for test
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     // Start with a single node
     let mut cluster = TestCluster::builder()
@@ -71,7 +71,7 @@ async fn test_rapid_sequential_joins() {
 #[tokio::test]
 async fn test_join_during_high_load() {
     // Initialize metrics for test
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     // Start with 2 nodes
     let mut cluster = TestCluster::builder()
@@ -155,7 +155,7 @@ async fn test_join_during_high_load() {
 #[ignore = "TestCluster cannot be cloned"]
 async fn test_leader_change_during_join() {
     // Initialize metrics for test
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     // Start with 3 nodes to allow leader changes
     let mut cluster = TestCluster::builder()
@@ -230,7 +230,7 @@ async fn test_leader_change_during_join() {
 #[tokio::test]
 async fn test_join_retry_after_failure() {
     // Initialize metrics for test
-    let _ = blixard_core::metrics_otel_v2::init_noop();
+    let _ = blixard_core::metrics_otel::init_noop();
     
     // Start with a single node
     let mut cluster = TestCluster::builder()

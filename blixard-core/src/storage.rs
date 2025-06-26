@@ -4,7 +4,7 @@ use raft::{Config, RawNode, GetEntriesContext};
 use slog::o;
 use crate::error::{BlixardError, BlixardResult};
 use crate::raft_codec;
-use crate::metrics_otel_v2::{metrics, Timer, attributes};
+use crate::metrics_otel::{metrics, Timer, attributes};
 use crate::tracing_otel;
 use serde::{Serialize, Deserialize};
 
