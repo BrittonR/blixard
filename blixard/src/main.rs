@@ -60,6 +60,10 @@ enum Commands {
         /// Cluster peers to join (comma-separated addresses)
         #[arg(long)]
         peers: Option<String>,
+        
+        /// Run node in background as daemon
+        #[arg(long)]
+        daemon: bool,
     },
     /// VM operations
     Vm {
@@ -192,7 +196,7 @@ async fn main() -> BlixardResult<()> {
     let cli = Cli::parse();
     
     match cli.command {
-        Commands::Node { id, bind, data_dir, vm_config_dir: _, vm_data_dir: _, mock_vm, vm_backend, peers } => {
+        Commands::Node { id, bind, data_dir, vm_config_dir: _, vm_data_dir: _, mock_vm, vm_backend, peers, daemon } => {
             // Load configuration from file or create from CLI args
             let mut config = if let Some(config_path) = cli.config {
                 // Load from TOML file
@@ -265,29 +269,84 @@ async fn main() -> BlixardResult<()> {
                 config: config.clone(),
             };
 
-            // Create and initialize the orchestrator
-            let mut orchestrator = BlixardOrchestrator::new(orchestrator_config).await?;
-            orchestrator.initialize(config).await?;
-            orchestrator.start().await?;
-            
-            // Get shared state for gRPC server
-            let shared_state = orchestrator.node().shared();
-            let actual_bind_address = orchestrator.bind_address();
-
             #[cfg(not(madsim))]
             {
-                // Keep orchestrator alive while running gRPC server
-                let _orchestrator = orchestrator;
-                
-                // Start gRPC server
-                match start_grpc_server(shared_state, actual_bind_address).await {
-                    Ok(()) => tracing::info!("gRPC server shut down gracefully"),
-                    Err(e) => tracing::error!("gRPC server error: {}", e),
+                if daemon {
+                    // Run in daemon mode (clone values for printing since they were moved)
+                    println!("🚀 Starting node {} in background (daemon mode)", id);
+                    println!("📍 Bind address: {}", config.node.bind_address);
+                    println!("📂 Data directory: {}", config.node.data_dir.display());
+                    println!("🔧 VM backend: {}", config.node.vm_backend);
+                    
+                    // Fork process to run in background
+                    match unsafe { libc::fork() } {
+                        -1 => {
+                            return Err(BlixardError::Internal {
+                                message: "Failed to fork process".to_string(),
+                            });
+                        }
+                        0 => {
+                            // Child process - detach from terminal and run server
+                            if unsafe { libc::setsid() } == -1 {
+                                eprintln!("Warning: Failed to create new session");
+                            }
+                            
+                            // Create and initialize the orchestrator
+                            let mut orchestrator = BlixardOrchestrator::new(orchestrator_config).await?;
+                            orchestrator.initialize(config).await?;
+                            orchestrator.start().await?;
+                            
+                            // Get shared state for gRPC server
+                            let shared_state = orchestrator.node().shared();
+                            let actual_bind_address = orchestrator.bind_address();
+                            
+                            // Keep orchestrator alive while running gRPC server
+                            let _orchestrator = orchestrator;
+                            
+                            // Start gRPC server (runs indefinitely)
+                            match start_grpc_server(shared_state, actual_bind_address).await {
+                                Ok(()) => tracing::info!("gRPC server shut down gracefully"),
+                                Err(e) => tracing::error!("gRPC server error: {}", e),
+                            }
+                        }
+                        pid => {
+                            // Parent process - print info and exit
+                            println!("✅ Node {} started in background with PID {}", id, pid);
+                            println!("🔍 To check status: cargo run -- cluster status --addr {}", config.node.bind_address);
+                            println!("🛑 To stop: kill {}", pid);
+                            return Ok(());
+                        }
+                    }
+                } else {
+                    // Run in foreground (normal mode)
+                    // Create and initialize the orchestrator
+                    let mut orchestrator = BlixardOrchestrator::new(orchestrator_config).await?;
+                    orchestrator.initialize(config).await?;
+                    orchestrator.start().await?;
+                    
+                    // Get shared state for gRPC server
+                    let shared_state = orchestrator.node().shared();
+                    let actual_bind_address = orchestrator.bind_address();
+                    
+                    // Keep orchestrator alive while running gRPC server
+                    let _orchestrator = orchestrator;
+                    
+                    // Start gRPC server
+                    match start_grpc_server(shared_state, actual_bind_address).await {
+                        Ok(()) => tracing::info!("gRPC server shut down gracefully"),
+                        Err(e) => tracing::error!("gRPC server error: {}", e),
+                    }
                 }
             }
             
             #[cfg(madsim)]
             {
+                // In simulation mode, ignore daemon flag and run normally
+                // Create and initialize the orchestrator
+                let mut orchestrator = BlixardOrchestrator::new(orchestrator_config).await?;
+                orchestrator.initialize(config).await?;
+                orchestrator.start().await?;
+                
                 // In simulation mode, just keep the orchestrator running
                 let _orchestrator = orchestrator;
                 tracing::info!("Node {} running (gRPC disabled in simulation)", id);
