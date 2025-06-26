@@ -646,22 +646,26 @@ When working on tests:
 1. **Metrics & Observability**
    - ✅ OpenTelemetry metrics foundation (metrics_otel_v2.rs)
    - ✅ Comprehensive metric definitions for all components
-   - ❌ Missing: HTTP /metrics endpoint
-   - ❌ Missing: Distributed tracing with spans
-   - ❌ Missing: Most components not instrumented (only RaftManager and PeerConnector)
-   - ❌ Missing: Dashboards, alerting rules, OTLP export configuration
+   - ✅ HTTP /metrics endpoint (metrics_server.rs)
+   - ✅ Prometheus metrics exposition format
+   - ✅ Distributed tracing with OpenTelemetry spans (tracing_otel.rs)
+   - ✅ gRPC trace context propagation
+   - ✅ Components instrumented: RaftManager, PeerConnector, Storage, gRPC, VM operations
+   - ❌ Missing: Dashboards (partial Grafana example exists)
+   - ❌ Missing: Production alerting rules
+   - ❌ Missing: OTLP export configuration for cloud vendors
 
 ### 📋 Future Implementation Areas
 
 1. **Complete Observability Stack**
-   - Add HTTP server for Prometheus /metrics endpoint
-   - Instrument all components (storage, gRPC, VM operations)
-   - Implement distributed tracing with OpenTelemetry spans
-   - Create Grafana dashboards and alerting rules
-   - Configure OTLP exporters for cloud vendors
+   - Polish and expand Grafana dashboards
+   - Define production alerting rules for Prometheus
+   - Configure OTLP exporters for major cloud vendors (AWS, GCP, Azure)
+   - Add exemplar support for trace-to-metrics correlation
+   - Create runbooks for common alert scenarios
 
 2. **Production Hardening**
-   - Configuration management (currently uses hardcoded thresholds)
+   - ✅ Configuration management (TOML-based with hot-reload support)
    - Security: TLS for gRPC, authentication/authorization
    - Resource limits and quotas per tenant
    - Backup and disaster recovery procedures

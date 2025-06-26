@@ -47,3 +47,7 @@ test-helpers = ["blixard-core/test-helpers"]
 [[bin]]
 name = "blixard"
 path = "src/main.rs"
+
+[[example]]
+name = "metrics_demo"
+path = "../examples/metrics_demo.rs"

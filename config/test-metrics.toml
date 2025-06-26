@@ -1,0 +1,19 @@
+# Test configuration with metrics enabled
+
+[node]
+id = 1
+bind_address = "127.0.0.1:7001"
+data_dir = "./data/node1"
+vm_backend = "mock"
+
+[cluster]
+bootstrap = true
+
+[network.metrics]
+enabled = true
+port_offset = 1000
+path = "/metrics"
+
+[observability.metrics]
+enabled = true
+prefix = "blixard"

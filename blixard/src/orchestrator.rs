@@ -124,13 +124,18 @@ impl BlixardOrchestrator {
         tracing::info!("Starting Blixard node services");
         self.node.start().await?;
         
-        // Start metrics server on port bind_port + 1000
-        let bind_addr = *self.node.shared().get_bind_addr();
-        let metrics_port = bind_addr.port() + 1000;
-        let metrics_addr = SocketAddr::new(bind_addr.ip(), metrics_port);
-        
-        self.metrics_handle = Some(metrics_server::spawn_metrics_server(metrics_addr));
-        tracing::info!("Metrics server started on http://{}/metrics", metrics_addr);
+        // Start metrics server if enabled
+        let config = config_global::get();
+        if config.network.metrics.enabled {
+            let bind_addr = *self.node.shared().get_bind_addr();
+            let metrics_port = bind_addr.port() + config.network.metrics.port_offset;
+            let metrics_addr = SocketAddr::new(bind_addr.ip(), metrics_port);
+            
+            self.metrics_handle = Some(metrics_server::spawn_metrics_server(metrics_addr));
+            tracing::info!("Metrics server started on http://{}{}", metrics_addr, config.network.metrics.path);
+        } else {
+            tracing::info!("Metrics server disabled by configuration");
+        }
         
         tracing::info!("Blixard node started successfully");
         Ok(())
