@@ -8,6 +8,7 @@ use crate::vm_backend::{VmManager, VmBackendRegistry};
 use crate::raft_manager::{RaftManager, RaftProposal, ProposalData};
 use crate::node_shared::SharedNodeState;
 use crate::peer_connector::PeerConnector;
+use crate::vm_health_monitor::VmHealthMonitor;
 
 use redb::Database;
 
@@ -18,6 +19,8 @@ pub struct Node {
     /// Non-sync runtime handles
     handle: Option<JoinHandle<BlixardResult<()>>>,
     raft_handle: Option<JoinHandle<BlixardResult<()>>>,
+    /// VM health monitor
+    health_monitor: Option<VmHealthMonitor>,
 }
 
 impl Node {
@@ -27,6 +30,7 @@ impl Node {
             shared: Arc::new(SharedNodeState::new(config)),
             handle: None,
             raft_handle: None,
+            health_monitor: None,
         }
     }
     
@@ -88,7 +92,15 @@ impl Node {
         let vm_backend = self.create_vm_backend(&registry, db_arc.clone())?;
         let vm_manager = Arc::new(VmManager::new(db_arc.clone(), vm_backend, self.shared.clone()));
         
-        self.shared.set_vm_manager(vm_manager).await;
+        self.shared.set_vm_manager(vm_manager.clone()).await;
+        
+        // Initialize VM health monitor
+        let health_check_interval = std::time::Duration::from_secs(30); // Check every 30 seconds
+        self.health_monitor = Some(VmHealthMonitor::new(
+            self.shared.clone(),
+            vm_manager,
+            health_check_interval,
+        ));
 
         // Initialize quota manager
         let storage = Arc::new(crate::storage::RedbRaftStorage { database: db_arc.clone() });
@@ -538,6 +550,13 @@ impl Node {
 
         self.handle = Some(handle);
         self.shared.set_running(true).await;
+        
+        // Start VM health monitor
+        if let Some(ref mut monitor) = self.health_monitor {
+            monitor.start();
+            tracing::info!("VM health monitor started");
+        }
+        
         Ok(())
     }
 
@@ -558,6 +577,12 @@ impl Node {
         // Stop Raft handle
         if let Some(handle) = self.raft_handle.take() {
             handle.abort(); // Abort the Raft task
+        }
+        
+        // Stop VM health monitor
+        if let Some(ref mut monitor) = self.health_monitor {
+            monitor.stop();
+            tracing::info!("VM health monitor stopped");
         }
         
         self.shared.set_running(false).await;

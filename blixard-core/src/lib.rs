@@ -25,6 +25,8 @@ pub use iroh_transport_stub as iroh_transport;
 pub mod p2p_image_store;
 pub mod p2p_manager;
 pub mod cluster_state;
+pub mod vm_health_monitor;
+pub mod vm_auto_recovery;
 
 // Test helpers are exposed for integration tests
 #[cfg(any(test, feature = "test-helpers"))]

@@ -45,6 +45,11 @@ pub struct Metrics {
     pub vm_stop_failed: Counter<u64>,
     pub vm_delete_total: Counter<u64>,
     pub vm_delete_failed: Counter<u64>,
+    pub vm_health_checks_total: Counter<u64>,
+    pub vm_health_check_failed: Counter<u64>,
+    pub vm_status_changes: Counter<u64>,
+    pub vm_recovery_success: Counter<u64>,
+    pub vm_recovery_failed: Counter<u64>,
     
     // Resource monitoring metrics
     pub cluster_nodes_total: UpDownCounter<i64>,
@@ -173,6 +178,26 @@ impl Metrics {
             vm_delete_failed: meter
                 .u64_counter("vm.delete.failed")
                 .with_description("Number of failed VM deletes")
+                .init(),
+            vm_health_checks_total: meter
+                .u64_counter("vm.health_checks.total")
+                .with_description("Total number of VM health checks performed")
+                .init(),
+            vm_health_check_failed: meter
+                .u64_counter("vm.health_check.failed")
+                .with_description("Number of failed VM health checks")
+                .init(),
+            vm_status_changes: meter
+                .u64_counter("vm.status_changes.total")
+                .with_description("Number of VM status changes detected by health monitoring")
+                .init(),
+            vm_recovery_success: meter
+                .u64_counter("vm.recovery.success")
+                .with_description("Number of successful VM recoveries")
+                .init(),
+            vm_recovery_failed: meter
+                .u64_counter("vm.recovery.failed")
+                .with_description("Number of failed VM recovery attempts")
                 .init(),
             
             // Resource monitoring metrics
@@ -460,6 +485,10 @@ pub mod attributes {
     
     pub fn error(value: bool) -> KeyValue {
         KeyValue::new("error", value)
+    }
+    
+    pub fn recovery_type(value: &str) -> KeyValue {
+        KeyValue::new("recovery.type", value.to_string())
     }
 }
 
