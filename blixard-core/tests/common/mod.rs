@@ -35,6 +35,8 @@ pub fn test_vm_config(name: &str) -> VmConfig {
         config_path: "/tmp/test.nix".to_string(),
         memory: 512,
         vcpus: 1,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     }
 }
 

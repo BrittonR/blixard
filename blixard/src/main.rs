@@ -75,6 +75,11 @@ enum Commands {
         #[command(subcommand)]
         command: ClusterCommands,
     },
+    /// Security operations (certificates, tokens, etc.)
+    Security {
+        #[command(subcommand)]
+        command: SecurityCommands,
+    },
     /// Reset all data and VMs (clean slate)
     Reset {
         /// Data directory to clean
@@ -232,6 +237,54 @@ enum ClusterCommands {
         /// Data directory
         #[arg(long, default_value = "./data")]
         data_dir: String,
+    },
+}
+
+#[derive(clap::Subcommand)]
+enum SecurityCommands {
+    /// Generate certificates for cluster TLS/mTLS
+    GenCerts {
+        /// Cluster name
+        #[arg(short, long)]
+        cluster_name: String,
+        
+        /// Node names (comma-separated)
+        #[arg(short, long)]
+        nodes: String,
+        
+        /// Client names for authentication (comma-separated)
+        #[arg(long, default_value = "admin,operator")]
+        clients: String,
+        
+        /// Output directory for certificates
+        #[arg(short, long, default_value = "./certs")]
+        output_dir: String,
+        
+        /// Certificate validity in days
+        #[arg(long, default_value = "365")]
+        validity_days: i64,
+        
+        /// Key algorithm (rsa2048, rsa4096, ecdsa-p256, ecdsa-p384)
+        #[arg(long, default_value = "ecdsa-p256")]
+        key_algorithm: String,
+    },
+    /// Generate an API token for authentication
+    GenToken {
+        /// User/service name
+        #[arg(short, long)]
+        user: String,
+        
+        /// Permissions (comma-separated: cluster-read,cluster-write,vm-read,vm-write,task-read,task-write,metrics-read,admin)
+        #[arg(short, long, default_value = "cluster-read,vm-read,task-read,metrics-read")]
+        permissions: String,
+        
+        /// Token validity in days (0 for no expiration)
+        #[arg(long, default_value = "30")]
+        validity_days: u64,
+        
+        /// Node address to connect to
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        addr: String,
     },
 }
 
@@ -415,6 +468,9 @@ async fn main() -> BlixardResult<()> {
         },
         Commands::Cluster { command } => {
             handle_cluster_command(command).await?;
+        }
+        Commands::Security { command } => {
+            handle_security_command(command).await?;
         }
         Commands::Reset { data_dir, vm_config_dir, vm_data_dir, force } => {
             handle_reset_command(&data_dir, &vm_config_dir, &vm_data_dir, force).await?;
@@ -1139,6 +1195,145 @@ async fn handle_tui_command() -> BlixardResult<()> {
     })?;
 
     result
+}
+
+#[cfg(not(madsim))]
+async fn handle_security_command(command: SecurityCommands) -> BlixardResult<()> {
+    use blixard_core::cert_generator::{
+        CertGenerator, CertGeneratorConfig, KeyAlgorithm, generate_cluster_pki
+    };
+    use std::path::PathBuf;
+    
+    match command {
+        SecurityCommands::GenCerts { 
+            cluster_name, 
+            nodes, 
+            clients, 
+            output_dir, 
+            validity_days,
+            key_algorithm,
+        } => {
+            println!("🔐 Generating certificates for cluster: {}", cluster_name);
+            
+            // Parse node names
+            let node_names: Vec<String> = nodes.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            
+            if node_names.is_empty() {
+                eprintln!("Error: No node names provided");
+                std::process::exit(1);
+            }
+            
+            // Parse client names
+            let client_names: Vec<String> = clients.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            
+            // Parse key algorithm
+            let key_algo = match key_algorithm.as_str() {
+                "rsa2048" => KeyAlgorithm::Rsa2048,
+                "rsa4096" => KeyAlgorithm::Rsa4096,
+                "ecdsa-p256" => KeyAlgorithm::EcdsaP256,
+                "ecdsa-p384" => KeyAlgorithm::EcdsaP384,
+                _ => {
+                    eprintln!("Error: Invalid key algorithm '{}'. Valid options: rsa2048, rsa4096, ecdsa-p256, ecdsa-p384", key_algorithm);
+                    std::process::exit(1);
+                }
+            };
+            
+            // Create output directory
+            let output_path = PathBuf::from(&output_dir);
+            
+            // Generate certificates
+            match generate_cluster_pki(
+                &cluster_name,
+                node_names.clone(),
+                client_names.clone(),
+                output_path.clone(),
+            ).await {
+                Ok(()) => {
+                    println!("✅ Successfully generated certificates!");
+                    println!();
+                    println!("📁 Certificate files created in: {}", output_dir);
+                    println!();
+                    println!("🔑 CA Certificate:");
+                    println!("   - {}/ca-{}-ca.crt", output_dir, cluster_name);
+                    println!("   - {}/ca-{}-ca.key", output_dir, cluster_name);
+                    println!();
+                    println!("🖥️  Server Certificates:");
+                    for node in &node_names {
+                        println!("   - {}/server-{}.crt", output_dir, node);
+                        println!("   - {}/server-{}.key", output_dir, node);
+                    }
+                    println!();
+                    println!("👤 Client Certificates:");
+                    for client in &client_names {
+                        println!("   - {}/client-{}.crt", output_dir, client);
+                        println!("   - {}/client-{}.key", output_dir, client);
+                    }
+                    println!();
+                    println!("💡 To use these certificates, configure your nodes with:");
+                    println!("   --config <config.toml>");
+                    println!();
+                    println!("Example config.toml:");
+                    println!("[security.tls]");
+                    println!("enabled = true");
+                    println!("cert_file = \"{}/server-<node-name>.crt\"", output_dir);
+                    println!("key_file = \"{}/server-<node-name>.key\"", output_dir);
+                    println!("ca_file = \"{}/ca-{}-ca.crt\"", output_dir, cluster_name);
+                    println!("require_client_cert = true  # For mTLS");
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to generate certificates: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        SecurityCommands::GenToken { user, permissions, validity_days, addr } => {
+            // Parse permissions
+            let perm_strings: Vec<&str> = permissions.split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+            
+            let mut parsed_permissions = Vec::new();
+            for perm in perm_strings {
+                match perm {
+                    "cluster-read" => parsed_permissions.push("ClusterRead"),
+                    "cluster-write" => parsed_permissions.push("ClusterWrite"),
+                    "vm-read" => parsed_permissions.push("VmRead"),
+                    "vm-write" => parsed_permissions.push("VmWrite"),
+                    "task-read" => parsed_permissions.push("TaskRead"),
+                    "task-write" => parsed_permissions.push("TaskWrite"),
+                    "metrics-read" => parsed_permissions.push("MetricsRead"),
+                    "admin" => parsed_permissions.push("Admin"),
+                    _ => {
+                        eprintln!("Error: Invalid permission '{}'. Valid options: cluster-read, cluster-write, vm-read, vm-write, task-read, task-write, metrics-read, admin", perm);
+                        std::process::exit(1);
+                    }
+                }
+            }
+            
+            println!("🔑 Generating API token for user: {}", user);
+            println!("📋 Permissions: {:?}", parsed_permissions);
+            println!("⏱️  Validity: {} days", validity_days);
+            
+            // TODO: Connect to node and generate token via gRPC
+            eprintln!("Note: Token generation via gRPC is not yet implemented");
+            eprintln!("For now, tokens must be generated on the node directly");
+        }
+    }
+    
+    Ok(())
+}
+
+#[cfg(madsim)]
+async fn handle_security_command(_command: SecurityCommands) -> BlixardResult<()> {
+    eprintln!("Security commands are not available in simulation mode");
+    std::process::exit(1);
 }
 
 #[cfg(madsim)]

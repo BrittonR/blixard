@@ -30,6 +30,8 @@ fn test_vm_config_serialization() {
         config_path: "/path/to/config.nix".to_string(),
         vcpus: 2,
         memory: 1024,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     // Test JSON serialization
@@ -90,6 +92,8 @@ fn test_vm_state_full_lifecycle() {
         config_path: "/tmp/lifecycle.nix".to_string(),
         vcpus: 1,
         memory: 512,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     let now = chrono::Utc::now();
@@ -123,6 +127,8 @@ fn test_vm_command_variants() {
         config_path: "/tmp/cmd.nix".to_string(),
         vcpus: 1,
         memory: 256,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     let commands = vec![
@@ -177,6 +183,8 @@ fn test_vm_config_validation_constraints() {
         config_path: "/tmp/test.nix".to_string(),
         vcpus: 1,
         memory: 64, // Very low memory
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     assert!(config.memory > 0);
@@ -187,6 +195,8 @@ fn test_vm_config_validation_constraints() {
         config_path: "/tmp/test.nix".to_string(),
         vcpus: 0, // Invalid CPU count
         memory: 512,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     // Should serialize even with invalid values (validation happens elsewhere)
@@ -211,6 +221,8 @@ fn test_vm_name_edge_cases() {
             config_path: "/tmp/test.nix".to_string(),
             vcpus: 1,
             memory: 512,
+            tenant_id: "default".to_string(),
+            ip_address: None,
         };
         
         // Should serialize regardless of validation
@@ -232,6 +244,8 @@ fn test_timestamp_handling() {
             config_path: "/tmp/test.nix".to_string(),
             vcpus: 1,
             memory: 512,
+            tenant_id: "default".to_string(),
+            ip_address: None,
         },
         status: VmStatus::Running,
         node_id: 1,
@@ -255,6 +269,8 @@ fn test_bincode_serialization() {
         config_path: "/tmp/bincode.nix".to_string(),
         vcpus: 4,
         memory: 2048,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     // Test bincode serialization (used for database storage)

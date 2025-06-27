@@ -438,6 +438,8 @@ impl VmBackend for MicrovmBackend {
                 config_path: self.get_vm_flake_dir(name).to_string_lossy().to_string(),
                 vcpus: vm_config.vcpus,
                 memory: vm_config.memory,
+                ip_address: None,  // TODO: Extract from VM config if available
+                tenant_id: "default".to_string(),  // TODO: Extract from VM config
             };
             
             // Get current status
@@ -464,6 +466,8 @@ impl VmBackend for MicrovmBackend {
                                 config_path: path.to_string_lossy().to_string(),
                                 vcpus: 1,
                                 memory: 512,
+                                ip_address: None,  // TODO: Extract from VM config if available
+                                tenant_id: "default".to_string(),  // TODO: Extract from VM config
                             };
                             
                             let status = self.get_vm_status(vm_name).await?

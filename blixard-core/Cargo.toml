@@ -67,6 +67,8 @@ notify = "6.1"
 aes-gcm = "0.10"
 sha2 = "0.10"
 hex = "0.4"
+rcgen = { version = "0.11", features = ["pem"] }
+time = "0.3"
 
 # VM management dependencies  
 tera = "1.19"

@@ -79,6 +79,8 @@ async fn test_vm_command_send() {
         config_path: "/tmp/test.nix".to_string(),
         memory: 512,
         vcpus: 1,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     let command = VmCommand::Create {
@@ -100,6 +102,8 @@ async fn test_vm_command_send_without_initialization() {
         config_path: "/tmp/test.nix".to_string(),
         memory: 512,
         vcpus: 1,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     let command = VmCommand::Create {
@@ -285,6 +289,8 @@ async fn test_database_persistence_across_restarts() {
             config_path: "/tmp/test.nix".to_string(),
             memory: 1024,
             vcpus: 2,
+            tenant_id: "default".to_string(),
+            ip_address: None,
         };
         
         // Note: After our changes, VMs created through send_vm_command won't persist

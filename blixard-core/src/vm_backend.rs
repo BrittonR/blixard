@@ -409,7 +409,10 @@ impl VmBackend for MockVmBackend {
         // Simulate VM creation with status transition
         // Start with "Creating", will transition to "Running" after a short delay
         {
-            let mut states = self.simulated_states.write().unwrap();
+            let mut states = self.simulated_states.write()
+                .map_err(|_| BlixardError::Internal { 
+                    message: "Mock VM backend lock poisoned".to_string() 
+                })?;
             states.insert(config.name.clone(), (crate::types::VmStatus::Creating, std::time::Instant::now()));
         }
         
@@ -421,7 +424,10 @@ impl VmBackend for MockVmBackend {
         
         // Simulate VM start with status transition to Running
         {
-            let mut states = self.simulated_states.write().unwrap();
+            let mut states = self.simulated_states.write()
+                .map_err(|_| BlixardError::Internal { 
+                    message: "Mock VM backend lock poisoned".to_string() 
+                })?;
             states.insert(name.to_string(), (crate::types::VmStatus::Running, std::time::Instant::now()));
         }
         
@@ -433,7 +439,10 @@ impl VmBackend for MockVmBackend {
         
         // Simulate VM stop with status transition to Stopped
         {
-            let mut states = self.simulated_states.write().unwrap();
+            let mut states = self.simulated_states.write()
+                .map_err(|_| BlixardError::Internal { 
+                    message: "Mock VM backend lock poisoned".to_string() 
+                })?;
             states.insert(name.to_string(), (crate::types::VmStatus::Stopped, std::time::Instant::now()));
         }
         
@@ -453,7 +462,10 @@ impl VmBackend for MockVmBackend {
     async fn get_vm_status(&self, name: &str) -> BlixardResult<Option<VmStatus>> {
         // Check simulated states for realistic status transitions
         {
-            let states = self.simulated_states.read().unwrap();
+            let states = self.simulated_states.read()
+                .map_err(|_| BlixardError::Internal { 
+                    message: "Mock VM backend lock poisoned".to_string() 
+                })?;
             if let Some((status, created_at)) = states.get(name) {
                 let elapsed = created_at.elapsed();
                 
@@ -660,6 +672,8 @@ mod tests {
             config_path: "/tmp/test.nix".to_string(),
             vcpus: 1,
             memory: 512,
+            tenant_id: "default".to_string(),
+            ip_address: None,
         };
         
         backend.create_vm(&vm_config, 1).await.unwrap();

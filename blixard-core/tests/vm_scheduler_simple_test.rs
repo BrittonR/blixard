@@ -66,6 +66,8 @@ fn add_vm(
             config_path: "".to_string(),
             vcpus,
             memory,
+            tenant_id: "default".to_string(),
+            ip_address: None,
         };
         
         let vm_state = VmState {
@@ -112,6 +114,8 @@ async fn test_scheduler_basic_placement() {
         config_path: "".to_string(),
         vcpus: 2,
         memory: 2048,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::MostAvailable).await;
@@ -146,6 +150,8 @@ async fn test_scheduler_resource_constraints() {
         config_path: "".to_string(),
         vcpus: 1,
         memory: 2048,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     let result = scheduler.schedule_vm_placement(&small_vm, PlacementStrategy::MostAvailable).await;
@@ -157,6 +163,8 @@ async fn test_scheduler_resource_constraints() {
         config_path: "".to_string(),
         vcpus: 8,
         memory: 16384,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     let result = scheduler.schedule_vm_placement(&large_vm, PlacementStrategy::MostAvailable).await;
@@ -192,6 +200,8 @@ async fn test_scheduler_round_robin() {
         config_path: "".to_string(),
         vcpus: 1,
         memory: 1024,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::RoundRobin).await;
@@ -223,6 +233,8 @@ async fn test_scheduler_manual_placement() {
         config_path: "".to_string(),
         vcpus: 2,
         memory: 2048,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     // Test valid manual placement
@@ -266,6 +278,8 @@ async fn test_scheduler_feature_requirements() {
         config_path: "".to_string(),
         vcpus: 2,
         memory: 2048,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     // Note: VmResourceRequirements::from() always adds "microvm" feature
@@ -343,6 +357,8 @@ async fn test_scheduler_bin_packing() {
         config_path: "".to_string(),
         vcpus: 2,
         memory: 2048,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::LeastAvailable).await;

@@ -8,6 +8,7 @@ pub mod raft_manager;
 pub mod storage;
 pub mod vm_backend;
 pub mod vm_scheduler;
+pub mod network_isolated_backend;
 pub mod peer_connector;
 pub mod config_v2;
 pub mod config_watcher;
@@ -19,6 +20,7 @@ pub mod resource_quotas;
 pub mod quota_manager;
 pub mod security;
 pub mod grpc_security;
+pub mod cert_generator;
 // pub mod iroh_transport;  // Temporarily disabled while updating to new Iroh API
 pub mod iroh_transport_stub;
 pub use iroh_transport_stub as iroh_transport;
@@ -27,6 +29,7 @@ pub mod p2p_manager;
 pub mod cluster_state;
 pub mod vm_health_monitor;
 pub mod vm_auto_recovery;
+pub mod vm_network_isolation;
 
 // Test helpers are exposed for integration tests
 #[cfg(any(test, feature = "test-helpers"))]

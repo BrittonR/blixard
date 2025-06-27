@@ -517,6 +517,8 @@ mod tests {
             config_path: "".to_string(),
             vcpus: 4,
             memory: 8192,
+            tenant_id: "default".to_string(),
+            ip_address: None,
         };
         
         let requirements = VmResourceRequirements::from(&vm_config);

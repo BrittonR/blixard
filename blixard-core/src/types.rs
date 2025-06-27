@@ -17,6 +17,14 @@ pub struct VmConfig {
     pub config_path: String,
     pub vcpus: u32,
     pub memory: u32, // MB
+    #[serde(default = "default_tenant")]
+    pub tenant_id: String, // Tenant identifier for multi-tenancy
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip_address: Option<String>, // VM IP address for network isolation
+}
+
+fn default_tenant() -> String {
+    "default".to_string()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

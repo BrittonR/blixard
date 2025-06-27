@@ -304,7 +304,7 @@ pub fn init_prometheus() -> Result<&'static Metrics, Box<dyn std::error::Error>>
     
     METRICS.set(metrics).map_err(|_| "Metrics already initialized")?;
     
-    Ok(METRICS.get().unwrap())
+    Ok(METRICS.get().expect("Metrics was just initialized"))
 }
 
 
@@ -319,7 +319,11 @@ pub fn prometheus_metrics() -> String {
         let mut buffer = Vec::new();
         let encoder = TextEncoder::new();
         let metric_families = registry.gather();
-        encoder.encode(&metric_families, &mut buffer).unwrap();
+        
+        if let Err(e) = encoder.encode(&metric_families, &mut buffer) {
+            return format!("# Error encoding metrics: {}\n", e);
+        }
+        
         String::from_utf8(buffer).unwrap_or_else(|_| "# Error encoding metrics\n".to_string())
     } else {
         String::from("# Metrics not initialized\n")
@@ -403,12 +407,17 @@ pub fn init_noop() -> Result<&'static Metrics, Box<dyn std::error::Error>> {
     let metrics = Metrics::new(meter);
     
     METRICS.set(metrics).map_err(|_| "Metrics already initialized")?;
-    Ok(METRICS.get().unwrap())
+    Ok(METRICS.get().expect("Metrics was just initialized"))
 }
 
 /// Get the global metrics instance
 pub fn metrics() -> &'static Metrics {
     METRICS.get().expect("Metrics not initialized. Call init_prometheus() or init_noop() first.")
+}
+
+/// Try to get the global metrics instance, returning None if not initialized
+pub fn try_metrics() -> Option<&'static Metrics> {
+    METRICS.get()
 }
 
 /// Timer guard for recording operation duration

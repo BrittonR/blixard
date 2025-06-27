@@ -909,10 +909,32 @@ pub fn init<P: AsRef<Path>>(config_path: P) -> BlixardResult<()> {
 /// Get the current configuration
 pub fn get() -> Arc<Config> {
     if let Some(config) = CONFIG.get() {
-        Arc::new(config.read().unwrap().clone())
+        match config.read() {
+            Ok(guard) => Arc::new(guard.clone()),
+            Err(_) => {
+                // Lock is poisoned, fallback to default
+                tracing::error!("Configuration lock is poisoned, returning default config");
+                Arc::new(Config::default())
+            }
+        }
     } else {
         // Fallback to default if not initialized
         Arc::new(Config::default())
+    }
+}
+
+/// Get the current configuration, returning an error if lock is poisoned
+pub fn try_get() -> BlixardResult<Arc<Config>> {
+    if let Some(config) = CONFIG.get() {
+        config.read()
+            .map(|guard| Arc::new(guard.clone()))
+            .map_err(|_| BlixardError::ConfigError(
+                "Failed to read configuration (lock poisoned)".to_string()
+            ))
+    } else {
+        Err(BlixardError::ConfigError(
+            "Configuration not initialized".to_string()
+        ))
     }
 }
 
@@ -933,7 +955,10 @@ pub async fn reload<P: AsRef<Path>>(config_path: P) -> BlixardResult<()> {
     
     // Update global config
     if let Some(config) = CONFIG.get() {
-        let mut config_write = config.write().unwrap();
+        let mut config_write = config.write()
+            .map_err(|_| BlixardError::ConfigError(
+                "Failed to acquire write lock on configuration (lock poisoned)".to_string()
+            ))?;
         
         // Apply only hot-reloadable changes
         // This is a simplified version - in production, you'd want more granular updates

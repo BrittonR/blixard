@@ -581,7 +581,12 @@ mod tests {
         }
         
         async fn kill(&self, pid: u32) -> Result<(), std::io::Error> {
-            self.killed_pids.lock().unwrap().push(pid);
+            self.killed_pids.lock()
+                .map_err(|_| std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Lock poisoned"
+                ))?
+                .push(pid);
             Ok(())
         }
     }
