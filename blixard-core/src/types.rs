@@ -37,6 +37,16 @@ pub enum VmStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NodeState {
+    Uninitialized,
+    Initialized,
+    JoiningCluster,
+    Active,
+    LeavingCluster,
+    Error,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VmState {
     pub name: String,

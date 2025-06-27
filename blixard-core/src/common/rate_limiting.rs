@@ -5,7 +5,8 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
-    resource_quotas::{ApiOperation, QuotaManager},
+    quota_manager::QuotaManager,
+    resource_quotas::ApiOperation,
 };
 use std::sync::Arc;
 use std::time::{Duration, Instant};

@@ -5,6 +5,7 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
+use std::path::PathBuf;
 use crate::{
     error::BlixardResult,
     config_v2::Config,
@@ -56,10 +57,10 @@ impl ConfigProvider for GlobalConfigProvider {
         // Simple path-based value extraction
         // In a real implementation, this would use a proper path parser
         let value = match path {
-            "node.id" => Some(config.node.id.to_string()),
+            "node.id" => config.node.id.map(|id| id.to_string()),
             "node.bind_address" => Some(config.node.bind_address.clone()),
-            "node.data_dir" => Some(config.node.data_dir.clone()),
-            "cluster.name" => Some(config.cluster.name.clone()),
+            "node.data_dir" => Some(config.node.data_dir.to_string_lossy().into_owned()),
+            "cluster.bootstrap" => Some(config.cluster.bootstrap.to_string()),
             "cluster.peer.max_connections" => Some(config.cluster.peer.max_connections.to_string()),
             _ => None,
         };
@@ -128,10 +129,10 @@ impl MockConfigProvider {
         
         // Simple path-based value setting
         match path {
-            "node.id" => config.node.id = value.parse().unwrap_or(0),
+            "node.id" => config.node.id = Some(value.parse().unwrap_or(0)),
             "node.bind_address" => config.node.bind_address = value,
-            "node.data_dir" => config.node.data_dir = value,
-            "cluster.name" => config.cluster.name = value,
+            "node.data_dir" => config.node.data_dir = PathBuf::from(value),
+            "cluster.bootstrap" => config.cluster.bootstrap = value.parse().unwrap_or(false),
             "cluster.peer.max_connections" => {
                 config.cluster.peer.max_connections = value.parse().unwrap_or(100)
             }
@@ -161,10 +162,10 @@ impl ConfigProvider for MockConfigProvider {
         let config = self.get().await?;
         
         let value = match path {
-            "node.id" => Some(config.node.id.to_string()),
+            "node.id" => config.node.id.map(|id| id.to_string()),
             "node.bind_address" => Some(config.node.bind_address.clone()),
-            "node.data_dir" => Some(config.node.data_dir.clone()),
-            "cluster.name" => Some(config.cluster.name.clone()),
+            "node.data_dir" => Some(config.node.data_dir.to_string_lossy().into_owned()),
+            "cluster.bootstrap" => Some(config.cluster.bootstrap.to_string()),
             "cluster.peer.max_connections" => Some(config.cluster.peer.max_connections.to_string()),
             _ => None,
         };

@@ -297,8 +297,8 @@ impl P2pManager {
     
     /// Start peer discovery task
     fn start_peer_discovery(&self) {
-        let peers = self.peers.clone();
-        let event_tx = self.event_tx.clone();
+        let _peers = self.peers.clone();
+        let _event_tx = self.event_tx.clone();
         let interval_duration = self.config.peer_discovery_interval;
         
         tokio::spawn(async move {

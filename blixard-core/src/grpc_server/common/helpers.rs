@@ -17,7 +17,7 @@ pub fn instrument_grpc_method<T>(
 ) -> (opentelemetry::Context, Timer) {
     // Extract trace context from incoming request
     let parent_context = tracing_otel::extract_context(request);
-    let _guard = parent_context.attach();
+    let _guard = parent_context.clone().attach();
     
     // Create span for this operation
     let span = tracing_otel::grpc_span(method_name, opentelemetry::trace::SpanKind::Server);

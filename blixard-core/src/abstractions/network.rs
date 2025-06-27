@@ -12,7 +12,6 @@ use crate::{
         blixard_service_client::BlixardServiceClient,
         JoinRequest, JoinResponse,
         ClusterStatusRequest, ClusterStatusResponse,
-        HealthCheckRequest, HealthCheckResponse,
     },
 };
 use tonic::{transport::Channel, Request, Response};
@@ -43,8 +42,7 @@ pub trait ClusterClient: Send + Sync {
 /// Abstraction for blixard service operations
 #[async_trait]
 pub trait BlixardClient: Send + Sync {
-    /// Health check operation
-    async fn health_check(&mut self, request: HealthCheckRequest) -> BlixardResult<HealthCheckResponse>;
+    // TODO: Add BlixardService methods here
 }
 
 // Production implementations
@@ -69,9 +67,9 @@ impl Default for TonicNetworkClient {
 impl NetworkClient for TonicNetworkClient {
     async fn create_cluster_client(&self, address: &str) -> BlixardResult<Box<dyn ClusterClient>> {
         let channel = Channel::from_shared(format!("http://{}", address))
-            .map_err(|e| crate::error::BlixardError::NetworkError(
-                tonic::transport::Error::from(e)
-            ))?
+            .map_err(|e| crate::error::BlixardError::Internal {
+                message: format!("Invalid URI: {}", e)
+            })?
             .connect()
             .await?;
             
@@ -82,9 +80,9 @@ impl NetworkClient for TonicNetworkClient {
     
     async fn create_blixard_client(&self, address: &str) -> BlixardResult<Box<dyn BlixardClient>> {
         let channel = Channel::from_shared(format!("http://{}", address))
-            .map_err(|e| crate::error::BlixardError::NetworkError(
-                tonic::transport::Error::from(e)
-            ))?
+            .map_err(|e| crate::error::BlixardError::Internal {
+                message: format!("Invalid URI: {}", e)
+            })?
             .connect()
             .await?;
             
@@ -97,9 +95,9 @@ impl NetworkClient for TonicNetworkClient {
         match tokio::time::timeout(
             timeout,
             Channel::from_shared(format!("http://{}", address))
-                .map_err(|e| crate::error::BlixardError::NetworkError(
-                    tonic::transport::Error::from(e)
-                ))?
+                .map_err(|e| crate::error::BlixardError::Internal {
+                    message: format!("Invalid URI: {}", e)
+                })?
                 .connect()
         ).await {
             Ok(Ok(_)) => Ok(true),
@@ -117,12 +115,18 @@ struct TonicClusterClient {
 #[async_trait]
 impl ClusterClient for TonicClusterClient {
     async fn join_cluster(&mut self, request: JoinRequest) -> BlixardResult<JoinResponse> {
-        let response = self.inner.join_cluster(Request::new(request)).await?;
+        let response = self.inner.join_cluster(Request::new(request)).await
+            .map_err(|e| crate::error::BlixardError::Internal {
+                message: format!("gRPC error: {}", e)
+            })?;
         Ok(response.into_inner())
     }
     
     async fn get_cluster_status(&mut self, request: ClusterStatusRequest) -> BlixardResult<ClusterStatusResponse> {
-        let response = self.inner.get_cluster_status(Request::new(request)).await?;
+        let response = self.inner.get_cluster_status(Request::new(request)).await
+            .map_err(|e| crate::error::BlixardError::Internal {
+                message: format!("gRPC error: {}", e)
+            })?;
         Ok(response.into_inner())
     }
 }
@@ -134,10 +138,7 @@ struct TonicBlixardClient {
 
 #[async_trait]
 impl BlixardClient for TonicBlixardClient {
-    async fn health_check(&mut self, request: HealthCheckRequest) -> BlixardResult<HealthCheckResponse> {
-        let response = self.inner.health_check(Request::new(request)).await?;
-        Ok(response.into_inner())
-    }
+    // Health check is now in ClusterService, not BlixardService
 }
 
 // Mock implementations
@@ -150,7 +151,6 @@ use std::collections::HashMap;
 pub struct MockNetworkClient {
     reachable_addresses: Arc<RwLock<HashMap<String, bool>>>,
     cluster_responses: Arc<RwLock<HashMap<String, MockClusterResponses>>>,
-    health_responses: Arc<RwLock<HashMap<String, HealthCheckResponse>>>,
 }
 
 #[derive(Clone, Default)]
@@ -165,7 +165,6 @@ impl MockNetworkClient {
         Self {
             reachable_addresses: Arc::new(RwLock::new(HashMap::new())),
             cluster_responses: Arc::new(RwLock::new(HashMap::new())),
-            health_responses: Arc::new(RwLock::new(HashMap::new())),
         }
     }
     
@@ -187,11 +186,6 @@ impl MockNetworkClient {
         let entry = responses.entry(address.to_string()).or_default();
         entry.status_response = Some(response);
     }
-    
-    /// Set health check response for an address
-    pub async fn set_health_response(&self, address: &str, response: HealthCheckResponse) {
-        self.health_responses.write().await.insert(address.to_string(), response);
-    }
 }
 
 impl Default for MockNetworkClient {
@@ -211,12 +205,8 @@ impl NetworkClient for MockNetworkClient {
         Ok(Box::new(MockClusterClient { responses }))
     }
     
-    async fn create_blixard_client(&self, address: &str) -> BlixardResult<Box<dyn BlixardClient>> {
-        let response = self.health_responses.read().await
-            .get(address)
-            .cloned();
-            
-        Ok(Box::new(MockBlixardClient { response }))
+    async fn create_blixard_client(&self, _address: &str) -> BlixardResult<Box<dyn BlixardClient>> {
+        Ok(Box::new(MockBlixardClient {}))
     }
     
     async fn is_reachable(&self, address: &str, _timeout: Duration) -> BlixardResult<bool> {
@@ -251,15 +241,10 @@ impl ClusterClient for MockClusterClient {
 
 /// Mock blixard client
 struct MockBlixardClient {
-    response: Option<HealthCheckResponse>,
+    // TODO: Add mock responses for BlixardService methods
 }
 
 #[async_trait]
 impl BlixardClient for MockBlixardClient {
-    async fn health_check(&mut self, _request: HealthCheckRequest) -> BlixardResult<HealthCheckResponse> {
-        self.response.clone()
-            .ok_or_else(|| crate::error::BlixardError::Internal {
-                message: "No mock health response configured".to_string()
-            })
-    }
+    // TODO: Implement BlixardService methods
 }

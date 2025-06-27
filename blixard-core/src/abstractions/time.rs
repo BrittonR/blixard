@@ -44,12 +44,36 @@ pub trait Clock: Send + Sync {
     
     /// Sleep for a duration
     async fn sleep(&self, duration: Duration);
-    
+}
+
+/// Extension trait for timeout operations
+/// This is separate from Clock to maintain dyn compatibility
+#[async_trait]
+pub trait ClockExt: Clock {
     /// Create a timeout future
     async fn timeout<F, T>(&self, duration: Duration, future: F) -> Result<T, ()>
     where
         F: std::future::Future<Output = T> + Send,
         T: Send;
+}
+
+// Blanket implementation for all Clock types
+#[async_trait]
+impl<C: Clock + ?Sized> ClockExt for C {
+    async fn timeout<F, T>(&self, duration: Duration, future: F) -> Result<T, ()>
+    where
+        F: std::future::Future<Output = T> + Send,
+        T: Send,
+    {
+        let sleep_future = self.sleep(duration);
+        tokio::pin!(sleep_future);
+        tokio::pin!(future);
+        
+        tokio::select! {
+            result = future => Ok(result),
+            _ = sleep_future => Err(()),
+        }
+    }
 }
 
 // Production implementation using std/tokio time
@@ -86,16 +110,6 @@ impl Clock for SystemClock {
     
     async fn sleep(&self, duration: Duration) {
         tokio::time::sleep(duration).await;
-    }
-    
-    async fn timeout<F, T>(&self, duration: Duration, future: F) -> Result<T, ()>
-    where
-        F: std::future::Future<Output = T> + Send,
-        T: Send,
-    {
-        tokio::time::timeout(duration, future)
-            .await
-            .map_err(|_| ())
     }
 }
 
@@ -197,26 +211,12 @@ impl Clock for MockClock {
             notified.await;
         }
     }
-    
-    async fn timeout<F, T>(&self, duration: Duration, future: F) -> Result<T, ()>
-    where
-        F: std::future::Future<Output = T> + Send,
-        T: Send,
-    {
-        let sleep_future = self.sleep(duration);
-        tokio::pin!(sleep_future);
-        tokio::pin!(future);
-        
-        tokio::select! {
-            result = future => Ok(result),
-            _ = sleep_future => Err(()),
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::ClockExt;
     
     #[tokio::test]
     async fn test_mock_clock_sleep() {

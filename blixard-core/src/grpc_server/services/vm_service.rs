@@ -5,14 +5,13 @@
 
 use crate::{
     node_shared::SharedNodeState,
-    types::VmCommand,
+    types::{VmCommand, VmMigrationTask},
     raft_manager::{TaskSpec, ResourceRequirements},
     resource_quotas::ApiOperation,
     grpc_server::common::{
         GrpcMiddleware, vm_status_to_proto, error_to_status,
     },
     proto::{
-        cluster_service_server::ClusterService,
         CreateVmRequest, CreateVmResponse, DeleteVmRequest, DeleteVmResponse,
         GetVmStatusRequest, GetVmStatusResponse, ListVmsRequest, ListVmsResponse,
         StartVmRequest, StartVmResponse, StopVmRequest, StopVmResponse,
@@ -64,8 +63,8 @@ impl VmServiceImpl {
     /// Create VM configuration from request
     fn create_vm_config(&self, name: String, vcpus: u32, memory: u32) -> crate::types::VmConfig {
         crate::types::VmConfig {
-            name,
             config_path: format!("/etc/blixard/vms/{}.yaml", name),
+            name,
             vcpus,
             memory,
             ip_address: None,
@@ -74,9 +73,9 @@ impl VmServiceImpl {
     }
 }
 
-#[tonic::async_trait]
-impl ClusterService for VmServiceImpl {
-    async fn create_vm(
+// VM operation helper methods for use by ClusterServiceImpl
+impl VmServiceImpl {
+    pub async fn create_vm(
         &self,
         request: Request<CreateVmRequest>,
     ) -> Result<Response<CreateVmResponse>, Status> {
@@ -88,23 +87,23 @@ impl ClusterService for VmServiceImpl {
         let req = instrument_grpc!(self.node, request, "create_vm");
         
         tracing::info!("Creating VM '{}' with {} vCPUs and {} MB memory", 
-            req.name, req.vcpus, req.memory);
+            req.name, req.vcpus, req.memory_mb);
         
         // Create VM configuration
-        let mut vm_config = self.create_vm_config(req.name.clone(), req.vcpus, req.memory);
+        let mut vm_config = self.create_vm_config(req.name.clone(), req.vcpus, req.memory_mb);
         vm_config.tenant_id = tenant_id.clone();
         
         // Check resource quotas
         self.middleware.check_vm_quota(&tenant_id, &vm_config, None).await?;
         
         // Create the VM through Raft consensus
-        match self.node.execute_vm_command(VmCommand::Create(vm_config.clone())).await {
+        match self.node.send_vm_command(VmCommand::Create { config: vm_config.clone(), node_id: self.node.get_id() }).await {
             Ok(_) => {
                 // Update resource usage
                 self.middleware.update_resource_usage(
                     &tenant_id,
                     req.vcpus as i32,
-                    req.memory as i64,
+                    req.memory_mb as i64,
                     5, // Default disk size
                     self.node.get_id(),
                 ).await;
@@ -112,14 +111,7 @@ impl ClusterService for VmServiceImpl {
                 Ok(Response::new(CreateVmResponse {
                     success: true,
                     message: format!("VM '{}' created successfully", req.name),
-                    vm_info: Some(VmInfo {
-                        name: req.name,
-                        state: VmState::Created as i32,
-                        vcpus: req.vcpus,
-                        memory: req.memory,
-                        node_id: self.node.get_id(),
-                        ip_address: vm_config.ip_address.unwrap_or_default(),
-                    }),
+                    vm_id: req.name,
                 }))
             }
             Err(e) => {
@@ -129,7 +121,7 @@ impl ClusterService for VmServiceImpl {
         }
     }
     
-    async fn start_vm(
+    pub async fn start_vm(
         &self,
         request: Request<StartVmRequest>,
     ) -> Result<Response<StartVmResponse>, Status> {
@@ -142,7 +134,7 @@ impl ClusterService for VmServiceImpl {
         
         tracing::info!("Starting VM '{}'", req.name);
         
-        match self.node.execute_vm_command(VmCommand::Start(req.name.clone())).await {
+        match self.node.send_vm_command(VmCommand::Start { name: req.name.clone() }).await {
             Ok(_) => {
                 Ok(Response::new(StartVmResponse {
                     success: true,
@@ -156,7 +148,7 @@ impl ClusterService for VmServiceImpl {
         }
     }
     
-    async fn stop_vm(
+    pub async fn stop_vm(
         &self,
         request: Request<StopVmRequest>,
     ) -> Result<Response<StopVmResponse>, Status> {
@@ -169,7 +161,7 @@ impl ClusterService for VmServiceImpl {
         
         tracing::info!("Stopping VM '{}'", req.name);
         
-        match self.node.execute_vm_command(VmCommand::Stop(req.name.clone())).await {
+        match self.node.send_vm_command(VmCommand::Stop { name: req.name.clone() }).await {
             Ok(_) => {
                 Ok(Response::new(StopVmResponse {
                     success: true,
@@ -183,7 +175,7 @@ impl ClusterService for VmServiceImpl {
         }
     }
     
-    async fn delete_vm(
+    pub async fn delete_vm(
         &self,
         request: Request<DeleteVmRequest>,
     ) -> Result<Response<DeleteVmResponse>, Status> {
@@ -200,7 +192,7 @@ impl ClusterService for VmServiceImpl {
         if let Ok(vms) = self.node.list_vms().await {
             if let Some((vm_config, _)) = vms.iter().find(|(cfg, _)| cfg.name == req.name) {
                 // Delete the VM through Raft consensus
-                match self.node.execute_vm_command(VmCommand::Delete(req.name.clone())).await {
+                match self.node.send_vm_command(VmCommand::Delete { name: req.name.clone() }).await {
                     Ok(_) => {
                         // Update resource usage (negative values to release resources)
                         self.middleware.update_resource_usage(
@@ -232,7 +224,7 @@ impl ClusterService for VmServiceImpl {
         }
     }
     
-    async fn list_vms(
+    pub async fn list_vms(
         &self,
         request: Request<ListVmsRequest>,
     ) -> Result<Response<ListVmsResponse>, Status> {
@@ -250,7 +242,7 @@ impl ClusterService for VmServiceImpl {
                         name: config.name,
                         state: vm_status_to_proto(&status) as i32,
                         vcpus: config.vcpus,
-                        memory: config.memory,
+                        memory_mb: config.memory,
                         node_id: self.node.get_id(),
                         ip_address: config.ip_address.unwrap_or_default(),
                     }
@@ -267,7 +259,7 @@ impl ClusterService for VmServiceImpl {
         }
     }
     
-    async fn get_vm_status(
+    pub async fn get_vm_status(
         &self,
         request: Request<GetVmStatusRequest>,
     ) -> Result<Response<GetVmStatusResponse>, Status> {
@@ -286,7 +278,7 @@ impl ClusterService for VmServiceImpl {
                         name: config.name,
                         state: vm_status_to_proto(&status) as i32,
                         vcpus: config.vcpus,
-                        memory: config.memory,
+                        memory_mb: config.memory,
                         node_id: self.node.get_id(),
                         ip_address: config.ip_address.unwrap_or_default(),
                     }),
@@ -305,7 +297,7 @@ impl ClusterService for VmServiceImpl {
         }
     }
     
-    async fn migrate_vm(
+    pub async fn migrate_vm(
         &self,
         request: Request<MigrateVmRequest>,
     ) -> Result<Response<MigrateVmResponse>, Status> {
@@ -316,30 +308,34 @@ impl ClusterService for VmServiceImpl {
         
         let req = instrument_grpc!(self.node, request, "migrate_vm");
         
-        tracing::info!("Migrating VM '{}' from node {} to node {}", 
-            req.vm_name, req.source_node_id, req.target_node_id);
+        tracing::info!("Migrating VM '{}' to node {}", 
+            req.vm_name, req.target_node_id);
         
         // Verify we're the leader
         if !self.node.is_leader().await {
             return Err(Status::failed_precondition("Not the leader"));
         }
         
-        // Create migration task
-        let task_spec = TaskSpec {
-            task_type: "vm_migration".to_string(),
-            vm_name: Some(req.vm_name.clone()),
-            target_node: Some(req.target_node_id),
-            source_node: Some(req.source_node_id),
-            resource_requirements: None,
-            metadata: None,
+        // Create migration task as a VM command
+        let migration_task = VmMigrationTask {
+            vm_name: req.vm_name.clone(),
+            source_node_id: self.node.get_id(),
+            target_node_id: req.target_node_id,
+            live_migration: req.live_migration,
+            force: req.force,
         };
         
-        match self.node.propose_task(task_spec).await {
-            Ok(task_id) => {
+        let vm_command = VmCommand::Migrate { task: migration_task };
+        
+        match self.node.send_vm_command(vm_command).await {
+            Ok(()) => {
                 Ok(Response::new(MigrateVmResponse {
                     success: true,
-                    message: format!("Migration task {} created", task_id),
-                    task_id: Some(task_id),
+                    message: format!("Migration of VM '{}' started", req.vm_name),
+                    source_node_id: self.node.get_id(),
+                    target_node_id: req.target_node_id,
+                    status: 1, // MIGRATION_STATUS_PREPARING
+                    duration_ms: 0, // Not available yet
                 }))
             }
             Err(e) => {
@@ -349,7 +345,7 @@ impl ClusterService for VmServiceImpl {
         }
     }
     
-    async fn create_vm_with_scheduling(
+    pub async fn create_vm_with_scheduling(
         &self,
         request: Request<CreateVmWithSchedulingRequest>,
     ) -> Result<Response<CreateVmWithSchedulingResponse>, Status> {
@@ -363,44 +359,22 @@ impl ClusterService for VmServiceImpl {
         tracing::info!("Creating VM '{}' with scheduling", req.name);
         
         // Create VM configuration
-        let mut vm_config = self.create_vm_config(req.name.clone(), req.vcpus, req.memory);
+        let mut vm_config = self.create_vm_config(req.name.clone(), req.vcpus, req.memory_mb);
         vm_config.tenant_id = tenant_id.clone();
         
         // Create resource requirements for scheduling
         let resource_reqs = ResourceRequirements {
-            vcpus: req.vcpus,
-            memory_mb: req.memory as u64,
+            cpu_cores: req.vcpus,
+            memory_mb: req.memory_mb as u64,
             disk_gb: 5, // Default
-            features: req.required_features,
+            required_features: vec![],
         };
         
-        // Schedule and create the VM
-        match self.node.schedule_and_create_vm(vm_config, resource_reqs).await {
-            Ok((node_id, task_id)) => {
-                // Update resource usage
-                self.middleware.update_resource_usage(
-                    &tenant_id,
-                    req.vcpus as i32,
-                    req.memory as i64,
-                    5,
-                    node_id,
-                ).await;
-                
-                Ok(Response::new(CreateVmWithSchedulingResponse {
-                    success: true,
-                    message: format!("VM '{}' scheduled on node {}", req.name, node_id),
-                    scheduled_node_id: node_id,
-                    task_id,
-                }))
-            }
-            Err(e) => {
-                record_grpc_error!("create_vm_with_scheduling", e);
-                Err(error_to_status(e))
-            }
-        }
+        // TODO: Implement VM scheduling
+        Err(Status::unimplemented("VM scheduling not implemented"))
     }
     
-    async fn schedule_vm_placement(
+    pub async fn schedule_vm_placement(
         &self,
         request: Request<ScheduleVmPlacementRequest>,
     ) -> Result<Response<ScheduleVmPlacementResponse>, Status> {
@@ -413,34 +387,13 @@ impl ClusterService for VmServiceImpl {
         
         // Create resource requirements
         let resource_reqs = ResourceRequirements {
-            vcpus: req.vcpus,
-            memory_mb: req.memory as u64,
+            cpu_cores: req.vcpus,
+            memory_mb: req.memory_mb as u64,
             disk_gb: 5, // Default
-            features: req.required_features,
+            required_features: vec![],
         };
         
-        match self.node.find_best_node_for_vm(resource_reqs).await {
-            Ok(Some(node_id)) => {
-                Ok(Response::new(ScheduleVmPlacementResponse {
-                    success: true,
-                    recommended_node_id: node_id,
-                    message: format!("Node {} recommended for VM placement", node_id),
-                }))
-            }
-            Ok(None) => {
-                Ok(Response::new(ScheduleVmPlacementResponse {
-                    success: false,
-                    recommended_node_id: 0,
-                    message: "No suitable node found for VM placement".to_string(),
-                }))
-            }
-            Err(e) => {
-                record_grpc_error!("schedule_vm_placement", e);
-                Err(error_to_status(e))
-            }
-        }
+        // TODO: Implement VM placement scheduling
+        Err(Status::unimplemented("VM placement scheduling not implemented"))
     }
-    
-    // Note: Other ClusterService methods would return unimplemented
-    // In practice, we'd split the trait or use a different approach
 }

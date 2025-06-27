@@ -5,8 +5,8 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
-    types::{VmConfig, VmStatus, NodeState as InternalNodeState},
-    proto::{VmInfo, VmState, NodeState as ProtoNodeState, NodeInfo},
+    types::{VmConfig, VmStatus},
+    proto::{VmInfo, VmState},
 };
 
 /// Trait for converting to protocol buffer types
@@ -61,38 +61,10 @@ impl ToProto<VmInfo> for (VmConfig, VmStatus) {
             name: config.name.clone(),
             state: status.to_proto() as i32,
             vcpus: config.vcpus,
-            memory: config.memory,
+            memory_mb: config.memory,
             node_id: 0, // Should be set by caller
             ip_address: config.ip_address.clone().unwrap_or_default(),
         }
-    }
-}
-
-// Node State conversions
-
-impl ToProto<ProtoNodeState> for InternalNodeState {
-    fn to_proto(&self) -> ProtoNodeState {
-        match self {
-            InternalNodeState::Uninitialized => ProtoNodeState::Unknown,
-            InternalNodeState::Initialized => ProtoNodeState::Initialized,
-            InternalNodeState::JoiningCluster => ProtoNodeState::JoiningCluster,
-            InternalNodeState::Active => ProtoNodeState::Active,
-            InternalNodeState::LeavingCluster => ProtoNodeState::LeavingCluster,
-            InternalNodeState::Error => ProtoNodeState::Error,
-        }
-    }
-}
-
-impl FromProto<ProtoNodeState> for InternalNodeState {
-    fn from_proto(proto: ProtoNodeState) -> BlixardResult<Self> {
-        Ok(match proto {
-            ProtoNodeState::Unknown => InternalNodeState::Uninitialized,
-            ProtoNodeState::Initialized => InternalNodeState::Initialized,
-            ProtoNodeState::JoiningCluster => InternalNodeState::JoiningCluster,
-            ProtoNodeState::Active => InternalNodeState::Active,
-            ProtoNodeState::LeavingCluster => InternalNodeState::LeavingCluster,
-            ProtoNodeState::Error => InternalNodeState::Error,
-        })
     }
 }
 

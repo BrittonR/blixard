@@ -152,7 +152,8 @@ impl VmRepository for RedbVmRepository {
             let table = read_txn.open_table(VM_STATE_TABLE)?;
             
             let mut vms = Vec::new();
-            for entry in table.iter()? {
+            let iter = table.range::<&str>(..)?;
+            for entry in iter {
                 let (_, bytes) = entry?;
                 let vm: VmConfig = bincode::deserialize(bytes.value())?;
                 vms.push(vm);
