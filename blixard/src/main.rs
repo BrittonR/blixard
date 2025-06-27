@@ -1088,6 +1088,9 @@ async fn handle_tui_command() -> BlixardResult<()> {
     // Create modern app and event handler
     let mut app = tui::app::App::new().await?;
     let mut event_handler = tui::events::EventHandler::new(250); // 250ms tick rate
+    
+    // Connect the event sender to the app
+    app.set_event_sender(event_handler.sender());
 
     // Initial data refresh
     let _ = app.refresh_all_data().await;

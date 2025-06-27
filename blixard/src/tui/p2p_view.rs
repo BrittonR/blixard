@@ -6,7 +6,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Table, Row, Cell, Gauge},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Table, Row, Cell},
     Frame,
 };
 use super::app::App;
@@ -232,7 +232,7 @@ fn render_transfer_activity(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(list, area);
 }
 
-fn format_bytes(bytes: u64) -> String {
+pub fn format_bytes(bytes: u64) -> String {
     if bytes < 1024 {
         format!("{} B", bytes)
     } else if bytes < 1024 * 1024 {
