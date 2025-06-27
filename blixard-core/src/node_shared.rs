@@ -1061,6 +1061,33 @@ impl SharedNodeState {
         }
     }
     
+    /// Submit VM migration through Raft consensus
+    pub async fn submit_vm_migration(&self, task: crate::types::VmMigrationTask) -> BlixardResult<()> {
+        use crate::raft_manager::ProposalData;
+        
+        let proposal_data = ProposalData::MigrateVm {
+            vm_name: task.vm_name.clone(),
+            from_node: task.source_node_id,
+            to_node: task.target_node_id,
+        };
+        
+        let (response_tx, response_rx) = oneshot::channel();
+        let proposal = RaftProposal {
+            id: uuid::Uuid::new_v4().as_bytes().to_vec(),
+            data: proposal_data,
+            response_tx: Some(response_tx),
+        };
+        
+        self.send_raft_proposal(proposal).await?;
+        
+        // Wait for response
+        response_rx.await.map_err(|_| BlixardError::Internal {
+            message: "Migration proposal response channel closed".to_string(),
+        })??;
+        
+        Ok(())
+    }
+    
     /// Register a worker through Raft consensus
     /// This ensures worker information is replicated across all nodes
     pub async fn register_worker_through_raft(

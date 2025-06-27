@@ -24,6 +24,7 @@ service ClusterService {
   rpc DeleteVm(DeleteVmRequest) returns (DeleteVmResponse);
   rpc ListVms(ListVmsRequest) returns (ListVmsResponse);
   rpc GetVmStatus(GetVmStatusRequest) returns (GetVmStatusResponse);
+  rpc MigrateVm(MigrateVmRequest) returns (MigrateVmResponse);
   
   // VM scheduling operations
   rpc ScheduleVmPlacement(ScheduleVmPlacementRequest) returns (ScheduleVmPlacementResponse);
@@ -158,6 +159,33 @@ message GetVmStatusRequest {
 message GetVmStatusResponse {
   bool found = 1;
   VmInfo vm_info = 2;
+}
+
+// VM Migration messages
+message MigrateVmRequest {
+  string vm_name = 1;
+  uint64 target_node_id = 2;
+  bool live_migration = 3; // Whether to do live migration (minimize downtime)
+  bool force = 4; // Force migration even if target has less resources
+}
+
+message MigrateVmResponse {
+  bool success = 1;
+  string message = 2;
+  uint64 source_node_id = 3;
+  uint64 target_node_id = 4;
+  MigrationStatus status = 5;
+  int64 duration_ms = 6; // Migration duration in milliseconds
+}
+
+enum MigrationStatus {
+  MIGRATION_STATUS_UNKNOWN = 0;
+  MIGRATION_STATUS_PREPARING = 1;
+  MIGRATION_STATUS_TRANSFERRING = 2;
+  MIGRATION_STATUS_SWITCHING = 3;
+  MIGRATION_STATUS_COMPLETED = 4;
+  MIGRATION_STATUS_FAILED = 5;
+  MIGRATION_STATUS_CANCELLED = 6;
 }
 
 // VM Scheduling messages

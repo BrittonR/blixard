@@ -143,3 +143,54 @@ async fn test_tui_cluster_metrics() {
     assert!(app.cluster_metrics.healthy_nodes >= 3);
     assert!(app.cluster_metrics.leader_id.is_some());
 }
+
+#[tokio::test]
+async fn test_tui_resource_usage_graphs() {
+    let cluster = TestCluster::new(2).await;
+    cluster.wait_for_cluster_formation(Duration::from_secs(10)).await.unwrap();
+    
+    let mut app = App::new().await.unwrap();
+    app.vm_client = Some(VmClient::new("127.0.0.1:7001").await.unwrap());
+    
+    // Create some VMs to generate resource usage
+    app.create_vm_form.name = "test-vm-1".to_string();
+    app.create_vm_form.vcpus = "2".to_string();
+    app.create_vm_form.memory = "1024".to_string();
+    app.submit_vm_form().await.unwrap();
+    
+    // Refresh all data multiple times to build history
+    for _ in 0..5 {
+        app.refresh_all_data().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    
+    // Verify resource history is populated
+    assert!(!app.cpu_history.is_empty(), "CPU history should be populated");
+    assert!(!app.memory_history.is_empty(), "Memory history should be populated");
+    assert!(!app.network_history.is_empty(), "Network history should be populated");
+    
+    // Verify health monitoring
+    app.update_cluster_health();
+    assert_ne!(app.cluster_health.status, blixard::tui::app::HealthStatus::Unknown);
+    
+    // Verify per-node health history
+    assert!(!app.node_health_history.is_empty(), "Node health history should be populated");
+    
+    // Check alerts are generated for high resource usage
+    app.check_health_alerts();
+    // May or may not have alerts depending on simulated resource usage
+}
+
+#[tokio::test] 
+async fn test_tui_vm_templates() {
+    let mut app = App::new().await.unwrap();
+    
+    // Verify VM templates are initialized
+    assert!(!app.vm_templates.is_empty(), "VM templates should be initialized");
+    
+    // Test template selection
+    let template = &app.vm_templates[0];
+    assert_eq!(template.name, "Micro Instance");
+    assert_eq!(template.vcpus, 1);
+    assert_eq!(template.memory, 512);
+}

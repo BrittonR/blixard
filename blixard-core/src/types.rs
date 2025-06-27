@@ -46,4 +46,14 @@ pub enum VmCommand {
     Stop { name: String },
     Delete { name: String },
     UpdateStatus { name: String, status: VmStatus },
+    Migrate { task: VmMigrationTask },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VmMigrationTask {
+    pub vm_name: String,
+    pub source_node_id: u64,
+    pub target_node_id: u64,
+    pub live_migration: bool,
+    pub force: bool,
 }

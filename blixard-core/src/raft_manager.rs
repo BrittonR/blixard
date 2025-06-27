@@ -169,6 +169,18 @@ impl RaftStateMachine {
             ProposalData::UpdateVmStatus { vm_name, status, node_id } => {
                 self.apply_update_vm_status(write_txn, &vm_name, status, node_id)?;
             }
+            ProposalData::MigrateVm { vm_name, from_node, to_node } => {
+                // Create a migration task and apply it through VM command
+                let task = crate::types::VmMigrationTask {
+                    vm_name: vm_name.clone(),
+                    source_node_id: from_node,
+                    target_node_id: to_node,
+                    live_migration: false,
+                    force: false,
+                };
+                let command = VmCommand::Migrate { task };
+                self.apply_vm_command(write_txn, &command)?;
+            }
             _ => {
                 // Handle other proposal types
             }
@@ -382,6 +394,33 @@ impl RaftStateMachine {
                     // Remove VM from database
                     table.remove(name.as_str())?;
                 }
+                VmCommand::Migrate { task } => {
+                    // Update VM's node assignment
+                    let serialized = {
+                        let vm_state_data = table.get(task.vm_name.as_str())?;
+                        if let Some(data) = vm_state_data {
+                            let mut vm_state: crate::types::VmState = bincode::deserialize(data.value())
+                                .map_err(|e| BlixardError::Serialization {
+                                    operation: "deserialize vm state".to_string(),
+                                    source: Box::new(e),
+                                })?;
+                            // Update node assignment
+                            vm_state.node_id = task.target_node_id;
+                            vm_state.updated_at = Utc::now();
+                            Some(bincode::serialize(&vm_state)
+                                .map_err(|e| BlixardError::Serialization {
+                                    operation: "serialize vm state".to_string(),
+                                    source: Box::new(e),
+                                })?)
+                        } else {
+                            None
+                        }
+                    };
+                    
+                    if let Some(data) = serialized {
+                        table.insert(task.vm_name.as_str(), data.as_slice())?;
+                    }
+                }
             }
         }
         
@@ -417,6 +456,10 @@ impl RaftStateMachine {
                                     } else {
                                         false
                                     }
+                                }
+                                VmCommand::Migrate { task } => {
+                                    // Migration needs to be executed on both source and target nodes
+                                    task.source_node_id == shared.get_id() || task.target_node_id == shared.get_id()
                                 }
                                 _ => false,
                             }

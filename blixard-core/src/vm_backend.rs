@@ -43,6 +43,13 @@ pub trait VmBackend: Send + Sync {
     async fn get_vm_ip(&self, _name: &str) -> BlixardResult<Option<String>> {
         Ok(None) // Default implementation returns None
     }
+    
+    /// Migrate a VM from this node to another (optional, not all backends support this)
+    async fn migrate_vm(&self, _name: &str, _target_node_id: u64, _live: bool) -> BlixardResult<()> {
+        Err(BlixardError::NotImplemented {
+            feature: "VM migration".to_string(),
+        })
+    }
 }
 
 /// VM Manager that coordinates between Raft consensus and VM backend
@@ -142,6 +149,39 @@ impl VmManager {
             }
             VmCommand::UpdateStatus { name, status } => {
                 self.backend.update_vm_status(&name, status).await
+            }
+            VmCommand::Migrate { task } => {
+                let node_id = self.node_state.get_id();
+                
+                // Handle migration based on whether we're source or target
+                if task.source_node_id == node_id {
+                    // We're the source node - initiate migration
+                    tracing::info!("Starting migration of VM '{}' from node {} to node {}", 
+                        task.vm_name, node_id, task.target_node_id);
+                    
+                    // For now, we'll do a simple stop-and-start migration
+                    // In the future, this could be enhanced with live migration
+                    if !task.live_migration {
+                        // Stop the VM on this node
+                        self.backend.stop_vm(&task.vm_name).await?;
+                    }
+                    
+                    // The actual VM will be started on the target node
+                    self.backend.migrate_vm(&task.vm_name, task.target_node_id, task.live_migration).await
+                } else if task.target_node_id == node_id {
+                    // We're the target node - prepare to receive the VM
+                    tracing::info!("Preparing to receive VM '{}' from node {} to node {}", 
+                        task.vm_name, task.source_node_id, node_id);
+                    
+                    // For now, just acknowledge - the VM will be started when we get a Start command
+                    // In a real implementation, this would set up resources for the incoming VM
+                    Ok(())
+                } else {
+                    // We're neither source nor target - shouldn't happen
+                    tracing::warn!("Received migration command for VM '{}' but we're neither source ({}) nor target ({})", 
+                        task.vm_name, task.source_node_id, task.target_node_id);
+                    Ok(())
+                }
             }
         }
     }

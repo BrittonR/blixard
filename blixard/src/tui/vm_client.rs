@@ -10,27 +10,125 @@ use blixard_core::{
     types::VmStatus,
 };
 use tonic::transport::Channel;
+use std::time::Duration;
+use tokio::time::sleep;
 
-/// VM client for TUI operations
+/// Retry configuration for network operations
+#[derive(Debug, Clone)]
+pub struct RetryConfig {
+    /// Maximum number of retry attempts
+    pub max_attempts: u32,
+    /// Initial delay between retries
+    pub initial_delay: Duration,
+    /// Maximum delay between retries
+    pub max_delay: Duration,
+    /// Exponential backoff multiplier
+    pub backoff_multiplier: f64,
+    /// Timeout for individual requests
+    pub request_timeout: Duration,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            max_attempts: 3,
+            initial_delay: Duration::from_millis(100),
+            max_delay: Duration::from_secs(5),
+            backoff_multiplier: 2.0,
+            request_timeout: Duration::from_secs(10),
+        }
+    }
+}
+
+
+/// VM client for TUI operations with retry support
 pub struct VmClient {
     client: ClusterServiceClient<Channel>,
+    retry_config: RetryConfig,
 }
 
 impl VmClient {
     pub async fn new(addr: &str) -> BlixardResult<Self> {
+        Self::new_with_config(addr, RetryConfig::default()).await
+    }
+    
+    pub async fn new_with_config(addr: &str, retry_config: RetryConfig) -> BlixardResult<Self> {
         let endpoint = format!("http://{}", addr);
         
-        let client = ClusterServiceClient::connect(endpoint).await
-            .map_err(|e| crate::BlixardError::Internal {
-                message: format!("Failed to connect to blixard node: {}", e),
-            })?;
+        // Try to connect with retries
+        let client = Self::retry_operation(
+            || async {
+                ClusterServiceClient::connect(endpoint.clone())
+                    .await
+                    .map_err(|e| crate::BlixardError::Internal {
+                        message: format!("Failed to connect to blixard node: {}", e),
+                    })
+            },
+            &retry_config,
+            "connect",
+        ).await?;
 
-        Ok(Self { client })
+        Ok(Self { client, retry_config })
+    }
+    
+    /// Execute an operation with retry logic
+    async fn retry_operation<F, Fut, T>(
+        operation: F,
+        config: &RetryConfig,
+        operation_name: &str,
+    ) -> BlixardResult<T>
+    where
+        F: Fn() -> Fut,
+        Fut: std::future::Future<Output = BlixardResult<T>>,
+    {
+        let mut attempt = 0;
+        let mut delay = config.initial_delay;
+        
+        loop {
+            attempt += 1;
+            
+            match tokio::time::timeout(config.request_timeout, operation()).await {
+                Ok(Ok(result)) => return Ok(result),
+                Ok(Err(e)) if attempt >= config.max_attempts => return Err(e),
+                Ok(Err(e)) => {
+                    tracing::warn!(
+                        "Operation '{}' failed (attempt {}/{}): {}",
+                        operation_name,
+                        attempt,
+                        config.max_attempts,
+                        e
+                    );
+                }
+                Err(_) if attempt >= config.max_attempts => {
+                    return Err(crate::BlixardError::Internal {
+                        message: format!(
+                            "Operation '{}' timed out after {} attempts",
+                            operation_name,
+                            config.max_attempts
+                        ),
+                    });
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        "Operation '{}' timed out (attempt {}/{})",
+                        operation_name,
+                        attempt,
+                        config.max_attempts
+                    );
+                }
+            }
+            
+            // Wait before retry with exponential backoff
+            sleep(delay).await;
+            delay = std::cmp::min(
+                Duration::from_secs_f64(delay.as_secs_f64() * config.backoff_multiplier),
+                config.max_delay,
+            );
+        }
     }
 
     pub async fn list_vms(&mut self) -> BlixardResult<Vec<VmInfo>> {
         let request = tonic::Request::new(ListVmsRequest {});
-        
         let response = self.client.list_vms(request).await
             .map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to list VMs: {}", e),
@@ -396,5 +494,36 @@ impl VmClient {
         }
         
         Ok(resp.message)
+    }
+    
+    /// Migrate a VM to another node
+    pub async fn migrate_vm(
+        &mut self, 
+        vm_name: &str, 
+        target_node_id: u64, 
+        live_migration: bool
+    ) -> BlixardResult<(u64, u64, String)> {
+        use blixard_core::proto::MigrateVmRequest;
+        
+        let request = tonic::Request::new(MigrateVmRequest {
+            vm_name: vm_name.to_string(),
+            target_node_id,
+            live_migration,
+            force: false,
+        });
+        
+        let response = self.client.migrate_vm(request).await
+            .map_err(|e| crate::BlixardError::Internal {
+                message: format!("Failed to migrate VM: {}", e),
+            })?;
+        
+        let resp = response.into_inner();
+        if !resp.success {
+            return Err(crate::BlixardError::Internal {
+                message: format!("VM migration failed: {}", resp.message),
+            });
+        }
+        
+        Ok((resp.source_node_id, resp.target_node_id, resp.message))
     }
 }

@@ -1036,6 +1036,122 @@ impl ClusterService for BlixardGrpcService {
         }
     }
 
+    async fn migrate_vm(
+        &self,
+        request: Request<crate::proto::MigrateVmRequest>,
+    ) -> Result<Response<crate::proto::MigrateVmResponse>, Status> {
+        // Authenticate and authorize the request
+        let _security_context = self.authenticate(&request, Permission::VmWrite).await?;
+        
+        let metrics = metrics();
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            vec![
+                attributes::method("migrate_vm"),
+                attributes::node_id(self.node.get_id()),
+            ],
+        );
+        metrics.grpc_requests_total.add(1, &[attributes::method("migrate_vm")]);
+        
+        let req = request.into_inner();
+        let start_time = std::time::Instant::now();
+        
+        // Get VM state from database to find node assignment
+        let (vm_state, vm_status) = {
+            match self.node.get_database().await {
+                Some(db) => {
+                    let read_txn = db.begin_read().map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+                    if let Ok(table) = read_txn.open_table(crate::storage::VM_STATE_TABLE) {
+                        if let Ok(Some(data)) = table.get(req.vm_name.as_str()) {
+                            let vm_state: crate::types::VmState = bincode::deserialize(data.value())
+                                .map_err(|e| Status::internal(format!("Failed to deserialize VM state: {}", e)))?;
+                            let status = vm_state.status;
+                            (vm_state, status)
+                        } else {
+                            record_grpc_error!("migrate_vm");
+                            return Ok(Response::new(crate::proto::MigrateVmResponse {
+                                success: false,
+                                message: format!("VM '{}' not found", req.vm_name),
+                                source_node_id: 0,
+                                target_node_id: req.target_node_id,
+                                status: crate::proto::MigrationStatus::Failed as i32,
+                                duration_ms: 0,
+                            }));
+                        }
+                    } else {
+                        record_grpc_error!("migrate_vm");
+                        return Err(Status::internal("Failed to open VM state table"));
+                    }
+                }
+                None => {
+                    record_grpc_error!("migrate_vm");
+                    return Err(Status::internal("Database not initialized"));
+                }
+            }
+        };
+        
+        let source_node_id = vm_state.node_id;
+        
+        // Check if VM is already on target node
+        if source_node_id == req.target_node_id {
+            return Ok(Response::new(crate::proto::MigrateVmResponse {
+                success: false,
+                message: format!("VM '{}' is already on node {}", req.vm_name, req.target_node_id),
+                source_node_id,
+                target_node_id: req.target_node_id,
+                status: crate::proto::MigrationStatus::Failed as i32,
+                duration_ms: 0,
+            }));
+        }
+        
+        // Check if VM is running (for live migration)
+        if req.live_migration && vm_status != crate::types::VmStatus::Running {
+            return Ok(Response::new(crate::proto::MigrateVmResponse {
+                success: false,
+                message: format!("VM '{}' must be running for live migration", req.vm_name),
+                source_node_id,
+                target_node_id: req.target_node_id,
+                status: crate::proto::MigrationStatus::Failed as i32,
+                duration_ms: 0,
+            }));
+        }
+        
+        // Submit migration task through Raft
+        let task = crate::types::VmMigrationTask {
+            vm_name: req.vm_name.clone(),
+            source_node_id,
+            target_node_id: req.target_node_id,
+            live_migration: req.live_migration,
+            force: req.force,
+        };
+        
+        match self.node.submit_vm_migration(task).await {
+            Ok(_) => {
+                let duration_ms = start_time.elapsed().as_millis() as i64;
+                Ok(Response::new(crate::proto::MigrateVmResponse {
+                    success: true,
+                    message: format!("VM '{}' migration from node {} to {} initiated", 
+                        req.vm_name, source_node_id, req.target_node_id),
+                    source_node_id,
+                    target_node_id: req.target_node_id,
+                    status: crate::proto::MigrationStatus::Preparing as i32,
+                    duration_ms,
+                }))
+            }
+            Err(e) => {
+                record_grpc_error!("migrate_vm");
+                Ok(Response::new(crate::proto::MigrateVmResponse {
+                    success: false,
+                    message: format!("Failed to initiate migration: {}", e),
+                    source_node_id,
+                    target_node_id: req.target_node_id,
+                    status: crate::proto::MigrationStatus::Failed as i32,
+                    duration_ms: 0,
+                }))
+            }
+        }
+    }
+
     async fn health_check(
         &self,
         request: Request<HealthCheckRequest>,

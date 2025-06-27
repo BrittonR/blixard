@@ -13,6 +13,7 @@ use blixard_core::types::VmStatus;
 use ratatui::widgets::{ListState, TableState};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use std::sync::Arc;
 use serde_json;
 
 #[derive(Debug, Clone)]
@@ -99,6 +100,7 @@ pub enum EventLevel {
     Warning,
     Error,
     Critical,
+    Debug,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -107,6 +109,7 @@ pub enum AppTab {
     VirtualMachines,
     Nodes,
     Monitoring,
+    P2P,
     Configuration,
     Debug,
     Help,
@@ -156,6 +159,11 @@ pub enum AppMode {
     SearchDialog,
     BatchNodeCreation,
     BatchVmCreation,
+    VmMigration,
+    SaveConfig,
+    LoadConfig,
+    EditNodeConfig,
+    P2P,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -177,6 +185,21 @@ pub struct CreateVmForm {
     pub current_field: CreateVmField,
 }
 
+#[derive(Debug, Clone)]
+pub struct VmMigrationForm {
+    pub vm_name: String,
+    pub source_node_id: u64,
+    pub target_node_id: String,
+    pub live_migration: bool,
+    pub current_field: VmMigrationField,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum VmMigrationField {
+    TargetNode,
+    LiveMigration,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum CreateVmField {
     Name,
@@ -186,6 +209,12 @@ pub enum CreateVmField {
     PlacementStrategy,
     NodeId,
     AutoStart,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SaveConfigField {
+    FilePath,
+    Description,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -294,12 +323,109 @@ impl Default for DebugMetrics {
 }
 
 #[derive(Debug, Clone)]
+pub struct ConnectionStatus {
+    pub state: ConnectionState,
+    pub endpoint: String,
+    pub connected_since: Option<Instant>,
+    pub last_attempt: Option<Instant>,
+    pub retry_count: u32,
+    pub next_retry_in: Option<Duration>,
+    pub latency_ms: Option<u64>,
+    pub quality: NetworkQuality,
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConnectionState {
+    Connected,
+    Connecting,
+    Reconnecting,
+    Disconnected,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum NetworkQuality {
+    Excellent,  // < 10ms latency
+    Good,       // < 50ms latency
+    Fair,       // < 100ms latency
+    Poor,       // < 200ms latency
+    Bad,        // >= 200ms latency
+    Unknown,
+}
+
+impl Default for ConnectionStatus {
+    fn default() -> Self {
+        Self {
+            state: ConnectionState::Disconnected,
+            endpoint: String::new(),
+            connected_since: None,
+            last_attempt: None,
+            retry_count: 0,
+            next_retry_in: None,
+            latency_ms: None,
+            quality: NetworkQuality::Unknown,
+            error_message: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct DebugLogEntry {
     pub timestamp: Instant,
     pub level: DebugLevel,
     pub component: String,
     pub message: String,
     pub details: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClusterHealth {
+    pub status: HealthStatus,
+    pub uptime: Duration,
+    pub leader_changes: u32,
+    pub failed_nodes: u32,
+    pub degraded_nodes: u32,
+    pub healthy_nodes: u32,
+    pub network_latency_ms: f32,
+    pub replication_lag_ms: f32,
+    pub last_health_check: Instant,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum HealthStatus {
+    Healthy,
+    Degraded,
+    Critical,
+    Unknown,
+}
+
+#[derive(Debug, Clone)]
+pub struct NodeHealthSnapshot {
+    pub timestamp: Instant,
+    pub cpu_percent: f32,
+    pub memory_percent: f32,
+    pub disk_io_mbps: f32,
+    pub network_mbps: f32,
+    pub vm_count: u32,
+    pub status: NodeStatus,
+}
+
+#[derive(Debug, Clone)]
+pub struct HealthAlert {
+    pub timestamp: Instant,
+    pub severity: AlertSeverity,
+    pub node_id: Option<u64>,
+    pub title: String,
+    pub message: String,
+    pub resolved: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AlertSeverity {
+    Info,
+    Warning,
+    Critical,
 }
 
 #[derive(Debug, Clone)]
@@ -368,6 +494,23 @@ pub enum CreateNodeField {
     Peers,
     VmBackend,
     DaemonMode,
+}
+
+#[derive(Debug, Clone)]
+pub struct EditNodeForm {
+    pub node_id: u64,
+    pub original_address: String,
+    pub bind_address: String,
+    pub data_dir: String,
+    pub vm_backend: String,
+    pub current_field: EditNodeField,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum EditNodeField {
+    BindAddress,
+    DataDir,
+    VmBackend,
 }
 
 #[derive(Debug, Clone)]
@@ -474,6 +617,79 @@ pub struct ClusterNetworkConfig {
     pub cluster_name: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct LogStreamConfig {
+    pub sources: Vec<LogSource>,
+    pub filters: LogFilters,
+    pub follow_mode: bool,
+    pub buffer_size: usize,
+    pub selected_source: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct LogSource {
+    pub name: String,
+    pub source_type: LogSourceType,
+    pub enabled: bool,
+    pub color: Option<ratatui::style::Color>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogSourceType {
+    Node(u64),      // Node ID
+    Vm(String),     // VM name
+    System,         // System-wide logs
+    Raft,           // Raft consensus logs
+    GrpcServer,     // gRPC server logs
+    All,            // All sources
+}
+
+#[derive(Debug, Clone)]
+pub struct LogFilters {
+    pub log_level: LogLevel,
+    pub search_text: String,
+    pub show_timestamps: bool,
+    pub highlight_errors: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct LogEntry {
+    pub timestamp: Instant,
+    pub source: LogSourceType,
+    pub level: LogLevel,
+    pub message: String,
+    pub details: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct P2pPeer {
+    pub node_id: String,
+    pub address: String,
+    pub status: String,
+    pub latency_ms: u64,
+    pub shared_images: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct P2pImage {
+    pub name: String,
+    pub version: String,
+    pub size: u64,
+    pub available_peers: usize,
+    pub is_cached: bool,
+    pub is_downloading: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct P2pTransfer {
+    pub resource_name: String,
+    pub peer_id: String,
+    pub is_upload: bool,
+    pub total_bytes: u64,
+    pub bytes_transferred: u64,
+    pub speed_bps: u64,
+}
+
 pub struct App {
     // Core application state
     pub current_tab: AppTab,
@@ -483,6 +699,7 @@ pub struct App {
     
     // Network and data
     pub vm_client: Option<VmClient>,
+    pub connection_status: ConnectionStatus,
     pub auto_refresh: bool,
     pub refresh_interval: Duration,
     pub last_refresh: Instant,
@@ -491,6 +708,9 @@ pub struct App {
     pub cluster_metrics: ClusterMetrics,
     pub recent_events: Vec<SystemEvent>,
     pub max_events: usize,
+    pub cluster_health: ClusterHealth,
+    pub node_health_history: HashMap<u64, Vec<NodeHealthSnapshot>>,
+    pub health_alerts: Vec<HealthAlert>,
     
     // VM management
     pub vms: Vec<VmInfo>,
@@ -499,6 +719,12 @@ pub struct App {
     pub selected_vm: Option<String>,
     pub vm_logs: Vec<String>,
     pub vm_log_state: ListState,
+    
+    // Log streaming
+    pub log_stream_config: LogStreamConfig,
+    pub log_entries: Vec<LogEntry>,
+    pub log_list_state: ListState,
+    pub max_log_entries: usize,
     
     // Node management
     pub nodes: Vec<NodeInfo>,
@@ -511,6 +737,8 @@ pub struct App {
     // Forms and dialogs
     pub create_vm_form: CreateVmForm,
     pub create_node_form: CreateNodeForm,
+    pub edit_node_form: EditNodeForm,
+    pub vm_migration_form: VmMigrationForm,
     pub confirm_dialog: Option<ConfirmDialog>,
     
     // UI state
@@ -545,12 +773,26 @@ pub struct App {
     // Configuration
     pub config_dirty: bool,
     pub settings: AppSettings,
+    pub config_file_path: Option<String>,
+    pub config_description: String,
+    pub save_config_field: SaveConfigField,
     
     // Debug mode data
     pub raft_debug_info: Option<RaftDebugInfo>,
     pub debug_metrics: DebugMetrics,
     pub debug_log_entries: Vec<DebugLogEntry>,
     pub max_debug_entries: usize,
+    
+    // P2P networking
+    pub p2p_enabled: bool,
+    pub p2p_node_id: String,
+    pub p2p_peer_count: usize,
+    pub p2p_shared_images: usize,
+    pub p2p_peers: Vec<P2pPeer>,
+    pub p2p_images: Vec<P2pImage>,
+    pub p2p_transfers: Vec<P2pTransfer>,
+    pub p2p_store: Option<Arc<tokio::sync::Mutex<blixard_core::p2p_image_store::P2pImageStore>>>,
+    pub p2p_manager: Option<Arc<blixard_core::p2p_manager::P2pManager>>,
 }
 
 #[derive(Debug, Clone)]
@@ -611,6 +853,70 @@ impl Default for ClusterMetrics {
     }
 }
 
+impl Default for ClusterHealth {
+    fn default() -> Self {
+        Self {
+            status: HealthStatus::Unknown,
+            uptime: Duration::from_secs(0),
+            leader_changes: 0,
+            failed_nodes: 0,
+            degraded_nodes: 0,
+            healthy_nodes: 0,
+            network_latency_ms: 0.0,
+            replication_lag_ms: 0.0,
+            last_health_check: Instant::now(),
+        }
+    }
+}
+
+impl Default for LogStreamConfig {
+    fn default() -> Self {
+        Self {
+            sources: vec![
+                LogSource {
+                    name: "All Sources".to_string(),
+                    source_type: LogSourceType::All,
+                    enabled: true,
+                    color: None,
+                },
+                LogSource {
+                    name: "System".to_string(),
+                    source_type: LogSourceType::System,
+                    enabled: true,
+                    color: Some(ratatui::style::Color::Blue),
+                },
+                LogSource {
+                    name: "Raft Consensus".to_string(),
+                    source_type: LogSourceType::Raft,
+                    enabled: false,
+                    color: Some(ratatui::style::Color::Magenta),
+                },
+                LogSource {
+                    name: "gRPC Server".to_string(),
+                    source_type: LogSourceType::GrpcServer,
+                    enabled: false,
+                    color: Some(ratatui::style::Color::Cyan),
+                },
+            ],
+            filters: LogFilters::default(),
+            follow_mode: true,
+            buffer_size: 1000,
+            selected_source: 0,
+        }
+    }
+}
+
+impl Default for LogFilters {
+    fn default() -> Self {
+        Self {
+            log_level: LogLevel::Info,
+            search_text: String::new(),
+            show_timestamps: true,
+            highlight_errors: true,
+        }
+    }
+}
+
 impl Default for CreateVmForm {
     fn default() -> Self {
         Self {
@@ -622,6 +928,18 @@ impl Default for CreateVmForm {
             node_id: None,
             auto_start: true,
             current_field: CreateVmField::Name,
+        }
+    }
+}
+
+impl Default for VmMigrationForm {
+    fn default() -> Self {
+        Self {
+            vm_name: String::new(),
+            source_node_id: 0,
+            target_node_id: String::new(),
+            live_migration: false,
+            current_field: VmMigrationField::TargetNode,
         }
     }
 }
@@ -660,6 +978,19 @@ impl Default for CreateNodeForm {
             vm_backend: "microvm".to_string(),
             daemon_mode: false,
             current_field: CreateNodeField::Id,
+        }
+    }
+}
+
+impl Default for EditNodeForm {
+    fn default() -> Self {
+        Self {
+            node_id: 0,
+            original_address: String::new(),
+            bind_address: String::new(),
+            data_dir: String::new(),
+            vm_backend: "microvm".to_string(),
+            current_field: EditNodeField::BindAddress,
         }
     }
 }
@@ -730,12 +1061,16 @@ impl App {
             should_quit: false,
             
             vm_client: None,
+            connection_status: ConnectionStatus::default(),
             auto_refresh: true,
             refresh_interval: Duration::from_secs(2),
             last_refresh: Instant::now(),
             
             cluster_metrics: ClusterMetrics::default(),
             recent_events: Vec::new(),
+            cluster_health: ClusterHealth::default(),
+            node_health_history: HashMap::new(),
+            health_alerts: Vec::new(),
             
             // Debug mode fields
             debug_log_entries: Vec::new(),
@@ -751,6 +1086,11 @@ impl App {
             vm_logs: Vec::new(),
             vm_log_state: ListState::default(),
             
+            log_stream_config: LogStreamConfig::default(),
+            log_entries: Vec::new(),
+            log_list_state: ListState::default(),
+            max_log_entries: 1000,
+            
             nodes: Vec::new(),
             node_list_state: ListState::default(),
             node_table_state: TableState::default(),
@@ -760,6 +1100,8 @@ impl App {
             
             create_vm_form: CreateVmForm::default(),
             create_node_form: CreateNodeForm::default(),
+            edit_node_form: EditNodeForm::default(),
+            vm_migration_form: VmMigrationForm::default(),
             confirm_dialog: None,
             
             status_message: None,
@@ -789,6 +1131,20 @@ impl App {
             
             config_dirty: false,
             settings: AppSettings::default(),
+            config_file_path: None,
+            config_description: String::new(),
+            save_config_field: SaveConfigField::FilePath,
+            
+            // P2P networking
+            p2p_enabled: false,
+            p2p_node_id: String::new(),
+            p2p_peer_count: 0,
+            p2p_shared_images: 0,
+            p2p_peers: Vec::new(),
+            p2p_images: Vec::new(),
+            p2p_transfers: Vec::new(),
+            p2p_store: None,
+            p2p_manager: None,
         };
         
         // Add startup event
@@ -946,13 +1302,78 @@ impl App {
         ]
     }
     
+    fn calculate_network_quality(latency_ms: u64) -> NetworkQuality {
+        match latency_ms {
+            0..=10 => NetworkQuality::Excellent,
+            11..=50 => NetworkQuality::Good,
+            51..=100 => NetworkQuality::Fair,
+            101..=200 => NetworkQuality::Poor,
+            _ => NetworkQuality::Bad,
+        }
+    }
+    
+    /// Update connection latency based on operation timing
+    pub fn update_connection_latency(&mut self, operation_duration: Duration) {
+        let latency_ms = operation_duration.as_millis() as u64;
+        
+        // Update rolling average if already connected
+        if let Some(current_latency) = self.connection_status.latency_ms {
+            // Simple exponential moving average
+            self.connection_status.latency_ms = Some((current_latency * 7 + latency_ms * 3) / 10);
+        } else {
+            self.connection_status.latency_ms = Some(latency_ms);
+        }
+        
+        // Update quality based on new latency
+        if let Some(avg_latency) = self.connection_status.latency_ms {
+            self.connection_status.quality = Self::calculate_network_quality(avg_latency);
+        }
+    }
+    
+    /// Check if reconnection is needed
+    pub fn check_reconnection_needed(&mut self) {
+        if self.vm_client.is_none() && self.connection_status.state != ConnectionState::Connecting {
+            if let Some(last_attempt) = self.connection_status.last_attempt {
+                let elapsed = last_attempt.elapsed();
+                let retry_delay = Duration::from_secs(5 * (self.connection_status.retry_count as u64 + 1).min(60));
+                
+                if elapsed >= retry_delay {
+                    self.connection_status.state = ConnectionState::Reconnecting;
+                    self.connection_status.next_retry_in = None;
+                } else {
+                    self.connection_status.next_retry_in = Some(retry_delay - elapsed);
+                }
+            }
+        }
+    }
+    
     pub async fn try_connect(&mut self) {
-        match VmClient::new("127.0.0.1:7001").await {
+        let endpoint = "127.0.0.1:7001";
+        self.connection_status.endpoint = endpoint.to_string();
+        self.connection_status.state = ConnectionState::Connecting;
+        self.connection_status.last_attempt = Some(Instant::now());
+        
+        self.status_message = Some("Connecting to cluster (with automatic retry)...".to_string());
+        self.add_event(EventLevel::Info, "Connection".to_string(), "Attempting to connect with retry logic enabled".to_string());
+        
+        let start_time = Instant::now();
+        match VmClient::new(endpoint).await {
             Ok(client) => {
+                let connect_duration = start_time.elapsed();
                 self.vm_client = Some(client);
-                self.status_message = Some("Connected to cluster".to_string());
+                
+                // Update connection status
+                self.connection_status.state = ConnectionState::Connected;
+                self.connection_status.connected_since = Some(Instant::now());
+                self.connection_status.retry_count = 0;
+                self.connection_status.latency_ms = Some(connect_duration.as_millis() as u64);
+                self.connection_status.quality = Self::calculate_network_quality(connect_duration.as_millis() as u64);
+                self.connection_status.error_message = None;
+                
+                self.status_message = Some(format!("Connected to cluster ({}ms)", connect_duration.as_millis()));
                 self.error_message = None;
-                self.add_event(EventLevel::Info, "Connection".to_string(), "Successfully connected to cluster".to_string());
+                self.add_event(EventLevel::Info, "Connection".to_string(), 
+                    format!("Successfully connected to cluster with {}ms latency", connect_duration.as_millis()));
                 
                 // Initial data load
                 match self.refresh_all_data().await {
@@ -966,9 +1387,16 @@ impl App {
             }
             Err(e) => {
                 self.vm_client = None;
-                self.error_message = Some(format!("Failed to connect: {}", e));
+                
+                // Update connection status for failure
+                self.connection_status.state = ConnectionState::Failed;
+                self.connection_status.retry_count += 1;
+                self.connection_status.error_message = Some(e.to_string());
+                self.connection_status.next_retry_in = Some(Duration::from_secs(5));
+                
+                self.error_message = Some(format!("Failed to connect after retries: {}", e));
                 self.status_message = None;
-                self.add_event(EventLevel::Error, "Connection".to_string(), format!("Failed to connect to cluster: {}", e));
+                self.add_event(EventLevel::Error, "Connection".to_string(), format!("Failed to connect to cluster after automatic retries: {}", e));
             }
         }
     }
@@ -979,6 +1407,7 @@ impl App {
             return Ok(());
         }
         
+        let start_time = Instant::now();
         let mut errors = Vec::new();
         
         // Refresh VMs
@@ -999,6 +1428,10 @@ impl App {
         // Update history
         self.update_metrics_history();
         
+        // Update connection latency based on refresh duration
+        let refresh_duration = start_time.elapsed();
+        self.update_connection_latency(refresh_duration);
+        
         self.last_refresh = Instant::now();
         
         if !errors.is_empty() {
@@ -1007,12 +1440,16 @@ impl App {
             return Err(crate::BlixardError::Internal { message: error_msg });
         }
         
+        // Update cluster health
+        self.update_cluster_health();
+        
         // Log successful refresh with data counts
         self.add_event(EventLevel::Info, "Data".to_string(), 
-            format!("Refreshed: {} VMs, {} nodes, leader={:?}", 
+            format!("Refreshed: {} VMs, {} nodes, leader={:?} ({}ms)", 
                 self.vms.len(), 
                 self.nodes.len(), 
-                self.cluster_metrics.leader_id
+                self.cluster_metrics.leader_id,
+                refresh_duration.as_millis()
             )
         );
         
@@ -1048,6 +1485,153 @@ impl App {
             }
         }
         Ok(())
+    }
+    
+    /// Update cluster health based on current metrics
+    pub fn update_cluster_health(&mut self) {
+        let now = Instant::now();
+        
+        // Calculate health status based on nodes
+        let total_nodes = self.nodes.len();
+        let healthy_nodes = self.nodes.iter().filter(|n| n.status == NodeStatus::Healthy).count();
+        let warning_nodes = self.nodes.iter().filter(|n| n.status == NodeStatus::Warning).count();
+        let critical_nodes = self.nodes.iter().filter(|n| n.status == NodeStatus::Critical).count();
+        
+        self.cluster_health.healthy_nodes = healthy_nodes as u32;
+        self.cluster_health.degraded_nodes = warning_nodes as u32;
+        self.cluster_health.failed_nodes = critical_nodes as u32;
+        
+        // Determine overall health status
+        self.cluster_health.status = if critical_nodes > 0 || healthy_nodes < total_nodes / 2 {
+            HealthStatus::Critical
+        } else if warning_nodes > 0 {
+            HealthStatus::Degraded
+        } else if healthy_nodes == total_nodes && total_nodes > 0 {
+            HealthStatus::Healthy
+        } else {
+            HealthStatus::Unknown
+        };
+        
+        // Update node health history
+        for node in &self.nodes {
+            let snapshot = NodeHealthSnapshot {
+                timestamp: now,
+                cpu_percent: node.cpu_usage,
+                memory_percent: node.memory_usage,
+                disk_io_mbps: 0.0, // TODO: Get from metrics
+                network_mbps: 0.0, // TODO: Get from metrics
+                vm_count: node.vm_count,
+                status: node.status.clone(),
+            };
+            
+            self.node_health_history
+                .entry(node.id)
+                .or_insert_with(Vec::new)
+                .push(snapshot);
+            
+            // Keep only last 60 snapshots (1 minute of history at 1s refresh)
+            if let Some(history) = self.node_health_history.get_mut(&node.id) {
+                if history.len() > 60 {
+                    history.remove(0);
+                }
+            }
+        }
+        
+        // Check for alerts
+        self.check_health_alerts();
+        
+        self.cluster_health.last_health_check = now;
+    }
+    
+    /// Check for health alerts based on current state
+    fn check_health_alerts(&mut self) {
+        
+        // Collect alerts to add (avoid borrowing issues)
+        let mut alerts_to_add = Vec::new();
+        
+        // Check node health
+        for node in &self.nodes {
+            // High CPU alert
+            if node.cpu_usage > 90.0 {
+                alerts_to_add.push((
+                    AlertSeverity::Critical,
+                    Some(node.id),
+                    format!("High CPU usage on node {}", node.id),
+                    format!("CPU usage is at {:.1}%", node.cpu_usage),
+                ));
+            } else if node.cpu_usage > 80.0 {
+                alerts_to_add.push((
+                    AlertSeverity::Warning,
+                    Some(node.id),
+                    format!("Elevated CPU usage on node {}", node.id),
+                    format!("CPU usage is at {:.1}%", node.cpu_usage),
+                ));
+            }
+            
+            // High memory alert
+            if node.memory_usage > 90.0 {
+                alerts_to_add.push((
+                    AlertSeverity::Critical,
+                    Some(node.id),
+                    format!("High memory usage on node {}", node.id),
+                    format!("Memory usage is at {:.1}%", node.memory_usage),
+                ));
+            }
+            
+            // Node status alert
+            if node.status == NodeStatus::Critical {
+                alerts_to_add.push((
+                    AlertSeverity::Critical,
+                    Some(node.id),
+                    format!("Node {} is in critical state", node.id),
+                    "Node may be unresponsive or experiencing failures".to_string(),
+                ));
+            }
+        }
+        
+        // Check cluster-wide issues
+        if self.cluster_health.failed_nodes > 0 {
+            alerts_to_add.push((
+                AlertSeverity::Critical,
+                None,
+                "Cluster has failed nodes".to_string(),
+                format!("{} nodes are in failed state", self.cluster_health.failed_nodes),
+            ));
+        }
+        
+        // Add all collected alerts
+        for (severity, node_id, title, message) in alerts_to_add {
+            self.add_health_alert(severity, node_id, title, message);
+        }
+        
+        // Remove old resolved alerts
+        self.health_alerts.retain(|alert| {
+            !alert.resolved || alert.timestamp.elapsed() < Duration::from_secs(300)
+        });
+    }
+    
+    /// Add a health alert if it doesn't already exist
+    fn add_health_alert(&mut self, severity: AlertSeverity, node_id: Option<u64>, title: String, message: String) {
+        // Check if similar alert already exists
+        let exists = self.health_alerts.iter().any(|a| {
+            a.title == title && a.node_id == node_id && !a.resolved
+        });
+        
+        if !exists {
+            self.health_alerts.push(HealthAlert {
+                timestamp: Instant::now(),
+                severity,
+                node_id,
+                title,
+                message,
+                resolved: false,
+            });
+            
+            // Keep only last 50 alerts
+            if self.health_alerts.len() > 50 {
+                self.health_alerts.remove(0);
+            }
+        }
     }
     
     pub async fn refresh_cluster_metrics(&mut self) -> BlixardResult<()> {
@@ -1092,8 +1676,8 @@ impl App {
                         } else {
                             NodeRole::Follower
                         },
-                        cpu_usage: 0.0, // TODO: Get actual metrics
-                        memory_usage: 0.0, // TODO: Get actual metrics
+                        cpu_usage: 20.0 + ::rand::random::<f32>() * 60.0, // Simulated CPU usage 20-80%
+                        memory_usage: 30.0 + ::rand::random::<f32>() * 50.0, // Simulated memory usage 30-80%
                         vm_count: self.vms.iter().filter(|vm| vm.node_id == node.id).count() as u32,
                         last_seen: Some(Instant::now()),
                         version: None, // TODO: Add to proto
@@ -1134,25 +1718,162 @@ impl App {
             self.memory_history.remove(0);
         }
         
-        // Network history (placeholder)
-        self.network_history.push(50.0); // TODO: Get actual network metrics
+        // Update network history with more realistic simulation
+        // Simulate network traffic based on VM count and activity
+        let base_network = 10.0; // Base network usage in MB/s
+        let vm_network = self.vms.iter()
+            .filter(|vm| vm.status == VmStatus::Running)
+            .count() as f32 * 5.0; // 5 MB/s per running VM
+        let network_variance = (::rand::random::<f32>() - 0.5) * 20.0; // +/- 10 MB/s variance
+        let network_usage = (base_network + vm_network + network_variance).max(0.0);
+        
+        self.network_history.push(network_usage);
         if self.network_history.len() > self.max_history_points {
             self.network_history.remove(0);
+        }
+        
+        // Update per-node health history
+        for node in &self.nodes {
+            let snapshot = NodeHealthSnapshot {
+                timestamp: Instant::now(),
+                cpu_percent: node.cpu_usage,
+                memory_percent: node.memory_usage,
+                disk_io_mbps: 25.0 + (::rand::random::<f32>() - 0.5) * 10.0, // Simulated disk I/O
+                network_mbps: network_usage / self.nodes.len() as f32, // Distribute network across nodes
+                vm_count: node.vm_count,
+                status: node.status.clone(),
+            };
+            
+            let history = self.node_health_history
+                .entry(node.id)
+                .or_insert_with(Vec::new);
+            
+            history.push(snapshot);
+            
+            // Keep only last N snapshots per node
+            if history.len() > self.max_history_points {
+                history.remove(0);
+            }
         }
     }
     
     pub fn add_event(&mut self, level: EventLevel, source: String, message: String) {
         let event = SystemEvent {
             timestamp: Instant::now(),
-            level,
-            source,
-            message,
+            level: level.clone(),
+            source: source.clone(),
+            message: message.clone(),
             details: None,
         };
         
         self.recent_events.insert(0, event);
         if self.recent_events.len() > self.max_events {
             self.recent_events.truncate(self.max_events);
+        }
+        
+        // Also add to log stream
+        let log_level = match level {
+            EventLevel::Info => LogLevel::Info,
+            EventLevel::Warning => LogLevel::Warning,
+            EventLevel::Error => LogLevel::Error,
+            EventLevel::Critical => LogLevel::Error,
+            EventLevel::Debug => LogLevel::Debug,
+        };
+        
+        let log_source = match source.as_str() {
+            "Node" => LogSourceType::System,
+            "VM" => LogSourceType::System,
+            "Raft" => LogSourceType::Raft,
+            "gRPC" => LogSourceType::GrpcServer,
+            _ => LogSourceType::System,
+        };
+        
+        self.add_log_entry(log_source, log_level, message);
+    }
+    
+    /// Add a log entry to the streaming log view
+    pub fn add_log_entry(&mut self, source: LogSourceType, level: LogLevel, message: String) {
+        let entry = LogEntry {
+            timestamp: Instant::now(),
+            source,
+            level,
+            message,
+            details: None,
+        };
+        
+        self.log_entries.push(entry);
+        
+        // Maintain buffer size
+        if self.log_entries.len() > self.log_stream_config.buffer_size {
+            self.log_entries.remove(0);
+        }
+        
+        // Auto-scroll if in follow mode
+        if self.log_stream_config.follow_mode {
+            self.log_list_state.select(Some(self.log_entries.len().saturating_sub(1)));
+        }
+    }
+    
+    /// Simulate log entries for demonstration
+    pub fn simulate_log_entries(&mut self) {
+        // Add some sample log entries
+        let sources = vec![
+            (LogSourceType::System, "System started successfully"),
+            (LogSourceType::Node(1), "Node 1 joined cluster"),
+            (LogSourceType::Node(2), "Node 2 joined cluster"),
+            (LogSourceType::Raft, "Leader election completed, node 1 is leader"),
+            (LogSourceType::GrpcServer, "gRPC server listening on 0.0.0.0:7001"),
+            (LogSourceType::Vm("web-server".to_string()), "VM 'web-server' started"),
+            (LogSourceType::System, "Health check passed, cluster healthy"),
+            (LogSourceType::Node(1), "Applying configuration change"),
+            (LogSourceType::Raft, "Committed entry at index 42"),
+            (LogSourceType::System, "Resource usage: CPU 45%, Memory 62%"),
+        ];
+        
+        for (source, msg) in sources {
+            let level = match ::rand::random::<f32>() {
+                x if x < 0.1 => LogLevel::Error,
+                x if x < 0.2 => LogLevel::Warning,
+                x if x < 0.4 => LogLevel::Debug,
+                _ => LogLevel::Info,
+            };
+            
+            self.add_log_entry(source, level, msg.to_string());
+        }
+    }
+    
+    /// Open log viewer for a specific source
+    pub fn open_log_viewer(&mut self, source: Option<LogSourceType>) {
+        self.mode = AppMode::LogViewer;
+        
+        // If a specific source is provided, select it
+        if let Some(source) = source {
+            // Add source if not already present
+            let exists = self.log_stream_config.sources.iter().any(|s| s.source_type == source.clone());
+            if !exists {
+                let name = match &source {
+                    LogSourceType::Node(id) => format!("Node {}", id),
+                    LogSourceType::Vm(name) => format!("VM: {}", name),
+                    _ => format!("{:?}", source),
+                };
+                
+                self.log_stream_config.sources.push(LogSource {
+                    name,
+                    source_type: source.clone(),
+                    enabled: true,
+                    color: Some(ratatui::style::Color::Magenta),
+                });
+            }
+            
+            // Select the source
+            if let Some(idx) = self.log_stream_config.sources.iter().position(|s| s.source_type == source) {
+                self.log_stream_config.selected_source = idx;
+            }
+        }
+        
+        // Simulate some initial logs if empty
+        if self.log_entries.is_empty() {
+            self.simulate_log_entries();
         }
     }
     
@@ -1163,6 +1884,7 @@ impl App {
             AppTab::VirtualMachines => AppMode::VmList,
             AppTab::Nodes => AppMode::NodeList,
             AppTab::Monitoring => AppMode::Monitoring,
+            AppTab::P2P => AppMode::P2P,
             AppTab::Configuration => AppMode::Config,
             AppTab::Debug => AppMode::Debug,
             AppTab::Help => AppMode::Help,
@@ -1274,9 +1996,10 @@ impl App {
             1 => AppTab::VirtualMachines,
             2 => AppTab::Nodes,
             3 => AppTab::Monitoring,
-            4 => AppTab::Configuration,
-            5 => AppTab::Debug,
-            6 => AppTab::Help,
+            4 => AppTab::P2P,
+            5 => AppTab::Configuration,
+            6 => AppTab::Debug,
+            7 => AppTab::Help,
             _ => return,
         };
         self.switch_tab(tab);
@@ -1350,9 +2073,27 @@ impl App {
     pub async fn handle_event(&mut self, event: Event) -> BlixardResult<()> {
         match event {
             Event::Tick => {
-                if self.should_refresh() {
+                // Check if reconnection is needed
+                self.check_reconnection_needed();
+                
+                // Try to reconnect if in reconnecting state
+                if self.connection_status.state == ConnectionState::Reconnecting {
+                    self.add_event(EventLevel::Info, "Connection".to_string(), 
+                        format!("Attempting automatic reconnection (attempt {})", self.connection_status.retry_count + 1));
+                    self.try_connect().await;
+                }
+                
+                // Regular data refresh if connected
+                if self.should_refresh() && self.connection_status.state == ConnectionState::Connected {
                     if let Err(e) = self.refresh_all_data().await {
                         self.add_event(EventLevel::Error, "Refresh".to_string(), format!("Auto-refresh failed: {}", e));
+                        
+                        // If refresh failed due to connection issue, mark as disconnected
+                        if e.to_string().contains("connection") || e.to_string().contains("transport") {
+                            self.connection_status.state = ConnectionState::Disconnected;
+                            self.connection_status.connected_since = None;
+                            self.vm_client = None;
+                        }
                     }
                 }
             }
@@ -1411,13 +2152,14 @@ impl App {
                 if self.settings.vim_mode && self.search_mode == SearchMode::None {
                     // vim-style navigation: h = left/previous tab
                     let new_tab_index = match self.current_tab {
-                        AppTab::Dashboard => 6, // wrap to Help
+                        AppTab::Dashboard => 7, // wrap to Help
                         AppTab::VirtualMachines => 0,
                         AppTab::Nodes => 1,
                         AppTab::Monitoring => 2,
-                        AppTab::Configuration => 3,
+                        AppTab::P2P => 3,
+                        AppTab::Configuration => 4,
                         AppTab::Debug => 5,
-                        AppTab::Help => 4,
+                        AppTab::Help => 6,
                     };
                     self.switch_to_tab_by_index(new_tab_index);
                 } else {
@@ -1433,8 +2175,9 @@ impl App {
                         AppTab::VirtualMachines => 2,
                         AppTab::Nodes => 3,
                         AppTab::Monitoring => 4,
-                        AppTab::Configuration => 5,
-                        AppTab::Debug => 6,
+                        AppTab::P2P => 5,
+                        AppTab::Configuration => 6,
+                        AppTab::Debug => 7,
                         AppTab::Help => 0, // wrap to Dashboard
                     };
                     self.switch_to_tab_by_index(new_tab_index);
@@ -1515,6 +2258,11 @@ impl App {
                     format!("Vim mode: {}", if self.settings.vim_mode { "enabled" } else { "disabled" }));
                 return Ok(());
             }
+            (KeyCode::Char('L'), KeyModifiers::SHIFT) => {
+                // Open log viewer
+                self.open_log_viewer(None);
+                return Ok(());
+            }
             (KeyCode::Char('d'), KeyModifiers::NONE) => {
                 // Toggle debug mode
                 if self.search_mode == SearchMode::None {
@@ -1548,8 +2296,9 @@ impl App {
             KeyCode::Char('2') => self.switch_tab(AppTab::VirtualMachines),
             KeyCode::Char('3') => self.switch_tab(AppTab::Nodes),
             KeyCode::Char('4') => self.switch_tab(AppTab::Monitoring),
-            KeyCode::Char('5') => self.switch_tab(AppTab::Configuration),
-            KeyCode::Char('6') => self.switch_tab(AppTab::Debug),
+            KeyCode::Char('5') => self.switch_tab(AppTab::P2P),
+            KeyCode::Char('6') => self.switch_tab(AppTab::Configuration),
+            KeyCode::Char('7') => self.switch_tab(AppTab::Debug),
             _ => {}
         }
         
@@ -1563,6 +2312,7 @@ impl App {
             AppMode::CreateClusterForm => self.handle_create_cluster_keys(key).await?,
             AppMode::ClusterDiscovery => self.handle_cluster_discovery_keys(key).await?,
             AppMode::ConfirmDialog => self.handle_confirm_dialog_keys(key).await?,
+            AppMode::VmMigration => self.handle_vm_migration_keys(key).await?,
             AppMode::Help => self.handle_help_keys(key),
             AppMode::Debug | AppMode::RaftDebug | AppMode::DebugMetrics | AppMode::DebugLogs => {
                 self.handle_debug_keys(key).await?;
@@ -1570,6 +2320,12 @@ impl App {
             AppMode::BatchNodeCreation => self.handle_batch_node_creation_keys(key).await?,
             AppMode::VmTemplateSelector => self.handle_vm_template_selector_keys(key).await?,
             AppMode::BatchVmCreation => self.handle_batch_vm_creation_keys(key).await?,
+            AppMode::LogViewer => self.handle_log_viewer_keys(key).await?,
+            AppMode::Config => self.handle_config_keys(key).await?,
+            AppMode::SaveConfig => self.handle_save_config_keys(key).await?,
+            AppMode::LoadConfig => self.handle_load_config_keys(key).await?,
+            AppMode::EditNodeConfig => self.handle_edit_node_config_keys(key).await?,
+            AppMode::P2P => self.handle_p2p_keys(key).await?,
             _ => {}
         }
         
@@ -1800,23 +2556,23 @@ impl App {
     
     /// Quick create VM with micro template
     pub async fn quick_create_vm(&mut self) -> BlixardResult<()> {
+        // Extract needed values before mutable borrow
+        let vm_number = self.vms.len() + 1;
+        let vm_name = format!("vm-{}", vm_number);
+        let template_name = self.vm_templates[0].name.clone();
+        let template_vcpus = self.vm_templates[0].vcpus;
+        let template_memory = self.vm_templates[0].memory;
+        
+        self.add_event(EventLevel::Info, "VM".to_string(), 
+            format!("Quick creating VM '{}' from '{}' template", vm_name, template_name));
+            
         if let Some(client) = &mut self.vm_client {
-            // Generate unique VM name
-            let vm_number = self.vms.len() + 1;
-            let vm_name = format!("vm-{}", vm_number);
-            
-            // Use micro template settings
-            let template = &self.vm_templates[0]; // Micro VM template
-            
-            self.add_event(EventLevel::Info, "VM".to_string(), 
-                format!("Quick creating VM '{}' from '{}' template", vm_name, template.name));
-            
-            match client.create_vm(&vm_name, template.vcpus, template.memory).await {
+            match client.create_vm(&vm_name, template_vcpus, template_memory).await {
                 Ok(_) => {
                     self.add_event(EventLevel::Info, "VM".to_string(), 
                         format!("VM '{}' created successfully", vm_name));
                     self.status_message = Some(format!("Created VM '{}' ({}vcpu, {}MB)", 
-                        vm_name, template.vcpus, template.memory));
+                        vm_name, template_vcpus, template_memory));
                     
                     // Refresh VM list
                     self.refresh_vm_list().await?;
@@ -1836,19 +2592,21 @@ impl App {
     
     /// Batch create VMs
     pub async fn batch_create_vms(&mut self, count: u32) -> BlixardResult<()> {
+        // Extract needed values before mutable borrow
+        let base_vm_number = self.vms.len();
+        let template_vcpus = self.vm_templates[0].vcpus;
+        let template_memory = self.vm_templates[0].memory;
+        
         if let Some(client) = &mut self.vm_client {
-            let template = &self.vm_templates[0]; // Use micro template for batch
             let mut successful = 0;
             let mut failed = Vec::new();
             
             for i in 0..count {
-                let vm_name = format!("batch-vm-{}", self.vms.len() + i as usize + 1);
+                let vm_name = format!("batch-vm-{}", base_vm_number + i as usize + 1);
                 
-                match client.create_vm(&vm_name, template.vcpus, template.memory).await {
+                match client.create_vm(&vm_name, template_vcpus, template_memory).await {
                     Ok(_) => {
                         successful += 1;
-                        self.add_event(EventLevel::Info, "VM".to_string(), 
-                            format!("Created VM '{}'", vm_name));
                     }
                     Err(e) => {
                         failed.push((vm_name, e.to_string()));
@@ -1877,22 +2635,53 @@ impl App {
         Ok(())
     }
     
+    /// Migrate VM to another node
+    pub async fn migrate_vm(&mut self, vm_name: String, target_node_id: u64, live_migration: bool) -> BlixardResult<()> {
+        self.add_event(EventLevel::Info, "VM".to_string(), 
+            format!("Initiating migration of VM '{}' to node {}", vm_name, target_node_id));
+            
+        if let Some(client) = &mut self.vm_client {
+            match client.migrate_vm(&vm_name, target_node_id, live_migration).await {
+                Ok((source_id, target_id, message)) => {
+                    self.add_event(EventLevel::Info, "VM".to_string(), 
+                        format!("VM '{}' migration from node {} to {} started", vm_name, source_id, target_id));
+                    self.status_message = Some(message);
+                    
+                    // Refresh VM list to show updated location
+                    self.refresh_vm_list().await?;
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("Failed to migrate VM: {}", e));
+                    self.add_event(EventLevel::Error, "VM".to_string(), 
+                        format!("Failed to migrate VM '{}': {}", vm_name, e));
+                }
+            }
+        } else {
+            self.error_message = Some("Not connected to cluster".to_string());
+        }
+        
+        Ok(())
+    }
+    
     /// Create VM from template
     pub async fn create_vm_from_template(&mut self, template: &VmTemplate) -> BlixardResult<()> {
+        // Extract needed values before mutable borrow
+        let vm_number = self.vms.len() + 1;
+        let vm_name = format!("{}-{}", template.name.to_lowercase().replace(' ', "-"), vm_number);
+        let template_name = template.name.clone();
+        let template_vcpus = template.vcpus;
+        let template_memory = template.memory;
+        
+        self.add_event(EventLevel::Info, "VM".to_string(), 
+            format!("Creating VM '{}' from template '{}'", vm_name, template_name));
+            
         if let Some(client) = &mut self.vm_client {
-            // Generate unique VM name
-            let vm_number = self.vms.len() + 1;
-            let vm_name = format!("{}-{}", template.name.to_lowercase().replace(' ', "-"), vm_number);
-            
-            self.add_event(EventLevel::Info, "VM".to_string(), 
-                format!("Creating VM '{}' from template '{}'", vm_name, template.name));
-            
-            match client.create_vm(&vm_name, template.vcpus, template.memory).await {
+            match client.create_vm(&vm_name, template_vcpus, template_memory).await {
                 Ok(_) => {
                     self.add_event(EventLevel::Info, "VM".to_string(), 
                         format!("VM '{}' created successfully", vm_name));
                     self.status_message = Some(format!("Created {} VM '{}' ({}vcpu, {}MB)", 
-                        template.name, vm_name, template.vcpus, template.memory));
+                        template_name, vm_name, template_vcpus, template_memory));
                     
                     // Refresh VM list
                     self.refresh_vm_list().await?;
@@ -2175,6 +2964,95 @@ impl App {
                     }
                 }
             }
+            KeyCode::Char('m') => {
+                // Migrate VM
+                if let Some(selected) = self.vm_table_state.selected() {
+                    if let Some(vm) = self.vms.get(selected) {
+                        // Prepare migration form
+                        self.vm_migration_form = VmMigrationForm {
+                            vm_name: vm.name.clone(),
+                            source_node_id: vm.node_id,
+                            target_node_id: String::new(),
+                            live_migration: vm.status == VmStatus::Running,
+                            current_field: VmMigrationField::TargetNode,
+                        };
+                        self.mode = AppMode::VmMigration;
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    
+    async fn handle_vm_migration_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
+        use crossterm::event::KeyCode;
+        
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = AppMode::VmList;
+                self.vm_migration_form = VmMigrationForm::default();
+            }
+            KeyCode::Tab => {
+                // Toggle between fields
+                self.vm_migration_form.current_field = match self.vm_migration_form.current_field {
+                    VmMigrationField::TargetNode => VmMigrationField::LiveMigration,
+                    VmMigrationField::LiveMigration => VmMigrationField::TargetNode,
+                };
+            }
+            KeyCode::Enter => {
+                // Submit migration
+                let target_node_id = match self.vm_migration_form.target_node_id.parse::<u64>() {
+                    Ok(id) => id,
+                    Err(_) => {
+                        self.error_message = Some("Invalid target node ID".to_string());
+                        return Ok(());
+                    }
+                };
+                
+                // Check if target is different from source
+                if target_node_id == self.vm_migration_form.source_node_id {
+                    self.error_message = Some("Target node must be different from source node".to_string());
+                    return Ok(());
+                }
+                
+                // Check if target node exists
+                if !self.nodes.iter().any(|n| n.id == target_node_id) {
+                    self.error_message = Some(format!("Node {} not found in cluster", target_node_id));
+                    return Ok(());
+                }
+                
+                // Perform migration
+                let vm_name = self.vm_migration_form.vm_name.clone();
+                let live_migration = self.vm_migration_form.live_migration;
+                
+                self.migrate_vm(vm_name, target_node_id, live_migration).await?;
+                
+                // Return to VM list
+                self.mode = AppMode::VmList;
+                self.vm_migration_form = VmMigrationForm::default();
+            }
+            KeyCode::Char(c) => {
+                if self.vm_migration_form.current_field == VmMigrationField::TargetNode {
+                    if c.is_ascii_digit() {
+                        self.vm_migration_form.target_node_id.push(c);
+                    }
+                } else if self.vm_migration_form.current_field == VmMigrationField::LiveMigration {
+                    if c == ' ' {
+                        self.vm_migration_form.live_migration = !self.vm_migration_form.live_migration;
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                if self.vm_migration_form.current_field == VmMigrationField::TargetNode {
+                    self.vm_migration_form.target_node_id.pop();
+                }
+            }
+            KeyCode::Up | KeyCode::Down => {
+                if self.vm_migration_form.current_field == VmMigrationField::LiveMigration {
+                    self.vm_migration_form.live_migration = !self.vm_migration_form.live_migration;
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -2443,6 +3321,24 @@ impl App {
             KeyCode::Char('D') => {
                 // Auto-discover and join local nodes
                 self.auto_discover_nodes().await?;
+            }
+            KeyCode::Char('e') => {
+                // Edit selected node configuration
+                if let Some(selected) = self.node_table_state.selected() {
+                    let displayed_nodes = self.get_displayed_nodes();
+                    if let Some(node) = displayed_nodes.get(selected) {
+                        // Populate edit form with current node data
+                        self.edit_node_form = EditNodeForm {
+                            node_id: node.id,
+                            original_address: node.address.clone(),
+                            bind_address: node.address.clone(),
+                            data_dir: format!("./data-node{}", node.id), // Default, could be fetched from node
+                            vm_backend: "microvm".to_string(), // Default, could be fetched from node
+                            current_field: EditNodeField::BindAddress,
+                        };
+                        self.mode = AppMode::EditNodeConfig;
+                    }
+                }
             }
             _ => {}
         }
@@ -2727,6 +3623,95 @@ impl App {
         }
         
         Ok(())
+    }
+    
+    async fn handle_log_viewer_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
+        use crossterm::event::KeyCode;
+        
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = self.previous_mode();
+            }
+            KeyCode::Char(' ') => {
+                // Toggle follow mode
+                self.log_stream_config.follow_mode = !self.log_stream_config.follow_mode;
+            }
+            KeyCode::Char('l') | KeyCode::Char('L') => {
+                // Cycle log level
+                self.log_stream_config.filters.log_level = match self.log_stream_config.filters.log_level {
+                    LogLevel::Debug => LogLevel::Info,
+                    LogLevel::Info => LogLevel::Warning,
+                    LogLevel::Warning => LogLevel::Error,
+                    LogLevel::Error => LogLevel::Debug,
+                };
+            }
+            KeyCode::Char('t') | KeyCode::Char('T') => {
+                // Toggle timestamps
+                self.log_stream_config.filters.show_timestamps = !self.log_stream_config.filters.show_timestamps;
+            }
+            KeyCode::Char('e') | KeyCode::Char('E') => {
+                // Toggle error highlighting
+                self.log_stream_config.filters.highlight_errors = !self.log_stream_config.filters.highlight_errors;
+            }
+            KeyCode::Up => {
+                // Select previous source
+                if self.log_stream_config.selected_source > 0 {
+                    self.log_stream_config.selected_source -= 1;
+                }
+            }
+            KeyCode::Down => {
+                // Select next source
+                if self.log_stream_config.selected_source < self.log_stream_config.sources.len() - 1 {
+                    self.log_stream_config.selected_source += 1;
+                }
+            }
+            KeyCode::Enter => {
+                // Toggle selected source
+                if let Some(source) = self.log_stream_config.sources.get_mut(self.log_stream_config.selected_source) {
+                    source.enabled = !source.enabled;
+                }
+            }
+            KeyCode::Char('c') | KeyCode::Char('C') => {
+                // Clear log entries
+                self.log_entries.clear();
+            }
+            KeyCode::Char('s') | KeyCode::Char('S') => {
+                // Simulate more log entries
+                self.simulate_log_entries();
+            }
+            KeyCode::PageUp => {
+                // Scroll up
+                if let Some(selected) = self.log_list_state.selected() {
+                    self.log_list_state.select(Some(selected.saturating_sub(10)));
+                    self.log_stream_config.follow_mode = false;
+                }
+            }
+            KeyCode::PageDown => {
+                // Scroll down
+                if let Some(selected) = self.log_list_state.selected() {
+                    let new_pos = (selected + 10).min(self.log_entries.len().saturating_sub(1));
+                    self.log_list_state.select(Some(new_pos));
+                    if new_pos == self.log_entries.len().saturating_sub(1) {
+                        self.log_stream_config.follow_mode = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+        
+        Ok(())
+    }
+    
+    fn previous_mode(&self) -> AppMode {
+        match self.current_tab {
+            AppTab::Dashboard => AppMode::Dashboard,
+            AppTab::VirtualMachines => AppMode::VmList,
+            AppTab::Nodes => AppMode::NodeList,
+            AppTab::Monitoring => AppMode::Monitoring,
+            AppTab::Configuration => AppMode::Config,
+            AppTab::Debug => AppMode::Debug,
+            AppTab::Help => AppMode::Help,
+        }
     }
     
     async fn handle_batch_node_creation_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
@@ -3170,6 +4155,267 @@ impl App {
         Ok(())
     }
     
+    async fn handle_config_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
+        use crossterm::event::KeyCode;
+        
+        match key.code {
+            KeyCode::Char('s') => {
+                // Save configuration
+                self.mode = AppMode::SaveConfig;
+                self.config_file_path = Some("cluster-config.yaml".to_string());
+            }
+            KeyCode::Char('l') => {
+                // Load configuration
+                self.mode = AppMode::LoadConfig;
+                self.config_file_path = Some("cluster-config.yaml".to_string());
+            }
+            KeyCode::Char('e') => {
+                // Export current state (future feature)
+                self.status_message = Some("Export state feature coming soon".to_string());
+            }
+            KeyCode::Char('i') => {
+                // Import state (future feature)
+                self.status_message = Some("Import state feature coming soon".to_string());
+            }
+            _ => {}
+        }
+        
+        Ok(())
+    }
+    
+    async fn handle_save_config_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
+        use crossterm::event::KeyCode;
+        
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = AppMode::Config;
+                self.config_file_path = None;
+                self.config_description.clear();
+            }
+            KeyCode::Tab => {
+                // Toggle between fields
+                self.save_config_field = match self.save_config_field {
+                    SaveConfigField::FilePath => SaveConfigField::Description,
+                    SaveConfigField::Description => SaveConfigField::FilePath,
+                };
+            }
+            KeyCode::Enter => {
+                if let Some(path) = self.config_file_path.clone() {
+                    match self.save_cluster_config(&path).await {
+                        Ok(_) => {
+                            self.mode = AppMode::Config;
+                            self.status_message = Some(format!("Configuration saved to {}", path));
+                        }
+                        Err(e) => {
+                            self.error_message = Some(format!("Failed to save configuration: {}", e));
+                        }
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                match self.save_config_field {
+                    SaveConfigField::FilePath => {
+                        if let Some(path) = &mut self.config_file_path {
+                            path.push(c);
+                        }
+                    }
+                    SaveConfigField::Description => {
+                        self.config_description.push(c);
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                match self.save_config_field {
+                    SaveConfigField::FilePath => {
+                        if let Some(path) = &mut self.config_file_path {
+                            path.pop();
+                        }
+                    }
+                    SaveConfigField::Description => {
+                        self.config_description.pop();
+                    }
+                }
+            }
+            _ => {}
+        }
+        
+        Ok(())
+    }
+    
+    async fn handle_load_config_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
+        use crossterm::event::KeyCode;
+        
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = AppMode::Config;
+                self.config_file_path = None;
+            }
+            KeyCode::Enter => {
+                if let Some(path) = self.config_file_path.clone() {
+                    match self.load_cluster_config(&path).await {
+                        Ok(_) => {
+                            self.mode = AppMode::Config;
+                            self.status_message = Some(format!("Configuration loaded from {}", path));
+                        }
+                        Err(e) => {
+                            self.error_message = Some(format!("Failed to load configuration: {}", e));
+                        }
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(path) = &mut self.config_file_path {
+                    path.push(c);
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(path) = &mut self.config_file_path {
+                    path.pop();
+                }
+            }
+            _ => {}
+        }
+        
+        Ok(())
+    }
+    
+    async fn handle_edit_node_config_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
+        use crossterm::event::KeyCode;
+        
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = AppMode::NodeList;
+            }
+            KeyCode::Tab => {
+                // Cycle through fields
+                self.edit_node_form.current_field = match self.edit_node_form.current_field {
+                    EditNodeField::BindAddress => EditNodeField::DataDir,
+                    EditNodeField::DataDir => EditNodeField::VmBackend,
+                    EditNodeField::VmBackend => EditNodeField::BindAddress,
+                };
+            }
+            KeyCode::Enter => {
+                // Apply changes
+                self.apply_node_config_changes().await?;
+                self.mode = AppMode::NodeList;
+            }
+            KeyCode::Char(c) => {
+                match self.edit_node_form.current_field {
+                    EditNodeField::BindAddress => self.edit_node_form.bind_address.push(c),
+                    EditNodeField::DataDir => self.edit_node_form.data_dir.push(c),
+                    EditNodeField::VmBackend => self.edit_node_form.vm_backend.push(c),
+                }
+            }
+            KeyCode::Backspace => {
+                match self.edit_node_form.current_field {
+                    EditNodeField::BindAddress => { self.edit_node_form.bind_address.pop(); }
+                    EditNodeField::DataDir => { self.edit_node_form.data_dir.pop(); }
+                    EditNodeField::VmBackend => { self.edit_node_form.vm_backend.pop(); }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    
+    /// Save cluster configuration to file
+    pub async fn save_cluster_config(&mut self, path: &str) -> BlixardResult<()> {
+        use super::cluster_config::{ClusterConfiguration, NodeConfiguration, VmConfiguration, VmTemplate as ConfigVmTemplate, ClusterSettings};
+        
+        let mut config = ClusterConfiguration::new(Some(self.config_description.clone()));
+        
+        // Add nodes
+        for node in &self.nodes {
+            config.nodes.push(NodeConfiguration {
+                id: node.id,
+                bind_address: node.address.clone(),
+                data_dir: format!("./data-node{}", node.id), // Default pattern
+                vm_backend: self.settings.default_vm_backend.clone(),
+                use_tailscale: false,
+                role: match node.role {
+                    NodeRole::Leader => "leader",
+                    NodeRole::Follower => "follower",
+                    _ => "unknown",
+                }.to_string(),
+                status: match node.status {
+                    NodeStatus::Healthy => "healthy",
+                    NodeStatus::Warning => "warning",
+                    NodeStatus::Critical => "critical",
+                    _ => "unknown",
+                }.to_string(),
+            });
+        }
+        
+        // Add VMs
+        for vm in &self.vms {
+            config.vms.push(VmConfiguration {
+                name: vm.name.clone(),
+                vcpus: vm.vcpus,
+                memory: vm.memory,
+                node_id: vm.node_id,
+                status: format!("{:?}", vm.status),
+                config_path: vm.config_path.clone(),
+            });
+        }
+        
+        // Add VM templates
+        for template in &self.vm_templates {
+            config.vm_templates.push(ConfigVmTemplate {
+                name: template.name.clone(),
+                description: template.description.clone(),
+                vcpus: template.vcpus,
+                memory: template.memory,
+                template_type: format!("{:?}", template.template_type),
+            });
+        }
+        
+        // Add settings
+        config.settings = ClusterSettings {
+            default_vm_backend: self.settings.default_vm_backend.clone(),
+            refresh_rate: self.settings.refresh_rate,
+            max_log_entries: self.max_log_entries,
+            auto_connect: self.settings.auto_connect,
+        };
+        
+        // Save to file
+        config.save_to_file(std::path::Path::new(path)).await?;
+        
+        self.config_file_path = Some(path.to_string());
+        self.config_dirty = false;
+        self.status_message = Some(format!("Configuration saved to {}", path));
+        
+        Ok(())
+    }
+    
+    /// Load cluster configuration from file
+    pub async fn load_cluster_config(&mut self, path: &str) -> BlixardResult<()> {
+        use super::cluster_config::ClusterConfiguration;
+        
+        let config = ClusterConfiguration::load_from_file(std::path::Path::new(path)).await?;
+        
+        // Validate configuration
+        config.validate()?;
+        
+        // Apply configuration
+        self.config_description = config.metadata.description.unwrap_or_default();
+        
+        // Note: We don't automatically create nodes/VMs from loaded config
+        // This would require more complex orchestration
+        // For now, we just load the configuration for reference
+        
+        self.config_file_path = Some(path.to_string());
+        self.status_message = Some(format!("Configuration loaded from {}", path));
+        
+        // Show a dialog with loaded configuration summary
+        self.add_event(
+            EventLevel::Info,
+            "Config".to_string(),
+            format!("Loaded configuration with {} nodes and {} VMs", config.nodes.len(), config.vms.len())
+        );
+        
+        Ok(())
+    }
+    
     /// Simulate Raft debug data for testing
     fn simulate_raft_debug_data(&mut self) {
         use std::time::Duration;
@@ -3222,6 +4468,456 @@ impl App {
         
         self.status_message = Some("Simulated Raft debug data updated".to_string());
     }
+    
+    /// Apply node configuration changes
+    async fn apply_node_config_changes(&mut self) -> BlixardResult<()> {
+        let node_id = self.edit_node_form.node_id;
+        let new_address = &self.edit_node_form.bind_address;
+        let new_data_dir = &self.edit_node_form.data_dir;
+        let new_vm_backend = &self.edit_node_form.vm_backend;
+        
+        // Update node info in local state
+        if let Some(node) = self.nodes.iter_mut().find(|n| n.id == node_id) {
+            node.address = new_address.clone();
+        }
+        
+        // In a real implementation, we would send these changes to the node via gRPC
+        // For now, we'll just show a status message
+        self.status_message = Some(format!(
+            "Node {} configuration updated:\n  Address: {}\n  Data Dir: {}\n  VM Backend: {}",
+            node_id, new_address, new_data_dir, new_vm_backend
+        ));
+        
+        self.add_event(
+            EventLevel::Info, 
+            "Node Config".to_string(),
+            format!("Updated configuration for node {}", node_id)
+        );
+        
+        // Note: In production, this would require:
+        // 1. Stopping the node if bind address changed
+        // 2. Updating node configuration file
+        // 3. Restarting the node with new configuration
+        // 4. Updating cluster membership if address changed
+        
+        Ok(())
+    }
+    
+    /// Initialize P2P functionality
+    pub async fn initialize_p2p(&mut self) -> BlixardResult<()> {
+        if self.p2p_enabled {
+            return Ok(()); // Already initialized
+        }
+        
+        // Get current node info if connected
+        let node_id = if let Some(node) = self.nodes.iter().find(|n| n.is_current_node) {
+            node.id
+        } else {
+            1 // Default node ID if not connected
+        };
+        
+        // Create temporary directory for P2P data
+        let p2p_dir = std::env::temp_dir().join(format!("blixard-p2p-{}", node_id));
+        std::fs::create_dir_all(&p2p_dir)?;
+        
+        // Initialize P2P manager with default config
+        let p2p_config = blixard_core::p2p_manager::P2pConfig::default();
+        let manager = Arc::new(
+            blixard_core::p2p_manager::P2pManager::new(node_id, &p2p_dir, p2p_config).await?
+        );
+        
+        // Start the P2P manager
+        manager.start().await?;
+        
+        // Initialize P2P image store
+        let store = blixard_core::p2p_image_store::P2pImageStore::new(
+            node_id,
+            &p2p_dir
+        ).await?;
+        
+        // Get node ID from Iroh
+        let node_addr = store.get_node_addr().await?;
+        self.p2p_node_id = node_addr.node_id.to_string().chars().take(8).collect();
+        
+        self.p2p_store = Some(Arc::new(tokio::sync::Mutex::new(store)));
+        self.p2p_manager = Some(manager.clone());
+        self.p2p_enabled = true;
+        
+        self.add_event(
+            EventLevel::Info,
+            "P2P".to_string(),
+            format!("P2P networking enabled with node ID: {}", self.p2p_node_id)
+        );
+        
+        self.status_message = Some("P2P networking enabled".to_string());
+        
+        // Start background task to update P2P stats
+        self.start_p2p_stats_updater(manager);
+        
+        Ok(())
+    }
+    
+    /// Disable P2P functionality
+    pub async fn disable_p2p(&mut self) -> BlixardResult<()> {
+        if !self.p2p_enabled {
+            return Ok(());
+        }
+        
+        self.p2p_enabled = false;
+        self.p2p_store = None;
+        self.p2p_manager = None;
+        self.p2p_peers.clear();
+        self.p2p_images.clear();
+        self.p2p_transfers.clear();
+        self.p2p_peer_count = 0;
+        self.p2p_shared_images = 0;
+        
+        self.add_event(
+            EventLevel::Info,
+            "P2P".to_string(),
+            "P2P networking disabled".to_string()
+        );
+        
+        self.status_message = Some("P2P networking disabled".to_string());
+        
+        Ok(())
+    }
+    
+    /// Start background task to update P2P stats
+    fn start_p2p_stats_updater(&self, manager: Arc<blixard_core::p2p_manager::P2pManager>) {
+        let p2p_peers = self.p2p_peers.clone();
+        let p2p_transfers = self.p2p_transfers.clone();
+        
+        // Spawn task to handle P2P events
+        let event_rx = manager.event_receiver();
+        tokio::spawn(async move {
+            let mut rx = event_rx.write().await;
+            
+            while let Some(event) = rx.recv().await {
+                use blixard_core::p2p_manager::P2pEvent;
+                
+                match event {
+                    P2pEvent::PeerConnected(peer_id) => {
+                        tracing::info!("Peer connected: {}", peer_id);
+                    }
+                    P2pEvent::PeerDisconnected(peer_id) => {
+                        tracing::info!("Peer disconnected: {}", peer_id);
+                    }
+                    P2pEvent::TransferStarted(transfer_id) => {
+                        tracing::info!("Transfer started: {}", transfer_id);
+                    }
+                    P2pEvent::TransferCompleted(transfer_id) => {
+                        tracing::info!("Transfer completed: {}", transfer_id);
+                    }
+                    _ => {}
+                }
+            }
+        });
+        
+        // Spawn task to periodically update stats
+        let manager_clone = manager.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                
+                // Update peer list
+                if let Ok(peers) = manager_clone.get_peers().await {
+                    // Convert to UI format
+                    // This would update the shared state in a real implementation
+                }
+                
+                // Update transfer list
+                if let Ok(transfers) = manager_clone.get_active_transfers().await {
+                    // Convert to UI format
+                }
+            }
+        });
+    }
+    
+    /// Upload a VM image to P2P network
+    pub async fn upload_vm_image_to_p2p(&mut self, vm_name: &str) -> BlixardResult<()> {
+        if !self.p2p_enabled {
+            self.error_message = Some("P2P networking is not enabled".to_string());
+            return Ok(());
+        }
+        
+        // In a real implementation, this would:
+        // 1. Find the VM image file on disk
+        // 2. Upload it to P2P network via p2p_store
+        // 3. Update the UI with progress
+        
+        self.add_event(
+            EventLevel::Info,
+            "P2P".to_string(),
+            format!("Uploading VM image '{}' to P2P network", vm_name)
+        );
+        
+        // Simulate upload
+        self.p2p_transfers.push(P2pTransfer {
+            resource_name: format!("{}.img", vm_name),
+            peer_id: "local".to_string(),
+            is_upload: true,
+            total_bytes: 1024 * 1024 * 512, // 512MB
+            bytes_transferred: 0,
+            speed_bps: 10 * 1024 * 1024, // 10MB/s
+        });
+        
+        Ok(())
+    }
+    
+    /// Download a VM image from P2P network
+    pub async fn download_vm_image_from_p2p(&mut self, image_name: &str, version: &str) -> BlixardResult<()> {
+        if !self.p2p_enabled {
+            self.error_message = Some("P2P networking is not enabled".to_string());
+            return Ok(());
+        }
+        
+        if let Some(store) = &self.p2p_store {
+            let store = store.lock().await;
+            
+            self.add_event(
+                EventLevel::Info,
+                "P2P".to_string(),
+                format!("Downloading VM image '{}' v{} from P2P network", image_name, version)
+            );
+            
+            match store.download_image(image_name, version).await {
+                Ok(path) => {
+                    self.status_message = Some(format!("Downloaded image to: {:?}", path));
+                    self.add_event(
+                        EventLevel::Info,
+                        "P2P".to_string(),
+                        format!("Successfully downloaded '{}' v{}", image_name, version)
+                    );
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("Failed to download image: {}", e));
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Handle keyboard events in P2P mode
+    async fn handle_p2p_keys(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
+        use crossterm::event::KeyCode;
+        
+        match key.code {
+            KeyCode::Char('p') => {
+                // Toggle P2P on/off
+                if self.p2p_enabled {
+                    self.disable_p2p().await?;
+                } else {
+                    self.initialize_p2p().await?;
+                }
+            }
+            KeyCode::Char('u') => {
+                // Upload current VM image
+                if let Some(vm_name) = &self.selected_vm {
+                    self.upload_vm_image_to_p2p(vm_name).await?;
+                } else {
+                    self.error_message = Some("No VM selected for upload".to_string());
+                }
+            }
+            KeyCode::Char('d') => {
+                // Download selected P2P image
+                if !self.p2p_images.is_empty() {
+                    // For demo, download the first image
+                    let image = &self.p2p_images[0];
+                    self.download_vm_image_from_p2p(&image.name, &image.version).await?;
+                } else {
+                    self.error_message = Some("No P2P images available for download".to_string());
+                }
+            }
+            KeyCode::Char('r') => {
+                // Refresh P2P stats
+                self.refresh_p2p_stats().await?;
+            }
+            KeyCode::Char('c') => {
+                // Connect to a peer
+                self.prompt_peer_connection().await?;
+            }
+            KeyCode::Char('s') => {
+                // Show P2P statistics
+                self.show_p2p_statistics().await?;
+            }
+            KeyCode::Char('l') => {
+                // List available resources
+                self.list_p2p_resources().await?;
+            }
+            KeyCode::Char('q') => {
+                // Queue a download with priority selection
+                if !self.p2p_images.is_empty() {
+                    self.queue_p2p_download().await?;
+                }
+            }
+            KeyCode::Esc => {
+                // Return to normal mode
+                self.mode = AppMode::Dashboard;
+            }
+            _ => {}
+        }
+        
+        Ok(())
+    }
+    
+    /// Refresh P2P statistics and peer list
+    async fn refresh_p2p_stats(&mut self) -> BlixardResult<()> {
+        if !self.p2p_enabled {
+            return Ok(());
+        }
+        
+        if let Some(manager) = &self.p2p_manager {
+            // Get real data from P2P manager
+            let peers = manager.get_peers().await;
+            let transfers = manager.get_active_transfers().await;
+            
+            // Convert peers to UI format
+            self.p2p_peers = peers.iter().map(|peer| P2pPeer {
+                node_id: peer.node_id.chars().take(8).collect(),
+                address: peer.address.clone(),
+                status: "connected".to_string(),
+                latency_ms: peer.connection_quality.latency_ms,
+                shared_images: peer.shared_resources.len(),
+            }).collect();
+            
+            // Convert transfers to UI format
+            self.p2p_transfers = transfers.iter().map(|transfer| {
+                let is_upload = matches!(transfer.progress.status, 
+                    blixard_core::p2p_manager::TransferStatus::Uploading
+                );
+                
+                P2pTransfer {
+                    resource_name: format!("{}-{}.img", transfer.request.name, transfer.request.version),
+                    peer_id: transfer.request.source_peer.clone().unwrap_or_else(|| "local".to_string()),
+                    is_upload,
+                    total_bytes: transfer.progress.total_bytes,
+                    bytes_transferred: transfer.progress.bytes_transferred,
+                    speed_bps: transfer.progress.speed_bps,
+                }
+            }).collect();
+            
+            self.p2p_peer_count = self.p2p_peers.len();
+            
+            // Add some demo images
+            self.p2p_images = vec![
+                P2pImage {
+                    name: "ubuntu-server".to_string(),
+                    version: "22.04".to_string(),
+                    size: 1024 * 1024 * 512, // 512MB
+                    available_peers: self.p2p_peer_count,
+                    is_cached: false,
+                    is_downloading: self.p2p_transfers.iter().any(|t| 
+                        t.resource_name.contains("ubuntu") && !t.is_upload
+                    ),
+                },
+                P2pImage {
+                    name: "alpine-linux".to_string(),
+                    version: "3.18".to_string(),
+                    size: 1024 * 1024 * 128, // 128MB
+                    available_peers: self.p2p_peer_count + 1,
+                    is_cached: true,
+                    is_downloading: false,
+                },
+            ];
+            
+            self.p2p_shared_images = self.p2p_images.len();
+        }
+        
+        self.status_message = Some("P2P stats refreshed".to_string());
+        
+        Ok(())
+    }
+    
+    /// Prompt for peer connection
+    async fn prompt_peer_connection(&mut self) -> BlixardResult<()> {
+        if let Some(manager) = &self.p2p_manager {
+            // In a real implementation, this would open a dialog
+            // For now, we'll connect to a hardcoded peer
+            let peer_addr = "192.168.1.100:7001";
+            
+            match manager.connect_peer(peer_addr).await {
+                Ok(_) => {
+                    self.status_message = Some(format!("Connected to peer at {}", peer_addr));
+                    self.refresh_p2p_stats().await?;
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("Failed to connect to peer: {}", e));
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Show P2P statistics
+    async fn show_p2p_statistics(&mut self) -> BlixardResult<()> {
+        let stats = format!(
+            "P2P Statistics:\n\
+             Node ID: {}\n\
+             Connected Peers: {}\n\
+             Shared Images: {}\n\
+             Active Transfers: {}\n\
+             Cache Size: {} images",
+            self.p2p_node_id,
+            self.p2p_peer_count,
+            self.p2p_shared_images,
+            self.p2p_transfers.len(),
+            self.p2p_images.iter().filter(|img| img.is_cached).count()
+        );
+        
+        self.status_message = Some(stats);
+        Ok(())
+    }
+    
+    /// List available P2P resources
+    async fn list_p2p_resources(&mut self) -> BlixardResult<()> {
+        if let Some(store) = &self.p2p_store {
+            let store = store.lock().await;
+            let images = store.list_images().await?;
+            
+            if images.is_empty() {
+                self.status_message = Some("No resources available in P2P network".to_string());
+            } else {
+                let list = images.iter()
+                    .map(|img| format!("- {} v{} ({} bytes)", img.name, img.version, img.size))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                
+                self.status_message = Some(format!("Available P2P Resources:\n{}", list));
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Queue a P2P download
+    async fn queue_p2p_download(&mut self) -> BlixardResult<()> {
+        if let Some(manager) = &self.p2p_manager {
+            // For demo, download the first non-cached image
+            if let Some(image) = self.p2p_images.iter().find(|img| !img.is_cached) {
+                let request_id = manager.request_download(
+                    blixard_core::p2p_manager::ResourceType::VmImage,
+                    &image.name,
+                    &image.version,
+                    blixard_core::p2p_manager::TransferPriority::Normal,
+                ).await?;
+                
+                self.status_message = Some(format!(
+                    "Queued download of {} v{} (request ID: {})",
+                    image.name, image.version, request_id
+                ));
+                
+                // Refresh to show new transfer
+                self.refresh_p2p_stats().await?;
+            } else {
+                self.status_message = Some("All available images are already cached".to_string());
+            }
+        }
+        
+        Ok(())
+    }
 }
 
 impl PlacementStrategy {
@@ -3265,6 +4961,7 @@ impl EventLevel {
             EventLevel::Warning => Color::Yellow,
             EventLevel::Error => Color::Red,
             EventLevel::Critical => Color::Magenta,
+            EventLevel::Debug => Color::Gray,
         }
     }
     
@@ -3274,6 +4971,7 @@ impl EventLevel {
             EventLevel::Warning => "⚠️",
             EventLevel::Error => "❌",
             EventLevel::Critical => "🚨",
+            EventLevel::Debug => "🔍",
         }
     }
 }

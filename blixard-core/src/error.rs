@@ -70,6 +70,12 @@ pub enum BlixardError {
 
     #[error("Security error: {message}")]
     Security { message: String },
+    
+    #[error("Resource not found: {resource}")]
+    NotFound { resource: String },
+    
+    #[error("JSON error: {0}")]
+    JsonError(#[from] serde_json::Error),
 }
 
 pub type Result<T> = std::result::Result<T, BlixardError>;

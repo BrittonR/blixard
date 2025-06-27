@@ -19,6 +19,9 @@ pub mod resource_quotas;
 pub mod quota_manager;
 pub mod security;
 pub mod grpc_security;
+pub mod iroh_transport;
+pub mod p2p_image_store;
+pub mod p2p_manager;
 
 // Test helpers are exposed for integration tests
 #[cfg(any(test, feature = "test-helpers"))]

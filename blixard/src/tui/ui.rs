@@ -17,11 +17,13 @@ use ratatui::{
     },
     Frame,
 };
+use std::time::Duration;
 
 use super::app::{
-    App, AppTab, AppMode, NodeRole, 
+    App, AppTab, AppMode, NodeRole, NodeStatus,
     CreateVmField, CreateNodeField, RaftDebugInfo, 
-    RaftNodeState, DebugLevel
+    RaftNodeState, DebugLevel, HealthStatus, AlertSeverity, HealthAlert,
+    LogEntry, LogSourceType, LogLevel
 };
 use blixard_core::types::VmStatus;
 
@@ -58,6 +60,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppTab::VirtualMachines => render_vm_management(f, chunks[1], app),
         AppTab::Nodes => render_node_management(f, chunks[1], app),
         AppTab::Monitoring => render_monitoring(f, chunks[1], app),
+        AppTab::P2P => super::p2p_view::render_p2p_view(f, chunks[1], app),
         AppTab::Configuration => render_configuration(f, chunks[1], app),
         AppTab::Debug => render_debug(f, chunks[1], app),
         AppTab::Help => render_help(f, chunks[1], app),
@@ -77,6 +80,10 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::BatchNodeCreation => render_batch_node_creation_dialog(f, app),
         AppMode::VmTemplateSelector => render_vm_template_selector(f, app),
         AppMode::BatchVmCreation => render_batch_vm_creation_dialog(f, app),
+        AppMode::VmMigration => render_vm_migration_dialog(f, app),
+        AppMode::SaveConfig => render_save_config_dialog(f, app),
+        AppMode::LoadConfig => render_load_config_dialog(f, app),
+        AppMode::EditNodeConfig => render_edit_node_config_dialog(f, app),
         _ => {}
     }
     
@@ -92,6 +99,7 @@ fn render_tab_bar(f: &mut Frame, area: Rect, app: &App) {
         "🖥️ VMs", 
         "🔗 Nodes",
         "📈 Monitoring",
+        "🌐 P2P",
         "⚙️ Config",
         "🐛 Debug",
         "❓ Help"
@@ -102,9 +110,10 @@ fn render_tab_bar(f: &mut Frame, area: Rect, app: &App) {
         AppTab::VirtualMachines => 1,
         AppTab::Nodes => 2,
         AppTab::Monitoring => 3,
-        AppTab::Configuration => 4,
-        AppTab::Debug => 5,
-        AppTab::Help => 6,
+        AppTab::P2P => 4,
+        AppTab::Configuration => 5,
+        AppTab::Debug => 6,
+        AppTab::Help => 7,
     };
     
     let tabs = Tabs::new(titles)
@@ -120,10 +129,14 @@ fn render_dashboard(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(5),  // Health status bar
             Constraint::Length(8),  // Top metrics row
             Constraint::Min(8),     // Content area
         ])
         .split(area);
+    
+    // Health status bar
+    render_health_status_bar(f, chunks[0], app);
     
     // Top metrics row
     let metrics_chunks = Layout::default()
@@ -134,28 +147,41 @@ fn render_dashboard(f: &mut Frame, area: Rect, app: &App) {
             Constraint::Percentage(25), // VM status
             Constraint::Percentage(25), // Quick actions
         ])
-        .split(chunks[0]);
+        .split(chunks[1]);
     
     render_cluster_status_card(f, metrics_chunks[0], app);
     render_resource_usage_card(f, metrics_chunks[1], app);
     render_vm_status_card(f, metrics_chunks[2], app);
     render_quick_actions_card(f, metrics_chunks[3], app);
     
-    // Bottom content area
+    // Bottom content area - now with alerts
     let content_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(70), // Recent events
-            Constraint::Percentage(30), // System overview
+            Constraint::Percentage(50), // Recent events and alerts
+            Constraint::Percentage(25), // Node health
+            Constraint::Percentage(25), // System overview
         ])
-        .split(chunks[1]);
+        .split(chunks[2]);
     
-    render_recent_events(f, content_chunks[0], app);
-    render_system_overview(f, content_chunks[1], app);
+    // Split events area for alerts and events
+    let events_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(40), // Health alerts
+            Constraint::Percentage(60), // Recent events
+        ])
+        .split(content_chunks[0]);
+    
+    render_health_alerts(f, events_chunks[0], app);
+    render_recent_events(f, events_chunks[1], app);
+    render_node_health_summary(f, content_chunks[1], app);
+    render_system_overview(f, content_chunks[2], app);
 }
 
 fn render_cluster_status_card(f: &mut Frame, area: Rect, app: &App) {
     let metrics = &app.cluster_metrics;
+    let conn = &app.connection_status;
     
     let status_text = if metrics.healthy_nodes == metrics.total_nodes && metrics.total_nodes > 0 {
         "🟢 Healthy"
@@ -170,7 +196,31 @@ fn render_cluster_status_card(f: &mut Frame, area: Rect, app: &App) {
         None => "Leader: None".to_string(),
     };
     
-    let content = vec![
+    // Connection status line
+    let conn_status = match &conn.state {
+        super::app::ConnectionState::Connected => {
+            let quality = match conn.quality {
+                super::app::NetworkQuality::Excellent => "Excellent",
+                super::app::NetworkQuality::Good => "Good",
+                super::app::NetworkQuality::Fair => "Fair",
+                super::app::NetworkQuality::Poor => "Poor",
+                super::app::NetworkQuality::Bad => "Bad",
+                super::app::NetworkQuality::Unknown => "Unknown",
+            };
+            format!("🟢 {} ({})", quality, conn.endpoint)
+        }
+        super::app::ConnectionState::Connecting => format!("🟡 Connecting to {}", conn.endpoint),
+        super::app::ConnectionState::Reconnecting => format!("🟠 Reconnecting ({}x)", conn.retry_count),
+        super::app::ConnectionState::Disconnected => "🔴 Disconnected".to_string(),
+        super::app::ConnectionState::Failed => format!("❌ Failed: {}", 
+            conn.error_message.as_ref().unwrap_or(&"Unknown error".to_string())),
+    };
+    
+    let mut content = vec![
+        Line::from(vec![
+            Span::styled("Network: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(conn_status, Style::default().fg(PRIMARY_COLOR)),
+        ]),
         Line::from(vec![
             Span::styled("Status: ", Style::default().fg(TEXT_COLOR)),
             Span::styled(status_text, Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD)),
@@ -187,6 +237,14 @@ fn render_cluster_status_card(f: &mut Frame, area: Rect, app: &App) {
             Span::styled(format!("Term: {}", metrics.raft_term), Style::default().fg(TEXT_COLOR)),
         ]),
     ];
+    
+    // Add latency info if connected
+    if let Some(latency) = conn.latency_ms {
+        content.push(Line::from(vec![
+            Span::styled("Latency: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(format!("{}ms", latency), Style::default().fg(PRIMARY_COLOR)),
+        ]));
+    }
     
     let paragraph = Paragraph::new(content)
         .block(Block::default()
@@ -503,6 +561,9 @@ fn render_node_toolbar(f: &mut Frame, area: Rect, _app: &App) {
             Span::styled("a", Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD)),
             Span::styled(" Add Node", Style::default().fg(TEXT_COLOR)),
             Span::styled(" | ", Style::default().fg(TEXT_COLOR)),
+            Span::styled("e", Style::default().fg(INFO_COLOR).add_modifier(Modifier::BOLD)),
+            Span::styled(" Edit", Style::default().fg(TEXT_COLOR)),
+            Span::styled(" | ", Style::default().fg(TEXT_COLOR)),
             Span::styled("Enter", Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD)),
             Span::styled(" Details", Style::default().fg(TEXT_COLOR)),
             Span::styled(" | ", Style::default().fg(TEXT_COLOR)),
@@ -590,95 +651,397 @@ fn render_monitoring(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(50), // Resource charts
-            Constraint::Percentage(50), // Performance metrics
+            Constraint::Length(3),   // Tab selector
+            Constraint::Percentage(40), // Main resource charts
+            Constraint::Percentage(30), // Per-node metrics
+            Constraint::Percentage(30), // Performance metrics & alerts
         ])
         .split(area);
     
+    // Resource graph tabs
+    let tabs = vec!["📊 Overview", "💻 Per-Node", "🌐 Network", "💾 Storage"];
+    let tabs_widget = Tabs::new(tabs)
+        .block(Block::default().borders(Borders::ALL).title("Resource Monitoring"))
+        .select(0)
+        .style(Style::default().fg(TEXT_COLOR))
+        .highlight_style(Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD));
+    f.render_widget(tabs_widget, chunks[0]);
+    
+    // Main resource charts (4 graphs)
     let resource_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(50), // CPU chart
-            Constraint::Percentage(50), // Memory chart
+            Constraint::Percentage(25), // CPU chart
+            Constraint::Percentage(25), // Memory chart
+            Constraint::Percentage(25), // Network chart
+            Constraint::Percentage(25), // Disk I/O chart
         ])
-        .split(chunks[0]);
+        .split(chunks[1]);
     
     render_cpu_chart(f, resource_chunks[0], app);
     render_memory_chart(f, resource_chunks[1], app);
-    render_performance_metrics(f, chunks[1], app);
+    render_network_chart(f, resource_chunks[2], app);
+    render_disk_io_chart(f, resource_chunks[3], app);
+    
+    // Per-node resource usage
+    render_node_resource_grid(f, chunks[2], app);
+    
+    // Performance metrics and alerts
+    render_performance_metrics(f, chunks[3], app);
 }
 
 fn render_cpu_chart(f: &mut Frame, area: Rect, app: &App) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("📊 CPU Usage")
+        .border_style(Style::default().fg(PRIMARY_COLOR));
+    
     if app.cpu_history.is_empty() {
         let empty = Paragraph::new("No CPU data available")
-            .block(Block::default()
-                .borders(Borders::ALL)
-                .title("📊 CPU Usage")
-                .border_style(Style::default().fg(PRIMARY_COLOR)))
+            .block(block)
             .alignment(Alignment::Center);
         f.render_widget(empty, area);
         return;
     }
     
+    let inner_area = block.inner(area);
+    f.render_widget(block, area);
+    
+    // Calculate current usage percentage
+    let current_cpu = app.cpu_history.last().copied().unwrap_or(0.0);
+    let avg_cpu = app.cpu_history.iter().sum::<f32>() / app.cpu_history.len() as f32;
+    
+    // Split area for value display and graph
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2), // Current value
+            Constraint::Min(0),    // Graph
+        ])
+        .split(inner_area);
+    
+    // Display current and average
+    let cpu_text = format!("Current: {:.1}% | Avg: {:.1}%", current_cpu, avg_cpu);
+    let cpu_color = if current_cpu > 80.0 { ERROR_COLOR } 
+                   else if current_cpu > 60.0 { WARNING_COLOR } 
+                   else { SUCCESS_COLOR };
+    
+    let cpu_info = Paragraph::new(cpu_text)
+        .style(Style::default().fg(cpu_color).add_modifier(Modifier::BOLD))
+        .alignment(Alignment::Center);
+    f.render_widget(cpu_info, chunks[0]);
+    
+    // Render sparkline
     let data: Vec<u64> = app.cpu_history.iter().map(|&x| x as u64).collect();
     let sparkline = Sparkline::default()
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .title("📊 CPU Usage History")
-            .border_style(Style::default().fg(PRIMARY_COLOR)))
         .data(&data)
-        .style(Style::default().fg(SUCCESS_COLOR));
+        .style(Style::default().fg(cpu_color))
+        .max(100);
     
-    f.render_widget(sparkline, area);
+    f.render_widget(sparkline, chunks[1]);
 }
 
 fn render_memory_chart(f: &mut Frame, area: Rect, app: &App) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("🧠 Memory Usage")
+        .border_style(Style::default().fg(PRIMARY_COLOR));
+    
     if app.memory_history.is_empty() {
         let empty = Paragraph::new("No memory data available")
-            .block(Block::default()
-                .borders(Borders::ALL)
-                .title("🧠 Memory Usage")
-                .border_style(Style::default().fg(PRIMARY_COLOR)))
+            .block(block)
             .alignment(Alignment::Center);
         f.render_widget(empty, area);
         return;
     }
     
+    let inner_area = block.inner(area);
+    f.render_widget(block, area);
+    
+    // Calculate current usage
+    let current_mem = app.memory_history.last().copied().unwrap_or(0.0);
+    let _avg_mem = app.memory_history.iter().sum::<f32>() / app.memory_history.len() as f32;
+    
+    // Split for value display and graph
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2), // Current value
+            Constraint::Min(0),    // Graph
+        ])
+        .split(inner_area);
+    
+    // Display current and average with used/total
+    let total_mem_gb = app.cluster_metrics.total_memory as f32 / 1024.0;
+    let used_mem_gb = app.cluster_metrics.used_memory as f32 / 1024.0;
+    let mem_text = format!("{:.1}/{:.1} GB ({:.1}%)", used_mem_gb, total_mem_gb, current_mem);
+    let mem_color = if current_mem > 90.0 { ERROR_COLOR }
+                   else if current_mem > 70.0 { WARNING_COLOR }
+                   else { SUCCESS_COLOR };
+    
+    let mem_info = Paragraph::new(mem_text)
+        .style(Style::default().fg(mem_color).add_modifier(Modifier::BOLD))
+        .alignment(Alignment::Center);
+    f.render_widget(mem_info, chunks[0]);
+    
+    // Render sparkline
     let data: Vec<u64> = app.memory_history.iter().map(|&x| x as u64).collect();
     let sparkline = Sparkline::default()
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .title("🧠 Memory Usage History")
-            .border_style(Style::default().fg(PRIMARY_COLOR)))
+        .data(&data)
+        .style(Style::default().fg(mem_color))
+        .max(100);
+    
+    f.render_widget(sparkline, chunks[1]);
+}
+
+fn render_network_chart(f: &mut Frame, area: Rect, app: &App) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("🌐 Network I/O")
+        .border_style(Style::default().fg(PRIMARY_COLOR));
+    
+    if app.network_history.is_empty() {
+        let empty = Paragraph::new("No network data available")
+            .block(block)
+            .alignment(Alignment::Center);
+        f.render_widget(empty, area);
+        return;
+    }
+    
+    let inner_area = block.inner(area);
+    f.render_widget(block, area);
+    
+    // Calculate current network usage
+    let current_net = app.network_history.last().copied().unwrap_or(0.0);
+    let avg_net = app.network_history.iter().sum::<f32>() / app.network_history.len() as f32;
+    
+    // Split for value display and graph
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2), // Current value
+            Constraint::Min(0),    // Graph
+        ])
+        .split(inner_area);
+    
+    // Display current and average
+    let net_text = format!("Current: {:.1} MB/s | Avg: {:.1} MB/s", current_net, avg_net);
+    let net_color = if current_net > 100.0 { WARNING_COLOR }
+                   else { INFO_COLOR };
+    
+    let net_info = Paragraph::new(net_text)
+        .style(Style::default().fg(net_color).add_modifier(Modifier::BOLD))
+        .alignment(Alignment::Center);
+    f.render_widget(net_info, chunks[0]);
+    
+    // Render sparkline
+    let data: Vec<u64> = app.network_history.iter().map(|&x| (x * 10.0) as u64).collect();
+    let sparkline = Sparkline::default()
+        .data(&data)
+        .style(Style::default().fg(net_color));
+    
+    f.render_widget(sparkline, chunks[1]);
+}
+
+fn render_disk_io_chart(f: &mut Frame, area: Rect, app: &App) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("💾 Disk I/O")
+        .border_style(Style::default().fg(PRIMARY_COLOR));
+    
+    // For now, use network history as placeholder for disk I/O
+    // In real implementation, would track actual disk metrics
+    let has_data = !app.network_history.is_empty();
+    
+    if !has_data {
+        let empty = Paragraph::new("No disk I/O data available")
+            .block(block)
+            .alignment(Alignment::Center);
+        f.render_widget(empty, area);
+        return;
+    }
+    
+    let inner_area = block.inner(area);
+    f.render_widget(block, area);
+    
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2), // Current value
+            Constraint::Min(0),    // Graph
+        ])
+        .split(inner_area);
+    
+    // Mock disk I/O data
+    let disk_text = "Read: 45.2 MB/s | Write: 23.1 MB/s";
+    let disk_info = Paragraph::new(disk_text)
+        .style(Style::default().fg(SECONDARY_COLOR).add_modifier(Modifier::BOLD))
+        .alignment(Alignment::Center);
+    f.render_widget(disk_info, chunks[0]);
+    
+    // Simple sparkline for disk activity
+    let data: Vec<u64> = vec![30, 45, 50, 35, 40, 55, 48, 42, 38, 44];
+    let sparkline = Sparkline::default()
         .data(&data)
         .style(Style::default().fg(SECONDARY_COLOR));
     
-    f.render_widget(sparkline, area);
+    f.render_widget(sparkline, chunks[1]);
 }
 
-fn render_performance_metrics(f: &mut Frame, area: Rect, _app: &App) {
+fn render_node_resource_grid(f: &mut Frame, area: Rect, app: &App) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("📊 Per-Node Resource Usage")
+        .border_style(Style::default().fg(PRIMARY_COLOR));
+    
+    if app.nodes.is_empty() {
+        let empty = Paragraph::new("No nodes available")
+            .block(block)
+            .alignment(Alignment::Center);
+        f.render_widget(empty, area);
+        return;
+    }
+    
+    // Create a table with node resource information
+    let header_cells = ["Node", "Status", "CPU %", "Memory %", "VMs", "Network"]
+        .iter()
+        .map(|h| Cell::from(*h).style(Style::default().add_modifier(Modifier::BOLD)))
+        .collect::<Vec<_>>();
+    
+    let header = Row::new(header_cells)
+        .style(Style::default().fg(TEXT_COLOR))
+        .height(1);
+    
+    let rows = app.nodes.iter().map(|node| {
+        let status_icon = match node.status {
+            NodeStatus::Healthy => "✅",
+            NodeStatus::Warning => "⚠️",
+            NodeStatus::Critical => "🚨",
+            NodeStatus::Offline => "❌",
+        };
+        
+        let cpu_color = if node.cpu_usage > 80.0 { ERROR_COLOR }
+                       else if node.cpu_usage > 60.0 { WARNING_COLOR }
+                       else { SUCCESS_COLOR };
+        
+        let mem_color = if node.memory_usage > 90.0 { ERROR_COLOR }
+                       else if node.memory_usage > 70.0 { WARNING_COLOR }
+                       else { SUCCESS_COLOR };
+        
+        let role_icon = match node.role {
+            NodeRole::Leader => "👑",
+            _ => "",
+        };
+        
+        Row::new(vec![
+            Cell::from(format!("{} Node {}", role_icon, node.id)),
+            Cell::from(format!("{} {}", status_icon, node.address)),
+            Cell::from(format!("{:.1}%", node.cpu_usage))
+                .style(Style::default().fg(cpu_color)),
+            Cell::from(format!("{:.1}%", node.memory_usage))
+                .style(Style::default().fg(mem_color)),
+            Cell::from(node.vm_count.to_string()),
+            Cell::from("📊"), // Placeholder for mini sparkline
+        ])
+    }).collect::<Vec<_>>();
+    
+    let table = Table::new(rows, &[
+        Constraint::Length(10),
+        Constraint::Length(20),
+        Constraint::Length(8),
+        Constraint::Length(10),
+        Constraint::Length(5),
+        Constraint::Length(8),
+    ])
+    .header(header)
+    .block(block)
+    .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+    .highlight_symbol("➤ ");
+    
+    f.render_stateful_widget(table, area, &mut app.node_table_state.clone());
+}
+
+fn render_performance_metrics(f: &mut Frame, area: Rect, app: &App) {
+    // Split area for metrics and alerts
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(60), // Performance metrics
+            Constraint::Percentage(40), // Health alerts
+        ])
+        .split(area);
+    
+    // Calculate cluster health percentage
+    let health_percentage = if app.nodes.is_empty() {
+        0.0
+    } else {
+        (app.cluster_health.healthy_nodes as f32 / app.nodes.len() as f32) * 100.0
+    };
+    
+    let health_color = if health_percentage >= 90.0 { SUCCESS_COLOR }
+                      else if health_percentage >= 70.0 { WARNING_COLOR }
+                      else { ERROR_COLOR };
+    
+    // Average CPU and memory from history
+    let avg_cpu = if app.cpu_history.is_empty() { 0.0 } 
+                  else { app.cpu_history.iter().sum::<f32>() / app.cpu_history.len() as f32 };
+    let avg_mem = if app.memory_history.is_empty() { 0.0 }
+                  else { app.memory_history.iter().sum::<f32>() / app.memory_history.len() as f32 };
+    
     let content = vec![
         Line::from("📈 Performance Metrics"),
         Line::from(""),
         Line::from(vec![
             Span::styled("Cluster Health: ", Style::default().fg(TEXT_COLOR)),
-            Span::styled("98.5%", Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{:.1}%", health_percentage), 
+                Style::default().fg(health_color).add_modifier(Modifier::BOLD)
+            ),
         ]),
         Line::from(vec![
-            Span::styled("Average Response Time: ", Style::default().fg(TEXT_COLOR)),
-            Span::styled("125ms", Style::default().fg(PRIMARY_COLOR)),
+            Span::styled("Uptime: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(
+                format_duration(app.cluster_health.uptime), 
+                Style::default().fg(PRIMARY_COLOR)
+            ),
         ]),
         Line::from(vec![
-            Span::styled("Requests/sec: ", Style::default().fg(TEXT_COLOR)),
-            Span::styled("1,247", Style::default().fg(PRIMARY_COLOR)),
+            Span::styled("Average CPU: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(
+                format!("{:.1}%", avg_cpu), 
+                Style::default().fg(PRIMARY_COLOR)
+            ),
         ]),
         Line::from(vec![
-            Span::styled("Raft Consensus: ", Style::default().fg(TEXT_COLOR)),
-            Span::styled("Healthy", Style::default().fg(SUCCESS_COLOR)),
+            Span::styled("Average Memory: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(
+                format!("{:.1}%", avg_mem), 
+                Style::default().fg(PRIMARY_COLOR)
+            ),
         ]),
         Line::from(vec![
-            Span::styled("Storage: ", Style::default().fg(TEXT_COLOR)),
-            Span::styled("Synchronized", Style::default().fg(SUCCESS_COLOR)),
+            Span::styled("Network Latency: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(
+                format!("{:.1}ms", app.cluster_health.network_latency_ms), 
+                Style::default().fg(PRIMARY_COLOR)
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Leader Changes: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(
+                app.cluster_health.leader_changes.to_string(), 
+                Style::default().fg(
+                    if app.cluster_health.leader_changes > 10 { WARNING_COLOR } 
+                    else { SUCCESS_COLOR }
+                )
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Total VMs: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(
+                format!("{} ({} running)", app.cluster_metrics.total_vms, app.cluster_metrics.running_vms),
+                Style::default().fg(INFO_COLOR)
+            ),
         ]),
     ];
     
@@ -689,12 +1052,29 @@ fn render_performance_metrics(f: &mut Frame, area: Rect, _app: &App) {
             .border_style(Style::default().fg(PRIMARY_COLOR)))
         .wrap(Wrap { trim: true });
     
-    f.render_widget(paragraph, area);
+    f.render_widget(paragraph, chunks[0]);
+    
+    // Render health alerts in the right section
+    render_health_alerts(f, chunks[1], app);
 }
 
 fn render_configuration(f: &mut Frame, area: Rect, _app: &App) {
     let content = vec![
         Line::from("⚙️ Configuration Management"),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("💾 Cluster Configuration", Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::raw("  Press "),
+            Span::styled("s", Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" to save current configuration"),
+        ]),
+        Line::from(vec![
+            Span::raw("  Press "),
+            Span::styled("l", Style::default().fg(INFO_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" to load configuration from file"),
+        ]),
         Line::from(""),
         Line::from("🔐 Security Settings"),
         Line::from("  • Authentication: Enabled"),
@@ -913,6 +1293,7 @@ fn render_help(f: &mut Frame, area: Rect, _app: &App) {
         Line::from("  p            - Cycle performance mode (PowerSaver → Balanced → HighRefresh → Debug)"),
         Line::from("  v            - Toggle vim mode (hjkl navigation)"),
         Line::from("  d            - Toggle debug mode"),
+        Line::from("  Shift+L      - Open log streaming viewer"),
         Line::from(""),
         Line::from("🔍 Search & Filtering (lazygit-inspired):"),
         Line::from("  /            - Enter search mode (context-aware)"),
@@ -1021,10 +1402,39 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         .split(area);
     
     // Left side: Status information
-    let connection_status = if app.vm_client.is_some() {
-        "🟢 Connected"
-    } else {
-        "🔴 Disconnected"
+    let connection_info = match &app.connection_status.state {
+        super::app::ConnectionState::Connected => {
+            let quality_icon = match app.connection_status.quality {
+                super::app::NetworkQuality::Excellent => "🟢",
+                super::app::NetworkQuality::Good => "🟢",
+                super::app::NetworkQuality::Fair => "🟡",
+                super::app::NetworkQuality::Poor => "🟠",
+                super::app::NetworkQuality::Bad => "🔴",
+                super::app::NetworkQuality::Unknown => "⚪",
+            };
+            
+            let latency_str = if let Some(latency) = app.connection_status.latency_ms {
+                format!(" ({}ms)", latency)
+            } else {
+                String::new()
+            };
+            
+            format!("{} Connected{}", quality_icon, latency_str)
+        }
+        super::app::ConnectionState::Connecting => "🟡 Connecting...".to_string(),
+        super::app::ConnectionState::Reconnecting => {
+            format!("🟠 Reconnecting... (attempt {})", app.connection_status.retry_count + 1)
+        }
+        super::app::ConnectionState::Disconnected => {
+            if let Some(next_retry) = &app.connection_status.next_retry_in {
+                format!("🔴 Disconnected (retry in {}s)", next_retry.as_secs())
+            } else {
+                "🔴 Disconnected".to_string()
+            }
+        }
+        super::app::ConnectionState::Failed => {
+            format!("❌ Failed ({}x)", app.connection_status.retry_count)
+        }
     };
     
     let leader_info = match app.cluster_metrics.leader_id {
@@ -1049,7 +1459,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         format!("❌ {}", msg)
     } else {
         format!("{} | {} | {} | {} | {}{}", 
-            connection_status, leader_info, vm_count, node_count, perf_mode, mode_indicators)
+            connection_info, leader_info, vm_count, node_count, perf_mode, mode_indicators)
     };
     
     let status_style = if app.error_message.is_some() {
@@ -1087,7 +1497,7 @@ fn get_current_shortcuts(app: &App) -> String {
     
     match app.mode {
         AppMode::VmList => {
-            format!("↑↓ Select  Enter View  C Create  / Search  F Filter{}", vim_suffix)
+            format!("↑↓ Select  Enter View  C Create  M Migrate  / Search  F Filter{}", vim_suffix)
         }
         AppMode::NodeList => {
             format!("↑↓ Select  Enter View  A Add  / Search  F Filter{}", vim_suffix)
@@ -1522,23 +1932,238 @@ fn render_batch_node_creation_dialog(f: &mut Frame, app: &App) {
     f.render_widget(help, chunks[4]);
 }
 
-fn render_log_viewer(f: &mut Frame, _app: &App) {
-    let area = centered_rect(90, 80, f.size());
-    f.render_widget(Clear, area);
+fn render_log_viewer(f: &mut Frame, app: &App) {
+    let area = f.size();
     
+    // Main layout: sidebar for sources, main area for logs
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(25),  // Log sources sidebar
+            Constraint::Min(0),      // Log stream area
+        ])
+        .split(area);
+    
+    // Render log sources sidebar
+    render_log_sources_sidebar(f, chunks[0], app);
+    
+    // Split log area into controls and content
+    let log_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),   // Filter controls
+            Constraint::Min(0),      // Log content
+            Constraint::Length(3),   // Status bar
+        ])
+        .split(chunks[1]);
+    
+    // Render filter controls
+    render_log_filters(f, log_chunks[0], app);
+    
+    // Render log stream
+    render_log_stream(f, log_chunks[1], app);
+    
+    // Render status bar
+    render_log_status_bar(f, log_chunks[2], app);
+}
+
+fn render_log_sources_sidebar(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
-        .title("📋 Log Viewer")
+        .title("📋 Log Sources")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(PRIMARY_COLOR));
     
-    f.render_widget(block, area);
+    let items: Vec<ListItem> = app.log_stream_config.sources.iter().enumerate().map(|(idx, source)| {
+        let prefix = if idx == app.log_stream_config.selected_source { "▶ " } else { "  " };
+        let status = if source.enabled { "✓" } else { " " };
+        let color = source.color.unwrap_or(TEXT_COLOR);
+        
+        let text = format!("{}{} {}", prefix, status, source.name);
+        ListItem::new(text)
+            .style(Style::default().fg(if source.enabled { color } else { Color::DarkGray }))
+    }).collect();
     
-    // TODO: Implement log viewing
-    let content = Paragraph::new("Log Viewer\n\nPress Esc to close")
-        .block(Block::default().borders(Borders::NONE))
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD));
+    
+    f.render_widget(list, area);
+}
+
+fn render_log_filters(f: &mut Frame, area: Rect, app: &App) {
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(15),  // Log level
+            Constraint::Min(0),      // Search box
+            Constraint::Length(20),  // Options
+        ])
+        .split(area);
+    
+    // Log level selector
+    let level_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(SECONDARY_COLOR));
+    
+    let level_text = format!("Level: {:?}", app.log_stream_config.filters.log_level);
+    let level_widget = Paragraph::new(level_text)
+        .block(level_block)
         .alignment(Alignment::Center);
+    f.render_widget(level_widget, chunks[0]);
     
-    f.render_widget(content, area.inner(&Margin { vertical: 1, horizontal: 1 }));
+    // Search box
+    let search_block = Block::default()
+        .title("🔍 Filter")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(
+            if app.log_stream_config.filters.search_text.is_empty() { SECONDARY_COLOR } else { INFO_COLOR }
+        ));
+    
+    let search_text = if app.log_stream_config.filters.search_text.is_empty() {
+        "Type to filter...".to_string()
+    } else {
+        app.log_stream_config.filters.search_text.clone()
+    };
+    
+    let search_widget = Paragraph::new(search_text)
+        .block(search_block);
+    f.render_widget(search_widget, chunks[1]);
+    
+    // Options
+    let options_text = format!(
+        "{}  {}  {}",
+        if app.log_stream_config.follow_mode { "▶ Follow" } else { "⏸ Paused" },
+        if app.log_stream_config.filters.show_timestamps { "🕐 Time" } else { "   Time" },
+        if app.log_stream_config.filters.highlight_errors { "⚠️ Errors" } else { "   Errors" }
+    );
+    
+    let options_widget = Paragraph::new(options_text)
+        .style(Style::default().fg(INFO_COLOR))
+        .alignment(Alignment::Center);
+    f.render_widget(options_widget, chunks[2]);
+}
+
+fn render_log_stream(f: &mut Frame, area: Rect, app: &App) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(PRIMARY_COLOR))
+        .title(format!("📜 Log Stream ({} entries)", app.log_entries.len()));
+    
+    // Filter logs based on current filters
+    let filtered_logs: Vec<&LogEntry> = app.log_entries.iter()
+        .filter(|entry| {
+            // Filter by log level
+            let level_match = match app.log_stream_config.filters.log_level {
+                LogLevel::Debug => true,
+                LogLevel::Info => matches!(entry.level, LogLevel::Info | LogLevel::Warning | LogLevel::Error),
+                LogLevel::Warning => matches!(entry.level, LogLevel::Warning | LogLevel::Error),
+                LogLevel::Error => matches!(entry.level, LogLevel::Error),
+            };
+            
+            // Filter by search text
+            let search_match = app.log_stream_config.filters.search_text.is_empty() ||
+                entry.message.to_lowercase().contains(&app.log_stream_config.filters.search_text.to_lowercase());
+            
+            // Filter by selected source
+            let source_match = app.log_stream_config.selected_source == 0 || // All sources
+                match &app.log_stream_config.sources[app.log_stream_config.selected_source].source_type {
+                    LogSourceType::All => true,
+                    LogSourceType::Node(id) => matches!(&entry.source, LogSourceType::Node(node_id) if node_id == id),
+                    LogSourceType::Vm(name) => matches!(&entry.source, LogSourceType::Vm(vm_name) if vm_name == name),
+                    source_type => &entry.source == source_type,
+                };
+            
+            level_match && search_match && source_match
+        })
+        .collect();
+    
+    // Convert to list items
+    let items: Vec<ListItem> = filtered_logs.iter().map(|entry| {
+        let (level_color, level_icon) = match entry.level {
+            LogLevel::Debug => (Color::Gray, "🔍"),
+            LogLevel::Info => (INFO_COLOR, "ℹ️"),
+            LogLevel::Warning => (WARNING_COLOR, "⚠️"),
+            LogLevel::Error => (ERROR_COLOR, "❌"),
+        };
+        
+        let source_str = match &entry.source {
+            LogSourceType::Node(id) => format!("[Node {}]", id),
+            LogSourceType::Vm(name) => format!("[VM: {}]", name),
+            LogSourceType::System => "[System]".to_string(),
+            LogSourceType::Raft => "[Raft]".to_string(),
+            LogSourceType::GrpcServer => "[gRPC]".to_string(),
+            LogSourceType::All => "[All]".to_string(),
+        };
+        
+        let timestamp_str = if app.log_stream_config.filters.show_timestamps {
+            let elapsed = entry.timestamp.elapsed();
+            format!("{:>4}.{:03}s ", elapsed.as_secs(), elapsed.subsec_millis())
+        } else {
+            String::new()
+        };
+        
+        let line = format!("{}{} {} {}", timestamp_str, level_icon, source_str, entry.message);
+        
+        let style = if app.log_stream_config.filters.highlight_errors && entry.level == LogLevel::Error {
+            Style::default().fg(level_color).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(level_color)
+        };
+        
+        ListItem::new(line).style(style)
+    }).collect();
+    
+    let list = List::new(items)
+        .block(block);
+    
+    // Set scroll position for follow mode
+    if app.log_stream_config.follow_mode && !filtered_logs.is_empty() {
+        let mut state = app.log_list_state.clone();
+        state.select(Some(filtered_logs.len().saturating_sub(1)));
+        f.render_stateful_widget(list, area, &mut state);
+    } else {
+        f.render_stateful_widget(list, area, &mut app.log_list_state.clone());
+    }
+}
+
+fn render_log_status_bar(f: &mut Frame, area: Rect, app: &App) {
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(33),
+            Constraint::Percentage(34),
+            Constraint::Percentage(33),
+        ])
+        .split(area);
+    
+    // Left: Entry count
+    let entry_text = format!(
+        "Total: {} | Shown: {} | Buffer: {}/{}",
+        app.log_entries.len(),
+        app.log_entries.len(), // TODO: Calculate filtered count
+        app.log_entries.len(),
+        app.log_stream_config.buffer_size
+    );
+    let entry_widget = Paragraph::new(entry_text)
+        .style(Style::default().fg(TEXT_COLOR));
+    f.render_widget(entry_widget, chunks[0]);
+    
+    // Center: Keybindings
+    let keys_text = "Space: Toggle Follow | L: Level | T: Timestamps | E: Errors | ↑↓: Select Source | Enter: Toggle";
+    let keys_widget = Paragraph::new(keys_text)
+        .style(Style::default().fg(INFO_COLOR))
+        .alignment(Alignment::Center);
+    f.render_widget(keys_widget, chunks[1]);
+    
+    // Right: Mode
+    let mode_text = format!(
+        "Mode: {} | Press Esc to exit",
+        if app.log_stream_config.follow_mode { "Following" } else { "Paused" }
+    );
+    let mode_widget = Paragraph::new(mode_text)
+        .style(Style::default().fg(SUCCESS_COLOR))
+        .alignment(Alignment::Right);
+    f.render_widget(mode_widget, chunks[2]);
 }
 
 // Helper functions
@@ -2069,6 +2694,197 @@ fn render_vm_template_selector(f: &mut Frame, app: &App) {
     }
 }
 
+fn render_health_status_bar(f: &mut Frame, area: Rect, app: &App) {
+    let health = &app.cluster_health;
+    
+    let (status_color, status_icon, status_text) = match health.status {
+        HealthStatus::Healthy => (SUCCESS_COLOR, "✅", "HEALTHY"),
+        HealthStatus::Degraded => (WARNING_COLOR, "⚠️", "DEGRADED"),
+        HealthStatus::Critical => (ERROR_COLOR, "🚨", "CRITICAL"),
+        HealthStatus::Unknown => (Color::Gray, "❓", "UNKNOWN"),
+    };
+    
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(20),  // Status
+            Constraint::Length(30),  // Node counts
+            Constraint::Length(30),  // Alerts
+            Constraint::Min(0),      // Details
+        ])
+        .split(area);
+    
+    // Overall status
+    let status_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(status_color))
+        .title("Cluster Health");
+    
+    let status_content = Paragraph::new(format!("{} {}", status_icon, status_text))
+        .style(Style::default().fg(status_color).add_modifier(Modifier::BOLD))
+        .alignment(Alignment::Center)
+        .block(status_block);
+    
+    f.render_widget(status_content, chunks[0]);
+    
+    // Node status counts
+    let node_block = Block::default()
+        .borders(Borders::ALL)
+        .title("Nodes");
+    
+    let node_content = Paragraph::new(format!(
+        "✅ {} | ⚠️ {} | 🚨 {}",
+        health.healthy_nodes,
+        health.degraded_nodes,
+        health.failed_nodes
+    ))
+    .alignment(Alignment::Center)
+    .block(node_block);
+    
+    f.render_widget(node_content, chunks[1]);
+    
+    // Alert summary
+    let critical_alerts = app.health_alerts.iter()
+        .filter(|a| a.severity == AlertSeverity::Critical && !a.resolved)
+        .count();
+    let warning_alerts = app.health_alerts.iter()
+        .filter(|a| a.severity == AlertSeverity::Warning && !a.resolved)
+        .count();
+    
+    let alert_block = Block::default()
+        .borders(Borders::ALL)
+        .title("Active Alerts");
+    
+    let alert_content = Paragraph::new(format!(
+        "🚨 {} Critical | ⚠️ {} Warning",
+        critical_alerts,
+        warning_alerts
+    ))
+    .alignment(Alignment::Center)
+    .block(alert_block);
+    
+    f.render_widget(alert_content, chunks[2]);
+    
+    // Health details
+    let details_block = Block::default()
+        .borders(Borders::ALL)
+        .title("Health Metrics");
+    
+    let details_content = Paragraph::new(format!(
+        "Latency: {:.1}ms | Replication Lag: {:.1}ms | Leader Changes: {}",
+        health.network_latency_ms,
+        health.replication_lag_ms,
+        health.leader_changes
+    ))
+    .alignment(Alignment::Center)
+    .block(details_block);
+    
+    f.render_widget(details_content, chunks[3]);
+}
+
+fn render_health_alerts(f: &mut Frame, area: Rect, app: &App) {
+    let block = Block::default()
+        .title("🚨 Health Alerts")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(WARNING_COLOR));
+    
+    let active_alerts: Vec<&HealthAlert> = app.health_alerts.iter()
+        .filter(|a| !a.resolved)
+        .take(5)
+        .collect();
+    
+    if active_alerts.is_empty() {
+        let no_alerts = Paragraph::new("✅ No active health alerts")
+            .style(Style::default().fg(SUCCESS_COLOR))
+            .alignment(Alignment::Center)
+            .block(block);
+        f.render_widget(no_alerts, area);
+    } else {
+        let alert_items: Vec<ListItem> = active_alerts.iter()
+            .map(|alert| {
+                let icon = match alert.severity {
+                    AlertSeverity::Critical => "🚨",
+                    AlertSeverity::Warning => "⚠️",
+                    AlertSeverity::Info => "ℹ️",
+                };
+                
+                let color = match alert.severity {
+                    AlertSeverity::Critical => ERROR_COLOR,
+                    AlertSeverity::Warning => WARNING_COLOR,
+                    AlertSeverity::Info => INFO_COLOR,
+                };
+                
+                let text = if let Some(node_id) = alert.node_id {
+                    format!("{} [Node {}] {}", icon, node_id, alert.title)
+                } else {
+                    format!("{} {}", icon, alert.title)
+                };
+                
+                ListItem::new(text).style(Style::default().fg(color))
+            })
+            .collect();
+        
+        let alerts_list = List::new(alert_items)
+            .block(block)
+            .style(Style::default().fg(TEXT_COLOR));
+        
+        f.render_widget(alerts_list, area);
+    }
+}
+
+fn render_node_health_summary(f: &mut Frame, area: Rect, app: &App) {
+    let block = Block::default()
+        .title("📊 Node Health")
+        .borders(Borders::ALL);
+    
+    let inner_area = area.inner(&Margin { vertical: 1, horizontal: 1 });
+    
+    // Show health for up to 5 nodes
+    let node_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            app.nodes.iter()
+                .take(5)
+                .map(|_| Constraint::Length(2))
+                .collect::<Vec<_>>()
+        )
+        .split(inner_area);
+    
+    for (node, chunk) in app.nodes.iter().take(5).zip(node_chunks.iter()) {
+        let status_icon = match node.status {
+            NodeStatus::Healthy => "✅",
+            NodeStatus::Warning => "⚠️",
+            NodeStatus::Critical => "🚨",
+            NodeStatus::Offline => "❌",
+        };
+        
+        let cpu_bar = format!("CPU: {:>3.0}%", node.cpu_usage);
+        let mem_bar = format!("MEM: {:>3.0}%", node.memory_usage);
+        
+        let content = format!(
+            "{} Node {} | {} | {}",
+            status_icon,
+            node.id,
+            cpu_bar,
+            mem_bar
+        );
+        
+        let color = match node.status {
+            NodeStatus::Healthy => SUCCESS_COLOR,
+            NodeStatus::Warning => WARNING_COLOR,
+            NodeStatus::Critical => ERROR_COLOR,
+            NodeStatus::Offline => Color::Gray,
+        };
+        
+        let paragraph = Paragraph::new(content)
+            .style(Style::default().fg(color));
+        
+        f.render_widget(paragraph, *chunk);
+    }
+    
+    f.render_widget(block, area);
+}
+
 fn render_batch_vm_creation_dialog(f: &mut Frame, app: &App) {
     let area = centered_rect(40, 10, f.size());
     f.render_widget(Clear, area);
@@ -2114,4 +2930,350 @@ fn render_batch_vm_creation_dialog(f: &mut Frame, app: &App) {
     f.render_widget(help, chunks[2]);
 }
 
+fn format_duration(duration: Duration) -> String {
+    let total_secs = duration.as_secs();
+    let days = total_secs / 86400;
+    let hours = (total_secs % 86400) / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+    
+    if days > 0 {
+        format!("{}d {}h {}m", days, hours, minutes)
+    } else if hours > 0 {
+        format!("{}h {}m {}s", hours, minutes, seconds)
+    } else if minutes > 0 {
+        format!("{}m {}s", minutes, seconds)
+    } else {
+        format!("{}s", seconds)
+    }
+}
 
+fn render_vm_migration_dialog(f: &mut Frame, app: &App) {
+    let area = centered_rect(60, 50, f.size());
+    f.render_widget(Clear, area);
+    
+    let form = &app.vm_migration_form;
+    
+    // Available nodes list for reference
+    let available_nodes: Vec<String> = app.nodes.iter()
+        .filter(|n| n.id != form.source_node_id)
+        .map(|n| format!("Node {} ({})", n.id, n.address))
+        .collect();
+    
+    let content = vec![
+        Line::from(vec![
+            Span::styled("VM Name: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(&form.vm_name, Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled("Current Node: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(format!("{}", form.source_node_id), Style::default().fg(INFO_COLOR)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                if form.current_field == super::app::VmMigrationField::TargetNode { "▶ " } else { "  " }, 
+                Style::default().fg(PRIMARY_COLOR)
+            ),
+            Span::styled("Target Node ID: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(&form.target_node_id, 
+                if form.current_field == super::app::VmMigrationField::TargetNode {
+                    Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::UNDERLINED)
+                } else {
+                    Style::default().fg(TEXT_COLOR)
+                }
+            ),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                if form.current_field == super::app::VmMigrationField::LiveMigration { "▶ " } else { "  " }, 
+                Style::default().fg(PRIMARY_COLOR)
+            ),
+            Span::styled("Live Migration: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(
+                if form.live_migration { "[✓]" } else { "[ ]" }, 
+                if form.current_field == super::app::VmMigrationField::LiveMigration {
+                    Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(TEXT_COLOR)
+                }
+            ),
+            Span::styled(" (minimize downtime)", Style::default().fg(Color::Gray)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Available Nodes:", Style::default().fg(TEXT_COLOR).add_modifier(Modifier::BOLD)),
+        ]),
+    ];
+    
+    let mut all_lines = content;
+    for node in available_nodes.iter().take(5) {
+        all_lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(node, Style::default().fg(Color::Gray)),
+        ]));
+    }
+    if available_nodes.len() > 5 {
+        all_lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(format!("... and {} more", available_nodes.len() - 5), Style::default().fg(Color::Gray)),
+        ]));
+    }
+    
+    all_lines.push(Line::from(""));
+    all_lines.push(Line::from(vec![
+        Span::styled("Enter", Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD)),
+        Span::raw(" Submit  "),
+        Span::styled("Tab", Style::default().fg(INFO_COLOR).add_modifier(Modifier::BOLD)),
+        Span::raw(" Next Field  "),
+        Span::styled("Esc", Style::default().fg(WARNING_COLOR).add_modifier(Modifier::BOLD)),
+        Span::raw(" Cancel"),
+    ]));
+    
+    let paragraph = Paragraph::new(all_lines)
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .title("🔄 Migrate VM")
+            .border_style(Style::default().fg(PRIMARY_COLOR)))
+        .wrap(Wrap { trim: true });
+    
+    f.render_widget(paragraph, area);
+}
+
+// Additional UI functions for save/load configuration dialogs
+
+pub fn render_save_config_dialog(f: &mut Frame, app: &App) {
+    let area = centered_rect(60, 30, f.size());
+    f.render_widget(Clear, area);
+    
+    let block = Block::default()
+        .title("💾 Save Cluster Configuration")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(PRIMARY_COLOR));
+    
+    f.render_widget(block, area);
+    
+    let inner_area = area.inner(&Margin { vertical: 1, horizontal: 2 });
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // File path field
+            Constraint::Length(3), // Description field
+            Constraint::Length(1), // Spacer
+            Constraint::Length(3), // Help text
+        ])
+        .split(inner_area);
+    
+    // File path field
+    let default_path = "cluster-config.yaml".to_string();
+    let file_path = app.config_file_path.as_ref().unwrap_or(&default_path);
+    let path_style = if app.save_config_field == super::app::SaveConfigField::FilePath {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let path_border_style = if app.save_config_field == super::app::SaveConfigField::FilePath {
+        Style::default().fg(PRIMARY_COLOR)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    let path_field = Paragraph::new(file_path.as_str())
+        .style(path_style)
+        .block(Block::default().borders(Borders::ALL).title("File Path").border_style(path_border_style));
+    f.render_widget(path_field, chunks[0]);
+    
+    // Description field
+    let desc_style = if app.save_config_field == super::app::SaveConfigField::Description {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let desc_border_style = if app.save_config_field == super::app::SaveConfigField::Description {
+        Style::default().fg(PRIMARY_COLOR)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    let desc_field = Paragraph::new(app.config_description.as_str())
+        .style(desc_style)
+        .block(Block::default().borders(Borders::ALL).title("Description (optional)").border_style(desc_border_style));
+    f.render_widget(desc_field, chunks[1]);
+    
+    // Help text
+    let help_text = vec![
+        Line::from(vec![
+            Span::styled("Enter", Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" Save  "),
+            Span::styled("Tab", Style::default().fg(INFO_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" Switch Fields  "),
+            Span::styled("Esc", Style::default().fg(WARNING_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" Cancel"),
+        ]),
+    ];
+    
+    let help = Paragraph::new(help_text)
+        .alignment(Alignment::Center);
+    f.render_widget(help, chunks[3]);
+}
+
+pub fn render_load_config_dialog(f: &mut Frame, app: &App) {
+    let area = centered_rect(60, 25, f.size());
+    f.render_widget(Clear, area);
+    
+    let block = Block::default()
+        .title("📂 Load Cluster Configuration")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(PRIMARY_COLOR));
+    
+    f.render_widget(block, area);
+    
+    let inner_area = area.inner(&Margin { vertical: 1, horizontal: 2 });
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // File path field
+            Constraint::Length(1), // Spacer
+            Constraint::Length(3), // Warning text
+            Constraint::Length(3), // Help text
+        ])
+        .split(inner_area);
+    
+    // File path field
+    let default_path = "cluster-config.yaml".to_string();
+    let file_path = app.config_file_path.as_ref().unwrap_or(&default_path);
+    let path_field = Paragraph::new(file_path.as_str())
+        .style(Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD))
+        .block(Block::default().borders(Borders::ALL).title("File Path"));
+    f.render_widget(path_field, chunks[0]);
+    
+    // Warning text
+    let warning_text = vec![
+        Line::from(vec![
+            Span::styled("⚠️ ", Style::default().fg(WARNING_COLOR)),
+            Span::styled("Loading a configuration will update the current cluster state", 
+                       Style::default().fg(WARNING_COLOR)),
+        ]),
+    ];
+    
+    let warning = Paragraph::new(warning_text)
+        .alignment(Alignment::Center);
+    f.render_widget(warning, chunks[2]);
+    
+    // Help text
+    let help_text = vec![
+        Line::from(vec![
+            Span::styled("Enter", Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" Load  "),
+            Span::styled("Esc", Style::default().fg(WARNING_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" Cancel"),
+        ]),
+    ];
+    
+    let help = Paragraph::new(help_text)
+        .alignment(Alignment::Center);
+    f.render_widget(help, chunks[3]);
+}// Edit node configuration dialog
+
+pub fn render_edit_node_config_dialog(f: &mut Frame, app: &App) {
+    let area = centered_rect(60, 35, f.size());
+    f.render_widget(Clear, area);
+    
+    let block = Block::default()
+        .title(format!("📝 Edit Node {} Configuration", app.edit_node_form.node_id))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(PRIMARY_COLOR));
+    
+    f.render_widget(block, area);
+    
+    let inner_area = area.inner(&Margin { vertical: 1, horizontal: 2 });
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2), // Info text
+            Constraint::Length(3), // Bind address field
+            Constraint::Length(3), // Data dir field
+            Constraint::Length(3), // VM backend field
+            Constraint::Length(1), // Spacer
+            Constraint::Length(3), // Help text
+        ])
+        .split(inner_area);
+    
+    // Info text
+    let info_text = vec![
+        Line::from(vec![
+            Span::styled("Original Address: ", Style::default().fg(TEXT_COLOR)),
+            Span::styled(&app.edit_node_form.original_address, Style::default().fg(Color::Gray)),
+        ]),
+    ];
+    let info = Paragraph::new(info_text);
+    f.render_widget(info, chunks[0]);
+    
+    // Bind address field
+    let addr_style = if app.edit_node_form.current_field == super::app::EditNodeField::BindAddress {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let addr_border_style = if app.edit_node_form.current_field == super::app::EditNodeField::BindAddress {
+        Style::default().fg(PRIMARY_COLOR)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    let addr_field = Paragraph::new(app.edit_node_form.bind_address.as_str())
+        .style(addr_style)
+        .block(Block::default().borders(Borders::ALL).title("Bind Address").border_style(addr_border_style));
+    f.render_widget(addr_field, chunks[1]);
+    
+    // Data directory field
+    let data_style = if app.edit_node_form.current_field == super::app::EditNodeField::DataDir {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let data_border_style = if app.edit_node_form.current_field == super::app::EditNodeField::DataDir {
+        Style::default().fg(PRIMARY_COLOR)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    let data_field = Paragraph::new(app.edit_node_form.data_dir.as_str())
+        .style(data_style)
+        .block(Block::default().borders(Borders::ALL).title("Data Directory").border_style(data_border_style));
+    f.render_widget(data_field, chunks[2]);
+    
+    // VM backend field
+    let backend_style = if app.edit_node_form.current_field == super::app::EditNodeField::VmBackend {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let backend_border_style = if app.edit_node_form.current_field == super::app::EditNodeField::VmBackend {
+        Style::default().fg(PRIMARY_COLOR)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    let backend_field = Paragraph::new(app.edit_node_form.vm_backend.as_str())
+        .style(backend_style)
+        .block(Block::default().borders(Borders::ALL).title("VM Backend (microvm/docker)").border_style(backend_border_style));
+    f.render_widget(backend_field, chunks[3]);
+    
+    // Help text
+    let help_text = vec![
+        Line::from(vec![
+            Span::styled("Enter", Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" Apply  "),
+            Span::styled("Tab", Style::default().fg(INFO_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" Next Field  "),
+            Span::styled("Esc", Style::default().fg(WARNING_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" Cancel"),
+        ]),
+        Line::from(vec![
+            Span::styled("⚠️ ", Style::default().fg(WARNING_COLOR)),
+            Span::styled("Note: Node restart may be required for changes to take effect", 
+                       Style::default().fg(Color::Gray)),
+        ]),
+    ];
+    
+    let help = Paragraph::new(help_text)
+        .alignment(Alignment::Center);
+    f.render_widget(help, chunks[5]);
+}

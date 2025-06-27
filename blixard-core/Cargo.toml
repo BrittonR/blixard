@@ -71,6 +71,8 @@ hex = "0.4"
 # VM management dependencies  
 tera = "1.19"
 
+# P2P networking
+iroh = "0.28"
 
 fail = { version = "0.5", optional = true }
 

@@ -33,6 +33,8 @@ tonic = "0.12"
 # Configuration
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_yaml = "0.9"
+chrono = { version = "0.4", features = ["serde"] }
 
 # File operations
 glob = "0.3"
@@ -43,6 +45,9 @@ libc = "0.2"
 # TUI
 ratatui = "0.26"
 crossterm = "0.28"
+
+# Random number generation for resource simulation
+rand = "0.8"
 
 [features]
 default = []
@@ -62,3 +67,11 @@ path = "../examples/metrics_demo.rs"
 [[example]]
 name = "grpc_with_auth"
 path = "../examples/grpc_with_auth.rs"
+
+[[example]]
+name = "p2p_image_sharing"
+path = "../examples/p2p_image_sharing.rs"
+
+[[example]]
+name = "tui_p2p_demo"
+path = "../examples/tui_p2p_demo.rs"
