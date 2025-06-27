@@ -30,6 +30,8 @@ async fn test_distributed_vm_lifecycle() {
         config_path: "/tmp/test-vm.nix".to_string(),
         vcpus: 2,
         memory: 1024,
+            ip_address: None,
+            tenant_id: "test".to_string(),
     };
     
     let command = VmCommand::Create {
@@ -117,6 +119,10 @@ async fn test_distributed_vm_scheduling() {
             config_path: "/tmp/test-vm.nix".to_string(),
             vcpus: 1,
             memory: 512,
+            ip_address: None,
+            tenant_id: "test".to_string(),
+            ip_address: None,
+            tenant_id: "test".to_string(),
         };
         
         // Use the scheduler to determine placement
@@ -180,6 +186,8 @@ async fn test_concurrent_vm_operations() {
                 config_path: "/tmp/test-vm.nix".to_string(),
                 vcpus: 1,
                 memory: 512,
+            ip_address: None,
+            tenant_id: "test".to_string(),
             };
             
             let command = VmCommand::Create {

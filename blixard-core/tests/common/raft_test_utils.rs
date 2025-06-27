@@ -1,6 +1,8 @@
 
 #[cfg(feature = "test-helpers")]
 use blixard_core::test_helpers::{TestNode, TestCluster, timing};
+use blixard_core::error::{BlixardError, BlixardResult};
+use std::time::Duration;
 
 /// Helper to create a cluster and wait for convergence
 #[cfg(feature = "test-helpers")]

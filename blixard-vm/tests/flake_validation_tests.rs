@@ -28,6 +28,8 @@ mod flake_validation_tests {
             config_path: "".to_string(),
             vcpus: 2,
             memory: 1024,
+            ip_address: None,
+            tenant_id: "test".to_string(),
         };
         
         // Create VM to generate flake
@@ -250,6 +252,8 @@ mod flake_validation_tests {
             config_path: "".to_string(),
             vcpus: 1,
             memory: 512,
+            ip_address: None,
+            tenant_id: "test".to_string(),
         };
         
         backend.create_vm(&vm_config, 1).await.unwrap();

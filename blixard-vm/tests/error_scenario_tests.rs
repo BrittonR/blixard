@@ -28,6 +28,8 @@ mod error_scenario_tests {
             config_path: "".to_string(),
             vcpus: 1,
             memory: 512,
+            ip_address: None,
+            tenant_id: "test".to_string(),
         };
         
         let result = backend.create_vm(&invalid_config, 1).await;
@@ -39,6 +41,8 @@ mod error_scenario_tests {
             config_path: "".to_string(),
             vcpus: 1,
             memory: 512,
+            ip_address: None,
+            tenant_id: "test".to_string(),
         };
         
         let result = backend.create_vm(&invalid_config, 1).await;
@@ -85,6 +89,8 @@ mod error_scenario_tests {
             config_path: "".to_string(),
             vcpus: 1,
             memory: 512,
+            ip_address: None,
+            tenant_id: "test".to_string(),
         };
         
         // Create VM first time - should succeed
@@ -154,6 +160,8 @@ mod error_scenario_tests {
                     config_path: "".to_string(),
                     vcpus: 1,
                     memory: 512,
+            ip_address: None,
+            tenant_id: "test".to_string(),
                 };
                 
                 let result = backend.create_vm(&vm_config, 1).await;
@@ -186,6 +194,8 @@ mod error_scenario_tests {
             config_path: "".to_string(),
             vcpus: 1,
             memory: 512,
+            ip_address: None,
+            tenant_id: "test".to_string(),
         };
         
         // This should succeed as we're just generating flakes
@@ -219,6 +229,8 @@ mod error_scenario_tests {
             config_path: "".to_string(),
             vcpus: 2,
             memory: 1024,
+            ip_address: None,
+            tenant_id: "test".to_string(),
         };
         
         // Create a VM normally
@@ -303,6 +315,8 @@ mod error_scenario_tests {
                 config_path: "".to_string(),
                 vcpus: 1,
                 memory: 256,
+            ip_address: None,
+            tenant_id: "test".to_string(),
             };
             
             match backend.create_vm(&vm_config, 1).await {
@@ -350,6 +364,8 @@ mod error_scenario_tests {
             config_path: "".to_string(),
             vcpus: 1,
             memory: 512,
+            ip_address: None,
+            tenant_id: "test".to_string(),
         };
         
         // Create the VM first
@@ -415,6 +431,8 @@ mod recovery_tests {
             config_path: "".to_string(),
             vcpus: 1,
             memory: 512,
+            ip_address: None,
+            tenant_id: "test".to_string(),
         };
         
         {

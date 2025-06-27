@@ -14,7 +14,7 @@ use crate::{
         ClusterStatusRequest, ClusterStatusResponse,
     },
 };
-use tonic::{transport::Channel, Request, Response};
+use tonic::{transport::Channel, Request};
 
 /// Abstraction for network client operations
 #[async_trait]

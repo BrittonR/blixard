@@ -94,7 +94,7 @@ async fn grpc_handler_example(
     let config = VmConfig {
         name: req.name.clone(),
         vcpus: req.vcpus,
-        memory: req.memory,
+        memory: req.memory_mb,
         config_path: format!("/vms/{}.yaml", req.name),
         ip_address: None,
         tenant_id: tenant_id.to_string(),
@@ -104,20 +104,13 @@ async fn grpc_handler_example(
     let vm_id = service.create_vm(tenant_id, config)
         .await
         .log_error("Failed to create VM")  // Log on error
-        .to_status()?;  // Convert to gRPC Status
+        .map_err(crate::grpc_server::common::conversions::error_to_status)?;  // Convert to gRPC Status
         
     // Convert to proto response
     let response = crate::proto::CreateVmResponse {
         success: true,
         message: format!("VM {} created successfully", vm_id),
-        vm_info: Some(crate::proto::VmInfo {
-            name: req.name,
-            state: VmStatus::Creating.to_proto() as i32,
-            vcpus: req.vcpus,
-            memory: req.memory,
-            node_id: 42,
-            ip_address: String::new(),
-        }),
+        vm_id: vm_id.clone(),
     };
     
     Ok(tonic::Response::new(response))

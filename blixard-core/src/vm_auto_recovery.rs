@@ -7,7 +7,7 @@ use tracing::{info, warn, error};
 use crate::{
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
-    types::{VmCommand, VmConfig, VmStatus},
+    types::{VmCommand, VmConfig},
     vm_scheduler::{PlacementStrategy, VmScheduler},
     metrics_otel::{metrics, attributes},
 };

@@ -6,7 +6,7 @@
 use crate::{
     node_shared::SharedNodeState,
     types::{VmCommand, VmMigrationTask},
-    raft_manager::{TaskSpec, ResourceRequirements},
+    raft_manager::ResourceRequirements,
     resource_quotas::ApiOperation,
     grpc_server::common::{
         GrpcMiddleware, vm_status_to_proto, error_to_status,
@@ -15,7 +15,7 @@ use crate::{
         CreateVmRequest, CreateVmResponse, DeleteVmRequest, DeleteVmResponse,
         GetVmStatusRequest, GetVmStatusResponse, ListVmsRequest, ListVmsResponse,
         StartVmRequest, StartVmResponse, StopVmRequest, StopVmResponse,
-        VmInfo, VmState, MigrateVmRequest, MigrateVmResponse,
+        VmInfo, MigrateVmRequest, MigrateVmResponse,
         CreateVmWithSchedulingRequest, CreateVmWithSchedulingResponse,
         ScheduleVmPlacementRequest, ScheduleVmPlacementResponse,
     },

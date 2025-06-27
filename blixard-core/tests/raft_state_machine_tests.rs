@@ -196,6 +196,8 @@ async fn test_apply_vm_command_create() {
             config_path: "/tmp/test.nix".to_string(),
             vcpus: 2,
             memory: 1024,
+            ip_address: None,
+            tenant_id: "test".to_string(),
         },
         node_id: 1,
     });
@@ -408,6 +410,8 @@ async fn test_multiple_vm_operations() {
             config_path: "/tmp/test.nix".to_string(),
             vcpus: 2,
             memory: 1024,
+            ip_address: None,
+            tenant_id: "test".to_string(),
         },
         node_id: 1,
     });

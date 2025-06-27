@@ -181,6 +181,10 @@ async fn test_minority_partition_cannot_write() {
             config_path: format!("/tmp/partition-test-{}.nix", node.id),
             vcpus: 1,
             memory: 256,
+            ip_address: None,
+            tenant_id: "test".to_string(),
+            ip_address: None,
+            tenant_id: "test".to_string(),
         };
         let vm_command = VmCommand::Create {
             config: vm_config,
@@ -227,6 +231,10 @@ async fn test_partition_healing() {
             config_path: format!("/tmp/pre-partition-{}.nix", i),
             vcpus: 1,
             memory: 256,
+            ip_address: None,
+            tenant_id: "test".to_string(),
+            ip_address: None,
+            tenant_id: "test".to_string(),
         };
         
         let request = CreateVmRequest {

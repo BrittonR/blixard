@@ -112,7 +112,7 @@ impl P2pImageStore {
 
     /// List all available VM images
     pub async fn list_images(&self) -> BlixardResult<Vec<VmImageMetadata>> {
-        let mut images = Vec::new();
+        let images = Vec::new();
 
         // In a real implementation, we would iterate through all entries in the document
         // For now, we'll return an empty list

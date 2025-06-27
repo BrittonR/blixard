@@ -8,7 +8,7 @@
 use crate::security::{SecurityManager, AuthResult, Permission, extract_auth_token};
 use crate::error::{BlixardError, BlixardResult};
 use std::sync::Arc;
-use tonic::{Request, Status, Extensions};
+use tonic::{Request, Status};
 use tracing::{debug, warn};
 
 /// Security middleware for gRPC services

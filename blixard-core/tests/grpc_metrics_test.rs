@@ -32,6 +32,8 @@ async fn test_comprehensive_grpc_metrics_instrumentation() {
         config_path: "/tmp/test.nix".to_string(),
         vcpus: 2,
         memory: 1024,
+            ip_address: None,
+            tenant_id: "test".to_string(),
     };
     
     let command = VmCommand::Create {

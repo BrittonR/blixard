@@ -4,18 +4,14 @@
 //! cluster status queries, and Raft message forwarding.
 
 use crate::{
-    error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
-    grpc_server::common::{GrpcMiddleware, error_to_status},
+    grpc_server::common::GrpcMiddleware,
     proto::{
         cluster_service_server::ClusterService,
         JoinRequest, JoinResponse, LeaveRequest, LeaveResponse,
-        ClusterStatusRequest, ClusterStatusResponse, NodeInfo, NodeState,
+        ClusterStatusRequest, ClusterStatusResponse,
         RaftMessageRequest, RaftMessageResponse,
     },
-    security::Permission,
-    resource_quotas::ApiOperation,
-    instrument_grpc, record_grpc_error,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};

@@ -3,7 +3,7 @@
 //! This module provides utilities for consistent metrics recording
 //! across the application.
 
-use crate::metrics_otel::{metrics, Metrics, Timer, attributes};
+use crate::metrics_otel::attributes;
 use std::time::Instant;
 use opentelemetry::KeyValue;
 

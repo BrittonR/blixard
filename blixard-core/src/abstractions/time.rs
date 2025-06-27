@@ -119,6 +119,7 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, Notify};
 
 /// Mock clock for deterministic testing
+#[derive(Clone)]
 pub struct MockClock {
     /// Current time in microseconds
     current_micros: Arc<RwLock<u64>>,
@@ -252,12 +253,12 @@ mod tests {
         
         // Test timeout fails
         let clock_clone = clock.clone();
-        let timeout_future = clock_clone.timeout(
-            Duration::from_secs(5),
-            std::future::pending::<()>()
-        );
-        
-        let handle = tokio::spawn(timeout_future);
+        let handle = tokio::spawn(async move {
+            clock_clone.timeout(
+                Duration::from_secs(5),
+                std::future::pending::<()>()
+            ).await
+        });
         
         // Advance time
         clock.advance(Duration::from_secs(6)).await;

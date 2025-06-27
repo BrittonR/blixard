@@ -284,6 +284,8 @@ async fn test_50_node_cluster_stress() {
             config_path: format!("/tmp/stress-{}.nix", i),
             vcpus: 1,
             memory: 64,
+            ip_address: None,
+            tenant_id: "test".to_string(),
         };
         
         let request = blixard_core::proto::CreateVmRequest {

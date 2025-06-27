@@ -4,19 +4,10 @@
 //! and other monitoring-related operations.
 
 use crate::{
-    error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
-    grpc_server::common::{GrpcMiddleware, error_to_status},
-    proto::{
-        blixard_service_server::BlixardService,
-        HealthCheckRequest, HealthCheckResponse,
-        GetRaftStatusRequest, GetRaftStatusResponse,
-    },
-    security::Permission,
-    instrument_grpc, record_grpc_error,
+    grpc_server::common::GrpcMiddleware,
 };
 use std::sync::Arc;
-use tonic::{Request, Response, Status};
 
 /// Monitoring service implementation
 #[derive(Clone)]

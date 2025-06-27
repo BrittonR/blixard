@@ -91,6 +91,8 @@ async fn test_vm_resource_requirements_from_config() {
         config_path: "".to_string(),
         vcpus: 4,
         memory: 8192,
+            ip_address: None,
+            tenant_id: "test".to_string(),
     };
     
     let requirements = VmResourceRequirements::from(&vm_config);
@@ -193,6 +195,8 @@ async fn test_scheduler_no_workers_available() {
         config_path: "".to_string(),
         vcpus: 2,
         memory: 1024,
+            ip_address: None,
+            tenant_id: "test".to_string(),
     };
     
     // No workers in database - should fail
@@ -221,6 +225,8 @@ async fn test_scheduler_no_suitable_workers() {
         config_path: "".to_string(),
         vcpus: 4,
         memory: 8192,
+            ip_address: None,
+            tenant_id: "test".to_string(),
     };
     
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::MostAvailable).await;
@@ -259,6 +265,8 @@ async fn test_scheduler_most_available_strategy() {
         config_path: "".to_string(),
         vcpus: 1,
         memory: 1024,
+            ip_address: None,
+            tenant_id: "test".to_string(),
     };
     
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::MostAvailable).await;
@@ -300,6 +308,8 @@ async fn test_scheduler_least_available_strategy() {
         config_path: "".to_string(),
         vcpus: 1,
         memory: 1024,
+            ip_address: None,
+            tenant_id: "test".to_string(),
     };
     
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::LeastAvailable).await;
@@ -337,6 +347,8 @@ async fn test_scheduler_round_robin_strategy() {
         config_path: "".to_string(),
         vcpus: 1,
         memory: 1024,
+            ip_address: None,
+            tenant_id: "test".to_string(),
     };
     
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::RoundRobin).await;
@@ -367,6 +379,8 @@ async fn test_scheduler_manual_strategy() {
         config_path: "".to_string(),
         vcpus: 2,
         memory: 2048,
+            ip_address: None,
+            tenant_id: "test".to_string(),
     };
     
     // Test valid manual placement
@@ -404,6 +418,8 @@ async fn test_scheduler_offline_workers_ignored() {
         config_path: "".to_string(),
         vcpus: 1,
         memory: 1024,
+            ip_address: None,
+            tenant_id: "test".to_string(),
     };
     
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::MostAvailable).await;
@@ -524,6 +540,8 @@ async fn test_feature_requirements() {
         config_path: "".to_string(),
         vcpus: 1,
         memory: 1024,
+            ip_address: None,
+            tenant_id: "test".to_string(),
     };
     
     // Manually create requirements with GPU feature

@@ -7,7 +7,6 @@ pub mod common;
 pub mod services;
 
 use crate::{
-    error::BlixardResult,
     node_shared::SharedNodeState,
     grpc_security::GrpcSecurityMiddleware,
 };
@@ -70,4 +69,4 @@ impl GrpcServiceBuilder {
 }
 
 // Re-export the original service for backward compatibility during migration
-pub use crate::grpc_server_legacy::BlixardGrpcService;
+pub use crate::grpc_server_legacy::{BlixardGrpcService, start_grpc_server};

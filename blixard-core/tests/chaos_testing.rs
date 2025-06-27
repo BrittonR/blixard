@@ -196,6 +196,8 @@ async fn test_leader_failures_during_operations() {
                     config_path: format!("/tmp/chaos-{}.nix", i),
                     vcpus: 1,
                     memory: 256,
+            ip_address: None,
+            tenant_id: "test".to_string(),
                 };
                 
                 let start = Instant::now();
@@ -325,6 +327,8 @@ async fn test_random_network_delays_and_failures() {
                 config_path: format!("/tmp/delay-{}.nix", i),
                 vcpus: 1,
                 memory: 128,
+            ip_address: None,
+            tenant_id: "test".to_string(),
             };
             
             // Pick a random node to send the request to
@@ -436,6 +440,8 @@ async fn test_cascading_failures() {
                     config_path: format!("/tmp/wave-{}.nix", wave_num),
                     vcpus: 1,
                     memory: 128,
+            ip_address: None,
+            tenant_id: "test".to_string(),
                 };
                 
                 let request = CreateVmRequest {
