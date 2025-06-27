@@ -116,8 +116,8 @@ fn render_peer_connections(f: &mut Frame, area: Rect, app: &App) {
 
         Row::new(vec![
             Cell::from(peer.node_id.chars().take(8).collect::<String>()),
-            Cell::from(&peer.address),
-            Cell::from(&peer.status).style(Style::default().fg(status_color)),
+            Cell::from(peer.address.as_str()),
+            Cell::from(peer.status.as_str()).style(Style::default().fg(status_color)),
             Cell::from(format!("{}ms", peer.latency_ms)),
             Cell::from(format!("{} images", peer.shared_images)),
         ])
@@ -166,8 +166,8 @@ fn render_shared_resources(f: &mut Frame, area: Rect, app: &App) {
         };
 
         Row::new(vec![
-            Cell::from(&image.name),
-            Cell::from(&image.version),
+            Cell::from(image.name.as_str()),
+            Cell::from(image.version.as_str()),
             Cell::from(format_bytes(image.size)),
             Cell::from(image.available_peers.to_string()),
             Cell::from(status).style(Style::default().fg(status_color)),
@@ -191,7 +191,7 @@ fn render_shared_resources(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_transfer_activity(f: &mut Frame, area: Rect, app: &App) {
-    let chunks = Layout::default()
+    let _chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),

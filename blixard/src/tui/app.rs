@@ -3769,6 +3769,7 @@ impl App {
             AppTab::VirtualMachines => AppMode::VmList,
             AppTab::Nodes => AppMode::NodeList,
             AppTab::Monitoring => AppMode::Monitoring,
+            AppTab::P2P => AppMode::P2P,
             AppTab::Configuration => AppMode::Config,
             AppTab::Debug => AppMode::Debug,
             AppTab::Help => AppMode::Help,
@@ -4571,11 +4572,8 @@ impl App {
         }
         
         // Get current node info if connected
-        let node_id = if let Some(node) = self.nodes.iter().find(|n| n.is_current_node) {
-            node.id
-        } else {
-            1 // Default node ID if not connected
-        };
+        // For now, use the first node's ID or default to 1
+        let node_id = self.nodes.first().map(|n| n.id).unwrap_or(1);
         
         // Create temporary directory for P2P data
         let p2p_dir = std::env::temp_dir().join(format!("blixard-p2p-{}", node_id));
@@ -4646,8 +4644,8 @@ impl App {
     
     /// Start background task to update P2P stats
     fn start_p2p_stats_updater(&self, manager: Arc<blixard_core::p2p_manager::P2pManager>) {
-        let p2p_peers = self.p2p_peers.clone();
-        let p2p_transfers = self.p2p_transfers.clone();
+        let _p2p_peers = self.p2p_peers.clone();
+        let _p2p_transfers = self.p2p_transfers.clone();
         
         // Spawn task to handle P2P events
         let event_rx = manager.event_receiver();
@@ -4682,15 +4680,13 @@ impl App {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 
                 // Update peer list
-                if let Ok(peers) = manager_clone.get_peers().await {
-                    // Convert to UI format
-                    // This would update the shared state in a real implementation
-                }
+                let _peers = manager_clone.get_peers().await;
+                // Convert to UI format
+                // This would update the shared state in a real implementation
                 
                 // Update transfer list
-                if let Ok(transfers) = manager_clone.get_active_transfers().await {
-                    // Convert to UI format
-                }
+                let _transfers = manager_clone.get_active_transfers().await;
+                // Convert to UI format
             }
         });
     }
@@ -4733,17 +4729,17 @@ impl App {
             return Ok(());
         }
         
-        if let Some(store) = &self.p2p_store {
-            let store = store.lock().await;
-            
+        if let Some(store_arc) = self.p2p_store.clone() {
             self.add_event(
                 EventLevel::Info,
                 "P2P".to_string(),
                 format!("Downloading VM image '{}' v{} from P2P network", image_name, version)
             );
             
+            let store = store_arc.lock().await;
             match store.download_image(image_name, version).await {
                 Ok(path) => {
+                    drop(store); // Release the lock before mutating self
                     self.status_message = Some(format!("Downloaded image to: {:?}", path));
                     self.add_event(
                         EventLevel::Info,
@@ -4752,6 +4748,7 @@ impl App {
                     );
                 }
                 Err(e) => {
+                    drop(store); // Release the lock before mutating self
                     self.error_message = Some(format!("Failed to download image: {}", e));
                 }
             }
@@ -4775,8 +4772,8 @@ impl App {
             }
             KeyCode::Char('u') => {
                 // Upload current VM image
-                if let Some(vm_name) = &self.selected_vm {
-                    self.upload_vm_image_to_p2p(vm_name).await?;
+                if let Some(vm_name) = self.selected_vm.clone() {
+                    self.upload_vm_image_to_p2p(&vm_name).await?;
                 } else {
                     self.error_message = Some("No VM selected for upload".to_string());
                 }
@@ -4785,8 +4782,9 @@ impl App {
                 // Download selected P2P image
                 if !self.p2p_images.is_empty() {
                     // For demo, download the first image
-                    let image = &self.p2p_images[0];
-                    self.download_vm_image_from_p2p(&image.name, &image.version).await?;
+                    let name = self.p2p_images[0].name.clone();
+                    let version = self.p2p_images[0].version.clone();
+                    self.download_vm_image_from_p2p(&name, &version).await?;
                 } else {
                     self.error_message = Some("No P2P images available for download".to_string());
                 }
