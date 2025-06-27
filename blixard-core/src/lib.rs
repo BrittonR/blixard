@@ -31,6 +31,7 @@ pub mod cluster_state;
 pub mod vm_health_monitor;
 pub mod vm_auto_recovery;
 pub mod vm_network_isolation;
+pub mod abstractions;
 
 // Test helpers are exposed for integration tests
 #[cfg(any(test, feature = "test-helpers"))]
