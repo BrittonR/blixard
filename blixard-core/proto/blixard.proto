@@ -32,6 +32,12 @@ service ClusterService {
   
   // Health check
   rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+  
+  // P2P operations
+  rpc GetP2pStatus(GetP2pStatusRequest) returns (GetP2pStatusResponse);
+  rpc ShareVmImage(ShareVmImageRequest) returns (ShareVmImageResponse);
+  rpc GetVmImage(GetVmImageRequest) returns (GetVmImageResponse);
+  rpc ListP2pImages(ListP2pImagesRequest) returns (ListP2pImagesResponse);
 }
 
 // Main Blixard service
@@ -430,4 +436,72 @@ message GrpcHealthCheckResponse {
     SERVICE_UNKNOWN = 3;  // Used when the requested service is unknown
   }
   ServingStatus status = 1;
+}
+
+// P2P Service messages
+message GetP2pStatusRequest {}
+
+message GetP2pStatusResponse {
+  bool enabled = 1;
+  string node_address = 2;
+  repeated P2pPeerInfo peers = 3;
+  P2pStats stats = 4;
+}
+
+message P2pPeerInfo {
+  string node_id = 1;
+  string address = 2;
+  string last_seen = 3;
+  bool is_connected = 4;
+  repeated string capabilities = 5;
+}
+
+message P2pStats {
+  uint64 total_bytes_sent = 1;
+  uint64 total_bytes_received = 2;
+  uint32 active_transfers = 3;
+  uint32 cached_images = 4;
+  uint64 cache_size_bytes = 5;
+}
+
+message ShareVmImageRequest {
+  string image_name = 1;
+  string image_path = 2;
+  string version = 3;
+  map<string, string> metadata = 4;
+}
+
+message ShareVmImageResponse {
+  bool success = 1;
+  string message = 2;
+  string image_hash = 3;
+}
+
+message GetVmImageRequest {
+  string image_name = 1;
+  string version = 2;
+  string image_hash = 3;
+}
+
+message GetVmImageResponse {
+  bool success = 1;
+  string message = 2;
+  string local_path = 3;
+  map<string, string> metadata = 4;
+}
+
+message ListP2pImagesRequest {}
+
+message ListP2pImagesResponse {
+  repeated P2pImageInfo images = 1;
+}
+
+message P2pImageInfo {
+  string name = 1;
+  string version = 2;
+  string hash = 3;
+  uint64 size_bytes = 4;
+  string created_at = 5;
+  map<string, string> metadata = 6;
+  bool is_cached = 7;
 }

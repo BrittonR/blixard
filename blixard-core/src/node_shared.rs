@@ -122,6 +122,9 @@ pub struct SharedNodeState {
     
     // Peer connector for managing connections
     peer_connector: RwLock<Option<Arc<crate::peer_connector::PeerConnector>>>,
+    
+    // P2P manager for peer-to-peer data transfer
+    p2p_manager: RwLock<Option<Arc<crate::p2p_manager::P2pManager>>>,
 }
 
 /// Thread-safe wrapper for VM manager operations
@@ -153,6 +156,7 @@ impl SharedNodeState {
             }),
             peers: RwLock::new(HashMap::new()),
             peer_connector: RwLock::new(None),
+            p2p_manager: RwLock::new(None),
         }
     }
     
@@ -247,6 +251,9 @@ impl SharedNodeState {
         // Clear peer connector
         *self.peer_connector.write().await = None;
         
+        // Clear P2P manager
+        *self.p2p_manager.write().await = None;
+        
         // Clear all channel senders
         *self.raft_proposal_tx.lock().await = None;
         *self.raft_message_tx.lock().await = None;
@@ -270,6 +277,16 @@ impl SharedNodeState {
     /// Get the peer connector
     pub async fn get_peer_connector(&self) -> Option<Arc<crate::peer_connector::PeerConnector>> {
         self.peer_connector.read().await.clone()
+    }
+    
+    /// Set the P2P manager
+    pub async fn set_p2p_manager(&self, manager: Arc<crate::p2p_manager::P2pManager>) {
+        *self.p2p_manager.write().await = Some(manager);
+    }
+    
+    /// Get the P2P manager
+    pub async fn get_p2p_manager(&self) -> Option<Arc<crate::p2p_manager::P2pManager>> {
+        self.p2p_manager.read().await.clone()
     }
     
     /// Send a raft proposal

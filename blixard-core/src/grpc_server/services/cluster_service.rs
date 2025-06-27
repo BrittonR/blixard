@@ -160,8 +160,37 @@ impl ClusterService for ClusterServiceImpl {
     // Health check
     async fn health_check(
         &self,
-        request: Request<crate::proto::HealthCheckRequest>,
+        _request: Request<crate::proto::HealthCheckRequest>,
     ) -> Result<Response<crate::proto::HealthCheckResponse>, Status> {
         Err(Status::unimplemented("health_check not implemented"))
+    }
+    
+    // P2P operations
+    async fn get_p2p_status(
+        &self,
+        _request: Request<crate::proto::GetP2pStatusRequest>,
+    ) -> Result<Response<crate::proto::GetP2pStatusResponse>, Status> {
+        Err(Status::unimplemented("get_p2p_status not implemented"))
+    }
+    
+    async fn share_vm_image(
+        &self,
+        _request: Request<crate::proto::ShareVmImageRequest>,
+    ) -> Result<Response<crate::proto::ShareVmImageResponse>, Status> {
+        Err(Status::unimplemented("share_vm_image not implemented"))
+    }
+    
+    async fn get_vm_image(
+        &self,
+        _request: Request<crate::proto::GetVmImageRequest>,
+    ) -> Result<Response<crate::proto::GetVmImageResponse>, Status> {
+        Err(Status::unimplemented("get_vm_image not implemented"))
+    }
+    
+    async fn list_p2p_images(
+        &self,
+        _request: Request<crate::proto::ListP2pImagesRequest>,
+    ) -> Result<Response<crate::proto::ListP2pImagesResponse>, Status> {
+        Err(Status::unimplemented("list_p2p_images not implemented"))
     }
 }

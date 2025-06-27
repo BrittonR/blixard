@@ -101,10 +101,7 @@ impl IrohTransport {
         let node_id = self.endpoint.node_id();
         let addrs = self.endpoint.direct_addresses();
         
-        Ok(NodeAddr {
-            node_id,
-            info: addrs.into(),
-        })
+        Ok(NodeAddr::new(node_id).with_direct_addresses(addrs))
     }
 
     /// Connect to a peer
@@ -112,7 +109,9 @@ impl IrohTransport {
         let mut connections = self.connections.write().await;
         
         if let Some(conn) = connections.get(&addr.node_id) {
-            if conn.closed().await.is_none() {
+            // Check if connection is still alive by checking if it's closed
+            let closed = conn.closed();
+            if !closed {
                 return Ok(conn.clone());
             }
         }
@@ -219,15 +218,11 @@ impl IrohTransport {
     /// Shutdown the Iroh transport
     pub async fn shutdown(self) -> BlixardResult<()> {
         info!("Shutting down Iroh transport");
-        self.endpoint.close().await
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Failed to shutdown endpoint: {}", e),
-            })
+        self.endpoint.close().await;
+        Ok(())
     }
 }
 
-// Re-export Hash type for compatibility
-pub use iroh_blobs::Hash;
 
 #[cfg(test)]
 mod tests {
