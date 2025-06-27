@@ -177,6 +177,62 @@ enum ClusterCommands {
         #[arg(long, default_value = "127.0.0.1:7001")]
         addr: String,
     },
+    /// Export cluster state
+    Export {
+        /// Output file path
+        #[arg(short, long)]
+        output: std::path::PathBuf,
+        
+        /// Cluster name
+        #[arg(short, long)]
+        cluster_name: String,
+        
+        /// Include VM images in export
+        #[arg(long)]
+        include_images: bool,
+        
+        /// Include telemetry data (logs, metrics)
+        #[arg(long)]
+        include_telemetry: bool,
+        
+        /// Skip compression
+        #[arg(long)]
+        no_compress: bool,
+        
+        /// Share via P2P network
+        #[arg(long)]
+        p2p_share: bool,
+        
+        /// Node ID
+        #[arg(long, default_value = "1")]
+        node_id: u64,
+        
+        /// Data directory
+        #[arg(long, default_value = "./data")]
+        data_dir: String,
+    },
+    /// Import cluster state
+    Import {
+        /// Input file path or P2P ticket
+        #[arg(short, long)]
+        input: String,
+        
+        /// Merge with existing state instead of replacing
+        #[arg(short, long)]
+        merge: bool,
+        
+        /// Import from P2P ticket
+        #[arg(long)]
+        p2p: bool,
+        
+        /// Node ID
+        #[arg(long, default_value = "1")]
+        node_id: u64,
+        
+        /// Data directory
+        #[arg(long, default_value = "./data")]
+        data_dir: String,
+    },
 }
 
 #[tokio::main]
@@ -766,6 +822,111 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
                     eprintln!("Error getting cluster status: {}", e);
                     std::process::exit(1);
                 }
+            }
+        }
+        ClusterCommands::Export { 
+            output, 
+            cluster_name, 
+            include_images, 
+            include_telemetry, 
+            no_compress, 
+            p2p_share,
+            node_id,
+            data_dir,
+        } => {
+            use blixard_core::cluster_state::{ClusterStateManager, ExportOptions};
+            use blixard_core::storage::RedbRaftStorage;
+            use blixard_core::iroh_transport::IrohTransport;
+            use std::sync::Arc;
+            
+            // Initialize storage
+            let db_path = std::path::Path::new(&data_dir).join("blixard.db");
+            let database = Arc::new(redb::Database::create(&db_path)?);
+            let storage: Arc<dyn blixard_core::storage::Storage> = Arc::new(RedbRaftStorage { database });
+            
+            // Initialize P2P transport if needed
+            let transport = if p2p_share {
+                Some(Arc::new(IrohTransport::new(node_id, std::path::Path::new(&data_dir)).await?))
+            } else {
+                None
+            };
+            
+            let manager = ClusterStateManager::new(node_id, storage, transport.clone());
+            
+            let options = ExportOptions {
+                include_vm_images: include_images,
+                include_telemetry,
+                compress: !no_compress,
+                encryption_key: None,
+            };
+            
+            if p2p_share {
+                let ticket = manager.share_state_p2p(&cluster_name, &options).await?;
+                println!("✅ Cluster state shared via P2P");
+                println!("📤 Share this ticket with other nodes:");
+                println!("{}", ticket);
+                
+                // Also save to file
+                manager.export_to_file(&cluster_name, &output, &options).await?;
+                println!("💾 Also saved to file: {:?}", output);
+            } else {
+                manager.export_to_file(&cluster_name, &output, &options).await?;
+                println!("✅ Cluster state exported to: {:?}", output);
+            }
+            
+            // Cleanup P2P transport
+            if let Some(transport) = transport {
+                Arc::try_unwrap(transport)
+                    .map_err(|_| "Failed to unwrap transport Arc")
+                    .unwrap()
+                    .shutdown()
+                    .await?;
+            }
+        }
+        ClusterCommands::Import { 
+            input, 
+            merge, 
+            p2p,
+            node_id,
+            data_dir,
+        } => {
+            use blixard_core::cluster_state::ClusterStateManager;
+            use blixard_core::storage::RedbRaftStorage;
+            use blixard_core::iroh_transport::IrohTransport;
+            use std::sync::Arc;
+            
+            // Initialize storage
+            let db_path = std::path::Path::new(&data_dir).join("blixard.db");
+            let database = Arc::new(redb::Database::create(&db_path)?);
+            let storage: Arc<dyn blixard_core::storage::Storage> = Arc::new(RedbRaftStorage { database });
+            
+            // Initialize P2P transport if needed
+            let transport = if p2p {
+                Some(Arc::new(IrohTransport::new(node_id, std::path::Path::new(&data_dir)).await?))
+            } else {
+                None
+            };
+            
+            let manager = ClusterStateManager::new(node_id, storage, transport.clone());
+            
+            if p2p {
+                println!("📥 Importing cluster state from P2P ticket...");
+                manager.import_state_p2p(&input, merge).await?;
+                println!("✅ Cluster state imported successfully from P2P");
+            } else {
+                let input_path = std::path::PathBuf::from(input);
+                println!("📥 Importing cluster state from file: {:?}", input_path);
+                manager.import_from_file(&input_path, merge).await?;
+                println!("✅ Cluster state imported successfully");
+            }
+            
+            // Cleanup P2P transport
+            if let Some(transport) = transport {
+                Arc::try_unwrap(transport)
+                    .map_err(|_| "Failed to unwrap transport Arc")
+                    .unwrap()
+                    .shutdown()
+                    .await?;
             }
         }
     }

@@ -8,7 +8,7 @@ use crate::iroh_transport::{IrohTransport, DocumentType};
 use std::path::{Path, PathBuf};
 use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
-use iroh::base::hash::Hash;
+use crate::iroh_transport::Hash;
 use tracing::info;
 
 /// Metadata for a VM image
@@ -208,24 +208,10 @@ impl P2pImageStore {
 
     /// Subscribe to new image announcements
     pub async fn subscribe_to_images(&self) -> BlixardResult<impl futures::Stream<Item = VmImageMetadata> + '_> {
-        use futures::StreamExt;
+        use futures::stream;
         
-        let stream = self.transport.subscribe_to_doc(DocumentType::VmImages).await?;
-        
-        // Transform the stream to emit VmImageMetadata
-        let metadata_stream = stream.filter_map(|event| async move {
-            match event {
-                iroh::client::docs::LiveEvent::InsertLocal { entry } |
-                iroh::client::docs::LiveEvent::InsertRemote { entry, .. } => {
-                    // For now, we'll just return None as we need to handle the async content fetch
-                    // In a real implementation, we would need to fetch the content asynchronously
-                    None
-                }
-                _ => None
-            }
-        });
-
-        Ok(metadata_stream)
+        // Return empty stream for now (stub implementation)
+        Ok(stream::empty())
     }
 
     /// Get the Iroh node address for sharing

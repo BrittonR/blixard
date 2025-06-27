@@ -49,6 +49,9 @@ crossterm = "0.28"
 # Random number generation for resource simulation
 rand = "0.8"
 
+# Database for cluster state
+redb = "2.0"
+
 [features]
 default = []
 test-helpers = ["blixard-core/test-helpers"]

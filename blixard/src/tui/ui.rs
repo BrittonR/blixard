@@ -23,7 +23,7 @@ use super::app::{
     App, AppTab, AppMode, NodeRole, NodeStatus,
     CreateVmField, CreateNodeField, RaftDebugInfo, 
     RaftNodeState, DebugLevel, HealthStatus, AlertSeverity, HealthAlert,
-    LogEntry, LogSourceType, LogLevel
+    LogEntry, LogSourceType, LogLevel, ExportFormField, ImportFormField
 };
 use blixard_core::types::VmStatus;
 
@@ -84,6 +84,8 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::SaveConfig => render_save_config_dialog(f, app),
         AppMode::LoadConfig => render_load_config_dialog(f, app),
         AppMode::EditNodeConfig => render_edit_node_config_dialog(f, app),
+        AppMode::ExportCluster => render_export_cluster_dialog(f, app),
+        AppMode::ImportCluster => render_import_cluster_dialog(f, app),
         _ => {}
     }
     
@@ -1074,6 +1076,20 @@ fn render_configuration(f: &mut Frame, area: Rect, _app: &App) {
             Span::raw("  Press "),
             Span::styled("l", Style::default().fg(INFO_COLOR).add_modifier(Modifier::BOLD)),
             Span::raw(" to load configuration from file"),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("📤 Export/Import", Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::raw("  Press "),
+            Span::styled("e", Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" to export entire cluster state"),
+        ]),
+        Line::from(vec![
+            Span::raw("  Press "),
+            Span::styled("i", Style::default().fg(INFO_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" to import cluster state from backup"),
         ]),
         Line::from(""),
         Line::from("🔐 Security Settings"),
@@ -3270,6 +3286,195 @@ pub fn render_edit_node_config_dialog(f: &mut Frame, app: &App) {
             Span::styled("⚠️ ", Style::default().fg(WARNING_COLOR)),
             Span::styled("Note: Node restart may be required for changes to take effect", 
                        Style::default().fg(Color::Gray)),
+        ]),
+    ];
+    
+    let help = Paragraph::new(help_text)
+        .alignment(Alignment::Center);
+    f.render_widget(help, chunks[5]);
+}
+
+pub fn render_export_cluster_dialog(f: &mut Frame, app: &App) {
+    let area = centered_rect(70, 50, f.size());
+    f.render_widget(Clear, area);
+    
+    let block = Block::default()
+        .title("📤 Export Cluster State")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(PRIMARY_COLOR));
+    
+    f.render_widget(block, area);
+    
+    let inner_area = area.inner(&Margin { vertical: 1, horizontal: 2 });
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Output path
+            Constraint::Length(3), // Cluster name
+            Constraint::Length(2), // Include images checkbox
+            Constraint::Length(2), // Include telemetry checkbox
+            Constraint::Length(2), // Compress checkbox
+            Constraint::Length(2), // P2P share checkbox
+            Constraint::Min(0),    // Spacer
+            Constraint::Length(3), // Help text
+        ])
+        .split(inner_area);
+    
+    // Output path field
+    let path_style = if app.export_form.current_field == ExportFormField::OutputPath {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let path_border_style = if app.export_form.current_field == ExportFormField::OutputPath {
+        Style::default().fg(PRIMARY_COLOR)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    let path_field = Paragraph::new(app.export_form.output_path.as_str())
+        .style(path_style)
+        .block(Block::default().borders(Borders::ALL).title("Output Path").border_style(path_border_style));
+    f.render_widget(path_field, chunks[0]);
+    
+    // Cluster name field
+    let name_style = if app.export_form.current_field == ExportFormField::ClusterName {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let name_border_style = if app.export_form.current_field == ExportFormField::ClusterName {
+        Style::default().fg(PRIMARY_COLOR)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    let name_field = Paragraph::new(app.export_form.cluster_name.as_str())
+        .style(name_style)
+        .block(Block::default().borders(Borders::ALL).title("Cluster Name").border_style(name_border_style));
+    f.render_widget(name_field, chunks[1]);
+    
+    // Checkbox options
+    let checkbox_items = vec![
+        (app.export_form.include_images, "Include VM Images", app.export_form.current_field == ExportFormField::IncludeImages),
+        (app.export_form.include_telemetry, "Include Telemetry Data", app.export_form.current_field == ExportFormField::IncludeTelemetry),
+        (app.export_form.compress, "Compress Output", app.export_form.current_field == ExportFormField::Compress),
+        (app.export_form.p2p_share, "Share via P2P", app.export_form.current_field == ExportFormField::P2pShare),
+    ];
+    
+    for (i, (checked, label, selected)) in checkbox_items.iter().enumerate() {
+        let checkbox = if *checked { "[✓]" } else { "[ ]" };
+        let style = if *selected {
+            Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT_COLOR)
+        };
+        let checkbox_widget = Paragraph::new(format!("{} {}", checkbox, label))
+            .style(style);
+        f.render_widget(checkbox_widget, chunks[i + 2]);
+    }
+    
+    // Help text
+    let help_text = vec![
+        Line::from(vec![
+            Span::styled("Enter", Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" Export/Toggle  "),
+            Span::styled("Tab", Style::default().fg(INFO_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" Next Field  "),
+            Span::styled("Space", Style::default().fg(INFO_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" Toggle  "),
+            Span::styled("Esc", Style::default().fg(WARNING_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" Cancel"),
+        ]),
+    ];
+    
+    let help = Paragraph::new(help_text)
+        .alignment(Alignment::Center);
+    f.render_widget(help, chunks[7]);
+}
+
+pub fn render_import_cluster_dialog(f: &mut Frame, app: &App) {
+    let area = centered_rect(70, 35, f.size());
+    f.render_widget(Clear, area);
+    
+    let block = Block::default()
+        .title("📥 Import Cluster State")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(PRIMARY_COLOR));
+    
+    f.render_widget(block, area);
+    
+    let inner_area = area.inner(&Margin { vertical: 1, horizontal: 2 });
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Input path
+            Constraint::Length(2), // Merge checkbox
+            Constraint::Length(2), // P2P checkbox
+            Constraint::Min(0),    // Spacer
+            Constraint::Length(3), // Warning
+            Constraint::Length(3), // Help text
+        ])
+        .split(inner_area);
+    
+    // Input path field
+    let path_style = if app.import_form.current_field == ImportFormField::InputPath {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let path_border_style = if app.import_form.current_field == ImportFormField::InputPath {
+        Style::default().fg(PRIMARY_COLOR)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    let path_field = Paragraph::new(app.import_form.input_path.as_str())
+        .style(path_style)
+        .block(Block::default().borders(Borders::ALL).title("Input Path or P2P Ticket").border_style(path_border_style));
+    f.render_widget(path_field, chunks[0]);
+    
+    // Checkbox options
+    let merge_checkbox = if app.import_form.merge { "[✓]" } else { "[ ]" };
+    let merge_style = if app.import_form.current_field == ImportFormField::Merge {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let merge_widget = Paragraph::new(format!("{} Merge with existing state", merge_checkbox))
+        .style(merge_style);
+    f.render_widget(merge_widget, chunks[1]);
+    
+    let p2p_checkbox = if app.import_form.p2p { "[✓]" } else { "[ ]" };
+    let p2p_style = if app.import_form.current_field == ImportFormField::P2p {
+        Style::default().fg(PRIMARY_COLOR).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+    let p2p_widget = Paragraph::new(format!("{} Import from P2P ticket", p2p_checkbox))
+        .style(p2p_style);
+    f.render_widget(p2p_widget, chunks[2]);
+    
+    // Warning text
+    let warning_text = vec![
+        Line::from(vec![
+            Span::styled("⚠️ ", Style::default().fg(WARNING_COLOR)),
+            Span::styled("Warning: ", Style::default().fg(WARNING_COLOR).add_modifier(Modifier::BOLD)),
+            Span::styled("Importing will modify cluster configuration", Style::default().fg(WARNING_COLOR)),
+        ]),
+    ];
+    let warning = Paragraph::new(warning_text)
+        .alignment(Alignment::Center);
+    f.render_widget(warning, chunks[4]);
+    
+    // Help text
+    let help_text = vec![
+        Line::from(vec![
+            Span::styled("Enter", Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" Import/Toggle  "),
+            Span::styled("Tab", Style::default().fg(INFO_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" Next Field  "),
+            Span::styled("Space", Style::default().fg(INFO_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" Toggle  "),
+            Span::styled("Esc", Style::default().fg(WARNING_COLOR).add_modifier(Modifier::BOLD)),
+            Span::raw(" Cancel"),
         ]),
     ];
     

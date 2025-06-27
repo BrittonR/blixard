@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeConfig {
     pub id: u64,
     pub data_dir: String,

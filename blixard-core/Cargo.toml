@@ -74,6 +74,9 @@ tera = "1.19"
 # P2P networking
 iroh = "0.28"
 
+# Compression
+flate2 = "1.0"
+
 fail = { version = "0.5", optional = true }
 
 # Conditional dependencies based on madsim cfg

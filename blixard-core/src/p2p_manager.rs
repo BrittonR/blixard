@@ -7,15 +7,15 @@
 //! - Transfer queue management
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::iroh_transport::{IrohTransport, DocumentType};
+use crate::iroh_transport::IrohTransport;
 use crate::p2p_image_store::P2pImageStore;
 use std::collections::{HashMap, VecDeque};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::{interval, Duration};
 use serde::{Serialize, Deserialize};
-use tracing::{info, warn, debug};
+use tracing::{info, debug};
 use chrono::{DateTime, Utc};
 
 /// P2P peer information
@@ -219,7 +219,10 @@ impl P2pManager {
         };
         
         self.peers.write().await.insert(peer_info.node_id.clone(), peer_info.clone());
-        self.event_tx.send(P2pEvent::PeerConnected(peer_info.node_id.clone())).await?;
+        self.event_tx.send(P2pEvent::PeerConnected(peer_info.node_id.clone())).await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to send P2P event: {}", e),
+            })?;
         
         Ok(())
     }
