@@ -3,6 +3,7 @@ pub mod types;
 pub mod node;
 pub mod node_shared;
 pub mod grpc_server;
+pub mod grpc_server_legacy;
 pub mod raft_codec;
 pub mod raft_manager;
 pub mod storage;
