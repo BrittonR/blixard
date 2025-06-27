@@ -16,12 +16,17 @@ impl NixFlakeGenerator {
         // Initialize Tera with the template directory
         let mut tera = Tera::default();
         
-        // For now, use inline template instead of loading from file
-        // This ensures the test works without filesystem dependencies
-        let template_content = include_str!("../nix/templates/vm-flake.nix");
-        tera.add_raw_template("vm-flake.nix", template_content)
+        // Load both standard and flake-parts templates
+        let standard_template = include_str!("../nix/templates/vm-flake.nix");
+        tera.add_raw_template("vm-flake.nix", standard_template)
             .map_err(|e| BlixardError::Internal {
-                message: format!("Failed to add template: {}", e),
+                message: format!("Failed to add standard template: {}", e),
+            })?;
+            
+        let flake_parts_template = include_str!("../nix/templates/vm-flake-parts.nix");
+        tera.add_raw_template("vm-flake-parts.nix", flake_parts_template)
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to add flake-parts template: {}", e),
             })?;
         
         Ok(Self {
@@ -32,6 +37,14 @@ impl NixFlakeGenerator {
     }
     
     pub fn generate_vm_flake(&self, config: &VmConfig) -> BlixardResult<String> {
+        self.generate_vm_flake_with_template(config, "vm-flake.nix")
+    }
+    
+    pub fn generate_vm_flake_parts(&self, config: &VmConfig) -> BlixardResult<String> {
+        self.generate_vm_flake_with_template(config, "vm-flake-parts.nix")
+    }
+    
+    fn generate_vm_flake_with_template(&self, config: &VmConfig, template_name: &str) -> BlixardResult<String> {
         let mut context = Context::new();
         
         // Basic configuration
@@ -46,7 +59,8 @@ impl NixFlakeGenerator {
             .unwrap_or_else(|_| self.modules_dir.clone())
             .to_string_lossy()
             .into_owned();
-        context.insert("modules_path", &modules_path);
+        context.insert("blixard_modules_path", &modules_path);
+        context.insert("modules_path", &modules_path); // Keep for compatibility
         context.insert("hypervisor", &config.hypervisor.to_string());
         context.insert("vcpus", &config.vcpus);
         context.insert("memory", &config.memory);
@@ -118,7 +132,17 @@ impl NixFlakeGenerator {
             context.insert("init_command", init_cmd);
         }
         
-        self.tera.render("vm-flake.nix", &context)
+        // Add SSH keys (for flake-parts template)
+        let ssh_keys = vec!["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILYzh3yIsSTOYXkJMFHBKzkakoDfonm3/RED5rqMqhIO britton@framework"];
+        context.insert("ssh_keys", &ssh_keys);
+        
+        // Separate module types for flake-parts template
+        let (flake_modules, file_modules, inline_modules) = self.categorize_modules(config)?;
+        context.insert("flake_modules", &flake_modules);
+        context.insert("file_modules", &file_modules);
+        context.insert("inline_modules", &inline_modules);
+        
+        self.tera.render(template_name, &context)
             .map_err(|e| BlixardError::Internal {
                 message: format!("Failed to render flake template: {}", e),
             })
@@ -150,13 +174,54 @@ impl NixFlakeGenerator {
         Ok(imports)
     }
     
-    /// Write a generated flake to a directory
+    fn categorize_modules(&self, config: &VmConfig) -> BlixardResult<(Vec<String>, Vec<String>, Vec<String>)> {
+        let mut flake_modules = vec![];
+        let mut file_modules = vec![];
+        let mut inline_modules = vec![];
+        
+        // Add flake_modules field
+        for module in &config.flake_modules {
+            flake_modules.push(module.clone());
+        }
+        
+        // Categorize nixos_modules
+        for module in &config.nixos_modules {
+            match module {
+                NixModule::File(path) => {
+                    file_modules.push(format!("./{}", path.display()));
+                }
+                NixModule::FlakePart(name) => {
+                    flake_modules.push(name.clone());
+                }
+                NixModule::Inline(content) => {
+                    inline_modules.push(content.clone());
+                }
+            }
+        }
+        
+        Ok((flake_modules, file_modules, inline_modules))
+    }
+    
+    /// Write a generated flake to a directory (standard template)
     pub fn write_flake(&self, config: &VmConfig, output_dir: &Path) -> BlixardResult<PathBuf> {
+        self.write_flake_with_template(config, output_dir, false)
+    }
+    
+    /// Write a generated flake to a directory (flake-parts template)
+    pub fn write_flake_parts(&self, config: &VmConfig, output_dir: &Path) -> BlixardResult<PathBuf> {
+        self.write_flake_with_template(config, output_dir, true)
+    }
+    
+    fn write_flake_with_template(&self, config: &VmConfig, output_dir: &Path, use_flake_parts: bool) -> BlixardResult<PathBuf> {
         // Create output directory if it doesn't exist
         fs::create_dir_all(output_dir)?;
         
         // Generate the flake content
-        let flake_content = self.generate_vm_flake(config)?;
+        let flake_content = if use_flake_parts {
+            self.generate_vm_flake_parts(config)?
+        } else {
+            self.generate_vm_flake(config)?
+        };
         
         // Write to flake.nix
         let flake_path = output_dir.join("flake.nix");
@@ -207,5 +272,45 @@ mod tests {
         assert!(imports.contains(&"inputs.blixard-modules.nixosModules.monitoring".to_string()));
         assert!(imports.contains(&"./custom.nix".to_string()));
         assert!(imports.contains(&"inputs.blixard-modules.nixosModules.database".to_string()));
+    }
+    
+    #[test]
+    fn test_flake_parts_generation() {
+        let temp_dir = TempDir::new().unwrap();
+        let generator = NixFlakeGenerator::new(
+            temp_dir.path().to_path_buf(),
+            temp_dir.path().join("modules"),
+        ).unwrap();
+        
+        let config = VmConfig {
+            name: "test-vm".to_string(),
+            vm_index: 42,
+            hypervisor: Hypervisor::CloudHypervisor,
+            vcpus: 4,
+            memory: 2048,
+            networks: vec![],
+            volumes: vec![],
+            nixos_modules: vec![
+                NixModule::FlakePart("database".to_string()),
+                NixModule::Inline("{ services.nginx.enable = true; }".to_string()),
+            ],
+            flake_modules: vec!["webserver".to_string(), "monitoring".to_string()],
+            kernel: None,
+            init_command: Some("/run/current-system/sw/bin/echo 'Hello World'".to_string()),
+        };
+        
+        let flake = generator.generate_vm_flake_parts(&config).unwrap();
+        
+        // Verify key elements of flake-parts template
+        assert!(flake.contains("flake-parts.lib.mkFlake"));
+        assert!(flake.contains("perSystem"));
+        assert!(flake.contains("nixosConfigurations.\"test-vm\""));
+        assert!(flake.contains("inputs.blixard-modules.nixosModules.webserver"));
+        assert!(flake.contains("inputs.blixard-modules.nixosModules.monitoring"));
+        assert!(flake.contains("inputs.blixard-modules.nixosModules.database"));
+        assert!(flake.contains("{ services.nginx.enable = true; }"));
+        assert!(flake.contains("Hello World"));
+        assert!(flake.contains("vcpu = 4"));
+        assert!(flake.contains("mem = 2048"));
     }
 }
