@@ -74,7 +74,9 @@ time = "0.3"
 tera = "1.19"
 
 # P2P networking
-iroh = "0.28"
+iroh = "0.90"
+iroh-blobs = "0.90"
+iroh-docs = "0.35"
 
 # Compression
 flate2 = "1.0"

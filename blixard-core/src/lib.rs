@@ -22,9 +22,9 @@ pub mod quota_manager;
 pub mod security;
 pub mod grpc_security;
 pub mod cert_generator;
-// pub mod iroh_transport;  // Temporarily disabled while updating to new Iroh API
-pub mod iroh_transport_stub;
-pub use iroh_transport_stub as iroh_transport;
+pub mod iroh_transport;
+// pub mod iroh_transport_stub;  // Stub no longer needed with updated API
+// pub use iroh_transport_stub as iroh_transport;
 pub mod p2p_image_store;
 pub mod p2p_manager;
 pub mod cluster_state;

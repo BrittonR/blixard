@@ -4,27 +4,10 @@
 
 use crate::error::{BlixardError, BlixardResult};
 use std::path::Path;
-use iroh::docs::DocTicket;
-use iroh::net::NodeAddr;
-// Stub Hash type
-#[derive(Debug, Clone)]
-pub struct Hash(String);
+use iroh::NodeAddr;
 
-impl Hash {
-    pub fn from_hex(_hex: &str) -> Result<Self, std::io::Error> {
-        Ok(Hash("stub_hash".to_string()))
-    }
-    
-    pub fn to_hex(&self) -> String {
-        self.0.clone()
-    }
-}
-
-impl std::fmt::Display for Hash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+// Re-export Hash from iroh-blobs
+pub use iroh_blobs::Hash;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DocumentType {
@@ -56,7 +39,7 @@ impl IrohTransport {
         })
     }
     
-    pub async fn join_doc_from_ticket(&self, _ticket: &DocTicket, _doc_type: DocumentType) -> BlixardResult<()> {
+    pub async fn send_to_peer(&self, _peer_addr: &NodeAddr, _doc_type: DocumentType, _data: &[u8]) -> BlixardResult<()> {
         Err(BlixardError::NotImplemented {
             feature: "Iroh transport".to_string(),
         })
@@ -74,23 +57,10 @@ impl IrohTransport {
         })
     }
     
-    pub async fn write_to_doc(&self, _doc_type: DocumentType, _key: &[u8], _value: &[u8]) -> BlixardResult<()> {
-        Err(BlixardError::NotImplemented {
-            feature: "Iroh transport".to_string(),
-        })
-    }
-    
-    pub async fn read_from_doc(&self, _doc_type: DocumentType, _key: &[u8]) -> BlixardResult<Option<Vec<u8>>> {
-        Ok(None)
-    }
-    
-    pub async fn subscribe_to_doc(&self, _doc_type: DocumentType) -> BlixardResult<()> {
-        Err(BlixardError::NotImplemented {
-            feature: "Iroh transport".to_string(),
-        })
-    }
-    
-    pub async fn get_doc_ticket(&self, _doc_type: DocumentType) -> BlixardResult<DocTicket> {
+    pub async fn accept_connections<F>(&self, _handler: F) -> BlixardResult<()>
+    where
+        F: FnMut(DocumentType, Vec<u8>) + Send + 'static,
+    {
         Err(BlixardError::NotImplemented {
             feature: "Iroh transport".to_string(),
         })

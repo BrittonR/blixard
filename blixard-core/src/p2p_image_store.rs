@@ -8,7 +8,7 @@ use crate::iroh_transport::{IrohTransport, DocumentType};
 use std::path::{Path, PathBuf};
 use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
-use crate::iroh_transport::Hash;
+use iroh_blobs::Hash;
 use tracing::info;
 
 /// Metadata for a VM image
@@ -215,19 +215,15 @@ impl P2pImageStore {
     }
 
     /// Get the Iroh node address for sharing
-    pub async fn get_node_addr(&self) -> BlixardResult<iroh::net::NodeAddr> {
+    pub async fn get_node_addr(&self) -> BlixardResult<iroh::NodeAddr> {
         self.transport.node_addr().await
     }
 
-    /// Get a shareable ticket for the images document
-    pub async fn get_images_ticket(&self) -> BlixardResult<iroh::docs::DocTicket> {
-        self.transport.get_doc_ticket(DocumentType::VmImages).await
-    }
-
-    /// Join an images document from another node
-    pub async fn join_images_from_ticket(&self, ticket: &iroh::docs::DocTicket) -> BlixardResult<()> {
-        self.transport.join_doc_from_ticket(ticket, DocumentType::VmImages).await?;
-        Ok(())
+    /// Send image metadata to a peer
+    pub async fn send_image_metadata(&self, peer_addr: &iroh::NodeAddr, metadata: &VmImageMetadata) -> BlixardResult<()> {
+        let data = serde_json::to_vec(metadata)
+            .map_err(|e| BlixardError::Serialization(e.to_string()))?;
+        self.transport.send_to_peer(peer_addr, DocumentType::VmImages, &data).await
     }
 }
 
