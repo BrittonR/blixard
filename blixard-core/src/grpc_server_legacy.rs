@@ -400,6 +400,9 @@ impl ClusterService for BlixardGrpcService {
                         } else {
                             NodeState::Follower.into()
                         },
+                        p2p_node_id: String::new(),
+                        p2p_addresses: Vec::new(),
+                        p2p_relay_url: String::new(),
                     })
                     .collect();
                 
@@ -414,6 +417,9 @@ impl ClusterService for BlixardGrpcService {
                         "candidate" => NodeState::Candidate.into(),
                         _ => NodeState::Follower.into(),
                     },
+                    p2p_node_id: String::new(),
+                    p2p_addresses: Vec::new(),
+                    p2p_relay_url: String::new(),
                 });
                 
                 tracing::info!("[JOIN] Returning {} peers in join response to node {}", 
@@ -681,6 +687,9 @@ impl ClusterService for BlixardGrpcService {
                 id: node_id,
                 address,
                 state: state.into(),
+                p2p_node_id: String::new(),
+                p2p_addresses: Vec::new(),
+                p2p_relay_url: String::new(),
             });
         }
         
@@ -1551,6 +1560,35 @@ impl ClusterService for BlixardGrpcService {
                 summary: None,
             })),
         }
+    }
+    
+    // P2P operations
+    async fn get_p2p_status(
+        &self,
+        _request: Request<crate::proto::GetP2pStatusRequest>,
+    ) -> Result<Response<crate::proto::GetP2pStatusResponse>, Status> {
+        Err(Status::unimplemented("get_p2p_status not implemented"))
+    }
+    
+    async fn share_vm_image(
+        &self,
+        _request: Request<crate::proto::ShareVmImageRequest>,
+    ) -> Result<Response<crate::proto::ShareVmImageResponse>, Status> {
+        Err(Status::unimplemented("share_vm_image not implemented"))
+    }
+    
+    async fn get_vm_image(
+        &self,
+        _request: Request<crate::proto::GetVmImageRequest>,
+    ) -> Result<Response<crate::proto::GetVmImageResponse>, Status> {
+        Err(Status::unimplemented("get_vm_image not implemented"))
+    }
+    
+    async fn list_p2p_images(
+        &self,
+        _request: Request<crate::proto::ListP2pImagesRequest>,
+    ) -> Result<Response<crate::proto::ListP2pImagesResponse>, Status> {
+        Err(Status::unimplemented("list_p2p_images not implemented"))
     }
 }
 

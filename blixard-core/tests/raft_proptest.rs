@@ -248,6 +248,8 @@ proptest! {
                                     config_path: "/test/path".to_string(),
                                     vcpus: 2,
                                     memory: 1024,
+                                    tenant_id: "default".to_string(),
+                                    ip_address: None,
                                 },
                                 node_id: 1,
                             }

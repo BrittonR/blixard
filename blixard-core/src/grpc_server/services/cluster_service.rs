@@ -59,7 +59,91 @@ impl ClusterService for ClusterServiceImpl {
         &self,
         request: Request<ClusterStatusRequest>,
     ) -> Result<Response<ClusterStatusResponse>, Status> {
-        Err(Status::unimplemented("get_cluster_status not implemented"))
+        use crate::proto::{NodeInfo, NodeState};
+        
+        // TODO: Apply middleware when authentication is needed
+        // self.middleware.authenticate(&request, Permission::ClusterRead).await?;
+        
+        // Get cluster status from Raft configuration (authoritative source)
+        let (leader_id, node_ids, term) = self.node.get_cluster_status().await
+            .map_err(|e| Status::internal(format!("Failed to get cluster status: {}", e)))?;
+        
+        // Get Raft status for state information
+        let raft_status = self.node.get_raft_status().await
+            .map_err(|e| Status::internal(format!("Failed to get Raft status: {}", e)))?;
+        
+        // Get peers for address information
+        let peers = self.node.get_peers().await;
+        
+        // Get our P2P node address if available
+        let p2p_node_addr = self.node.get_p2p_node_addr().await;
+        
+        // Build node list from the authoritative Raft configuration
+        let mut nodes = Vec::new();
+        
+        for node_id in node_ids {
+            let (address, state, p2p_node_id, p2p_addresses, p2p_relay_url) = if node_id == self.node.get_id() {
+                // Self
+                let state = if raft_status.is_leader {
+                    NodeState::Leader
+                } else if raft_status.state == "candidate" {
+                    NodeState::Candidate
+                } else {
+                    NodeState::Follower
+                };
+                
+                // Extract P2P info for self
+                let (p2p_id, p2p_addrs, relay_url) = if let Some(ref addr) = p2p_node_addr {
+                    (
+                        // NodeAddr doesn't have a direct node_id() method, use format
+                        format!("{:?}", addr),
+                        // TODO: Get direct addresses from NodeAddr when API is available
+                        Vec::new(),
+                        // TODO: Get relay URL from NodeAddr when API is available
+                        String::new(),
+                    )
+                } else {
+                    (String::new(), Vec::new(), String::new())
+                };
+                
+                (self.node.get_bind_addr().to_string(), state, p2p_id, p2p_addrs, relay_url)
+            } else {
+                // Peer - get address from peers list
+                let peer_addr = peers.iter()
+                    .find(|p| p.id == node_id)
+                    .map(|p| p.address.clone())
+                    .unwrap_or_else(|| format!("unknown-{}", node_id));
+                    
+                // For peers, we can determine if they're the leader
+                let state = if Some(node_id) == raft_status.leader_id {
+                    NodeState::Leader
+                } else {
+                    // We don't have enough info to know if they're candidates or followers
+                    NodeState::Follower
+                };
+                
+                // TODO: Get P2P info for peers from P2P manager or stored state
+                // For now, return empty P2P info for peers
+                (peer_addr, state, String::new(), Vec::new(), String::new())
+            };
+            
+            nodes.push(NodeInfo {
+                id: node_id,
+                address,
+                state: state.into(),
+                p2p_node_id,
+                p2p_addresses,
+                p2p_relay_url,
+            });
+        }
+        
+        let response = ClusterStatusResponse {
+            leader_id,
+            nodes,
+            term,
+        };
+
+        Ok(Response::new(response))
     }
     
     // Raft communication

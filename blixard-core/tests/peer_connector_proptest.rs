@@ -33,6 +33,9 @@ fn peer_info_strategy() -> impl Strategy<Value = PeerInfo> {
             id,
             address: format!("127.0.0.1:{}", port),
             is_connected: false,
+            p2p_node_id: None,
+            p2p_addresses: vec![],
+            p2p_relay_url: None,
         }
     })
 }

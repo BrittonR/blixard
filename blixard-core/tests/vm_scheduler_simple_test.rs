@@ -114,8 +114,6 @@ async fn test_scheduler_basic_placement() {
         config_path: "".to_string(),
         vcpus: 2,
         memory: 2048,
-            ip_address: None,
-            tenant_id: "test".to_string(),
         tenant_id: "default".to_string(),
         ip_address: None,
     };
@@ -202,8 +200,6 @@ async fn test_scheduler_round_robin() {
         config_path: "".to_string(),
         vcpus: 1,
         memory: 1024,
-            ip_address: None,
-            tenant_id: "test".to_string(),
         tenant_id: "default".to_string(),
         ip_address: None,
     };
@@ -237,8 +233,6 @@ async fn test_scheduler_manual_placement() {
         config_path: "".to_string(),
         vcpus: 2,
         memory: 2048,
-            ip_address: None,
-            tenant_id: "test".to_string(),
         tenant_id: "default".to_string(),
         ip_address: None,
     };
@@ -363,8 +357,6 @@ async fn test_scheduler_bin_packing() {
         config_path: "".to_string(),
         vcpus: 2,
         memory: 2048,
-            ip_address: None,
-            tenant_id: "test".to_string(),
         tenant_id: "default".to_string(),
         ip_address: None,
     };

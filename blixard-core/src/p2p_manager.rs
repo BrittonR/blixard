@@ -7,7 +7,7 @@
 //! - Transfer queue management
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::iroh_transport::IrohTransport;
+use crate::iroh_transport::{IrohTransport, DocumentType};
 use crate::p2p_image_store::P2pImageStore;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
@@ -15,7 +15,7 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::{interval, Duration};
 use serde::{Serialize, Deserialize};
-use tracing::{info, debug};
+use tracing::{info, debug, warn};
 use chrono::{DateTime, Utc};
 
 /// P2P peer information
@@ -198,7 +198,12 @@ impl P2pManager {
         self.event_rx.clone()
     }
     
-    /// Connect to a peer
+    /// Get our P2P node address
+    pub async fn get_node_addr(&self) -> BlixardResult<iroh::NodeAddr> {
+        self.transport.node_addr().await
+    }
+    
+    /// Connect to a peer by gRPC address (legacy)
     pub async fn connect_peer(&self, peer_addr: &str) -> BlixardResult<()> {
         info!("Connecting to peer at {}", peer_addr);
         
@@ -225,6 +230,46 @@ impl P2pManager {
             })?;
         
         Ok(())
+    }
+    
+    /// Connect to a peer using Iroh NodeAddr
+    pub async fn connect_p2p_peer(&self, node_id: u64, peer_addr: &iroh::NodeAddr) -> BlixardResult<()> {
+        info!("Connecting to P2P peer {} with Iroh address", node_id);
+        
+        // Test connection by sending a ping
+        let test_data = format!("ping-from-{}", self.node_id).into_bytes();
+        match self.transport.send_to_peer(peer_addr, DocumentType::ClusterConfig, &test_data).await {
+            Ok(_) => {
+                info!("Successfully connected to P2P peer {}", node_id);
+                
+                // Store peer info
+                let peer_info = PeerInfo {
+                    node_id: node_id.to_string(),
+                    address: peer_addr.node_id.to_string(),
+                    last_seen: Utc::now(),
+                    capabilities: vec!["vm-images".to_string(), "logs".to_string()],
+                    shared_resources: HashMap::new(),
+                    connection_quality: ConnectionQuality {
+                        latency_ms: 10,
+                        bandwidth_mbps: 1000.0,
+                        packet_loss: 0.0,
+                        reliability_score: 1.0,
+                    },
+                };
+                
+                self.peers.write().await.insert(node_id.to_string(), peer_info.clone());
+                self.event_tx.send(P2pEvent::PeerConnected(node_id.to_string())).await
+                    .map_err(|e| BlixardError::Internal {
+                        message: format!("Failed to send P2P event: {}", e),
+                    })?;
+                
+                Ok(())
+            }
+            Err(e) => {
+                warn!("Failed to connect to P2P peer {}: {}", node_id, e);
+                Err(e)
+            }
+        }
     }
     
     /// Request a resource download

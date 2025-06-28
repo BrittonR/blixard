@@ -23,6 +23,8 @@ fn create_test_vm_state(name: &str, node_id: u64) -> VmState {
         config_path: "/tmp/test.nix".to_string(),
         vcpus: 2,
         memory: 1024,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     let now = chrono::Utc::now();

@@ -148,6 +148,8 @@ proptest! {
                 config_path: "/tmp/test.nix".to_string(),
                 vcpus,
                 memory,
+                tenant_id: "default".to_string(),
+                ip_address: None,
             };
             
             let command = match command_type {

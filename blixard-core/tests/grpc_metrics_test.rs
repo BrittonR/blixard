@@ -117,6 +117,8 @@ async fn test_comprehensive_grpc_metrics_instrumentation() {
         config_path: "/tmp/test2.nix".to_string(),
         vcpus: 4,
         memory: 2048,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     let placement = node.shared_state.schedule_vm_placement(&vm_config2, blixard_core::vm_scheduler::PlacementStrategy::MostAvailable).await

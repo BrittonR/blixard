@@ -102,6 +102,8 @@ async fn test_join_during_high_load() {
             config_path: format!("/tmp/{}.nix", vm_name),
             vcpus: 1,
             memory: 512,
+            tenant_id: "default".to_string(),
+            ip_address: None,
         };
         let vm_command = blixard_core::types::VmCommand::Create { 
             config: vm_config, 

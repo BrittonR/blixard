@@ -92,6 +92,8 @@ async fn test_vm_scheduling_multi_node_placement() {
         config_path: "".to_string(),
         vcpus: 2,
         memory: 4096,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     let placement1 = leader.shared_state.schedule_vm_placement(&vm1, PlacementStrategy::MostAvailable).await
@@ -120,6 +122,8 @@ async fn test_vm_scheduling_multi_node_placement() {
             config_path: "".to_string(),
             vcpus: 1,
             memory: 1024,
+            tenant_id: "default".to_string(),
+            ip_address: None,
         };
         
         let placement = leader.shared_state.schedule_vm_placement(&vm, PlacementStrategy::RoundRobin).await
@@ -149,6 +153,8 @@ async fn test_vm_scheduling_multi_node_placement() {
             config_path: "".to_string(),
             vcpus: 2,
             memory: 2048,
+            tenant_id: "default".to_string(),
+            ip_address: None,
         };
         
         let placement = leader.shared_state.schedule_vm_placement(&vm, PlacementStrategy::LeastAvailable).await
@@ -169,6 +175,8 @@ async fn test_vm_scheduling_multi_node_placement() {
         config_path: "".to_string(),
         vcpus: 1,
         memory: 2048,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     // Manual placement to GPU node
@@ -185,6 +193,8 @@ async fn test_vm_scheduling_multi_node_placement() {
         config_path: "".to_string(),
         vcpus: 32,
         memory: 65536,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     let result = leader.shared_state.schedule_vm_placement(&huge_vm, PlacementStrategy::MostAvailable).await;
@@ -247,6 +257,8 @@ async fn test_vm_scheduling_with_node_failures() {
             config_path: "".to_string(),
             vcpus: 2,
             memory: 2048,
+            tenant_id: "default".to_string(),
+            ip_address: None,
         };
         
         // TODO: Fix create_vm_with_scheduling(vm, PlacementStrategy::RoundRobin).await
@@ -270,6 +282,8 @@ async fn test_vm_scheduling_with_node_failures() {
             config_path: "".to_string(),
             vcpus: 1,
             memory: 1024,
+            tenant_id: "default".to_string(),
+            ip_address: None,
         };
         
         let placement = leader.shared_state.schedule_vm_placement(&vm, PlacementStrategy::MostAvailable).await
@@ -296,6 +310,8 @@ async fn test_vm_scheduling_with_node_failures() {
         config_path: "".to_string(),
         vcpus: 1,
         memory: 1024,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     let placement = leader.shared_state.schedule_vm_placement(&vm_recovery, PlacementStrategy::MostAvailable).await
@@ -382,6 +398,8 @@ async fn test_cluster_resource_summary_accuracy() {
         config_path: "".to_string(),
         vcpus: 4,
         memory: 8192,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     // TODO: Fix create_vm_with_scheduling(vm1, PlacementStrategy::Manual { node_id: 1 }).await
     // .expect("Should create VM1");
@@ -391,6 +409,8 @@ async fn test_cluster_resource_summary_accuracy() {
         config_path: "".to_string(),
         vcpus: 2,
         memory: 4096,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     // TODO: Fix create_vm_with_scheduling(vm2, PlacementStrategy::Manual { node_id: 2 }).await
     // .expect("Should create VM2");
@@ -480,6 +500,8 @@ async fn test_vm_migration_scheduling() {
         config_path: "".to_string(),
         vcpus: 2,
         memory: 4096,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     // TODO: Fix create_vm_with_scheduling(vm.clone(), PlacementStrategy::Manual { node_id: 1 }).await
@@ -510,6 +532,8 @@ async fn test_vm_migration_scheduling() {
             config_path: "".to_string(),
             vcpus: 2,
             memory: 2048,
+            tenant_id: "default".to_string(),
+            ip_address: None,
         };
         // TODO: Fix create_vm_with_scheduling(load_vm, PlacementStrategy::Manual { node_id: 1 }).await
         // .expect("Should create load VM");
@@ -587,6 +611,8 @@ async fn test_concurrent_vm_scheduling() {
                 config_path: "".to_string(),
                 vcpus: 1,
                 memory: 1024,
+                tenant_id: "default".to_string(),
+                ip_address: None,
             };
             
             leader_clone.create_vm_with_scheduling(vm, PlacementStrategy::RoundRobin).await

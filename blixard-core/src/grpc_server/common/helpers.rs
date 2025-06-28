@@ -6,8 +6,6 @@ use crate::{
 };
 use tonic::Request;
 
-/// Extract tenant ID from request (re-export from middleware)
-pub use super::middleware::extract_tenant_id;
 
 /// Instrument a gRPC method with tracing and metrics
 pub fn instrument_grpc_method<T>(

@@ -83,6 +83,9 @@ message NodeInfo {
   uint64 id = 1;
   string address = 2;
   NodeState state = 3;
+  string p2p_node_id = 4;  // Iroh node ID (base64 encoded)
+  repeated string p2p_addresses = 5;  // Direct P2P addresses
+  string p2p_relay_url = 6;  // Relay server URL if available
 }
 
 enum NodeState {

@@ -8,9 +8,8 @@ use crate::{
     types::{VmCommand, VmMigrationTask},
     raft_manager::ResourceRequirements,
     resource_quotas::ApiOperation,
-    grpc_server::common::{
-        GrpcMiddleware, vm_status_to_proto, error_to_status,
-    },
+    common::conversions::{error_to_status, vm_status_to_proto},
+    grpc_server::common::GrpcMiddleware,
     proto::{
         CreateVmRequest, CreateVmResponse, DeleteVmRequest, DeleteVmResponse,
         GetVmStatusRequest, GetVmStatusResponse, ListVmsRequest, ListVmsResponse,

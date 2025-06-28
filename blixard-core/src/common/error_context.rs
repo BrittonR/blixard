@@ -103,7 +103,7 @@ impl<T> ResultContext<T> for BlixardResult<T> {
     }
     
     fn to_status(self) -> Result<T, tonic::Status> {
-        self.map_err(crate::grpc_server::common::conversions::error_to_status)
+        self.map_err(crate::common::conversions::error_to_status)
     }
 }
 

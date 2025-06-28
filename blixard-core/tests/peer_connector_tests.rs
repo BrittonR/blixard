@@ -7,6 +7,8 @@
 //! - Error handling and resilience
 //! - Connection state tracking
 
+#![cfg(feature = "test-helpers")]
+
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -276,6 +278,41 @@ impl ClusterService for MockClusterService {
         &self,
         _request: Request<blixard_core::proto::ClusterResourceSummaryRequest>,
     ) -> Result<Response<blixard_core::proto::ClusterResourceSummaryResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
+
+    async fn migrate_vm(
+        &self,
+        _request: Request<blixard_core::proto::MigrateVmRequest>,
+    ) -> Result<Response<blixard_core::proto::MigrateVmResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
+
+    async fn get_p2p_status(
+        &self,
+        _request: Request<blixard_core::proto::GetP2pStatusRequest>,
+    ) -> Result<Response<blixard_core::proto::GetP2pStatusResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
+
+    async fn share_vm_image(
+        &self,
+        _request: Request<blixard_core::proto::ShareVmImageRequest>,
+    ) -> Result<Response<blixard_core::proto::ShareVmImageResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
+
+    async fn get_vm_image(
+        &self,
+        _request: Request<blixard_core::proto::GetVmImageRequest>,
+    ) -> Result<Response<blixard_core::proto::GetVmImageResponse>, Status> {
+        Err(Status::unimplemented("Not implemented in mock"))
+    }
+
+    async fn list_p2p_images(
+        &self,
+        _request: Request<blixard_core::proto::ListP2pImagesRequest>,
+    ) -> Result<Response<blixard_core::proto::ListP2pImagesResponse>, Status> {
         Err(Status::unimplemented("Not implemented in mock"))
     }
 }

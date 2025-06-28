@@ -104,7 +104,7 @@ async fn grpc_handler_example(
     let vm_id = service.create_vm(tenant_id, config)
         .await
         .log_error("Failed to create VM")  // Log on error
-        .map_err(crate::grpc_server::common::conversions::error_to_status)?;  // Convert to gRPC Status
+        .map_err(crate::common::conversions::error_to_status)?;  // Convert to gRPC Status
         
     // Convert to proto response
     let response = crate::proto::CreateVmResponse {

@@ -112,27 +112,34 @@ impl Node {
         let security_manager = Arc::new(crate::security::SecurityManager::new(config.security.clone()).await?);
         self.shared.set_security_manager(security_manager).await;
 
-        // Initialize P2P manager if enabled
-        if config.p2p.enabled {
-            tracing::info!("Initializing P2P manager");
-            let p2p_config = crate::p2p_manager::P2pConfig::default();
-            let p2p_manager = Arc::new(
-                crate::p2p_manager::P2pManager::new(
-                    self.shared.get_id(),
-                    &self.shared.config.data_dir,
-                    p2p_config,
-                ).await?
-            );
-            self.shared.set_p2p_manager(p2p_manager.clone()).await;
-            
-            // Start P2P services in background
-            let p2p_handle = p2p_manager.clone();
-            tokio::spawn(async move {
-                if let Err(e) = p2p_handle.start().await {
-                    tracing::error!("P2P manager failed to start: {}", e);
-                }
-            });
-        }
+        // TODO: Re-enable P2P when implementation is fixed
+        // // Initialize P2P manager if enabled
+        // if config.p2p.enabled {
+        //     tracing::info!("Initializing P2P manager");
+        //     let p2p_config = crate::p2p_manager::P2pConfig::default();
+        //     let p2p_manager = Arc::new(
+        //         crate::p2p_manager::P2pManager::new(
+        //             self.shared.get_id(),
+        //             std::path::Path::new(&self.shared.config.data_dir),
+        //             p2p_config,
+        //         ).await?
+        //     );
+        //     self.shared.set_p2p_manager(p2p_manager.clone()).await;
+        //     
+        //     // Get and store our P2P node address
+        //     if let Ok(node_addr) = p2p_manager.get_node_addr().await {
+        //         self.shared.set_p2p_node_addr(node_addr).await;
+        //         tracing::info!("P2P node initialized with address");
+        //     }
+        //     
+        //     // Start P2P services in background
+        //     let p2p_handle = p2p_manager.clone();
+        //     tokio::spawn(async move {
+        //         if let Err(e) = p2p_handle.start().await {
+        //             tracing::error!("P2P manager failed to start: {}", e);
+        //         }
+        //     });
+        // }
 
         // Initialize Raft manager
         // If join_addr is provided, don't bootstrap as single node

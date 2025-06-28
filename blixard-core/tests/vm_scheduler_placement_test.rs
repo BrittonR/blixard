@@ -87,6 +87,8 @@ async fn test_scheduler_placement_decisions() {
         config_path: "".to_string(),
         vcpus: 2,
         memory: 4096,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     let placement1 = leader.shared_state.schedule_vm_placement(&vm1, PlacementStrategy::MostAvailable).await
@@ -113,6 +115,8 @@ async fn test_scheduler_placement_decisions() {
         config_path: "".to_string(),
         vcpus: 1,
         memory: 1024,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     let placement2 = leader.shared_state.schedule_vm_placement(&vm2, PlacementStrategy::Manual { node_id: 2 }).await
@@ -127,6 +131,8 @@ async fn test_scheduler_placement_decisions() {
         config_path: "".to_string(),
         vcpus: 32,
         memory: 65536,
+        tenant_id: "default".to_string(),
+        ip_address: None,
     };
     
     let result = leader.shared_state.schedule_vm_placement(&huge_vm, PlacementStrategy::MostAvailable).await;

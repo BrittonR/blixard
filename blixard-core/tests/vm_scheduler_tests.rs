@@ -66,6 +66,8 @@ fn add_vm(
             config_path: "".to_string(),
             vcpus,
             memory,
+            tenant_id: "default".to_string(),
+            ip_address: None,
         };
         
         let vm_state = VmState {

@@ -9,6 +9,7 @@ use crate::security::{SecurityManager, AuthResult, Permission, extract_auth_toke
 use crate::error::{BlixardError, BlixardResult};
 use std::sync::Arc;
 use tonic::{Request, Status};
+use tonic::metadata::MetadataMap;
 use tracing::{debug, warn};
 
 /// Security middleware for gRPC services
@@ -169,8 +170,7 @@ mod tests {
         let middleware = GrpcSecurityMiddleware::new(security_manager);
         
         // Create a mock request without authentication
-        let metadata = MetadataMap::new();
-        let request = Request::from_parts(metadata, Extensions::new(), ());
+        let request = Request::new(());
         
         // Should succeed with disabled authentication
         let context = middleware.authenticate_request(&request).await.unwrap();

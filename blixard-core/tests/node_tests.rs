@@ -1,4 +1,7 @@
 // Comprehensive Node functionality tests
+
+#![cfg(feature = "test-helpers")]
+
 use tokio::time::{timeout, Duration};
 use tempfile::TempDir;
 use redb::Database;
@@ -78,8 +81,6 @@ async fn test_vm_command_send() {
         name: "test-vm".to_string(),
         config_path: "/tmp/test.nix".to_string(),
         memory: 512,
-            ip_address: None,
-            tenant_id: "test".to_string(),
         vcpus: 1,
         tenant_id: "default".to_string(),
         ip_address: None,
@@ -103,8 +104,6 @@ async fn test_vm_command_send_without_initialization() {
         name: "test-vm".to_string(),
         config_path: "/tmp/test.nix".to_string(),
         memory: 512,
-            ip_address: None,
-            tenant_id: "test".to_string(),
         vcpus: 1,
         tenant_id: "default".to_string(),
         ip_address: None,
@@ -292,8 +291,6 @@ async fn test_database_persistence_across_restarts() {
             name: "persist-test-vm".to_string(),
             config_path: "/tmp/test.nix".to_string(),
             memory: 1024,
-            ip_address: None,
-            tenant_id: "test".to_string(),
             vcpus: 2,
             tenant_id: "default".to_string(),
             ip_address: None,

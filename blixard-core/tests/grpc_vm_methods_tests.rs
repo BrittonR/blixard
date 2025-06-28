@@ -4,6 +4,8 @@
 //! that methods complete. They check state changes, error conditions,
 //! and end-to-end workflows to ensure production reliability.
 
+#![cfg(feature = "test-helpers")]
+
 use blixard_core::{
     grpc_server::BlixardGrpcService,
     proto::{

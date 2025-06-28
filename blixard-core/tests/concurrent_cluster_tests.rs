@@ -58,6 +58,8 @@ async fn test_leader_change_during_join() {
                 config_path: format!("/tmp/disruption-vm-{}.nix", i),
                 vcpus: 1,
                 memory: 512,
+                tenant_id: "default".to_string(),
+                ip_address: None,
             };
             let vm_command = blixard_core::types::VmCommand::Create {
                 config: vm_config,
@@ -144,6 +146,8 @@ async fn test_concurrent_operations_on_different_nodes() {
                     config_path: format!("/tmp/{}.nix", vm_name),
                     vcpus: 1,
                     memory: 256,
+                    tenant_id: "default".to_string(),
+                    ip_address: None,
                 };
                 let vm_command = blixard_core::types::VmCommand::Create {
                     config: vm_config,

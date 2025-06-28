@@ -65,6 +65,9 @@ pub struct PeerInfo {
     pub id: u64,
     pub address: String,
     pub is_connected: bool,
+    pub p2p_node_id: Option<String>,  // Base64 encoded Iroh node ID
+    pub p2p_addresses: Vec<String>,   // Direct P2P addresses
+    pub p2p_relay_url: Option<String>, // Relay server URL
 }
 
 /// Shared node state that is Send + Sync
@@ -123,8 +126,12 @@ pub struct SharedNodeState {
     // Peer connector for managing connections
     peer_connector: RwLock<Option<Arc<crate::peer_connector::PeerConnector>>>,
     
+    // TODO: Re-enable when P2P is fixed
     // P2P manager for peer-to-peer data transfer
-    p2p_manager: RwLock<Option<Arc<crate::p2p_manager::P2pManager>>>,
+    // p2p_manager: RwLock<Option<Arc<crate::p2p_manager::P2pManager>>>,
+    
+    // Our own P2P node address for sharing with peers
+    p2p_node_addr: RwLock<Option<iroh::NodeAddr>>,
 }
 
 /// Thread-safe wrapper for VM manager operations
@@ -156,7 +163,9 @@ impl SharedNodeState {
             }),
             peers: RwLock::new(HashMap::new()),
             peer_connector: RwLock::new(None),
-            p2p_manager: RwLock::new(None),
+            // TODO: Re-enable when P2P is fixed
+            // p2p_manager: RwLock::new(None),
+            p2p_node_addr: RwLock::new(None),
         }
     }
     
@@ -251,8 +260,9 @@ impl SharedNodeState {
         // Clear peer connector
         *self.peer_connector.write().await = None;
         
+        // TODO: Re-enable when P2P is fixed
         // Clear P2P manager
-        *self.p2p_manager.write().await = None;
+        // *self.p2p_manager.write().await = None;
         
         // Clear all channel senders
         *self.raft_proposal_tx.lock().await = None;
@@ -279,14 +289,25 @@ impl SharedNodeState {
         self.peer_connector.read().await.clone()
     }
     
-    /// Set the P2P manager
-    pub async fn set_p2p_manager(&self, manager: Arc<crate::p2p_manager::P2pManager>) {
-        *self.p2p_manager.write().await = Some(manager);
+    // TODO: Re-enable when P2P is fixed
+    // /// Set the P2P manager
+    // pub async fn set_p2p_manager(&self, manager: Arc<crate::p2p_manager::P2pManager>) {
+    //     *self.p2p_manager.write().await = Some(manager);
+    // }
+    // 
+    // /// Get the P2P manager
+    // pub async fn get_p2p_manager(&self) -> Option<Arc<crate::p2p_manager::P2pManager>> {
+    //     self.p2p_manager.read().await.clone()
+    // }
+    
+    /// Set our P2P node address
+    pub async fn set_p2p_node_addr(&self, addr: iroh::NodeAddr) {
+        *self.p2p_node_addr.write().await = Some(addr);
     }
     
-    /// Get the P2P manager
-    pub async fn get_p2p_manager(&self) -> Option<Arc<crate::p2p_manager::P2pManager>> {
-        self.p2p_manager.read().await.clone()
+    /// Get our P2P node address
+    pub async fn get_p2p_node_addr(&self) -> Option<iroh::NodeAddr> {
+        self.p2p_node_addr.read().await.clone()
     }
     
     /// Send a raft proposal
@@ -933,6 +954,9 @@ impl SharedNodeState {
             id,
             address,
             is_connected: false,
+            p2p_node_id: None,
+            p2p_addresses: Vec::new(),
+            p2p_relay_url: None,
         });
         Ok(())
     }

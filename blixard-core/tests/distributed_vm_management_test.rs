@@ -121,8 +121,6 @@ async fn test_distributed_vm_scheduling() {
             memory: 512,
             ip_address: None,
             tenant_id: "test".to_string(),
-            ip_address: None,
-            tenant_id: "test".to_string(),
         };
         
         // Use the scheduler to determine placement

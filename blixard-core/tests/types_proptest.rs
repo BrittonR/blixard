@@ -104,6 +104,8 @@ proptest! {
             config_path: config_path.clone(),
             vcpus,
             memory,
+            tenant_id: "default".to_string(),
+            ip_address: None,
         };
         
         // Test JSON serialization roundtrip
@@ -179,6 +181,8 @@ proptest! {
             config_path,
             vcpus,
             memory,
+            tenant_id: "default".to_string(),
+            ip_address: None,
         };
         
         let now = chrono::Utc::now();
@@ -239,6 +243,8 @@ proptest! {
             config_path,
             vcpus,
             memory,
+            tenant_id: "default".to_string(),
+            ip_address: None,
         };
         
         let command = match command_type {
@@ -305,6 +311,8 @@ proptest! {
             config_path: "/tmp/test.nix".to_string(),
             vcpus,
             memory,
+            tenant_id: "default".to_string(),
+            ip_address: None,
         };
         
         // Basic constraints that should always hold

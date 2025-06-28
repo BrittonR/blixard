@@ -162,6 +162,8 @@ async fn test_large_cluster_concurrent_operations() {
                     config_path: format!("/tmp/{}.nix", vm_name),
                     vcpus: 1,
                     memory: 128, // Small VMs for testing
+                    tenant_id: "default".to_string(),
+                    ip_address: None,
                 };
                 let vm_command = VmCommand::Create {
                     config: vm_config,

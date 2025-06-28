@@ -4,7 +4,8 @@
 //! including node configurations, VM definitions, and metadata.
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::iroh_transport::{IrohTransport, DocumentType};
+// TODO: Re-enable when P2P is fixed
+// use crate::iroh_transport::{IrohTransport, DocumentType};
 use crate::types::{NodeConfig, VmConfig};
 use crate::storage::Storage;
 use serde::{Deserialize, Serialize};
@@ -89,16 +90,17 @@ impl Default for ExportOptions {
 pub struct ClusterStateManager {
     node_id: u64,
     storage: Arc<dyn Storage>,
-    transport: Option<Arc<IrohTransport>>,
+    // TODO: Re-enable when P2P is fixed
+    // transport: Option<Arc<IrohTransport>>,
 }
 
 impl ClusterStateManager {
     /// Create a new cluster state manager
-    pub fn new(node_id: u64, storage: Arc<dyn Storage>, transport: Option<Arc<IrohTransport>>) -> Self {
+    pub fn new(node_id: u64, storage: Arc<dyn Storage>, _transport: Option<()>) -> Self {
         Self {
             node_id,
             storage,
-            transport,
+            // transport,
         }
     }
     
@@ -245,33 +247,34 @@ impl ClusterStateManager {
         self.import_state(&state, merge).await
     }
     
-    /// Share cluster state via P2P
-    pub async fn share_state_p2p(
-        &self,
-        cluster_name: &str,
-        options: &ExportOptions,
-    ) -> BlixardResult<String> {
-        let transport = self.transport.as_ref()
-            .ok_or_else(|| BlixardError::Internal {
-                message: "P2P transport not available".to_string(),
-            })?;
-        
-        let state = self.export_state(cluster_name, options).await?;
-        
-        // Serialize state
-        let json_data = serde_json::to_vec(&state)
-            .map_err(|e| BlixardError::JsonError(e))?;
-        
-        // Write to cluster config document
-        let key = format!("cluster-state-{}", Utc::now().timestamp()).into_bytes();
-        transport.write_to_doc(DocumentType::ClusterConfig, &key, &json_data).await?;
-        
-        // Get document ticket for sharing
-        let ticket = transport.get_doc_ticket(DocumentType::ClusterConfig).await?;
-        
-        info!("Cluster state shared via P2P");
-        Ok(ticket.to_string())
-    }
+    // TODO: Re-enable when P2P is fixed
+    // /// Share cluster state via P2P
+    // pub async fn share_state_p2p(
+    //     &self,
+    //     cluster_name: &str,
+    //     options: &ExportOptions,
+    // ) -> BlixardResult<String> {
+    //     let transport = self.transport.as_ref()
+    //         .ok_or_else(|| BlixardError::Internal {
+    //             message: "P2P transport not available".to_string(),
+    //         })?;
+    //     
+    //     let state = self.export_state(cluster_name, options).await?;
+    //     
+    //     // Serialize state
+    //     let json_data = serde_json::to_vec(&state)
+    //         .map_err(|e| BlixardError::JsonError(e))?;
+    //     
+    //     // Write to cluster config document
+    //     let key = format!("cluster-state-{}", Utc::now().timestamp()).into_bytes();
+    //     transport.write_to_doc(DocumentType::ClusterConfig, &key, &json_data).await?;
+    //     
+    //     // Get document ticket for sharing
+    //     let ticket = transport.get_doc_ticket(DocumentType::ClusterConfig).await?;
+    //     
+    //     info!("Cluster state shared via P2P");
+    //     Ok(ticket.to_string())
+    // }
     
     /// Import cluster state from P2P
     pub async fn import_state_p2p(
@@ -279,27 +282,34 @@ impl ClusterStateManager {
         ticket: &str,
         merge: bool,
     ) -> BlixardResult<()> {
-        let transport = self.transport.as_ref()
-            .ok_or_else(|| BlixardError::Internal {
-                message: "P2P transport not available".to_string(),
-            })?;
+        // TODO: Re-enable when P2P is fixed
+        return Err(BlixardError::NotImplemented {
+            feature: "P2P import".to_string(),
+        });
+        #[allow(unreachable_code)]
+        // let transport = self.transport.as_ref()
+        //     .ok_or_else(|| BlixardError::Internal {
+        //         message: "P2P transport not available".to_string(),
+        //     })?;
         
         // Parse and join document
-        let doc_ticket = ticket.parse()
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Invalid document ticket: {}", e),
-            })?;
+        // let doc_ticket = ticket.parse()
+        //     .map_err(|e| BlixardError::Internal {
+        //         message: format!("Invalid document ticket: {}", e),
+        //     })?;
         
-        transport.join_doc_from_ticket(&doc_ticket, DocumentType::ClusterConfig).await?;
+        // transport.join_doc_from_ticket(&doc_ticket, DocumentType::ClusterConfig).await?;
         
         // Read the latest cluster state
         // For now, we'll use a simple approach - in production, you'd want to
         // list all keys and find the most recent one
         let key = b"cluster-state-latest";
-        let data = transport.read_from_doc(DocumentType::ClusterConfig, key).await?
-            .ok_or_else(|| BlixardError::NotFound {
+        let data = Vec::new(); // transport.read_from_doc(DocumentType::ClusterConfig, key).await?
+        if data.is_empty() {
+            return Err(BlixardError::NotFound {
                 resource: "Cluster state in P2P document".to_string(),
-            })?;
+            });
+        }
         
         let state: ClusterState = serde_json::from_slice(&data)
             .map_err(|e| BlixardError::JsonError(e))?;
