@@ -27,6 +27,7 @@ pub mod iroh_transport;
 pub mod p2p_image_store;
 pub mod p2p_manager;
 pub mod cluster_state;
+pub mod transport;
 pub mod vm_health_monitor;
 pub mod vm_auto_recovery;
 pub mod vm_network_isolation;

@@ -103,6 +103,12 @@ impl IrohTransport {
         // For now, just return NodeAddr with node_id
         Ok(NodeAddr::new(node_id))
     }
+    
+    /// Get the underlying Iroh endpoint and node ID (for Raft transport)
+    pub fn endpoint(&self) -> (Endpoint, iroh::NodeId) {
+        let node_id = self.endpoint.node_id();
+        (self.endpoint.clone(), node_id)
+    }
 
     /// Connect to a peer
     async fn connect_to_peer(&self, addr: &NodeAddr, doc_type: DocumentType) -> BlixardResult<Connection> {

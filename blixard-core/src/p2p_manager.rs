@@ -203,6 +203,11 @@ impl P2pManager {
         self.transport.node_addr().await
     }
     
+    /// Get the underlying Iroh endpoint (for Raft transport)
+    pub fn get_endpoint(&self) -> (iroh::Endpoint, iroh::NodeId) {
+        self.transport.endpoint()
+    }
+    
     /// Connect to a peer by gRPC address (legacy)
     pub async fn connect_peer(&self, peer_addr: &str) -> BlixardResult<()> {
         info!("Connecting to peer at {}", peer_addr);

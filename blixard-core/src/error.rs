@@ -76,6 +76,12 @@ pub enum BlixardError {
     
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
+    
+    #[error("gRPC error: {0}")]
+    GrpcError(String),
+    
+    #[error("P2P error: {0}")]
+    P2PError(String),
 }
 
 pub type Result<T> = std::result::Result<T, BlixardError>;

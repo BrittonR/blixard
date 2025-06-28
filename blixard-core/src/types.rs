@@ -9,6 +9,8 @@ pub struct NodeConfig {
     pub join_addr: Option<String>,
     pub use_tailscale: bool,
     pub vm_backend: String, // Backend type: "mock", "microvm", "docker", etc.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport_config: Option<crate::transport::config::TransportConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

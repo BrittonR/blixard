@@ -1,4 +1,5 @@
 // Property-based testing for node functionality
+#![cfg(feature = "test-helpers")]
 
 use proptest::prelude::*;
 use tokio::time::Duration;

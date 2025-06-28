@@ -1,4 +1,5 @@
 pub mod orchestrator;
+pub mod tui;
 
 pub use orchestrator::BlixardOrchestrator;
 

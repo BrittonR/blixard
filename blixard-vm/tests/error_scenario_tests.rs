@@ -54,6 +54,8 @@ mod error_scenario_tests {
             config_path: "".to_string(),
             vcpus: 0,  // Invalid: zero CPUs
             memory: 0, // Invalid: zero memory
+            tenant_id: "test".to_string(),
+            ip_address: None,
         };
         
         let result = backend.create_vm(&invalid_config, 1).await;
@@ -65,6 +67,8 @@ mod error_scenario_tests {
             config_path: "".to_string(),
             vcpus: u32::MAX,     // Invalid: too many CPUs
             memory: u32::MAX,    // Invalid: too much memory
+            tenant_id: "test".to_string(),
+            ip_address: None,
         };
         
         let result = backend.create_vm(&invalid_config, 1).await;

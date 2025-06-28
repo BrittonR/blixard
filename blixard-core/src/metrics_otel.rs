@@ -462,7 +462,10 @@ impl Drop for Timer {
 
 /// Common attribute keys
 pub mod attributes {
-    use opentelemetry::KeyValue;
+    use opentelemetry::{KeyValue, Key};
+    
+    pub const TRANSPORT_TYPE: Key = Key::from_static_str("transport.type");
+    pub const MESSAGE_TYPE: Key = Key::from_static_str("message.type");
     
     pub fn node_id(id: u64) -> KeyValue {
         KeyValue::new("node.id", id as i64)

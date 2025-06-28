@@ -28,6 +28,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config_path: "".to_string(),
         vcpus: 1,
         memory: 512, // Smaller for faster startup
+        tenant_id: "default".to_string(),
+        ip_address: Some("10.0.0.100".to_string()),
     };
     
     println!("📦 Creating VM '{}'...", vm_config.name);

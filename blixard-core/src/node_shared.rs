@@ -307,6 +307,18 @@ impl SharedNodeState {
         self.p2p_node_addr.read().await.clone()
     }
     
+    /// Get the Iroh endpoint for Raft transport
+    pub async fn get_iroh_endpoint(&self) -> BlixardResult<(iroh::Endpoint, iroh::NodeId)> {
+        // Get the P2P manager
+        let p2p_manager = self.get_p2p_manager().await
+            .ok_or_else(|| BlixardError::NotInitialized {
+                component: "P2P manager".to_string(),
+            })?;
+        
+        // Get the endpoint from the P2P manager
+        Ok(p2p_manager.get_endpoint())
+    }
+    
     /// Send a raft proposal
     pub async fn send_raft_proposal(&self, proposal: RaftProposal) -> BlixardResult<()> {
         let tx = self.raft_proposal_tx.lock().await;
