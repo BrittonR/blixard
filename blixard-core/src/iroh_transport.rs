@@ -214,31 +214,37 @@ impl IrohTransport {
     }
 
     /// Accept incoming connections and handle them
-    pub async fn accept_connections<F>(&self, mut handler: F) -> BlixardResult<()>
+    pub async fn accept_connections<F>(&self, handler: F) -> BlixardResult<()>
     where
-        F: FnMut(DocumentType, Vec<u8>) + Send + 'static,
+        F: Fn(DocumentType, Vec<u8>) + Send + Sync + 'static,
     {
-        while let Ok(incoming) = self.endpoint.accept().await {
-            let alpn = incoming.alpn();
-            let doc_type = match alpn {
-                b"cluster-config" => DocumentType::ClusterConfig,
-                b"vm-images" => DocumentType::VmImages,
-                b"logs" => DocumentType::Logs,
-                b"metrics" => DocumentType::Metrics,
-                b"file-transfer" => DocumentType::FileTransfer,
-                _ => continue,
-            };
-            
-            let conn = match incoming.accept() {
-                Ok(conn) => conn,
-                Err(_) => continue,
-            };
+        let handler = Arc::new(handler);
+        
+        while let Some(incoming) = self.endpoint.accept().await {
+            let handler = handler.clone();
             
             tokio::spawn(async move {
+                // Accept the connection
+                let conn = match incoming.await {
+                    Ok(conn) => conn,
+                    Err(_) => return,
+                };
+                
+                // Get ALPN from the connection
+                let alpn = conn.alpn();
+                let doc_type = match alpn.as_deref() {
+                    Some(b"cluster-config") => DocumentType::ClusterConfig,
+                    Some(b"vm-images") => DocumentType::VmImages,
+                    Some(b"logs") => DocumentType::Logs,
+                    Some(b"metrics") => DocumentType::Metrics,
+                    Some(b"file-transfer") => DocumentType::FileTransfer,
+                    _ => return,
+                };
+                
                 while let Ok(mut recv_stream) = conn.accept_uni().await {
                     let mut data = Vec::new();
-                    if recv_stream.read_to_end(&mut data).await.is_ok() {
-                        handler(doc_type, data);
+                    if let Ok(_) = tokio::io::AsyncReadExt::read_to_end(&mut recv_stream, &mut data).await {
+                        handler(doc_type.clone(), data);
                     }
                 }
             });

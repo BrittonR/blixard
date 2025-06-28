@@ -57,7 +57,7 @@ impl P2pImageStore {
         let transport = IrohTransport::new(node_id, data_dir).await?;
         
         // Create or join the VM images document
-        transport.create_or_join_doc(DocumentType::VmImages).await?;
+        transport.create_or_join_doc(DocumentType::VmImages, true).await?;
 
         Ok(Self {
             transport,
@@ -104,7 +104,7 @@ impl P2pImageStore {
         // Store metadata in the document
         let key = format!("image:{}:{}", name, version);
         let metadata_json = serde_json::to_vec(&metadata)?;
-        self.transport.write_to_doc(DocumentType::VmImages, key.as_bytes(), metadata_json.as_slice()).await?;
+        self.transport.write_to_doc(DocumentType::VmImages, &key, metadata_json.as_slice()).await?;
 
         info!("VM image {} v{} uploaded successfully with hash {}", name, version, content_hash);
         Ok(metadata)
@@ -125,11 +125,12 @@ impl P2pImageStore {
     pub async fn get_image_metadata(&self, name: &str, version: &str) -> BlixardResult<Option<VmImageMetadata>> {
         let key = format!("image:{}:{}", name, version);
         
-        if let Some(data) = self.transport.read_from_doc(DocumentType::VmImages, key.as_bytes()).await? {
-            let metadata: VmImageMetadata = serde_json::from_slice(&data)?;
-            Ok(Some(metadata))
-        } else {
-            Ok(None)
+        match self.transport.read_from_doc(DocumentType::VmImages, &key).await {
+            Ok(data) => {
+                let metadata: VmImageMetadata = serde_json::from_slice(&data)?;
+                Ok(Some(metadata))
+            }
+            Err(_) => Ok(None),
         }
     }
 
@@ -143,8 +144,9 @@ impl P2pImageStore {
                 resource: format!("VM image {}:{}", name, version),
             })?;
 
-        // Parse hash
-        let hash = Hash::from_hex(&metadata.content_hash)
+        // Parse hash using FromStr trait
+        use std::str::FromStr;
+        let hash = Hash::from_str(&metadata.content_hash)
             .map_err(|e| BlixardError::Internal {
                 message: format!("Invalid hash format: {}", e),
             })?;
@@ -222,7 +224,7 @@ impl P2pImageStore {
     /// Send image metadata to a peer
     pub async fn send_image_metadata(&self, peer_addr: &iroh::NodeAddr, metadata: &VmImageMetadata) -> BlixardResult<()> {
         let data = serde_json::to_vec(metadata)
-            .map_err(|e| BlixardError::Serialization(e.to_string()))?;
+            .map_err(|e| BlixardError::JsonError(e))?;
         self.transport.send_to_peer(peer_addr, DocumentType::VmImages, &data).await
     }
 }

@@ -126,9 +126,8 @@ pub struct SharedNodeState {
     // Peer connector for managing connections
     peer_connector: RwLock<Option<Arc<crate::peer_connector::PeerConnector>>>,
     
-    // TODO: Re-enable when P2P is fixed
     // P2P manager for peer-to-peer data transfer
-    // p2p_manager: RwLock<Option<Arc<crate::p2p_manager::P2pManager>>>,
+    p2p_manager: RwLock<Option<Arc<crate::p2p_manager::P2pManager>>>,
     
     // Our own P2P node address for sharing with peers
     p2p_node_addr: RwLock<Option<iroh::NodeAddr>>,
@@ -163,8 +162,7 @@ impl SharedNodeState {
             }),
             peers: RwLock::new(HashMap::new()),
             peer_connector: RwLock::new(None),
-            // TODO: Re-enable when P2P is fixed
-            // p2p_manager: RwLock::new(None),
+            p2p_manager: RwLock::new(None),
             p2p_node_addr: RwLock::new(None),
         }
     }
@@ -289,16 +287,15 @@ impl SharedNodeState {
         self.peer_connector.read().await.clone()
     }
     
-    // TODO: Re-enable when P2P is fixed
-    // /// Set the P2P manager
-    // pub async fn set_p2p_manager(&self, manager: Arc<crate::p2p_manager::P2pManager>) {
-    //     *self.p2p_manager.write().await = Some(manager);
-    // }
-    // 
-    // /// Get the P2P manager
-    // pub async fn get_p2p_manager(&self) -> Option<Arc<crate::p2p_manager::P2pManager>> {
-    //     self.p2p_manager.read().await.clone()
-    // }
+    /// Set the P2P manager
+    pub async fn set_p2p_manager(&self, manager: Arc<crate::p2p_manager::P2pManager>) {
+        *self.p2p_manager.write().await = Some(manager);
+    }
+    
+    /// Get the P2P manager
+    pub async fn get_p2p_manager(&self) -> Option<Arc<crate::p2p_manager::P2pManager>> {
+        self.p2p_manager.read().await.clone()
+    }
     
     /// Set our P2P node address
     pub async fn set_p2p_node_addr(&self, addr: iroh::NodeAddr) {
