@@ -249,7 +249,7 @@ impl crate::proto::cluster_service_server::ClusterService for VmServiceImpl {
         
         let req = request.into_inner();
         
-        match self.create_vm(req.name.clone(), req.vcpus, req.memory_mb).await {
+        match VmService::create_vm(self, req.name.clone(), req.vcpus, req.memory_mb).await {
             Ok(vm_id) => Ok(Response::new(CreateVmResponse {
                 success: true,
                 message: format!("VM '{}' created successfully", req.name),
@@ -279,7 +279,7 @@ impl crate::proto::cluster_service_server::ClusterService for VmServiceImpl {
         
         let req = request.into_inner();
         
-        match self.start_vm(&req.name).await {
+        match VmService::start_vm(self, &req.name).await {
             Ok(()) => Ok(Response::new(StartVmResponse {
                 success: true,
                 message: format!("VM '{}' start command issued", req.name),
@@ -307,7 +307,7 @@ impl crate::proto::cluster_service_server::ClusterService for VmServiceImpl {
         
         let req = request.into_inner();
         
-        match self.stop_vm(&req.name).await {
+        match VmService::stop_vm(self, &req.name).await {
             Ok(()) => Ok(Response::new(StopVmResponse {
                 success: true,
                 message: format!("VM '{}' stop command issued", req.name),
@@ -335,7 +335,7 @@ impl crate::proto::cluster_service_server::ClusterService for VmServiceImpl {
         
         let req = request.into_inner();
         
-        match self.delete_vm(&req.name).await {
+        match VmService::delete_vm(self, &req.name).await {
             Ok(()) => Ok(Response::new(DeleteVmResponse {
                 success: true,
                 message: format!("VM '{}' deleted successfully", req.name),
@@ -361,7 +361,7 @@ impl crate::proto::cluster_service_server::ClusterService for VmServiceImpl {
         );
         metrics.grpc_requests_total.add(1, &[attributes::method("list_vms")]);
         
-        match self.list_vms().await {
+        match VmService::list_vms(self).await {
             Ok(vms) => {
                 let vm_infos = vms.into_iter().map(|(config, status)| {
                     VmInfo {
@@ -396,7 +396,7 @@ impl crate::proto::cluster_service_server::ClusterService for VmServiceImpl {
         
         let req = request.into_inner();
         
-        match self.get_vm_status(&req.name).await {
+        match VmService::get_vm_status(self, &req.name).await {
             Ok(Some((config, status))) => {
                 Ok(Response::new(GetVmStatusResponse {
                     found: true,
@@ -436,7 +436,7 @@ impl crate::proto::cluster_service_server::ClusterService for VmServiceImpl {
         
         let req = request.into_inner();
         
-        match self.migrate_vm(&req.vm_name, req.target_node_id, req.live_migration, req.force).await {
+        match VmService::migrate_vm(self, &req.vm_name, req.target_node_id, req.live_migration, req.force).await {
             Ok(()) => Ok(Response::new(MigrateVmResponse {
                 success: true,
                 message: format!("Migration of VM '{}' started", req.vm_name),

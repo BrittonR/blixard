@@ -74,6 +74,9 @@ pub enum BlixardError {
     #[error("Resource not found: {resource}")]
     NotFound { resource: String },
     
+    #[error("Not initialized: {component}")]
+    NotInitialized { component: String },
+    
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
     

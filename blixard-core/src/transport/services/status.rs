@@ -51,11 +51,10 @@ impl StatusService for StatusServiceImpl {
         let leader_id = raft_status.leader_id.unwrap_or(0);
         let term = raft_status.term;
         
-        // Get all configured node IDs from Raft
-        let node_ids = self.node.get_raft_node_ids().await
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Failed to get node IDs: {}", e),
-            })?;
+        // Get all configured node IDs from peers
+        let peers = self.node.get_peers().await;
+        let mut node_ids = vec![self.node.get_id()];
+        node_ids.extend(peers.iter().map(|p| p.id));
         
         // Get peers for address information
         let peers = self.node.get_peers().await;
@@ -96,15 +95,18 @@ impl StatusService for StatusServiceImpl {
                 if let Some(p2p_manager) = self.node.get_p2p_manager().await {
                     if node_id == self.node.get_id() {
                         // Self - get our own P2P info
-                        let node_addr = p2p_manager.get_node_address().await;
-                        (
-                            node_addr.node_id.to_string(),
-                            node_addr.direct_addresses.iter()
-                                .map(|addr| addr.to_string())
-                                .collect(),
-                            node_addr.relay_url.map(|url| url.to_string())
-                                .unwrap_or_default(),
-                        )
+                        if let Ok(node_addr) = p2p_manager.get_node_addr().await {
+                            (
+                                node_addr.node_id.to_string(),
+                                node_addr.direct_addresses.iter()
+                                    .map(|addr| addr.to_string())
+                                    .collect(),
+                                node_addr.relay_url.map(|url| url.to_string())
+                                    .unwrap_or_default(),
+                            )
+                        } else {
+                            (String::new(), vec![], String::new())
+                        }
                     } else {
                         // Peer - would need to query them for their P2P info
                         (String::new(), Vec::new(), String::new())
@@ -163,7 +165,7 @@ impl crate::proto::cluster_service_server::ClusterService for StatusServiceImpl 
         );
         metrics.grpc_requests_total.add(1, &[attributes::method("get_cluster_status")]);
         
-        match self.get_cluster_status().await {
+        match StatusService::get_cluster_status(self).await {
             Ok(response) => Ok(Response::new(response)),
             Err(e) => Err(Status::internal(format!("Failed to get cluster status: {}", e))),
         }
@@ -328,7 +330,7 @@ impl crate::proto::blixard_service_server::BlixardService for StatusServiceImpl 
         );
         metrics.grpc_requests_total.add(1, &[attributes::method("get_raft_status")]);
         
-        match self.get_raft_status().await {
+        match StatusService::get_raft_status(self).await {
             Ok(response) => Ok(Response::new(response)),
             Err(e) => Err(Status::internal(format!("Failed to get Raft status: {}", e))),
         }

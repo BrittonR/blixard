@@ -5,7 +5,7 @@
 use crate::{
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
-    proto::{HealthCheckRequest, HealthCheckResponse},
+    proto,
     transport::{
         iroh_protocol::{deserialize_payload, serialize_payload},
         iroh_service::IrohService,
@@ -14,6 +14,17 @@ use crate::{
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::sync::Arc;
+use serde::{Deserialize, Serialize};
+
+// Wrapper types for serialization
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct HealthCheckRequest {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct HealthCheckResponse {
+    pub healthy: bool,
+    pub message: String,
+}
 
 /// Health service implementation
 pub struct IrohHealthService {

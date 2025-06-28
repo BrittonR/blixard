@@ -7,7 +7,7 @@ pub mod config;
 pub mod service_factory;
 pub mod client_factory;
 pub mod metrics;
-pub mod iroh_grpc_bridge;
+// pub mod iroh_grpc_bridge; // Not used - we implemented custom RPC instead
 pub mod services;
 pub mod dual_service_runner;
 pub mod iroh_peer_connector;

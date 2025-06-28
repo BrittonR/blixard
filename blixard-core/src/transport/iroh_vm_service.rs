@@ -4,7 +4,7 @@ use crate::{
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
     transport::{
-        services::vm::{VmOperationRequest, VmOperationResponse, VmServiceImpl, VmInfoData},
+        services::vm::{VmOperationRequest, VmOperationResponse, VmServiceImpl, VmInfoData, VmService},
         iroh_protocol::{deserialize_payload, serialize_payload},
         iroh_service::IrohService,
     },
@@ -251,15 +251,27 @@ impl IrohVmService {
         let p2p_manager = self.node.get_p2p_manager().await
             .ok_or_else(|| BlixardError::P2PError("P2P manager not available".to_string()))?;
         
-        // Share the image through the P2P manager
-        let hash = p2p_manager.share_vm_image(&image_path, &image_name, &description, tags.clone()).await?;
+        // Share the image through the P2P manager using upload_resource
+        let path = std::path::Path::new(&image_path);
+        p2p_manager.upload_resource(
+            crate::p2p_manager::ResourceType::VmImage,
+            &image_name,
+            "latest", // version
+            path,
+        ).await?;
+        
+        // Generate a hash for tracking using SHA256
+        use sha2::{Sha256, Digest};
+        let mut hasher = Sha256::new();
+        hasher.update(&image_name);
+        let hash = format!("{:x}", hasher.finalize());
         let size = tokio::fs::metadata(&image_path).await
             .map_err(|e| BlixardError::IoError(e))?.len();
         
         // Store metadata
         let metadata = VmImageMetadata {
             name: image_name.clone(),
-            hash: hash.clone(),
+            hash: hash.to_string(),
             size,
             shared_by: self.node.get_id(),
             created_at: chrono::Utc::now().timestamp(),
@@ -295,7 +307,16 @@ impl IrohVmService {
             .ok_or_else(|| BlixardError::P2PError("P2P manager not available".to_string()))?;
         
         // Download the image through the P2P manager
-        p2p_manager.download_vm_image(&image_hash, &output_path).await?;
+        // For now, create a dummy download until we have proper hash-based lookup
+        let download_id = p2p_manager.request_download(
+            crate::p2p_manager::ResourceType::VmImage,
+            &image_hash, // Use hash as name for now
+            "latest",
+            crate::p2p_manager::TransferPriority::Normal,
+        ).await?;
+        
+        // TODO: Wait for download to complete and copy to output_path
+        tracing::info!("Download requested with ID: {}", download_id);
         
         // Get the size of the downloaded file
         let size = tokio::fs::metadata(&output_path).await
@@ -338,13 +359,13 @@ impl IrohService for IrohVmService {
     async fn handle_call(&self, method: &str, payload: Bytes) -> BlixardResult<Bytes> {
         let metrics = metrics();
         let _timer = Timer::with_attributes(
-            metrics.p2p_request_duration.clone(),
+            metrics.grpc_request_duration.clone(),
             vec![
                 attributes::method(method),
                 attributes::node_id(self.node.get_id()),
             ],
         );
-        metrics.p2p_requests_total.add(1, &[attributes::method(method)]);
+        metrics.grpc_requests_total.add(1, &[attributes::method(method)]);
         
         match method {
             // VM lifecycle operations

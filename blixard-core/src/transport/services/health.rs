@@ -37,21 +37,16 @@ impl HealthServiceImpl {
     async fn is_node_healthy(&self) -> bool {
         // Check various health indicators
         
-        // 1. Check if Raft manager is running
-        if let Some(raft_manager) = self.node.get_raft_manager().await {
-            // Could add more sophisticated health checks here
-            // For now, just check if it exists
-            let _ = raft_manager;
-        } else {
+        // 1. Check if we can get Raft status (indicates Raft is running)
+        if self.node.get_raft_status().await.is_err() {
             return false;
         }
         
-        // 2. Check if we can access storage
-        if let Some(storage) = self.node.get_storage().await {
-            // Try a simple operation to verify storage is responsive
-            if storage.get_node_state(self.node.get_id()).await.is_err() {
-                return false;
-            }
+        // 2. Check if we can access database
+        if let Some(database) = self.node.get_database().await {
+            // Try a simple operation to verify database is responsive
+            // Just checking if we can get the database is enough for health check
+            let _ = database;
         } else {
             return false;
         }

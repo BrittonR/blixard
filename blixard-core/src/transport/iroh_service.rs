@@ -98,20 +98,36 @@ impl IrohRpcServer {
         
         loop {
             match self.endpoint.accept().await {
-                Ok(connection) => {
+                Some(incoming) => {
                     let server = self.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = server.handle_connection(connection).await {
-                            error!("Connection handling error: {}", e);
+                        match incoming.accept() {
+                            Ok(connecting) => {
+                                match connecting.await {
+                                    Ok(connection) => {
+                                        if let Err(e) = server.handle_connection(connection).await {
+                                            error!("Connection handling error: {}", e);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Connection error: {}", e);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                error!("Accept error: {}", e);
+                            }
                         }
                     });
                 }
-                Err(e) => {
-                    error!("Accept error: {}", e);
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                None => {
+                    // Endpoint closed
+                    break;
                 }
             }
         }
+        
+        Ok(())
     }
     
     /// Handle a single connection
@@ -291,7 +307,7 @@ impl IrohRpcClient {
     
     /// Get or create a connection to a node
     async fn get_or_create_connection(&self, node_addr: NodeAddr) -> BlixardResult<Connection> {
-        let node_id = node_addr.node_id();
+        let node_id = node_addr.node_id;
         
         // Check existing connection
         {

@@ -163,20 +163,20 @@ impl VmImageService for VmImageServiceImpl {
             path,
         ).await?;
         
-        // Store metadata in image store
-        if let Some(image_store) = p2p_manager.get_image_store() {
-            let mut image_metadata = metadata.clone();
-            image_metadata.insert("original_path".to_string(), image_path.to_string());
-            image_metadata.insert("size_bytes".to_string(), size.to_string());
-            
-            image_store.add_image(
-                image_name,
-                version,
-                &hash,
-                path,
-                image_metadata,
-            ).await?;
-        }
+        // TODO: Store metadata in image store when implemented
+        // if let Some(image_store) = p2p_manager.get_image_store() {
+        //     let mut image_metadata = metadata.clone();
+        //     image_metadata.insert("original_path".to_string(), image_path.to_string());
+        //     image_metadata.insert("size_bytes".to_string(), size.to_string());
+        //     
+        //     image_store.add_image(
+        //         image_name,
+        //         version,
+        //         &hash,
+        //         path,
+        //         image_metadata,
+        //     ).await?;
+        // }
         
         Ok(hash)
     }
@@ -193,12 +193,12 @@ impl VmImageService for VmImageServiceImpl {
                 message: "P2P manager not available".to_string(),
             })?;
         
-        // Check if image is already cached
-        if let Some(image_store) = p2p_manager.get_image_store() {
-            if let Ok(Some(image)) = image_store.get_image_by_hash(image_hash).await {
-                return Ok((image.local_path.to_string_lossy().to_string(), image.metadata));
-            }
-        }
+        // TODO: Check if image is already cached when image store is available
+        // if let Some(image_store) = p2p_manager.get_image_store() {
+        //     if let Ok(Some(image)) = image_store.get_image_by_hash(image_hash).await {
+        //         return Ok((image.local_path.to_string_lossy().to_string(), image.metadata));
+        //     }
+        // }
         
         // Request download from P2P network
         let request_id = p2p_manager.request_download(
@@ -211,12 +211,12 @@ impl VmImageService for VmImageServiceImpl {
         // Wait for download to complete (simplified - in production would use events)
         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         
-        // Check if download completed
-        if let Some(image_store) = p2p_manager.get_image_store() {
-            if let Ok(Some(image)) = image_store.get_image(image_name, version).await {
-                return Ok((image.local_path.to_string_lossy().to_string(), image.metadata));
-            }
-        }
+        // TODO: Check if download completed when image store is available
+        // if let Some(image_store) = p2p_manager.get_image_store() {
+        //     if let Ok(Some(image)) = image_store.get_image(image_name, version).await {
+        //         return Ok((image.local_path.to_string_lossy().to_string(), image.metadata));
+        //     }
+        // }
         
         Err(BlixardError::NotFound {
             resource: format!("VM image {}:{}", image_name, version),
@@ -231,28 +231,32 @@ impl VmImageService for VmImageServiceImpl {
             })?;
         
         // Get image store
-        let image_store = p2p_manager.get_image_store()
-            .ok_or_else(|| BlixardError::Internal {
-                message: "Image store not available".to_string(),
-            })?;
+        // TODO: Get image store when available
+        // let image_store = p2p_manager.get_image_store()
+        //     .ok_or_else(|| BlixardError::Internal {
+        //         message: "Image store not available".to_string(),
+        //     })?;
         
-        // List all images
-        let images = image_store.list_images().await?;
+        // TODO: List all images when image store is available
+        // let images = image_store.list_images().await?;
+        // 
+        // // Convert to ImageInfo
+        // let image_infos = images.into_iter().map(|img| {
+        //     ImageInfo {
+        //         name: img.name,
+        //         version: img.version,
+        //         hash: img.hash,
+        //         size_bytes: img.size,
+        //         created_at: img.created_at.to_rfc3339(),
+        //         metadata: img.metadata,
+        //         is_cached: true, // All listed images are cached locally
+        //     }
+        // }).collect();
+        // 
+        // Ok(image_infos)
         
-        // Convert to ImageInfo
-        let image_infos = images.into_iter().map(|img| {
-            ImageInfo {
-                name: img.name,
-                version: img.version,
-                hash: img.hash,
-                size_bytes: img.size,
-                created_at: img.created_at.to_rfc3339(),
-                metadata: img.metadata,
-                is_cached: true, // All listed images are cached locally
-            }
-        }).collect();
-        
-        Ok(image_infos)
+        // Return empty list for now
+        Ok(Vec::new())
     }
 }
 

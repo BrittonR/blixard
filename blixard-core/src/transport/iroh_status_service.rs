@@ -5,10 +5,7 @@
 use crate::{
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
-    proto::{
-        ClusterStatusRequest, ClusterStatusResponse,
-        GetRaftStatusRequest, GetRaftStatusResponse,
-    },
+    proto,
     transport::{
         iroh_protocol::{deserialize_payload, serialize_payload},
         iroh_service::IrohService,
@@ -18,6 +15,30 @@ use crate::{
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::sync::Arc;
+use serde::{Deserialize, Serialize};
+
+// Wrapper types for serialization
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ClusterStatusRequest {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ClusterStatusResponse {
+    pub leader_id: u64,
+    pub member_ids: Vec<u64>,
+    pub term: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct GetRaftStatusRequest {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct GetRaftStatusResponse {
+    pub is_leader: bool,
+    pub node_id: u64,
+    pub leader_id: u64,
+    pub term: u64,
+    pub state: String,
+}
 
 /// Status service implementation for Iroh
 pub struct IrohStatusService {
@@ -50,7 +71,14 @@ impl IrohService for IrohStatusService {
                 let _request: ClusterStatusRequest = deserialize_payload(&payload)?;
                 
                 // Get cluster status
-                let response = self.service.get_cluster_status().await?;
+                let proto_response = self.service.get_cluster_status().await?;
+                
+                // Convert to wrapper type
+                let response = ClusterStatusResponse {
+                    leader_id: proto_response.leader_id,
+                    member_ids: proto_response.nodes.iter().map(|n| n.id).collect(),
+                    term: proto_response.term,
+                };
                 
                 // Serialize response
                 serialize_payload(&response)
@@ -61,7 +89,16 @@ impl IrohService for IrohStatusService {
                 let _request: GetRaftStatusRequest = deserialize_payload(&payload)?;
                 
                 // Get Raft status
-                let response = self.service.get_raft_status().await?;
+                let proto_response = self.service.get_raft_status().await?;
+                
+                // Convert to wrapper type
+                let response = GetRaftStatusResponse {
+                    is_leader: proto_response.is_leader,
+                    node_id: proto_response.node_id,
+                    leader_id: proto_response.leader_id,
+                    term: proto_response.term,
+                    state: proto_response.state,
+                };
                 
                 // Serialize response
                 serialize_payload(&response)

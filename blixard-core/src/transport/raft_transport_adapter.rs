@@ -144,7 +144,7 @@ impl RaftTransport {
             RaftTransport::Grpc(peer_connector) => {
                 RaftTransportMetrics {
                     transport_type: "grpc".to_string(),
-                    connections: peer_connector.get_connection_count().await,
+                    connections: 0, // TODO: Add connection count tracking
                     messages_sent: 0, // TODO: Implement in PeerConnector
                     messages_received: 0,
                 }
@@ -159,7 +159,7 @@ impl RaftTransport {
                 }
             }
             RaftTransport::Dual { grpc, iroh, prefer_iroh } => {
-                let grpc_connections = grpc.get_connection_count().await;
+                let grpc_connections = 0; // TODO: Add connection count tracking
                 RaftTransportMetrics {
                     transport_type: format!("dual(prefer_{})", if *prefer_iroh { "iroh" } else { "grpc" }),
                     connections: grpc_connections,

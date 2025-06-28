@@ -4,7 +4,7 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::proto::cluster_service_server::{ClusterService, ClusterServiceServer};
 use crate::proto::blixard_service_server::{BlixardService, BlixardServiceServer};
 use crate::transport::config::{TransportConfig, ServiceType, MigrationStrategy};
-use crate::transport::iroh_grpc_bridge::{IrohServiceRunner, GrpcProtocolHandler};
+// use crate::transport::iroh_grpc_bridge::{IrohServiceRunner, GrpcProtocolHandler};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tonic::transport::Server;
@@ -40,49 +40,49 @@ impl<S> GrpcServiceRunner<S> {
 // We need to implement ServiceRunner for specific concrete types
 // since impl Trait is not allowed in impl headers
 
-/// Dual transport service runner
-pub struct DualServiceRunner<S> {
-    grpc_runner: GrpcServiceRunner<S>,
-    iroh_runner: Option<IrohServiceRunner<S>>,
-    strategy: MigrationStrategy,
-}
+// /// Dual transport service runner
+// pub struct DualServiceRunner<S> {
+//     grpc_runner: GrpcServiceRunner<S>,
+//     iroh_runner: Option<IrohServiceRunner<S>>,
+//     strategy: MigrationStrategy,
+// }
 
-impl<S: Clone + tonic::server::NamedService + Send + Sync + 'static> DualServiceRunner<S> {
-    pub fn new(
-        grpc_addr: SocketAddr,
-        service: S,
-        iroh_endpoint: Option<iroh::Endpoint>,
-        strategy: MigrationStrategy,
-    ) -> Self {
-        let grpc_runner = GrpcServiceRunner::new(grpc_addr, service.clone());
-        let iroh_runner = iroh_endpoint.map(|endpoint| IrohServiceRunner::new(endpoint, service));
-        
-        Self {
-            grpc_runner,
-            iroh_runner,
-            strategy,
-        }
-    }
-}
+// impl<S: Clone + tonic::server::NamedService + Send + Sync + 'static> DualServiceRunner<S> {
+//     pub fn new(
+//         grpc_addr: SocketAddr,
+//         service: S,
+//         iroh_endpoint: Option<iroh::Endpoint>,
+//         strategy: MigrationStrategy,
+//     ) -> Self {
+//         let grpc_runner = GrpcServiceRunner::new(grpc_addr, service.clone());
+//         let iroh_runner = iroh_endpoint.map(|endpoint| IrohServiceRunner::new(endpoint, service));
+//         
+//         Self {
+//             grpc_runner,
+//             iroh_runner,
+//             strategy,
+//         }
+//     }
+// }
 
-#[async_trait]
-impl<S> ServiceRunner for DualServiceRunner<S>
-where
-    S: tonic::server::NamedService + Clone + Send + Sync + 'static,
-{
-    async fn serve(self: Box<Self>) -> BlixardResult<()> {
-        // In dual mode, run both transports
-        // For now, just run gRPC since we need to implement ServiceRunner for GrpcServiceRunner
-        // TODO: Implement proper dual transport serving
-        Err(BlixardError::NotImplemented {
-            feature: "Dual transport serving".to_string(),
-        })
-    }
-    
-    fn transport_type(&self) -> &'static str {
-        "dual"
-    }
-}
+// #[async_trait]
+// impl<S> ServiceRunner for DualServiceRunner<S>
+// where
+//     S: tonic::server::NamedService + Clone + Send + Sync + 'static,
+// {
+//     async fn serve(self: Box<Self>) -> BlixardResult<()> {
+//         // In dual mode, run both transports
+//         // For now, just run gRPC since we need to implement ServiceRunner for GrpcServiceRunner
+//         // TODO: Implement proper dual transport serving
+//         Err(BlixardError::NotImplemented {
+//             feature: "Dual transport serving".to_string(),
+//         })
+//     }
+//     
+//     fn transport_type(&self) -> &'static str {
+//         "dual"
+//     }
+// }
 
 /// Factory for creating services with the appropriate transport
 pub struct ServiceFactory {
@@ -115,12 +115,15 @@ impl ServiceFactory {
                 Ok(())
             }
             TransportConfig::Iroh(_) => {
-                let endpoint = self.iroh_endpoint.as_ref()
-                    .ok_or_else(|| BlixardError::Internal {
-                        message: "Iroh endpoint not initialized".to_string(),
-                    })?;
-                let runner = IrohServiceRunner::new((**endpoint).clone(), server);
-                runner.serve().await
+                // let endpoint = self.iroh_endpoint.as_ref()
+                //     .ok_or_else(|| BlixardError::Internal {
+                //         message: "Iroh endpoint not initialized".to_string(),
+                //     })?;
+                // let runner = IrohServiceRunner::new((**endpoint).clone(), server);
+                // runner.serve().await
+                Err(BlixardError::NotImplemented {
+                    feature: "Iroh service runner".to_string(),
+                })
             }
             TransportConfig::Dual { .. } => {
                 // For now, just serve gRPC

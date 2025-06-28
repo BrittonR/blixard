@@ -360,16 +360,19 @@ impl IrohPeerConnector {
     /// Convert PeerInfo to Iroh NodeAddr
     fn peer_info_to_node_addr(&self, peer: &PeerInfo) -> BlixardResult<NodeAddr> {
         // Parse node ID from P2P info if available
-        if !peer.p2p_node_id.is_empty() {
-            if let Ok(node_id) = peer.p2p_node_id.parse::<NodeId>() {
-                let mut node_addr = NodeAddr::new(node_id);
-                
-                // Add relay URL if available
-                if !peer.p2p_relay_url.is_empty() {
-                    if let Ok(relay_url) = peer.p2p_relay_url.parse() {
-                        node_addr = node_addr.with_relay_url(relay_url);
+        if let Some(ref p2p_node_id) = peer.p2p_node_id {
+            if !p2p_node_id.is_empty() {
+                if let Ok(node_id) = p2p_node_id.parse::<NodeId>() {
+                    let mut node_addr = NodeAddr::new(node_id);
+                    
+                    // Add relay URL if available
+                    if let Some(ref p2p_relay_url) = peer.p2p_relay_url {
+                        if !p2p_relay_url.is_empty() {
+                            if let Ok(relay_url) = p2p_relay_url.parse() {
+                                node_addr = node_addr.with_relay_url(relay_url);
+                            }
+                        }
                     }
-                }
                 
                 // Add direct addresses
                 for addr_str in &peer.p2p_addresses {
@@ -377,8 +380,9 @@ impl IrohPeerConnector {
                         node_addr = node_addr.with_direct_addresses([addr]);
                     }
                 }
-                
-                return Ok(node_addr);
+                    
+                    return Ok(node_addr);
+                }
             }
         }
         
@@ -481,7 +485,7 @@ impl IrohPeerConnector {
                             tracing::debug!("Health check for peer {}", peer_id);
                             
                             // For now, just update last used time
-                            let _ = client.get_channel().await;
+                            client.touch().await;
                         }
                     }
                     _ = shutdown_rx.changed() => {
@@ -557,10 +561,9 @@ impl IrohPeerConnector {
                             let client = entry.value();
                             
                             // Check if connection is idle
-                            if let Ok(info) = client.connection_info.read().await {
-                                if info.last_used.elapsed() > Duration::from_secs(300) {
-                                    to_remove.push(peer_id);
-                                }
+                            let info = client.connection_info.read().await;
+                            if info.last_used.elapsed() > Duration::from_secs(300) {
+                                to_remove.push(peer_id);
                             }
                         }
                         

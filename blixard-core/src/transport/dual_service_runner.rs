@@ -123,11 +123,11 @@ impl DualServiceRunner {
     
     /// Serve services in dual mode based on migration strategy
     async fn serve_dual_mode(&self, strategy: &MigrationStrategy) -> BlixardResult<()> {
-        let mut futures = Vec::new();
+        let mut futures: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>> = Vec::new();
         
         // Always run gRPC server as fallback
         let grpc_future = self.serve_grpc_services_for_dual_mode(strategy);
-        futures.push(grpc_future);
+        futures.push(Box::pin(grpc_future));
         
         // If Iroh is enabled and we're migrating some services
         if let Some(endpoint) = &self.iroh_endpoint {
@@ -136,7 +136,7 @@ impl DualServiceRunner {
                     endpoint.clone(),
                     strategy,
                 );
-                futures.push(iroh_future);
+                futures.push(Box::pin(iroh_future));
             }
         }
         

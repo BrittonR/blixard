@@ -21,7 +21,7 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::node_shared::{SharedNodeState, PeerInfo};
 use crate::raft_manager::RaftManager;
 use crate::transport::iroh_protocol::{
-    MessageType, MessageHeader, RpcRequest, RpcResponse,
+    MessageType as ProtocolMessageType, MessageHeader, RpcRequest, RpcResponse,
     write_message, read_message, generate_request_id,
     serialize_payload, deserialize_payload,
 };
@@ -34,11 +34,17 @@ lazy_static::lazy_static! {
             .with_description("Number of Raft messages sent over Iroh transport")
             .init()
     };
+    static ref RAFT_MESSAGES_RECEIVED: opentelemetry::metrics::Counter<u64> = {
+        opentelemetry::global::meter("blixard")
+            .u64_counter("raft.messages.received")
+            .with_description("Number of Raft messages received over Iroh transport")
+            .init()
+    };
 }
 use crate::config_global;
 
 /// Raft-specific message types for optimization
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum RaftMessagePriority {
     /// Election messages (RequestVote, Vote) - highest priority
     Election,
@@ -99,28 +105,28 @@ impl PeerConnection {
             RaftMessagePriority::Election => {
                 if self.election_stream.is_none() {
                     self.election_stream = Some(self.connection.open_uni().await
-                        .map_err(|e| BlixardError::IoError(e))?);
+                        .map_err(|e| BlixardError::Internal { message: format!("Failed to open stream: {}", e) })?);
                 }
                 Ok(self.election_stream.as_mut().unwrap())
             }
             RaftMessagePriority::Heartbeat => {
                 if self.heartbeat_stream.is_none() {
                     self.heartbeat_stream = Some(self.connection.open_uni().await
-                        .map_err(|e| BlixardError::IoError(e))?);
+                        .map_err(|e| BlixardError::Internal { message: format!("Failed to open stream: {}", e) })?);
                 }
                 Ok(self.heartbeat_stream.as_mut().unwrap())
             }
             RaftMessagePriority::LogAppend => {
                 if self.append_stream.is_none() {
                     self.append_stream = Some(self.connection.open_uni().await
-                        .map_err(|e| BlixardError::IoError(e))?);
+                        .map_err(|e| BlixardError::Internal { message: format!("Failed to open stream: {}", e) })?);
                 }
                 Ok(self.append_stream.as_mut().unwrap())
             }
             RaftMessagePriority::Snapshot => {
                 if self.snapshot_stream.is_none() {
                     self.snapshot_stream = Some(self.connection.open_uni().await
-                        .map_err(|e| BlixardError::IoError(e))?);
+                        .map_err(|e| BlixardError::Internal { message: format!("Failed to open stream: {}", e) })?);
                 }
                 Ok(self.snapshot_stream.as_mut().unwrap())
             }
@@ -225,7 +231,7 @@ impl IrohRaftTransport {
         message: &Message,
         priority: RaftMessagePriority,
     ) -> BlixardResult<()> {
-        let _timer = Timer::start("iroh.raft.send_immediate");
+        let _timer = Timer::new(metrics().raft_proposal_duration.clone());
         
         // Get or create connection
         let mut conn = self.get_or_create_connection(to).await?;
@@ -240,7 +246,7 @@ impl IrohRaftTransport {
         let request_id = generate_request_id();
         write_message(
             stream,
-            MessageType::Request,
+            ProtocolMessageType::Request,
             request_id,
             &payload,
         ).await?;
@@ -310,7 +316,11 @@ impl IrohRaftTransport {
             .ok_or_else(|| BlixardError::ClusterError(format!("Unknown peer {}", peer_id)))?;
         
         // Parse Iroh node ID from peer info
-        let iroh_node_id = NodeId::from_str(&peer_info.p2p_node_id)
+        let p2p_node_id = peer_info.p2p_node_id
+            .ok_or_else(|| BlixardError::Internal {
+                message: format!("Peer {} has no P2P node ID", peer_id),
+            })?;
+        let iroh_node_id = p2p_node_id.parse::<NodeId>()
             .map_err(|e| BlixardError::Internal {
                 message: format!("Invalid Iroh node ID: {}", e),
             })?;
@@ -319,7 +329,7 @@ impl IrohRaftTransport {
         let connection = self.endpoint
             .connect(iroh_node_id, Self::RAFT_ALPN)
             .await
-            .map_err(|e| BlixardError::IoError(e))?;
+            .map_err(|e| BlixardError::Internal { message: format!("Connection error: {}", e) })?;
         
         // Store connection
         let peer_conn = PeerConnection {
@@ -369,19 +379,26 @@ impl IrohRaftTransport {
                     }
                     incoming = endpoint.accept() => {
                         match incoming {
-                            Some(connecting) => {
+                            Some(incoming) => {
                                 let raft_rx_tx = raft_rx_tx.clone();
                                 let node = node.clone();
                                 let messages_received = messages_received.clone();
                                 
                                 tokio::spawn(async move {
-                                    if let Err(e) = handle_incoming_connection(
-                                        connecting,
-                                        raft_rx_tx,
-                                        node,
-                                        messages_received,
-                                    ).await {
-                                        tracing::warn!("Failed to handle incoming Raft connection: {}", e);
+                                    match incoming.await {
+                                        Ok(connection) => {
+                                            if let Err(e) = handle_incoming_connection(
+                                                connection,
+                                                raft_rx_tx,
+                                                node,
+                                                messages_received,
+                                            ).await {
+                                                tracing::warn!("Failed to handle incoming Raft connection: {}", e);
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!("Failed to accept incoming connection: {}", e);
+                                        }
                                     }
                                 });
                             }
@@ -489,18 +506,18 @@ impl IrohRaftTransport {
 
 /// Handle an incoming Raft connection
 async fn handle_incoming_connection(
-    connecting: iroh::endpoint::Connecting,
+    connection: iroh::endpoint::Connection,
     raft_rx_tx: mpsc::UnboundedSender<(u64, Message)>,
     node: Arc<SharedNodeState>,
     messages_received: Arc<Mutex<HashMap<String, u64>>>,
 ) -> BlixardResult<()> {
-    let connection = connecting.await.map_err(|e| BlixardError::IoError(e))?;
-    let remote_node_id = connection.remote_node_id();
+    let remote_node_id = connection.remote_node_id()
+        .map_err(|e| BlixardError::Internal { message: format!("Failed to get remote node ID: {}", e) })?;
     
     // Find the peer ID for this Iroh node
     let peers = node.get_peers().await;
     let peer_id = peers.iter()
-        .find(|p| p.p2p_node_id == remote_node_id.to_string())
+        .find(|p| p.p2p_node_id.as_ref().map(|id| id == &remote_node_id.to_string()).unwrap_or(false))
         .map(|p| p.id)
         .ok_or_else(|| BlixardError::ClusterError(
             format!("Unknown Iroh node: {}", remote_node_id)
@@ -545,7 +562,7 @@ async fn handle_raft_stream(
     loop {
         match read_message(stream).await {
             Ok((header, payload)) => {
-                if header.msg_type != MessageType::Request {
+                if header.msg_type != ProtocolMessageType::Request {
                     continue;
                 }
                 
@@ -558,7 +575,7 @@ async fn handle_raft_stream(
                     let key = format!("{:?}", message.msg_type());
                     *received.entry(key.clone()).or_insert(0) += 1;
                     
-                    metrics::RAFT_MESSAGES_RECEIVED.add(1, &[
+                    RAFT_MESSAGES_RECEIVED.add(1, &[
                         attributes::TRANSPORT_TYPE.string("iroh"),
                         attributes::MESSAGE_TYPE.string(key),
                     ]);
@@ -607,10 +624,11 @@ async fn process_message_batches(
                 // Try to create connection
                 match create_connection_for_peer(*peer_id, node, endpoint).await {
                     Ok(conn) => {
+                        let connection = conn.connection.clone();
                         // Store new connection
                         let mut connections = connections.write().await;
-                        connections.insert(*peer_id, conn.clone());
-                        conn.connection
+                        connections.insert(*peer_id, conn);
+                        connection
                     }
                     Err(e) => {
                         tracing::debug!("Failed to connect to peer {}: {}", peer_id, e);
@@ -662,7 +680,7 @@ async fn send_message_batch(
     messages_sent: &Arc<Mutex<HashMap<String, u64>>>,
 ) -> BlixardResult<()> {
     let mut stream = connection.open_uni().await
-        .map_err(|e| BlixardError::IoError(e))?;
+        .map_err(|e| BlixardError::Internal { message: format!("Failed to open uni stream: {}", e) })?;
     
     for message in messages {
         let payload = crate::raft_codec::serialize_message(&message)?;
@@ -670,7 +688,7 @@ async fn send_message_batch(
         
         write_message(
             &mut stream,
-            MessageType::Request,
+            ProtocolMessageType::Request,
             request_id,
             &payload,
         ).await?;
@@ -689,7 +707,7 @@ async fn send_message_batch(
     }
     
     // Close stream
-    stream.finish().await.map_err(|e| BlixardError::IoError(e))?;
+    stream.finish().map_err(|e| BlixardError::Internal { message: format!("Failed to finish stream: {}", e) })?;
     
     Ok(())
 }
@@ -703,7 +721,11 @@ async fn create_connection_for_peer(
     let peer_info = node.get_peer(peer_id).await
         .ok_or_else(|| BlixardError::ClusterError(format!("Unknown peer {}", peer_id)))?;
     
-    let iroh_node_id = NodeId::from_str(&peer_info.p2p_node_id)
+    let p2p_node_id = peer_info.p2p_node_id
+        .ok_or_else(|| BlixardError::Internal {
+            message: format!("Peer {} has no P2P node ID", peer_id),
+        })?;
+    let iroh_node_id = p2p_node_id.parse::<NodeId>()
         .map_err(|e| BlixardError::Internal {
             message: format!("Invalid Iroh node ID: {}", e),
         })?;
@@ -711,7 +733,7 @@ async fn create_connection_for_peer(
     let connection = endpoint
         .connect(iroh_node_id, IrohRaftTransport::RAFT_ALPN)
         .await
-        .map_err(|e| BlixardError::IoError(e))?;
+        .map_err(|e| BlixardError::Internal { message: format!("Failed to open uni stream: {}", e) })?;
     
     Ok(PeerConnection {
         node_id: peer_id,

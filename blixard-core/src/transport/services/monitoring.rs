@@ -116,7 +116,7 @@ impl MonitoringServiceImpl {
             vm_manager.list_vms().await
                 .unwrap_or_default()
                 .iter()
-                .filter(|vm| vm.state == crate::types::VmStatus::Running)
+                .filter(|(_, status)| *status == crate::types::VmStatus::Running)
                 .count() as u32
         } else {
             0
@@ -124,7 +124,8 @@ impl MonitoringServiceImpl {
         
         // Get Raft metrics
         let (raft_term, raft_commit_index) = if let Ok(raft_status) = self.node.get_raft_status().await {
-            (raft_status.term, raft_status.commit as u64)
+            // TODO: Get actual commit index from Raft manager
+            (raft_status.term, 0u64)
         } else {
             (0, 0)
         };

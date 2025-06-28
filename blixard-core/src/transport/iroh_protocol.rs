@@ -43,7 +43,7 @@ pub enum MessageType {
 impl TryFrom<u8> for MessageType {
     type Error = BlixardError;
     
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
+    fn try_from(value: u8) -> Result<Self, BlixardError> {
         match value {
             1 => Ok(MessageType::Request),
             2 => Ok(MessageType::Response),
@@ -174,13 +174,17 @@ pub async fn write_message(
     stream
         .write_all(&header.to_bytes())
         .await
-        .map_err(|e| BlixardError::IoError(e))?;
+        .map_err(|e| BlixardError::Internal {
+            message: format!("Failed to write to stream: {}", e),
+        })?;
     
     // Write payload
     stream
         .write_all(payload)
         .await
-        .map_err(|e| BlixardError::IoError(e))?;
+        .map_err(|e| BlixardError::Internal {
+            message: format!("Failed to write to stream: {}", e),
+        })?;
     
     Ok(())
 }
@@ -192,7 +196,9 @@ pub async fn read_message(stream: &mut RecvStream) -> BlixardResult<(MessageHead
     stream
         .read_exact(&mut header_bytes)
         .await
-        .map_err(|e| BlixardError::IoError(e))?;
+        .map_err(|e| BlixardError::Internal {
+            message: format!("Failed to write to stream: {}", e),
+        })?;
     
     let header = MessageHeader::from_bytes(&header_bytes)?;
     
@@ -201,7 +207,9 @@ pub async fn read_message(stream: &mut RecvStream) -> BlixardResult<(MessageHead
     stream
         .read_exact(&mut payload)
         .await
-        .map_err(|e| BlixardError::IoError(e))?;
+        .map_err(|e| BlixardError::Internal {
+            message: format!("Failed to write to stream: {}", e),
+        })?;
     
     Ok((header, Bytes::from(payload)))
 }
