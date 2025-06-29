@@ -345,6 +345,40 @@ impl MicrovmBackend {
         
         Ok(None)
     }
+    
+    /// Update VM configuration to use downloaded Nix image path
+    async fn update_vm_config_with_image_path(
+        &self,
+        vm_name: &str,
+        image_path: &PathBuf,
+    ) -> BlixardResult<()> {
+        let mut configs = self.vm_configs.write().await;
+        
+        if let Some(vm_config) = configs.get_mut(vm_name) {
+            // Update the NixOS module to reference the downloaded image
+            let image_module = vm_types::NixModule::Inline {
+                content: format!(r#"
+                    # Use P2P-downloaded Nix image
+                    imports = [ {} ];
+                    
+                    # Override boot configuration for microVM
+                    boot.loader.grub.enable = false;
+                    boot.isContainer = true;
+                "#, image_path.display()),
+            };
+            
+            // Replace or add the image module
+            vm_config.nixos_modules = vec![image_module];
+            
+            // Also update the flake on disk
+            let flake_dir = self.get_vm_flake_dir(vm_name);
+            self.flake_generator.write_flake(vm_config, &flake_dir)?;
+            
+            info!("Updated VM {} configuration to use image at {:?}", vm_name, image_path);
+        }
+        
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -397,6 +431,58 @@ impl VmBackend for MicrovmBackend {
     
     async fn start_vm(&self, name: &str) -> BlixardResult<()> {
         info!("Starting microVM '{}'", name);
+        
+        // Check if this VM uses a Nix image that needs to be downloaded
+        if let Some(metadata) = self.vm_metadata.read().await.get(name) {
+            if let Some(nix_image_id) = metadata.get("nix_image_id") {
+                if let Some(store) = &self.nix_image_store {
+                    info!("VM {} uses Nix image {}, ensuring availability", name, nix_image_id);
+                    
+                    // Check if image is already available locally
+                    let images = store.list_images().await?;
+                    let has_image = images.iter().any(|img| &img.id == nix_image_id);
+                    
+                    if !has_image {
+                        info!("Nix image {} not found locally, downloading...", nix_image_id);
+                        
+                        // Download the image
+                        let vm_images_dir = self.data_dir.join("vm-images");
+                        std::fs::create_dir_all(&vm_images_dir)?;
+                        
+                        let (image_path, stats) = store.download_image(
+                            nix_image_id,
+                            Some(&vm_images_dir),
+                        ).await?;
+                        
+                        info!(
+                            "Downloaded Nix image {} to {:?} ({} MB in {:?})",
+                            nix_image_id,
+                            image_path,
+                            stats.bytes_transferred / 1_048_576,
+                            stats.duration
+                        );
+                        
+                        // Verify the downloaded image
+                        let is_valid = store.verify_image(nix_image_id).await?;
+                        if !is_valid {
+                            return Err(BlixardError::VmOperationFailed {
+                                operation: "start".to_string(),
+                                details: format!("Downloaded image {} failed verification", nix_image_id),
+                            });
+                        }
+                        
+                        info!("Nix image {} verified successfully", nix_image_id);
+                        
+                        // Update the VM configuration to use the downloaded image path
+                        self.update_vm_config_with_image_path(name, &image_path).await?;
+                    } else {
+                        info!("Nix image {} already available locally", nix_image_id);
+                    }
+                } else {
+                    warn!("VM {} requires Nix image {} but no image store configured", name, nix_image_id);
+                }
+            }
+        }
         
         // Get the flake directory
         let flake_dir = self.get_vm_flake_dir(name);
@@ -455,6 +541,10 @@ impl VmBackend for MicrovmBackend {
                 }
             }
             configs.remove(name);
+            
+            // Also remove metadata
+            let mut metadata = self.vm_metadata.write().await;
+            metadata.remove(name);
         }
         
         // Remove the flake directory

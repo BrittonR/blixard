@@ -78,6 +78,51 @@ pub enum NixArtifactType {
 - Automatic download on first start
 - Pre-fetching for live migration support
 
+## VM Backend Integration
+
+The microvm backend now automatically handles Nix images:
+
+### Automatic Download on Start
+```rust
+// VM metadata references a Nix image
+let vm_config = VmConfig {
+    name: "my-vm".to_string(),
+    metadata: Some(HashMap::from([
+        ("nix_image_id", image_id),
+    ])),
+    // ...
+};
+
+// On start, the backend will:
+// 1. Check if image is available locally
+// 2. Download if missing (with progress tracking)
+// 3. Verify NAR hash after download
+// 4. Update VM config to use downloaded path
+backend.start_vm("my-vm").await?;
+```
+
+### Integration Flow
+1. **Create VM**: Store metadata with `nix_image_id`
+2. **Start VM**: 
+   - Check local image store
+   - Download from P2P network if needed
+   - Verify integrity with NAR hash
+   - Update flake to reference downloaded image
+3. **Migration**: Pre-fetch images to target node
+4. **Delete VM**: Clean up metadata
+
+### Configuration Updates
+The backend automatically updates the Nix flake to import the downloaded image:
+```nix
+{
+  # Generated flake references P2P-downloaded image
+  imports = [ /var/cache/blixard/vm-images/microvm-abc123... ];
+  
+  boot.loader.grub.enable = false;
+  boot.isContainer = true;
+}
+```
+
 ## Usage Examples
 
 ### Import a MicroVM Image
@@ -129,11 +174,12 @@ image_store.prefetch_for_migration("my-vm", target_node_id).await?;
 - Integration with VM backend (metadata support)
 - Test suite for basic functionality
 - **Image verification using NAR hashes** ✨
+- **VM backend integration with automatic downloads** ✨
 
 ### 🔧 In Progress
-- Full VM backend integration for automatic downloads
 - Metrics and monitoring for P2P transfers
 - Production-ready error handling
+- Real Nix command integration
 
 ### 📋 TODO
 - Nix signature verification (binary cache signatures)

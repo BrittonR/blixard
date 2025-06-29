@@ -14,7 +14,7 @@ use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
 use iroh_blobs::Hash;
 use tokio::sync::RwLock;
-use tracing::{info, debug};
+use tracing::{info, debug, warn};
 use std::sync::Arc;
 
 /// Type of Nix artifact
