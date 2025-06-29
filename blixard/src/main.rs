@@ -370,6 +370,7 @@ async fn main() -> BlixardResult<()> {
                 join_addr: config.cluster.join_address.clone(),
                 use_tailscale: false,
                 vm_backend: config.node.vm_backend.clone(),
+                transport_config: config.transport.clone(),
             };
             
             // Create orchestrator configuration

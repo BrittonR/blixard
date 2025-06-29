@@ -1,0 +1,146 @@
+# Blixard Configuration - Iroh Transport Default
+# This configuration uses Iroh P2P transport as the default
+
+[node]
+# Node ID (optional, can be set via CLI)
+# id = 1
+bind_address = "127.0.0.1:7001"
+data_dir = "./data"
+vm_backend = "microvm"
+debug = false
+
+[cluster]
+bootstrap = false
+# join_address = "127.0.0.1:7001"  # Uncomment to join existing cluster
+
+[cluster.raft]
+election_tick = 10
+heartbeat_tick = 2
+max_uncommitted_size = 1073741824  # 1GB
+max_inflight_msgs = 256
+compaction_threshold = 1000
+snapshot_interval = 10000
+conf_change_timeout = "5s"
+proposal_timeout = "10s"
+max_restarts = 5
+restart_delay = "1s"
+
+[cluster.peer]
+max_connections = 100
+pool_size = 10
+connection_timeout = "5s"
+reconnect_delay = "1s"
+health_check_interval = "10s"
+failure_threshold = 5
+max_buffered_messages = 100
+enable_pooling = true
+
+[transport]
+# Using Iroh as the default transport
+mode = "iroh"
+
+[transport.enabled]
+enabled = true
+home_relay = "https://relay.iroh.network"
+discovery_port = 0  # 0 for automatic
+alpn_protocols = []  # Uses defaults
+
+# Alternative configurations:
+
+# 1. Traditional gRPC transport
+# [transport]
+# mode = "grpc"
+# [transport.bind_address]
+# bind_address = "0.0.0.0:7001"
+# max_message_size = 4194304  # 4MB
+# tls_enabled = false
+
+# 2. Dual mode for gradual migration
+# [transport]
+# mode = "dual"
+# 
+# [transport.grpc_config]
+# bind_address = "0.0.0.0:7001"
+# max_message_size = 4194304
+# tls_enabled = false
+# 
+# [transport.iroh_config]
+# enabled = true
+# home_relay = "https://relay.iroh.network"
+# discovery_port = 0
+# 
+# [transport.strategy]
+# # Prefer Iroh for all services
+# prefer_iroh_for = ["health", "status", "monitoring", "vm_ops", "scheduling", "migration", "raft"]
+# raft_transport = { type = "always_iroh" }
+# fallback_to_grpc = true
+
+[network.grpc]
+max_message_size = 67108864  # 64MB
+keepalive_interval = "10s"
+keepalive_timeout = "10s"
+tcp_nodelay = true
+
+[network.metrics]
+enabled = true
+port_offset = 1000
+path = "/metrics"
+
+[storage]
+db_name = "blixard.db"
+cache_size_mb = 512
+compression = true
+sync_mode = "normal"
+
+[storage.backup]
+enabled = false
+backup_dir = "./backups"
+interval = "1h"
+max_backups = 7
+
+[vm.defaults]
+vcpus = 2
+memory_mb = 2048
+disk_gb = 10
+
+[vm.scheduler]
+strategy = "most_available"
+overcommit_ratio = 1.5
+rebalance_interval = "5m"
+placement_timeout = "30s"
+
+[observability.logging]
+level = "info"
+format = "json"
+output = "stdout"
+
+[observability.metrics]
+enabled = true
+prometheus_endpoint = "0.0.0.0:9090"
+collection_interval = "10s"
+
+[observability.tracing]
+enabled = false
+# otlp_endpoint = "http://localhost:4317"
+service_name = "blixard"
+sampling_ratio = 0.1
+span_events = false
+
+[security.tls]
+enabled = false
+# cert_file = "./certs/server.crt"
+# key_file = "./certs/server.key"
+# ca_file = "./certs/ca.crt"
+require_client_cert = false
+
+[security.auth]
+enabled = false
+method = "token"
+# token_file = "./tokens.json"
+
+[p2p]
+# P2P is automatically enabled when using Iroh transport
+enabled = true
+relay_mode = "auto"
+enable_docs = true
+enable_gossip = false

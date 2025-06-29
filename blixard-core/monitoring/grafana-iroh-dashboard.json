@@ -1,0 +1,244 @@
+{
+  "dashboard": {
+    "title": "Blixard Iroh Transport Monitoring",
+    "uid": "blixard-iroh-transport",
+    "version": 1,
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Transport Comparison Overview",
+        "type": "row",
+        "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+      },
+      {
+        "id": 2,
+        "title": "Message Latency Comparison",
+        "type": "graph",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.99, rate(blixard_message_duration_seconds_bucket{transport=\"iroh\"}[5m]))",
+            "legendFormat": "Iroh P99"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(blixard_message_duration_seconds_bucket{transport=\"grpc\"}[5m]))",
+            "legendFormat": "gRPC P99"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "s",
+            "label": "Latency"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Throughput Comparison",
+        "type": "graph",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+        "targets": [
+          {
+            "expr": "sum(rate(blixard_messages_total{transport=\"iroh\"}[1m]))",
+            "legendFormat": "Iroh msg/s"
+          },
+          {
+            "expr": "sum(rate(blixard_messages_total{transport=\"grpc\"}[1m]))",
+            "legendFormat": "gRPC msg/s"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ops",
+            "label": "Messages/sec"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Iroh Connection Metrics",
+        "type": "row",
+        "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 }
+      },
+      {
+        "id": 5,
+        "title": "Active Connections",
+        "type": "graph",
+        "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
+        "targets": [
+          {
+            "expr": "sum(blixard_iroh_connections_active) by (node_id)",
+            "legendFormat": "Node {{node_id}}"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Connection Establishment Time",
+        "type": "graph",
+        "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.99, rate(blixard_iroh_connection_duration_seconds_bucket[5m]))",
+            "legendFormat": "P99"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(blixard_iroh_connection_duration_seconds_bucket[5m]))",
+            "legendFormat": "P50"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "s",
+            "label": "Time"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "NAT Traversal Success Rate",
+        "type": "stat",
+        "gridPos": { "h": 8, "w": 8, "x": 16, "y": 10 },
+        "targets": [
+          {
+            "expr": "iroh:nat_traversal:success_rate * 100",
+            "instant": true
+          }
+        ],
+        "options": {
+          "graphMode": "area",
+          "orientation": "auto",
+          "reduceOptions": {
+            "calcs": ["lastNotNull"],
+            "fields": "",
+            "values": false
+          },
+          "textMode": "auto"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "red", "value": 0 },
+                { "color": "yellow", "value": 90 },
+                { "color": "green", "value": 95 }
+              ]
+            },
+            "unit": "percent"
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Raft Performance on Iroh",
+        "type": "row",
+        "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 }
+      },
+      {
+        "id": 9,
+        "title": "Raft Message Latency by Type",
+        "type": "graph",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.99, rate(blixard_raft_message_duration_seconds_bucket{transport=\"iroh\",message_type=\"election\"}[5m]))",
+            "legendFormat": "Election"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(blixard_raft_message_duration_seconds_bucket{transport=\"iroh\",message_type=\"heartbeat\"}[5m]))",
+            "legendFormat": "Heartbeat"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(blixard_raft_message_duration_seconds_bucket{transport=\"iroh\",message_type=\"append\"}[5m]))",
+            "legendFormat": "Log Append"
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "title": "Leader Stability",
+        "type": "stat",
+        "gridPos": { "h": 8, "w": 6, "x": 12, "y": 19 },
+        "targets": [
+          {
+            "expr": "increase(blixard_raft_leader_changes_total{transport=\"iroh\"}[1h])",
+            "instant": true
+          }
+        ],
+        "options": {
+          "graphMode": "none",
+          "orientation": "auto",
+          "reduceOptions": {
+            "calcs": ["lastNotNull"],
+            "fields": "",
+            "values": false
+          },
+          "textMode": "auto"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "green", "value": 0 },
+                { "color": "yellow", "value": 5 },
+                { "color": "red", "value": 10 }
+              ]
+            },
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "Election Success Rate",
+        "type": "gauge",
+        "gridPos": { "h": 8, "w": 6, "x": 18, "y": 19 },
+        "targets": [
+          {
+            "expr": "sum(rate(blixard_raft_election_success_total{transport=\"iroh\"}[5m])) / sum(rate(blixard_raft_election_attempts_total{transport=\"iroh\"}[5m])) * 100",
+            "instant": true
+          }
+        ],
+        "options": {
+          "orientation": "auto",
+          "reduceOptions": {
+            "calcs": ["lastNotNull"],
+            "fields": "",
+            "values": false
+          },
+          "showThresholdLabels": false,
+          "showThresholdMarkers": true
+        },
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "red", "value": 0 },
+                { "color": "yellow", "value": 95 },
+                { "color": "green", "value": 99 }
+              ]
+            },
+            "unit": "percent",
+            "min": 0,
+            "max": 100
+          }
+        }
+      }
+    ],
+    "refresh": "10s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {
+      "refresh_intervals": ["5s", "10s", "30s", "1m", "5m"]
+    }
+  }
+}

@@ -398,6 +398,7 @@ impl TestNodeBuilder {
             join_addr: self.join_addr.clone(),
             use_tailscale: false,
             vm_backend: "mock".to_string(), // Use mock backend for tests
+            transport_config: None, // Use default transport
         };
         
         // Create node

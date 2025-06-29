@@ -20,7 +20,8 @@ async fn test_node_can_be_shared_via_arc() {
         bind_addr: "127.0.0.1:0".parse().unwrap(),
         join_addr: None,
         use_tailscale: false,
-            vm_backend: "mock".to_string(),
+        vm_backend: "mock".to_string(),
+        transport_config: None,
     };
     
     let node = Node::new(config);
@@ -47,7 +48,8 @@ async fn test_grpc_server_can_use_shared_state() {
         bind_addr: "127.0.0.1:0".parse().unwrap(),
         join_addr: None,
         use_tailscale: false,
-            vm_backend: "mock".to_string(),
+        vm_backend: "mock".to_string(),
+        transport_config: None,
     };
     
     let node = Node::new(config);

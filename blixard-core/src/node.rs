@@ -21,6 +21,8 @@ pub struct Node {
     raft_handle: Option<JoinHandle<BlixardResult<()>>>,
     /// VM health monitor
     health_monitor: Option<VmHealthMonitor>,
+    /// Raft transport adapter
+    raft_transport: Option<Arc<crate::transport::raft_transport_adapter::RaftTransport>>,
 }
 
 impl Node {
@@ -31,6 +33,7 @@ impl Node {
             handle: None,
             raft_handle: None,
             health_monitor: None,
+            raft_transport: None,
         }
     }
     
@@ -112,9 +115,16 @@ impl Node {
         let security_manager = Arc::new(crate::security::SecurityManager::new(config.security.clone()).await?);
         self.shared.set_security_manager(security_manager).await;
 
-        // Initialize P2P manager if enabled
-        if config.p2p.enabled {
-            tracing::info!("Initializing P2P manager");
+        // Initialize P2P manager if enabled OR if using Iroh transport
+        let using_iroh_transport = matches!(
+            self.shared.config.transport_config.as_ref().unwrap_or(&crate::transport::config::TransportConfig::default()),
+            crate::transport::config::TransportConfig::Iroh(_) | 
+            crate::transport::config::TransportConfig::Dual { .. }
+        );
+        
+        if config.p2p.enabled || using_iroh_transport {
+            tracing::info!("Initializing P2P manager (P2P enabled: {}, Iroh transport: {})", 
+                         config.p2p.enabled, using_iroh_transport);
             let p2p_config = crate::p2p_manager::P2pConfig::default();
             let p2p_manager = Arc::new(
                 crate::p2p_manager::P2pManager::new(
@@ -202,21 +212,38 @@ impl Node {
         self.shared.set_raft_message_tx(message_tx).await;
         self.shared.set_raft_conf_change_tx(conf_change_tx).await;
         
-        // Create peer connector
-        let peer_connector = Arc::new(PeerConnector::new(self.shared.clone()));
+        // Get transport config
+        let default_config = crate::transport::config::TransportConfig::default();
+        let transport_config = self.shared.config.transport_config
+            .as_ref()
+            .unwrap_or(&default_config);
         
-        // Store peer connector in shared state
-        self.shared.set_peer_connector(peer_connector.clone()).await;
+        // Create Raft transport adapter (handles both gRPC and Iroh)
+        let (raft_msg_tx, raft_msg_rx) = tokio::sync::mpsc::unbounded_channel();
+        let raft_transport = Arc::new(crate::transport::raft_transport_adapter::RaftTransport::new(
+            self.shared.clone(),
+            raft_msg_tx,
+            transport_config
+        ).await?);
         
-        // Start peer connection maintenance
-        peer_connector.clone().start_connection_maintenance().await;
+        // Store transport in node
+        self.raft_transport = Some(raft_transport.clone());
+        
+        // For backward compatibility, create PeerConnector for gRPC mode
+        if matches!(transport_config, crate::transport::config::TransportConfig::Grpc(_)) {
+            let peer_connector = Arc::new(PeerConnector::new(self.shared.clone()));
+            self.shared.set_peer_connector(peer_connector.clone()).await;
+        }
+        
+        // Start transport maintenance
+        raft_transport.start_maintenance().await;
         
         // Start task to handle outgoing Raft messages
-        let peer_connector_clone = peer_connector.clone();
+        let transport_clone = raft_transport.clone();
         let _outgoing_handle = tokio::spawn(async move {
             let mut outgoing_rx = outgoing_rx;
             while let Some((to, msg)) = outgoing_rx.recv().await {
-                if let Err(e) = peer_connector_clone.send_raft_message(to, msg).await {
+                if let Err(e) = transport_clone.send_message(to, msg).await {
                     tracing::warn!("Failed to send Raft message to {}: {}", to, e);
                 }
             }
@@ -287,17 +314,49 @@ impl Node {
                         shared.set_raft_message_tx(message_tx).await;
                         shared.set_raft_conf_change_tx(conf_change_tx).await;
                         
-                        // Start handling outgoing messages
-                        if let Some(peer_connector) = shared.get_peer_connector().await {
-                            let peer_connector_clone = peer_connector.clone();
-                            tokio::spawn(async move {
-                                let mut outgoing_rx = outgoing_rx;
-                                while let Some((to, msg)) = outgoing_rx.recv().await {
-                                    if let Err(e) = peer_connector_clone.send_raft_message(to, msg).await {
-                                        tracing::warn!("Failed to send Raft message to {}: {}", to, e);
+                        // Get transport config
+                        let default_config = crate::transport::config::TransportConfig::default();
+                        let transport_config = shared.config.transport_config
+                            .as_ref()
+                            .unwrap_or(&default_config);
+                        
+                        // Create new Raft transport adapter
+                        let (raft_msg_tx, _raft_msg_rx) = tokio::sync::mpsc::unbounded_channel();
+                        match crate::transport::raft_transport_adapter::RaftTransport::new(
+                            shared.clone(),
+                            raft_msg_tx,
+                            transport_config
+                        ).await {
+                            Ok(new_transport) => {
+                                // Start handling outgoing messages with new transport
+                                let transport_clone = new_transport.clone();
+                                tokio::spawn(async move {
+                                    let mut outgoing_rx = outgoing_rx;
+                                    while let Some((to, msg)) = outgoing_rx.recv().await {
+                                        if let Err(e) = transport_clone.send_message(to, msg).await {
+                                            tracing::warn!("Failed to send Raft message to {}: {}", to, e);
+                                        }
                                     }
+                                });
+                                
+                                // Start transport maintenance
+                                new_transport.start_maintenance().await;
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to recreate Raft transport: {}", e);
+                                // Fall back to PeerConnector if available
+                                if let Some(peer_connector) = shared.get_peer_connector().await {
+                                    let peer_connector_clone = peer_connector.clone();
+                                    tokio::spawn(async move {
+                                        let mut outgoing_rx = outgoing_rx;
+                                        while let Some((to, msg)) = outgoing_rx.recv().await {
+                                            if let Err(e) = peer_connector_clone.send_raft_message(to, msg).await {
+                                                tracing::warn!("Failed to send Raft message to {}: {}", to, e);
+                                            }
+                                        }
+                                    });
                                 }
-                            });
+                            }
                         }
                         
                         // Run the new Raft manager
@@ -333,8 +392,12 @@ impl Node {
             
             // Pre-connect to the join address to ensure bidirectional connectivity
             if let Some(peer) = self.shared.get_peer(1).await {
-                let _ = peer_connector.connect_to_peer(&peer).await;
-                tracing::info!("Pre-connected to leader at {} before sending join request", join_addr);
+                // For gRPC mode, use PeerConnector if available
+                if let Some(peer_connector) = self.shared.get_peer_connector().await {
+                    let _ = peer_connector.connect_to_peer(&peer).await;
+                    tracing::info!("Pre-connected to leader at {} before sending join request", join_addr);
+                }
+                // For Iroh mode, connection will be established when sending messages
             }
             
             if let Err(e) = self.send_join_request().await {
@@ -613,6 +676,12 @@ impl Node {
             tracing::info!("VM health monitor stopped");
         }
         
+        // Shutdown Raft transport
+        if let Some(transport) = self.raft_transport.take() {
+            transport.shutdown().await;
+            tracing::info!("Raft transport shut down");
+        }
+        
         self.shared.set_running(false).await;
         self.shared.set_initialized(false).await;
         
@@ -773,6 +842,7 @@ mod tests {
             join_addr: None,
             use_tailscale: false,
             vm_backend: "mock".to_string(),
+            transport_config: None,
         };
 
         let mut node = Node::new(config);

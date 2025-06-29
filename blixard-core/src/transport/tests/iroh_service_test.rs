@@ -3,12 +3,12 @@
 use crate::{
     error::BlixardResult,
     node_shared::SharedNodeState,
-    proto::{HealthCheckRequest, ClusterStatusRequest},
+    types::NodeConfig,
     transport::{
         iroh_protocol::{serialize_payload, deserialize_payload},
         iroh_service::{IrohService, ServiceRegistry},
-        iroh_health_service::IrohHealthService,
-        iroh_status_service::IrohStatusService,
+        iroh_health_service::{IrohHealthService, HealthCheckRequest, HealthCheckResponse},
+        iroh_status_service::{IrohStatusService, ClusterStatusRequest, ClusterStatusResponse},
     },
 };
 use bytes::Bytes;
@@ -16,7 +16,16 @@ use std::sync::Arc;
 
 #[tokio::test]
 async fn test_health_service() -> BlixardResult<()> {
-    let node = Arc::new(SharedNodeState::new(1));
+    let config = NodeConfig {
+        id: 1,
+        data_dir: "/tmp/test".to_string(),
+        bind_addr: "127.0.0.1:0".parse().unwrap(),
+        join_addr: None,
+        use_tailscale: false,
+        vm_backend: "mock".to_string(),
+        transport_config: None,
+    };
+    let node = Arc::new(SharedNodeState::new(config));
     let service = IrohHealthService::new(node);
     
     // Test service name
@@ -31,17 +40,26 @@ async fn test_health_service() -> BlixardResult<()> {
     let request = HealthCheckRequest {};
     let request_bytes = serialize_payload(&request)?;
     let response_bytes = service.handle_call("check", request_bytes).await?;
-    let response: crate::proto::HealthCheckResponse = deserialize_payload(&response_bytes)?;
+    let response: HealthCheckResponse = deserialize_payload(&response_bytes)?;
     
-    assert_eq!(response.status, "healthy");
-    assert_eq!(response.node_id, 1);
+    assert!(response.healthy);
+    assert!(response.message.contains("Node 1"));
     
     Ok(())
 }
 
 #[tokio::test]
 async fn test_status_service() -> BlixardResult<()> {
-    let node = Arc::new(SharedNodeState::new(2));
+    let config = NodeConfig {
+        id: 2,
+        data_dir: "/tmp/test2".to_string(),
+        bind_addr: "127.0.0.1:0".parse().unwrap(),
+        join_addr: None,
+        use_tailscale: false,
+        vm_backend: "mock".to_string(),
+        transport_config: None,
+    };
+    let node = Arc::new(SharedNodeState::new(config));
     let service = IrohStatusService::new(node);
     
     // Test service name
@@ -52,10 +70,10 @@ async fn test_status_service() -> BlixardResult<()> {
     let request = ClusterStatusRequest {};
     let request_bytes = serialize_payload(&request)?;
     let response_bytes = service.handle_call("get_cluster_status", request_bytes).await?;
-    let response: crate::proto::ClusterStatusResponse = deserialize_payload(&response_bytes)?;
+    let response: ClusterStatusResponse = deserialize_payload(&response_bytes)?;
     
     // Should have at least the current node
-    assert!(!response.nodes.is_empty());
+    assert!(!response.member_ids.is_empty());
     
     Ok(())
 }
@@ -69,7 +87,16 @@ fn test_service_registry() {
     assert!(registry.list_services().is_empty());
     
     // Register a service
-    let node = Arc::new(SharedNodeState::new(1));
+    let config = NodeConfig {
+        id: 1,
+        data_dir: "/tmp/test".to_string(),
+        bind_addr: "127.0.0.1:0".parse().unwrap(),
+        join_addr: None,
+        use_tailscale: false,
+        vm_backend: "mock".to_string(),
+        transport_config: None,
+    };
+    let node = Arc::new(SharedNodeState::new(config));
     let health_service = IrohHealthService::new(node.clone());
     registry.register(health_service);
     

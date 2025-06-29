@@ -238,6 +238,7 @@ mod tests {
             join_addr: None,
             use_tailscale: false,
             vm_backend: "mock".to_string(),
+            transport_config: None,
         };
         
         let node_state = Arc::new(SharedNodeState::new(config));

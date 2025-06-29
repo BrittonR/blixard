@@ -1,0 +1,33 @@
+# Prometheus configuration for Iroh transport monitoring
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'blixard-iroh'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          transport: 'iroh'
+    
+    # Relabel to extract node_id from instance
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: '(.+):(\d+)'
+        target_label: 'node_address'
+        replacement: '${1}'
+      - source_labels: [__address__]
+        regex: '(.+):(\d+)'
+        target_label: 'node_port'
+        replacement: '${2}'
+
+# Recording rules for Iroh-specific metrics
+rule_files:
+  - 'iroh_rules.yml'
+
+# Alerting configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['localhost:9093']

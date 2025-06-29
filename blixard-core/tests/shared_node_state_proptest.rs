@@ -24,6 +24,7 @@ fn arb_node_config() -> impl Strategy<Value = NodeConfig> {
                 join_addr,
                 use_tailscale,
                 vm_backend: "mock".to_string(),
+                transport_config: None,
             }
         })
 }

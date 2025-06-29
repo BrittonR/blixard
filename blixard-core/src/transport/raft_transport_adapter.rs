@@ -15,6 +15,7 @@ use crate::transport::config::{TransportConfig, RaftTransportPreference};
 use crate::config_global;
 
 /// Unified Raft transport that can use either gRPC or Iroh
+#[derive(Clone)]
 pub enum RaftTransport {
     /// Traditional gRPC-based transport using PeerConnector
     Grpc(Arc<PeerConnector>),

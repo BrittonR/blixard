@@ -57,11 +57,12 @@ async fn create_demo_nodes() -> Result<Vec<(Arc<SharedNodeState>, RaftTransport,
     // Node 1: gRPC transport
     let config1 = NodeConfig {
         id: 1,
-        bind_address: "127.0.0.1:7001".to_string(),
-        data_dir: std::env::temp_dir().join("blixard-demo-1"),
+        bind_addr: "127.0.0.1:7001".parse().unwrap(),
+        data_dir: std::env::temp_dir().join("blixard-demo-1").to_string_lossy().to_string(),
         vm_backend: "test".to_string(),
-        join_address: None,
-        bootstrap: true,
+        join_addr: None,
+        use_tailscale: false,
+        transport_config: None,
     };
     let node1 = Arc::new(SharedNodeState::new(config1));
     let (tx1, rx1) = mpsc::unbounded_channel();
@@ -75,11 +76,12 @@ async fn create_demo_nodes() -> Result<Vec<(Arc<SharedNodeState>, RaftTransport,
     // Node 2: Iroh transport
     let config2 = NodeConfig {
         id: 2,
-        bind_address: "127.0.0.1:7002".to_string(),
-        data_dir: std::env::temp_dir().join("blixard-demo-2"),
+        bind_addr: "127.0.0.1:7002".parse().unwrap(),
+        data_dir: std::env::temp_dir().join("blixard-demo-2").to_string_lossy().to_string(),
         vm_backend: "test".to_string(),
-        join_address: Some("127.0.0.1:7001".to_string()),
-        bootstrap: false,
+        join_addr: Some("127.0.0.1:7001".parse().unwrap()),
+        use_tailscale: false,
+        transport_config: None,
     };
     let node2 = Arc::new(SharedNodeState::new(config2));
     let (tx2, rx2) = mpsc::unbounded_channel();
@@ -93,11 +95,12 @@ async fn create_demo_nodes() -> Result<Vec<(Arc<SharedNodeState>, RaftTransport,
     // Node 3: Dual transport
     let config3 = NodeConfig {
         id: 3,
-        bind_address: "127.0.0.1:7003".to_string(),
-        data_dir: std::env::temp_dir().join("blixard-demo-3"),
+        bind_addr: "127.0.0.1:7003".parse().unwrap(),
+        data_dir: std::env::temp_dir().join("blixard-demo-3").to_string_lossy().to_string(),
         vm_backend: "test".to_string(),
-        join_address: Some("127.0.0.1:7001".to_string()),
-        bootstrap: false,
+        join_addr: Some("127.0.0.1:7001".parse().unwrap()),
+        use_tailscale: false,
+        transport_config: None,
     };
     let node3 = Arc::new(SharedNodeState::new(config3));
     let (tx3, rx3) = mpsc::unbounded_channel();

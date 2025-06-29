@@ -1,0 +1,95 @@
+# Prometheus recording rules for Iroh transport metrics
+
+groups:
+  - name: iroh_transport
+    interval: 30s
+    rules:
+      # Connection metrics
+      - record: iroh:connections:active
+        expr: sum(blixard_iroh_connections_active) by (node_id)
+      
+      - record: iroh:connections:rate
+        expr: rate(blixard_iroh_connections_total[5m])
+      
+      - record: iroh:connections:error_rate
+        expr: rate(blixard_iroh_connection_errors_total[5m])
+      
+      # Message latency percentiles
+      - record: iroh:message_latency:p50
+        expr: histogram_quantile(0.5, rate(blixard_iroh_message_duration_seconds_bucket[5m]))
+      
+      - record: iroh:message_latency:p95
+        expr: histogram_quantile(0.95, rate(blixard_iroh_message_duration_seconds_bucket[5m]))
+      
+      - record: iroh:message_latency:p99
+        expr: histogram_quantile(0.99, rate(blixard_iroh_message_duration_seconds_bucket[5m]))
+      
+      # Throughput metrics
+      - record: iroh:throughput:messages_per_second
+        expr: rate(blixard_iroh_messages_total[1m])
+      
+      - record: iroh:throughput:bytes_per_second
+        expr: rate(blixard_iroh_bytes_total[1m])
+      
+      # NAT traversal success rate
+      - record: iroh:nat_traversal:success_rate
+        expr: |
+          rate(blixard_iroh_nat_traversal_success_total[5m]) /
+          (rate(blixard_iroh_nat_traversal_success_total[5m]) + 
+           rate(blixard_iroh_nat_traversal_failure_total[5m]))
+      
+      # Raft-specific metrics
+      - record: iroh:raft:election_latency
+        expr: histogram_quantile(0.99, rate(blixard_raft_election_duration_seconds_bucket{transport="iroh"}[5m]))
+      
+      - record: iroh:raft:heartbeat_latency
+        expr: histogram_quantile(0.99, rate(blixard_raft_heartbeat_duration_seconds_bucket{transport="iroh"}[5m]))
+      
+      # Comparison with gRPC
+      - record: transport:latency_ratio:iroh_vs_grpc
+        expr: |
+          histogram_quantile(0.99, rate(blixard_message_duration_seconds_bucket{transport="iroh"}[5m])) /
+          histogram_quantile(0.99, rate(blixard_message_duration_seconds_bucket{transport="grpc"}[5m]))
+
+  - name: iroh_alerts
+    interval: 30s
+    rules:
+      - alert: IrohHighConnectionFailureRate
+        expr: iroh:connections:error_rate > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          transport: iroh
+        annotations:
+          summary: "High Iroh connection failure rate"
+          description: "Iroh connection error rate is {{ $value | humanizePercentage }} on {{ $labels.node_id }}"
+      
+      - alert: IrohHighMessageLatency
+        expr: iroh:message_latency:p99 > 0.01
+        for: 5m
+        labels:
+          severity: warning
+          transport: iroh
+        annotations:
+          summary: "High Iroh message latency"
+          description: "P99 Iroh message latency is {{ $value | humanizeDuration }} on {{ $labels.node_id }}"
+      
+      - alert: IrohNATTraversalFailures
+        expr: iroh:nat_traversal:success_rate < 0.95
+        for: 10m
+        labels:
+          severity: warning
+          transport: iroh
+        annotations:
+          summary: "Low NAT traversal success rate"
+          description: "NAT traversal success rate is {{ $value | humanizePercentage }}"
+      
+      - alert: IrohRaftElectionInstability
+        expr: rate(blixard_raft_leader_changes_total{transport="iroh"}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          transport: iroh
+        annotations:
+          summary: "Raft election instability on Iroh transport"
+          description: "Frequent leader changes detected: {{ $value }} per second"

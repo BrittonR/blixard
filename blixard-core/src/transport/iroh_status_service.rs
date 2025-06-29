@@ -149,7 +149,18 @@ mod tests {
     
     #[tokio::test]
     async fn test_status_service_creation() {
-        let node = Arc::new(SharedNodeState::new(1));
+        use crate::types::NodeConfig;
+        
+        let config = NodeConfig {
+            id: 1,
+            data_dir: "/tmp/test".to_string(),
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            join_addr: None,
+            use_tailscale: false,
+            vm_backend: "mock".to_string(),
+            transport_config: None,
+        };
+        let node = Arc::new(SharedNodeState::new(config));
         let service = IrohStatusService::new(node);
         
         assert_eq!(service.name(), "status");

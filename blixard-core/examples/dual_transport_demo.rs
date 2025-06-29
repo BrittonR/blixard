@@ -6,6 +6,7 @@
 use blixard_core::{
     error::BlixardResult,
     node_shared::SharedNodeState,
+    types::NodeConfig,
     proto::{
         cluster_service_client::ClusterServiceClient,
         ClusterStatusRequest, HealthCheckRequest,
@@ -32,7 +33,16 @@ async fn main() -> BlixardResult<()> {
     info!("Starting dual transport demo");
     
     // Create node state
-    let node = Arc::new(SharedNodeState::new(42));
+    let config = NodeConfig {
+        id: 42,
+        data_dir: "/tmp/dual-transport-demo".to_string(),
+        bind_addr: "127.0.0.1:0".parse().unwrap(),
+        join_addr: None,
+        use_tailscale: false,
+        vm_backend: "mock".to_string(),
+        transport_config: None,
+    };
+    let node = Arc::new(SharedNodeState::new(config));
     
     // Create endpoints
     let grpc_addr: SocketAddr = "127.0.0.1:7042".parse().unwrap();
@@ -40,7 +50,8 @@ async fn main() -> BlixardResult<()> {
         .bind()
         .await?;
     
-    let iroh_node_addr = iroh_endpoint.node_addr().await?;
+    let watch = iroh_endpoint.node_addr();
+    let iroh_node_addr = watch.get().unwrap().unwrap();
     info!("Iroh endpoint: {}", iroh_node_addr.node_id);
     
     // Configure dual mode with gradual migration

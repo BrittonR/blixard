@@ -785,16 +785,20 @@ mod tests {
     
     #[test]
     fn test_message_priority() {
-        let vote_msg = Message::default().set_msg_type(MessageType::MsgRequestVote);
+        let mut vote_msg = Message::default();
+        vote_msg.set_msg_type(MessageType::MsgRequestVote);
         assert_eq!(RaftMessagePriority::from_raft_message(&vote_msg), RaftMessagePriority::Election);
         
-        let heartbeat_msg = Message::default().set_msg_type(MessageType::MsgHeartbeat);
+        let mut heartbeat_msg = Message::default();
+        heartbeat_msg.set_msg_type(MessageType::MsgHeartbeat);
         assert_eq!(RaftMessagePriority::from_raft_message(&heartbeat_msg), RaftMessagePriority::Heartbeat);
         
-        let append_msg = Message::default().set_msg_type(MessageType::MsgAppend);
+        let mut append_msg = Message::default();
+        append_msg.set_msg_type(MessageType::MsgAppend);
         assert_eq!(RaftMessagePriority::from_raft_message(&append_msg), RaftMessagePriority::LogAppend);
         
-        let snapshot_msg = Message::default().set_msg_type(MessageType::MsgSnapshot);
+        let mut snapshot_msg = Message::default();
+        snapshot_msg.set_msg_type(MessageType::MsgSnapshot);
         assert_eq!(RaftMessagePriority::from_raft_message(&snapshot_msg), RaftMessagePriority::Snapshot);
     }
     

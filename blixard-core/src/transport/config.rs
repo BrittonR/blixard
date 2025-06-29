@@ -107,17 +107,13 @@ pub enum RaftTransportPreference {
 
 impl Default for RaftTransportPreference {
     fn default() -> Self {
-        RaftTransportPreference::AlwaysGrpc
+        RaftTransportPreference::AlwaysIroh
     }
 }
 
 impl Default for TransportConfig {
     fn default() -> Self {
-        TransportConfig::Grpc(GrpcConfig {
-            bind_address: "0.0.0.0:7001".parse().unwrap(),
-            max_message_size: default_max_message_size(),
-            tls_enabled: false,
-        })
+        TransportConfig::Iroh(IrohConfig::default())
     }
 }
 

@@ -47,6 +47,9 @@ pub struct Config {
     
     /// P2P configuration
     pub p2p: P2pConfig,
+    
+    /// Transport configuration
+    pub transport: Option<crate::transport::config::TransportConfig>,
 }
 
 /// Node-specific configuration
@@ -508,6 +511,7 @@ impl Default for Config {
             observability: ObservabilityConfig::default(),
             security: SecurityConfig::default(),
             p2p: P2pConfig::default(),
+            transport: Some(crate::transport::config::TransportConfig::default()),
         }
     }
 }
