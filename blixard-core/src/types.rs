@@ -23,6 +23,8 @@ pub struct VmConfig {
     pub tenant_id: String, // Tenant identifier for multi-tenancy
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ip_address: Option<String>, // VM IP address for network isolation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<std::collections::HashMap<String, String>>, // Metadata for Nix images, etc.
 }
 
 fn default_tenant() -> String {

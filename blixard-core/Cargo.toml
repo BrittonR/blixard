@@ -85,6 +85,9 @@ iroh-docs = "0.35"
 # Compression
 flate2 = "1.0"
 
+# Hashing
+md5 = "0.7"
+
 fail = { version = "0.5", optional = true }
 
 # Conditional dependencies based on madsim cfg

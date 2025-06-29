@@ -143,6 +143,7 @@ mod tests {
             config_path: "/test.yaml".to_string(),
             ip_address: None,
             tenant_id: "test-tenant".to_string(),
+            metadata: None,
         };
         
         let result = service.create_vm("test-tenant", config).await;

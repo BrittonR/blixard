@@ -178,8 +178,12 @@ pub struct MicrovmBackend {
     process_manager: VmProcessManager,
     /// In-memory cache of VM configurations
     vm_configs: Arc<RwLock<HashMap<String, vm_types::VmConfig>>>,
+    /// Original VM metadata from core config
+    vm_metadata: Arc<RwLock<HashMap<String, HashMap<String, String>>>>,
     /// IP address pool manager for routed networking
     ip_pool: Arc<RwLock<IpAddressPool>>,
+    /// Optional Nix image store for P2P image distribution
+    nix_image_store: Option<Arc<blixard_core::nix_image_store::NixImageStore>>,
 }
 
 impl MicrovmBackend {
@@ -210,8 +214,15 @@ impl MicrovmBackend {
             flake_generator,
             process_manager,
             vm_configs: Arc::new(RwLock::new(HashMap::new())),
+            vm_metadata: Arc::new(RwLock::new(HashMap::new())),
             ip_pool: Arc::new(RwLock::new(IpAddressPool::new())),
+            nix_image_store: None,
         })
+    }
+    
+    /// Set the Nix image store for P2P image distribution
+    pub fn set_nix_image_store(&mut self, store: Arc<blixard_core::nix_image_store::NixImageStore>) {
+        self.nix_image_store = Some(store);
     }
     
     /// Allocate a unique IP address for a VM
@@ -256,6 +267,32 @@ impl MicrovmBackend {
         // Generate interface ID based on VM name
         let interface_id = format!("vm-{}", core_config.name);
         
+        // Check if this VM is using a Nix image
+        let (nixos_modules, kernel) = if let Some(metadata) = &core_config.metadata {
+            if let Some(nix_image_id) = metadata.get("nix_image_id") {
+                // This VM is using a P2P-distributed Nix image
+                info!("VM {} is using Nix image: {}", core_config.name, nix_image_id);
+                
+                // The actual download/preparation would happen in start_vm
+                // For now, we'll set up the module to reference the image
+                let nixos_module = vm_types::NixModule::Inline {
+                    content: format!(r#"
+                        # Reference P2P-distributed Nix image
+                        # Image ID: {}
+                        # This will be resolved to actual paths during VM start
+                        boot.loader.grub.enable = false;
+                        boot.isContainer = true;
+                    "#, nix_image_id),
+                };
+                
+                (vec![nixos_module], None)
+            } else {
+                (vec![], None)
+            }
+        } else {
+            (vec![], None)
+        };
+        
         Ok(vm_types::VmConfig {
             name: core_config.name.clone(),
             vm_index,
@@ -276,9 +313,9 @@ impl MicrovmBackend {
                     size: 10240, // 10GB default
                 }
             ],
-            nixos_modules: vec![],
+            nixos_modules,
             flake_modules: vec![],
-            kernel: None,
+            kernel,
             init_command: None,
         })
     }
@@ -315,6 +352,27 @@ impl VmBackend for MicrovmBackend {
     async fn create_vm(&self, config: &CoreVmConfig, _node_id: u64) -> BlixardResult<()> {
         info!("Creating microVM '{}'", config.name);
         
+        // Check if we need to download a Nix image
+        if let Some(metadata) = &config.metadata {
+            if let Some(nix_image_id) = metadata.get("nix_image_id") {
+                if let Some(store) = &self.nix_image_store {
+                    info!("VM {} requires Nix image {}, checking availability", config.name, nix_image_id);
+                    
+                    // Check if we already have the image
+                    let images = store.list_images().await?;
+                    let has_image = images.iter().any(|img| &img.id == nix_image_id);
+                    
+                    if !has_image {
+                        info!("Nix image {} not found locally, will download on start", nix_image_id);
+                    } else {
+                        info!("Nix image {} already available locally", nix_image_id);
+                    }
+                } else {
+                    warn!("VM {} requires Nix image {} but no image store configured", config.name, nix_image_id);
+                }
+            }
+        }
+        
         // Convert to our enhanced config with allocated IP address
         let vm_config = self.convert_config(config).await?;
         
@@ -322,10 +380,15 @@ impl VmBackend for MicrovmBackend {
         let flake_dir = self.get_vm_flake_dir(&config.name);
         self.flake_generator.write_flake(&vm_config, &flake_dir)?;
         
-        // Store the configuration
+        // Store the configuration including metadata
         {
             let mut configs = self.vm_configs.write().await;
             configs.insert(config.name.clone(), vm_config);
+            
+            if let Some(metadata) = &config.metadata {
+                let mut vm_metadata = self.vm_metadata.write().await;
+                vm_metadata.insert(config.name.clone(), metadata.clone());
+            }
         }
         
         info!("Successfully created microVM '{}' configuration", config.name);

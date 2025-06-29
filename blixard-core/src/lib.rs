@@ -25,6 +25,7 @@ pub mod cert_generator;
 // P2P implementation
 pub mod iroh_transport;
 pub mod p2p_image_store;
+pub mod nix_image_store;
 pub mod p2p_manager;
 pub mod cluster_state;
 pub mod transport;
