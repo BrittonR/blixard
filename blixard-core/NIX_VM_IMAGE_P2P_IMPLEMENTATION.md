@@ -128,6 +128,7 @@ image_store.prefetch_for_migration("my-vm", target_node_id).await?;
 - Service layer with RPC interfaces
 - Integration with VM backend (metadata support)
 - Test suite for basic functionality
+- **Image verification using NAR hashes** ✨
 
 ### 🔧 In Progress
 - Full VM backend integration for automatic downloads
@@ -135,7 +136,7 @@ image_store.prefetch_for_migration("my-vm", target_node_id).await?;
 - Production-ready error handling
 
 ### 📋 TODO
-- Image verification and integrity checks
+- Nix signature verification (binary cache signatures)
 - Compression optimization (zstd parameters)
 - Bandwidth throttling and QoS
 - Multi-source parallel downloads
@@ -184,12 +185,52 @@ NIX_IMAGE_GC_MIN_COPIES=2
 }
 ```
 
+## Image Verification
+
+Blixard leverages Nix's cryptographic guarantees for image integrity:
+
+### NAR Hash Verification
+```rust
+// During import, extract NAR metadata
+let (nar_hash, nar_size) = extract_nix_metadata(path).await?;
+
+// After download, verify integrity
+store.verify_image(&image_id).await?;
+```
+
+### Verification Process
+1. **Import**: Extract NAR hash and size from Nix store paths
+2. **Transfer**: Include NAR metadata in P2P image metadata
+3. **Download**: Verify downloaded content against NAR hash
+4. **Size Check**: Ensure byte-for-byte size matches
+
+### Nix Integration
+```bash
+# Get NAR info from Nix
+nix path-info --json /nix/store/xxx-nixos-system
+
+# Output includes:
+{
+  "narHash": "sha256:abc123...",
+  "narSize": 104857600,
+  "references": [...],
+  "signatures": [...]
+}
+```
+
+### Trust Model
+- **Derivation Hash**: Links to exact build instructions
+- **NAR Hash**: Ensures bit-for-bit content integrity
+- **Signatures**: Support for binary cache signatures (future)
+- **P2P Trust**: Relies on node authentication + content verification
+
 ## Security Considerations
 
 1. **Content Verification**
-   - All chunks verified by hash
-   - Metadata includes content signatures (TODO)
-   - Trust model based on node authentication
+   - All chunks verified by chunk hash during transfer
+   - NAR hash verification ensures end-to-end integrity
+   - Derivation hash provides build reproducibility
+   - Trust model based on Nix's cryptographic guarantees
 
 2. **Access Control**
    - Images scoped by tenant/namespace

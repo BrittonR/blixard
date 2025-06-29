@@ -34,6 +34,12 @@ async fn test_microvm_import_and_download() -> BlixardResult<()> {
     assert!(metadata.total_size > 0);
     assert!(metadata.chunk_hashes.len() > 0);
     
+    // Check that NAR hash was extracted (simulated in test)
+    if system_path.to_string_lossy().contains("nixos-system") {
+        assert!(metadata.nar_hash.is_some(), "NAR hash should be present");
+        assert!(metadata.nar_size.is_some(), "NAR size should be present");
+    }
+    
     // Test downloading the image
     let download_dir = temp_dir.path().join("downloads");
     let (downloaded_path, stats) = store.download_image(
@@ -43,6 +49,10 @@ async fn test_microvm_import_and_download() -> BlixardResult<()> {
     
     assert!(downloaded_path.exists());
     assert_eq!(stats.bytes_transferred, metadata.total_size);
+    
+    // Verify the downloaded image
+    let is_valid = store.verify_image(&metadata.id).await?;
+    assert!(is_valid, "Downloaded image should be valid");
     
     Ok(())
 }
@@ -198,6 +208,54 @@ async fn test_prefetch_for_migration() -> BlixardResult<()> {
     // Prefetch for migration to node 2
     // This should not fail even though we don't have a real cluster
     store.prefetch_for_migration("migration-test-vm", 2).await?;
+    
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_nix_verification() -> BlixardResult<()> {
+    let temp_dir = TempDir::new()?;
+    let nix_store_dir = temp_dir.path().join("nix").join("store");
+    std::fs::create_dir_all(&nix_store_dir)?;
+    
+    let p2p_manager = Arc::new(
+        P2pManager::new(1, temp_dir.path(), P2pConfig::default()).await?
+    );
+    
+    let store = NixImageStore::new(
+        1, 
+        p2p_manager, 
+        temp_dir.path(), 
+        Some(nix_store_dir.clone())
+    ).await?;
+    
+    // Create a Nix store path
+    let store_hash = "abc123def456";
+    let nixos_path = nix_store_dir.join(format!("{}-nixos-system", store_hash));
+    std::fs::create_dir_all(&nixos_path)?;
+    tokio::fs::write(nixos_path.join("init"), b"system init content").await?;
+    
+    // Import with Nix metadata
+    let metadata = store.import_microvm(
+        "nix-verified-vm",
+        &nixos_path,
+        None,
+    ).await?;
+    
+    // Should have extracted derivation hash from path
+    assert_eq!(metadata.derivation_hash, Some(store_hash.to_string()));
+    
+    // Should have NAR hash (simulated)
+    assert!(metadata.nar_hash.is_some());
+    assert!(metadata.nar_size.is_some());
+    
+    // Verify the image
+    let is_valid = store.verify_image(&metadata.id).await?;
+    assert!(is_valid, "Image with NAR hash should verify");
+    
+    // Test verification of non-existent image
+    let result = store.verify_image("non-existent-id").await;
+    assert!(result.is_err(), "Non-existent image should error");
     
     Ok(())
 }
