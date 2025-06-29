@@ -72,6 +72,21 @@ pub struct Metrics {
     pub storage_reads: Counter<u64>,
     pub storage_write_duration: Histogram<f64>,
     pub storage_read_duration: Histogram<f64>,
+    
+    // P2P Image Transfer metrics
+    pub p2p_image_imports_total: Counter<u64>,
+    pub p2p_image_imports_failed: Counter<u64>,
+    pub p2p_image_downloads_total: Counter<u64>,
+    pub p2p_image_downloads_failed: Counter<u64>,
+    pub p2p_bytes_transferred: Counter<u64>,
+    pub p2p_chunks_transferred: Counter<u64>,
+    pub p2p_chunks_deduplicated: Counter<u64>,
+    pub p2p_transfer_duration: Histogram<f64>,
+    pub p2p_verification_success: Counter<u64>,
+    pub p2p_verification_failed: Counter<u64>,
+    pub p2p_cache_hits: Counter<u64>,
+    pub p2p_cache_misses: Counter<u64>,
+    pub p2p_active_transfers: UpDownCounter<i64>,
 }
 
 impl Metrics {
@@ -276,6 +291,60 @@ impl Metrics {
                 .with_description("Duration of storage reads in seconds")
                 .init(),
             
+            // P2P Image Transfer metrics
+            p2p_image_imports_total: meter
+                .u64_counter("p2p.image.imports.total")
+                .with_description("Total number of P2P image imports")
+                .init(),
+            p2p_image_imports_failed: meter
+                .u64_counter("p2p.image.imports.failed")
+                .with_description("Number of failed P2P image imports")
+                .init(),
+            p2p_image_downloads_total: meter
+                .u64_counter("p2p.image.downloads.total")
+                .with_description("Total number of P2P image downloads")
+                .init(),
+            p2p_image_downloads_failed: meter
+                .u64_counter("p2p.image.downloads.failed")
+                .with_description("Number of failed P2P image downloads")
+                .init(),
+            p2p_bytes_transferred: meter
+                .u64_counter("p2p.bytes_transferred.total")
+                .with_description("Total bytes transferred via P2P")
+                .init(),
+            p2p_chunks_transferred: meter
+                .u64_counter("p2p.chunks_transferred.total")
+                .with_description("Total chunks transferred via P2P")
+                .init(),
+            p2p_chunks_deduplicated: meter
+                .u64_counter("p2p.chunks_deduplicated.total")
+                .with_description("Number of chunks deduplicated during P2P transfers")
+                .init(),
+            p2p_transfer_duration: meter
+                .f64_histogram("p2p.transfer.duration")
+                .with_description("Duration of P2P transfers in seconds")
+                .init(),
+            p2p_verification_success: meter
+                .u64_counter("p2p.verification.success")
+                .with_description("Number of successful P2P image verifications")
+                .init(),
+            p2p_verification_failed: meter
+                .u64_counter("p2p.verification.failed")
+                .with_description("Number of failed P2P image verifications")
+                .init(),
+            p2p_cache_hits: meter
+                .u64_counter("p2p.cache.hits")
+                .with_description("Number of P2P cache hits")
+                .init(),
+            p2p_cache_misses: meter
+                .u64_counter("p2p.cache.misses")
+                .with_description("Number of P2P cache misses")
+                .init(),
+            p2p_active_transfers: meter
+                .i64_up_down_counter("p2p.transfers.active")
+                .with_description("Number of active P2P transfers")
+                .init(),
+            
             meter,
         }
     }
@@ -401,6 +470,89 @@ pub fn record_vm_operation(operation: &str, success: bool) {
     }
 }
 
+/// Record P2P image import operation
+pub fn record_p2p_image_import(artifact_type: &str, success: bool, size_bytes: u64) {
+    let metrics = metrics();
+    let type_attr = KeyValue::new("artifact_type", artifact_type.to_string());
+    
+    metrics.p2p_image_imports_total.add(1, &[type_attr.clone()]);
+    if !success {
+        metrics.p2p_image_imports_failed.add(1, &[type_attr]);
+    } else if size_bytes > 0 {
+        metrics.p2p_bytes_transferred.add(size_bytes, &[type_attr]);
+    }
+}
+
+/// Record P2P image download operation
+pub fn record_p2p_image_download(image_id: &str, success: bool, duration_secs: f64) {
+    let metrics = metrics();
+    
+    metrics.p2p_image_downloads_total.add(1, &[]);
+    if !success {
+        metrics.p2p_image_downloads_failed.add(1, &[]);
+    }
+    metrics.p2p_transfer_duration.record(duration_secs, &[]);
+}
+
+/// Record P2P chunk transfer
+pub fn record_p2p_chunk_transfer(chunk_size: u64, was_deduplicated: bool) {
+    let metrics = metrics();
+    
+    if was_deduplicated {
+        metrics.p2p_chunks_deduplicated.add(1, &[]);
+    } else {
+        metrics.p2p_chunks_transferred.add(1, &[]);
+        metrics.p2p_bytes_transferred.add(chunk_size, &[]);
+    }
+}
+
+/// Record P2P image verification
+pub fn record_p2p_verification(success: bool, verification_type: &str) {
+    let metrics = metrics();
+    let type_attr = KeyValue::new("verification_type", verification_type.to_string());
+    
+    if success {
+        metrics.p2p_verification_success.add(1, &[type_attr]);
+    } else {
+        metrics.p2p_verification_failed.add(1, &[type_attr]);
+    }
+}
+
+/// Record P2P cache access
+pub fn record_p2p_cache_access(hit: bool, cache_type: &str) {
+    let metrics = metrics();
+    let type_attr = KeyValue::new("cache_type", cache_type.to_string());
+    
+    if hit {
+        metrics.p2p_cache_hits.add(1, &[type_attr]);
+    } else {
+        metrics.p2p_cache_misses.add(1, &[type_attr]);
+    }
+}
+
+/// Start tracking a P2P transfer
+pub fn start_p2p_transfer() -> P2pTransferGuard {
+    let metrics = metrics();
+    metrics.p2p_active_transfers.add(1, &[]);
+    P2pTransferGuard {
+        start: std::time::Instant::now(),
+    }
+}
+
+/// Guard for tracking P2P transfer duration
+pub struct P2pTransferGuard {
+    start: std::time::Instant,
+}
+
+impl Drop for P2pTransferGuard {
+    fn drop(&mut self) {
+        let metrics = metrics();
+        metrics.p2p_active_transfers.add(-1, &[]);
+        let duration = self.start.elapsed().as_secs_f64();
+        metrics.p2p_transfer_duration.record(duration, &[]);
+    }
+}
+
 /// Initialize metrics without exporter (for testing)
 pub fn init_noop() -> Result<&'static Metrics, Box<dyn std::error::Error>> {
     let meter = global::meter("blixard");
@@ -502,6 +654,59 @@ pub mod attributes {
     pub fn recovery_type(value: &str) -> KeyValue {
         KeyValue::new("recovery.type", value.to_string())
     }
+    
+    pub fn artifact_type(value: &str) -> KeyValue {
+        KeyValue::new("artifact.type", value.to_string())
+    }
+    
+    pub fn image_id(value: &str) -> KeyValue {
+        KeyValue::new("image.id", value.to_string())
+    }
+    
+    pub fn chunk_hash(value: &str) -> KeyValue {
+        KeyValue::new("chunk.hash", value.to_string())
+    }
+    
+    pub fn transfer_direction(value: &str) -> KeyValue {
+        KeyValue::new("transfer.direction", value.to_string())
+    }
+}
+
+/// P2P transfer statistics for monitoring dashboards
+#[derive(Debug, Clone)]
+pub struct P2pTransferStats {
+    pub total_imports: u64,
+    pub failed_imports: u64,
+    pub total_downloads: u64,
+    pub failed_downloads: u64,
+    pub bytes_transferred: u64,
+    pub chunks_transferred: u64,
+    pub chunks_deduplicated: u64,
+    pub verification_success: u64,
+    pub verification_failed: u64,
+    pub cache_hits: u64,
+    pub cache_misses: u64,
+    pub active_transfers: i64,
+}
+
+/// Get current P2P transfer statistics
+pub fn get_p2p_transfer_stats() -> P2pTransferStats {
+    // This would need to be implemented with actual metric reading
+    // For now, return a placeholder
+    P2pTransferStats {
+        total_imports: 0,
+        failed_imports: 0,
+        total_downloads: 0,
+        failed_downloads: 0,
+        bytes_transferred: 0,
+        chunks_transferred: 0,
+        chunks_deduplicated: 0,
+        verification_success: 0,
+        verification_failed: 0,
+        cache_hits: 0,
+        cache_misses: 0,
+        active_transfers: 0,
+    }
 }
 
 #[cfg(test)]
@@ -526,5 +731,30 @@ mod tests {
             let _timer = Timer::new(metrics.raft_proposal_duration.clone());
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
+    }
+    
+    #[test]
+    fn test_p2p_metrics() {
+        let _ = init_noop();
+        
+        // Test P2P import metrics
+        record_p2p_image_import("microvm", true, 1024 * 1024);
+        record_p2p_image_import("container", false, 0);
+        
+        // Test P2P download metrics
+        record_p2p_image_download("test-image-123", true, 2.5);
+        record_p2p_image_download("test-image-456", false, 0.1);
+        
+        // Test chunk transfer metrics
+        record_p2p_chunk_transfer(4096, false);
+        record_p2p_chunk_transfer(4096, true);
+        
+        // Test verification metrics
+        record_p2p_verification(true, "nar_hash");
+        record_p2p_verification(false, "chunk_hash");
+        
+        // Test cache metrics
+        record_p2p_cache_access(true, "chunk");
+        record_p2p_cache_access(false, "image");
     }
 }

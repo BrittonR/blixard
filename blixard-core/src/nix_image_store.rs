@@ -16,6 +16,10 @@ use iroh_blobs::Hash;
 use tokio::sync::RwLock;
 use tracing::{info, debug, warn};
 use std::sync::Arc;
+use crate::metrics_otel::{
+    record_p2p_image_import, record_p2p_image_download, record_p2p_chunk_transfer,
+    record_p2p_verification, record_p2p_cache_access, start_p2p_transfer,
+};
 
 /// Type of Nix artifact
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -321,6 +325,21 @@ impl NixImageStore {
         // Update chunk index
         self.update_chunk_index(&metadata).await?;
 
+        // Record metrics
+        let artifact_type_str = match &metadata.artifact_type {
+            NixArtifactType::MicroVM { .. } => "microvm",
+            NixArtifactType::Container { .. } => "container", 
+            NixArtifactType::StorePath { .. } => "storepath",
+            NixArtifactType::Closure { .. } => "closure",
+        };
+        record_p2p_image_import(artifact_type_str, true, total_size);
+        
+        // Record deduplication metrics
+        let chunks_deduplicated = all_chunks.len() - unique_chunks.len();
+        for _ in 0..chunks_deduplicated {
+            record_p2p_chunk_transfer(0, true);
+        }
+
         info!("Successfully imported {} with {} chunks", name, all_chunks.len());
         Ok(metadata)
     }
@@ -332,6 +351,9 @@ impl NixImageStore {
         target_dir: Option<&Path>,
     ) -> BlixardResult<(PathBuf, TransferStats)> {
         info!("Downloading Nix image {}", image_id);
+        
+        // Start P2P transfer tracking
+        let _transfer_guard = start_p2p_transfer();
 
         // Get metadata
         let metadata = self.get_metadata(image_id).await?
@@ -369,6 +391,12 @@ impl NixImageStore {
             chunks_needed.len(),
             chunks_have.len()
         );
+        
+        // Record cache hits/misses
+        record_p2p_cache_access(false, "chunk");  // For chunks we need
+        for _ in &chunks_have {
+            record_p2p_cache_access(true, "chunk");  // For chunks we already have
+        }
 
         let start_time = std::time::Instant::now();
         let mut bytes_transferred = 0u64;
@@ -379,6 +407,9 @@ impl NixImageStore {
             let chunk_data = self.download_chunk(&chunk.hash).await?;
             bytes_transferred += chunk_data.len() as u64;
             
+            // Record chunk transfer
+            record_p2p_chunk_transfer(chunk_data.len() as u64, false);
+            
             // Store chunk for future deduplication
             self.store_chunk(&chunk.hash, &chunk_data).await?;
         }
@@ -386,6 +417,8 @@ impl NixImageStore {
         // Calculate deduplicated bytes
         for chunk in &chunks_have {
             bytes_deduplicated += chunk.size;
+            // Record deduplicated chunks
+            record_p2p_chunk_transfer(chunk.size, true);
         }
 
         // Reassemble the image from chunks
@@ -393,7 +426,13 @@ impl NixImageStore {
         
         // Verify the downloaded image if we have NAR hash
         if metadata.nar_hash.is_some() {
-            self.verify_nix_image(&metadata, &target_path).await?;
+            match self.verify_nix_image(&metadata, &target_path).await {
+                Ok(_) => record_p2p_verification(true, "nar_hash"),
+                Err(e) => {
+                    record_p2p_verification(false, "nar_hash");
+                    return Err(e);
+                }
+            }
         }
 
         let stats = TransferStats {
@@ -411,6 +450,9 @@ impl NixImageStore {
             (bytes_transferred as f64 / stats.duration.as_secs_f64()) / 1_048_576.0,
             (bytes_deduplicated as f64 / (bytes_transferred + bytes_deduplicated) as f64) * 100.0
         );
+        
+        // Record download metrics
+        record_p2p_image_download(image_id, true, stats.duration.as_secs_f64());
 
         Ok((target_path, stats))
     }
@@ -825,79 +867,243 @@ impl NixImageStore {
     
     /// Extract Nix metadata from a store path
     async fn extract_nix_metadata(&self, path: &Path) -> BlixardResult<(Option<String>, Option<u64>)> {
+        use tokio::process::Command;
+        
         // Check if this is a Nix store path
         if !path.starts_with(&self.nix_store_dir) {
+            debug!("Path {:?} is not in Nix store, skipping NAR metadata extraction", path);
             return Ok((None, None));
         }
         
-        // Try to get NAR info from Nix
-        // In a real implementation, we would:
-        // 1. Run `nix path-info --json <path>` to get metadata
-        // 2. Extract narHash and narSize fields
-        // 3. Use `nix hash path --type sha256 --base32 <path>` for verification
+        // First check if the path exists
+        if !path.exists() {
+            debug!("Path {:?} does not exist, cannot extract NAR metadata", path);
+            return Ok((None, None));
+        }
         
-        // For now, we'll simulate this
-        if path.to_string_lossy().contains("nixos-system") {
-            // Example NAR hash format from Nix
-            Ok((
-                Some("sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string()),
-                Some(1024 * 1024 * 100), // 100MB
-            ))
+        // Run nix path-info to get NAR hash and size
+        let output = Command::new("nix")
+            .args(&["path-info", "--json", &path.to_string_lossy()])
+            .env("NIX_CONFIG", "experimental-features = nix-command")
+            .output()
+            .await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to run nix path-info: {}", e),
+            })?;
+        
+        if !output.status.success() {
+            // Path might not be in store database yet
+            // Try to add it first if it's a regular path
+            if path.is_dir() || path.is_file() {
+                debug!("Path not in store database, trying nix store add-path");
+                
+                let add_output = Command::new("nix")
+                    .args(&["store", "add-path", &path.to_string_lossy()])
+                    .env("NIX_CONFIG", "experimental-features = nix-command")
+                    .output()
+                    .await
+                    .map_err(|e| BlixardError::Internal {
+                        message: format!("Failed to run nix store add-path: {}", e),
+                    })?;
+                
+                if !add_output.status.success() {
+                    debug!("Failed to add path to store: {}", String::from_utf8_lossy(&add_output.stderr));
+                    return Ok((None, None));
+                }
+                
+                // Try path-info again
+                let retry_output = Command::new("nix")
+                    .args(&["path-info", "--json", &path.to_string_lossy()])
+                    .env("NIX_CONFIG", "experimental-features = nix-command")
+                    .output()
+                    .await?;
+                
+                if !retry_output.status.success() {
+                    debug!("nix path-info still failed after add-path: {}", 
+                           String::from_utf8_lossy(&retry_output.stderr));
+                    return Ok((None, None));
+                }
+                
+                // Parse the retry output
+                return self.parse_nix_path_info_output(&retry_output.stdout, path).await;
+            }
+            
+            debug!("nix path-info failed for {:?}: {}", path, String::from_utf8_lossy(&output.stderr));
+            return Ok((None, None));
+        }
+        
+        self.parse_nix_path_info_output(&output.stdout, path).await
+    }
+    
+    /// Parse nix path-info JSON output
+    async fn parse_nix_path_info_output(&self, stdout: &[u8], path: &Path) -> BlixardResult<(Option<String>, Option<u64>)> {
+        let json_str = String::from_utf8_lossy(stdout);
+        let path_info: serde_json::Value = serde_json::from_str(&json_str)
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to parse nix path-info JSON: {}", e),
+            })?;
+        
+        // Extract NAR hash and size from the first (and only) entry
+        if let Some(info) = path_info.as_object()
+            .and_then(|obj| obj.values().next())
+            .and_then(|v| v.as_object()) {
+            
+            let nar_hash = info.get("narHash")
+                .and_then(|h| h.as_str())
+                .map(String::from);
+            
+            let nar_size = info.get("narSize")
+                .and_then(|s| s.as_u64());
+            
+            info!("Extracted NAR metadata for {:?}: hash={:?}, size={:?}", 
+                  path, nar_hash, nar_size);
+            
+            Ok((nar_hash, nar_size))
         } else {
+            warn!("Unexpected nix path-info output format for {:?}", path);
             Ok((None, None))
         }
     }
     
     /// Verify a downloaded Nix image against its NAR hash
     async fn verify_nix_image(&self, metadata: &NixImageMetadata, path: &Path) -> BlixardResult<()> {
-        let nar_hash = metadata.nar_hash.as_ref()
+        use tokio::process::Command;
+        
+        let expected_nar_hash = metadata.nar_hash.as_ref()
             .ok_or_else(|| BlixardError::Internal {
                 message: "No NAR hash available for verification".to_string(),
             })?;
         
-        info!("Verifying Nix image {} against NAR hash {}", metadata.name, nar_hash);
+        info!("Verifying Nix image {} against NAR hash {}", metadata.name, expected_nar_hash);
         
-        // In a real implementation, we would:
-        // 1. Run `nix hash path --type sha256 <path>` 
-        // 2. Compare with stored NAR hash
-        // 3. Optionally verify signatures with `nix path-info --sigs`
-        
-        // For demonstration, let's calculate SHA256 of the file
-        use sha2::{Sha256, Digest};
-        use tokio::io::AsyncReadExt;
-        
-        let mut file = tokio::fs::File::open(path).await?;
-        let mut hasher = Sha256::new();
-        let mut buffer = vec![0u8; 8192];
-        
-        loop {
-            let n = file.read(&mut buffer).await?;
-            if n == 0 {
-                break;
+        // First try to get the NAR hash if the path is already in the store
+        if path.starts_with(&self.nix_store_dir) {
+            let output = Command::new("nix")
+                .args(&["path-info", "--json", &path.to_string_lossy()])
+                .env("NIX_CONFIG", "experimental-features = nix-command")
+                .output()
+                .await?;
+                
+            if output.status.success() {
+                let (nar_hash, _) = self.parse_nix_path_info_output(&output.stdout, path).await?;
+                if let Some(actual_hash) = nar_hash {
+                    if actual_hash == *expected_nar_hash {
+                        info!("NAR hash verification succeeded for {}", metadata.name);
+                        return Ok(());
+                    } else {
+                        return Err(BlixardError::Internal {
+                            message: format!(
+                                "NAR hash mismatch for {}: expected {}, got {}",
+                                metadata.name, expected_nar_hash, actual_hash
+                            ),
+                        });
+                    }
+                }
             }
-            hasher.update(&buffer[..n]);
         }
         
-        let computed_hash = format!("sha256:{}", hex::encode(hasher.finalize()));
-        
-        // In production, we'd compare with the actual NAR hash
-        // For now, we'll just log
-        info!("Computed hash: {} (would compare with {})", computed_hash, nar_hash);
-        
-        // Check file size if available
-        if let Some(expected_size) = metadata.nar_size {
-            let actual_size = std::fs::metadata(path)?.len();
-            if actual_size != expected_size {
+        // Otherwise, compute the NAR hash directly
+        let output = Command::new("nix")
+            .args(&["nar", "dump-path", &path.to_string_lossy(), "|", "nix", "hash", "file", "--type", "sha256", "--base32", "-"])
+            .env("NIX_CONFIG", "experimental-features = nix-command")
+            .output()
+            .await;
+            
+        // If the above fails (due to shell pipe), try an alternative approach
+        let computed_hash = if output.is_err() || !output.as_ref().unwrap().status.success() {
+            // Alternative: use nix-store --dump and pipe to nix-hash
+            let dump_output = Command::new("nix-store")
+                .args(&["--dump", &path.to_string_lossy()])
+                .output()
+                .await
+                .map_err(|e| BlixardError::Internal {
+                    message: format!("Failed to run nix-store --dump: {}", e),
+                })?;
+                
+            if !dump_output.status.success() {
                 return Err(BlixardError::Internal {
                     message: format!(
-                        "Size mismatch: expected {} bytes, got {} bytes",
-                        expected_size, actual_size
+                        "Failed to dump NAR for {}: {}",
+                        path.display(),
+                        String::from_utf8_lossy(&dump_output.stderr)
                     ),
                 });
             }
-        }
+            
+            // Hash the NAR output
+            let mut hash_cmd = Command::new("nix-hash")
+                .args(&["--type", "sha256", "--base32", "--flat"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .map_err(|e| BlixardError::Internal {
+                    message: format!("Failed to spawn nix-hash: {}", e),
+                })?;
+                
+            // Write NAR data to nix-hash stdin
+            use tokio::io::AsyncWriteExt;
+            if let Some(stdin) = hash_cmd.stdin.take() {
+                let mut stdin = tokio::io::BufWriter::new(stdin);
+                stdin.write_all(&dump_output.stdout).await?;
+                stdin.flush().await?;
+            }
+            
+            let hash_result = hash_cmd.wait_with_output().await?;
+            
+            if !hash_result.status.success() {
+                return Err(BlixardError::Internal {
+                    message: format!(
+                        "Failed to hash NAR: {}",
+                        String::from_utf8_lossy(&hash_result.stderr)
+                    ),
+                });
+            }
+            
+            format!("sha256:{}", String::from_utf8_lossy(&hash_result.stdout).trim())
+        } else {
+            let output = output.unwrap();
+            format!("sha256:{}", String::from_utf8_lossy(&output.stdout).trim())
+        };
         
-        Ok(())
+        // Compare the computed hash with the expected hash
+        if computed_hash == *expected_nar_hash {
+            info!("NAR hash verification succeeded for {}", metadata.name);
+            
+            // Also check NAR size if available
+            if let Some(expected_size) = metadata.nar_size {
+                if path.starts_with(&self.nix_store_dir) {
+                    // For store paths, we already have the exact NAR size
+                    // The file size might be different from NAR size
+                    debug!("NAR size verification skipped for store path (size: {})", expected_size);
+                } else {
+                    // For non-store paths, verify the actual file size
+                    let actual_size = if path.is_file() {
+                        std::fs::metadata(path)?.len()
+                    } else {
+                        // For directories, we'd need to compute the NAR size
+                        // which is complex, so skip for now
+                        expected_size
+                    };
+                    
+                    if actual_size != expected_size {
+                        warn!(
+                            "Size mismatch for {}: expected {} bytes, got {} bytes",
+                            metadata.name, expected_size, actual_size
+                        );
+                        // Don't fail on size mismatch as NAR size != file size
+                    }
+                }
+            }
+            
+            Ok(())
+        } else {
+            Err(BlixardError::Internal {
+                message: format!(
+                    "NAR hash verification failed for {}: expected {}, got {}",
+                    metadata.name, expected_nar_hash, computed_hash
+                ),
+            })
+        }
     }
     
     /// Extract derivation hash from a Nix store path

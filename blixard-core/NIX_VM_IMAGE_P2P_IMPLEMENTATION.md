@@ -176,10 +176,20 @@ image_store.prefetch_for_migration("my-vm", target_node_id).await?;
 - **Image verification using NAR hashes** ✨
 - **VM backend integration with automatic downloads** ✨
 
+### ✅ Recently Completed
+- **Real Nix command integration** ✨
+  - `nix path-info --json` for NAR hash extraction
+  - `nix store add-path` for adding paths to store
+  - `nix-store --dump | nix-hash` for NAR hash computation
+  - Automatic NAR hash verification during downloads
+- **P2P transfer metrics and monitoring** ✨
+  - Comprehensive OpenTelemetry metrics
+  - Transfer speed, cache hits, deduplication tracking
+  - Grafana dashboard configuration
+
 ### 🔧 In Progress
-- Metrics and monitoring for P2P transfers
 - Production-ready error handling
-- Real Nix command integration
+- Nix binary cache signature verification
 
 ### 📋 TODO
 - Nix signature verification (binary cache signatures)

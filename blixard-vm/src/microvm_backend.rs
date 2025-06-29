@@ -445,6 +445,9 @@ impl VmBackend for MicrovmBackend {
                     if !has_image {
                         info!("Nix image {} not found locally, downloading...", nix_image_id);
                         
+                        // Record cache miss
+                        blixard_core::metrics_otel::record_p2p_cache_access(false, "vm_image");
+                        
                         // Download the image
                         let vm_images_dir = self.data_dir.join("vm-images");
                         std::fs::create_dir_all(&vm_images_dir)?;
@@ -477,6 +480,9 @@ impl VmBackend for MicrovmBackend {
                         self.update_vm_config_with_image_path(name, &image_path).await?;
                     } else {
                         info!("Nix image {} already available locally", nix_image_id);
+                        
+                        // Record cache hit
+                        blixard_core::metrics_otel::record_p2p_cache_access(true, "vm_image");
                     }
                 } else {
                     warn!("VM {} requires Nix image {} but no image store configured", name, nix_image_id);
