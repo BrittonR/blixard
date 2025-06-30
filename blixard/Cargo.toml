@@ -79,9 +79,21 @@ name = "secure_cluster_demo"
 path = "../examples/secure_cluster_demo.rs"
 
 [[example]]
+name = "connection_pool_demo"
+path = "../examples/connection_pool_demo.rs"
+
+[[example]]
 name = "p2p_image_sharing"
 path = "../examples/p2p_image_sharing.rs"
 
 [[example]]
 name = "tui_p2p_demo"
 path = "../examples/tui_p2p_demo.rs"
+
+[[example]]
+name = "raft_batch_demo"
+path = "../examples/raft_batch_demo.rs"
+
+[[example]]
+name = "raft_batch_simple_demo"
+path = "../examples/raft_batch_simple_demo.rs"

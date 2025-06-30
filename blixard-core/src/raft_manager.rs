@@ -14,6 +14,7 @@ use crate::storage::{RedbRaftStorage, SnapshotData, VM_STATE_TABLE, CLUSTER_STAT
     TASK_TABLE, TASK_ASSIGNMENT_TABLE, TASK_RESULT_TABLE, WORKER_TABLE, WORKER_STATUS_TABLE};
 use crate::types::{VmCommand, VmStatus};
 use crate::metrics_otel::{metrics, Timer, attributes};
+use crate::config_global;
 
 // Raft message types for cluster communication
 #[derive(Debug)]
@@ -63,6 +64,9 @@ pub enum ProposalData {
     CreateVm(VmCommand),
     UpdateVmStatus { vm_name: String, status: VmStatus, node_id: u64 },
     MigrateVm { vm_name: String, from_node: u64, to_node: u64 },
+    
+    // Batch processing
+    Batch(Vec<ProposalData>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,8 +185,52 @@ impl RaftStateMachine {
                 let command = VmCommand::Migrate { task };
                 self.apply_vm_command(write_txn, &command)?;
             }
+            ProposalData::Batch(proposals) => {
+                // Commit the current transaction first
+                write_txn.commit()
+                    .map_err(|e| BlixardError::Storage {
+                        operation: "commit batch transaction".to_string(),
+                        source: Box::new(e),
+                    })?;
+                
+                // Apply each proposal in the batch sequentially
+                // Each sub-proposal gets its own transaction
+                for sub_proposal in proposals {
+                    // Prevent nested batches
+                    if matches!(sub_proposal, ProposalData::Batch(_)) {
+                        return Err(BlixardError::Internal {
+                            message: "Nested batch proposals are not supported".to_string(),
+                        });
+                    }
+                    
+                    // Create an entry for the sub-proposal and apply it
+                    let sub_entry = Entry {
+                        entry_type: entry.entry_type,
+                        term: entry.term,
+                        index: entry.index,
+                        data: bincode::serialize(&sub_proposal)
+                            .map_err(|e| BlixardError::Serialization {
+                                operation: "serialize sub-proposal".to_string(),
+                                source: Box::new(e),
+                            })?,
+                        context: entry.context.clone(),
+                        sync_log: entry.sync_log,
+                    };
+                    
+                    // Recursively apply the sub-proposal
+                    Box::pin(self.apply_entry(&sub_entry)).await?;
+                }
+                
+                return Ok(());
+            }
             _ => {
                 // Handle other proposal types
+                // Since we don't handle this proposal type, commit empty transaction
+                write_txn.commit()
+                    .map_err(|e| BlixardError::Storage {
+                        operation: "commit transaction".to_string(),
+                        source: Box::new(e),
+                    })?;
             }
         }
 
@@ -730,6 +778,37 @@ impl RaftManager {
         let (message_tx, message_rx) = mpsc::unbounded_channel();
         let (conf_change_tx, conf_change_rx) = mpsc::unbounded_channel();
         let (outgoing_tx, outgoing_rx) = mpsc::unbounded_channel();
+        
+        // Set up batch processing if enabled
+        let final_proposal_tx = if let Some(_shared) = shared_state.upgrade() {
+            let config = config_global::get();
+            let batch_config = crate::raft_batch_processor::BatchConfig {
+                enabled: config.cluster.raft.batch_processing.enabled,
+                max_batch_size: config.cluster.raft.batch_processing.max_batch_size,
+                batch_timeout_ms: config.cluster.raft.batch_processing.batch_timeout_ms,
+                max_batch_bytes: config.cluster.raft.batch_processing.max_batch_bytes,
+            };
+            
+            if batch_config.enabled {
+                // Create batch processor
+                let (batch_tx, batch_processor) = crate::raft_batch_processor::create_batch_processor(
+                    batch_config,
+                    proposal_tx.clone(),
+                    node_id,
+                );
+                
+                // Spawn batch processor
+                tokio::spawn(batch_processor.run());
+                
+                // Use batch processor's channel for sending proposals
+                batch_tx
+            } else {
+                // Use direct channel
+                proposal_tx.clone()
+            }
+        } else {
+            proposal_tx.clone()
+        };
 
         let manager = Self {
             node_id,
@@ -740,7 +819,7 @@ impl RaftManager {
             logger,
             shared_state,
             proposal_rx,
-            proposal_tx: proposal_tx.clone(),
+            proposal_tx: final_proposal_tx.clone(),
             message_rx,
             _message_tx: message_tx.clone(),
             conf_change_rx,
@@ -751,7 +830,7 @@ impl RaftManager {
             needs_replication_trigger: Arc::new(RwLock::new(false)),
         };
 
-        Ok((manager, proposal_tx, message_tx, conf_change_tx, outgoing_rx))
+        Ok((manager, final_proposal_tx, message_tx, conf_change_tx, outgoing_rx))
     }
     
     /// Bootstrap a single-node cluster

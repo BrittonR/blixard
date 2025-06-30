@@ -122,12 +122,35 @@ pub struct RaftConfig {
     #[serde(with = "humantime_serde")]
     pub proposal_timeout: Duration,
     
+    /// Batch processing configuration
+    pub batch_processing: RaftBatchConfig,
+    
     /// Maximum restart attempts
     pub max_restarts: u32,
     
     /// Restart base delay
     #[serde(with = "humantime_serde")]
     pub restart_delay: Duration,
+}
+
+/// Connection pool configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ConnectionPoolConfig {
+    /// Maximum connections per peer
+    pub max_connections_per_peer: usize,
+    
+    /// Maximum number of peers
+    pub max_peers: usize,
+    
+    /// Idle timeout in seconds
+    pub idle_timeout_secs: u64,
+    
+    /// Maximum connection lifetime in seconds
+    pub max_lifetime_secs: u64,
+    
+    /// Cleanup interval in seconds
+    pub cleanup_interval_secs: u64,
 }
 
 /// Peer connection configuration
@@ -160,6 +183,9 @@ pub struct PeerConfig {
     
     /// Enable connection pooling
     pub enable_pooling: bool,
+    
+    /// Connection pool configuration
+    pub connection_pool: ConnectionPoolConfig,
 }
 
 /// Worker configuration
@@ -182,6 +208,23 @@ pub struct WorkerConfig {
     /// Health check timeout
     #[serde(with = "humantime_serde")]
     pub health_check_timeout: Duration,
+}
+
+/// Raft batch processing configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RaftBatchConfig {
+    /// Whether batch processing is enabled
+    pub enabled: bool,
+    
+    /// Maximum number of proposals in a single batch
+    pub max_batch_size: usize,
+    
+    /// Maximum time to wait before flushing a batch (ms)
+    pub batch_timeout_ms: u64,
+    
+    /// Maximum bytes in a single batch
+    pub max_batch_bytes: usize,
 }
 
 /// Storage configuration
@@ -551,6 +594,7 @@ impl Default for RaftConfig {
             snapshot_interval: 10000,
             conf_change_timeout: Duration::from_secs(5),
             proposal_timeout: Duration::from_secs(10),
+            batch_processing: RaftBatchConfig::default(),
             max_restarts: 5,
             restart_delay: Duration::from_secs(1),
         }
@@ -568,6 +612,19 @@ impl Default for PeerConfig {
             failure_threshold: 5,
             max_buffered_messages: 100,
             enable_pooling: true,
+            connection_pool: ConnectionPoolConfig::default(),
+        }
+    }
+}
+
+impl Default for ConnectionPoolConfig {
+    fn default() -> Self {
+        Self {
+            max_connections_per_peer: 5,
+            max_peers: 100,
+            idle_timeout_secs: 300, // 5 minutes
+            max_lifetime_secs: 3600, // 1 hour
+            cleanup_interval_secs: 60, // 1 minute
         }
     }
 }
@@ -580,6 +637,17 @@ impl Default for WorkerConfig {
             default_disk_gb: 100,
             resource_update_interval: Duration::from_secs(30),
             health_check_timeout: Duration::from_secs(5),
+        }
+    }
+}
+
+impl Default for RaftBatchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_batch_size: 100,
+            batch_timeout_ms: 10,
+            max_batch_bytes: 1024 * 1024, // 1MB
         }
     }
 }

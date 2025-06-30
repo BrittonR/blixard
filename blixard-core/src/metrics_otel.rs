@@ -87,6 +87,14 @@ pub struct Metrics {
     pub p2p_cache_hits: Counter<u64>,
     pub p2p_cache_misses: Counter<u64>,
     pub p2p_active_transfers: UpDownCounter<i64>,
+    
+    // Connection pool metrics
+    pub connection_pool_total: UpDownCounter<i64>,
+    pub connection_pool_active: UpDownCounter<i64>,
+    pub connection_pool_idle: UpDownCounter<i64>,
+    pub connection_pool_created: Counter<u64>,
+    pub connection_pool_evicted: Counter<u64>,
+    pub connection_pool_reused: Counter<u64>,
 }
 
 impl Metrics {
@@ -343,6 +351,32 @@ impl Metrics {
             p2p_active_transfers: meter
                 .i64_up_down_counter("p2p.transfers.active")
                 .with_description("Number of active P2P transfers")
+                .init(),
+            
+            // Connection pool metrics
+            connection_pool_total: meter
+                .i64_up_down_counter("connection_pool.connections.total")
+                .with_description("Total number of connections in the pool")
+                .init(),
+            connection_pool_active: meter
+                .i64_up_down_counter("connection_pool.connections.active")
+                .with_description("Number of active connections in the pool")
+                .init(),
+            connection_pool_idle: meter
+                .i64_up_down_counter("connection_pool.connections.idle")
+                .with_description("Number of idle connections in the pool")
+                .init(),
+            connection_pool_created: meter
+                .u64_counter("connection_pool.connections.created")
+                .with_description("Total connections created by the pool")
+                .init(),
+            connection_pool_evicted: meter
+                .u64_counter("connection_pool.connections.evicted")
+                .with_description("Total connections evicted from the pool")
+                .init(),
+            connection_pool_reused: meter
+                .u64_counter("connection_pool.connections.reused")
+                .with_description("Total connection reuses from the pool")
                 .init(),
             
             meter,
@@ -707,6 +741,41 @@ pub fn get_p2p_transfer_stats() -> P2pTransferStats {
         cache_misses: 0,
         active_transfers: 0,
     }
+}
+
+/// Record connection pool statistics
+pub fn record_connection_pool_stats(total: usize, active: usize, idle: usize) {
+    let metrics = metrics();
+    
+    // Update gauges with absolute values
+    metrics.connection_pool_total.add(total as i64, &[]);
+    metrics.connection_pool_active.add(active as i64, &[]);
+    metrics.connection_pool_idle.add(idle as i64, &[]);
+}
+
+/// Record connection pool event
+pub fn record_connection_pool_event(event: ConnectionPoolEvent) {
+    let metrics = metrics();
+    
+    match event {
+        ConnectionPoolEvent::Created => {
+            metrics.connection_pool_created.add(1, &[]);
+        }
+        ConnectionPoolEvent::Reused => {
+            metrics.connection_pool_reused.add(1, &[]);
+        }
+        ConnectionPoolEvent::Evicted => {
+            metrics.connection_pool_evicted.add(1, &[]);
+        }
+    }
+}
+
+/// Connection pool events
+#[derive(Debug, Clone, Copy)]
+pub enum ConnectionPoolEvent {
+    Created,
+    Reused,
+    Evicted,
 }
 
 #[cfg(test)]

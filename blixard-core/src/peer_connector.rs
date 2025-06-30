@@ -16,6 +16,7 @@ use crate::node_shared::{SharedNodeState, PeerInfo};
 use crate::config_global;
 use crate::metrics_otel::{metrics, Timer, attributes};
 use crate::tracing_otel;
+use crate::connection_pool::{ConnectionPool, PooledConnectionGuard};
 
 /// Buffered message for delayed sending
 struct BufferedMessage {
@@ -131,6 +132,9 @@ impl ConnectionState {
 /// Manages connections to peer nodes
 pub struct PeerConnector {
     node: Arc<SharedNodeState>,
+    /// Connection pool for better performance
+    connection_pool: Option<Arc<ConnectionPool>>,
+    /// Legacy connections (used when pooling is disabled)
     connections: RwLock<HashMap<u64, ClusterServiceClient<Channel>>>,
     /// Messages buffered while waiting for connection
     message_buffer: Mutex<HashMap<u64, VecDeque<BufferedMessage>>>,
@@ -152,10 +156,28 @@ impl PeerConnector {
     pub fn new(node: Arc<SharedNodeState>) -> Self {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         
-        // TLS config removed - not implemented yet
+        // Create connection pool if enabled
+        let config = config_global::get();
+        let connection_pool = if config.cluster.peer.enable_pooling {
+            let pool_config = config.cluster.peer.connection_pool.clone();
+            let node_clone = node.clone();
+            
+            let pool = ConnectionPool::new(pool_config, move |endpoint| {
+                let node = node_clone.clone();
+                let endpoint = endpoint.to_string();
+                Box::pin(async move {
+                    Self::create_channel_static(&node, &endpoint).await
+                })
+            });
+            
+            Some(Arc::new(pool))
+        } else {
+            None
+        };
         
         Self {
             node,
+            connection_pool,
             connections: RwLock::new(HashMap::new()),
             message_buffer: Mutex::new(HashMap::new()),
             connecting: Mutex::new(HashMap::new()),
@@ -167,8 +189,8 @@ impl PeerConnector {
         }
     }
     
-    /// Create a channel with optional TLS
-    async fn create_channel(&self, endpoint: &str) -> BlixardResult<Channel> {
+    /// Create a channel with optional TLS (static version for connection pool)
+    async fn create_channel_static(_node: &SharedNodeState, endpoint: &str) -> BlixardResult<Channel> {
         // TLS removed - not implemented yet
         if false {
             // TLS would be created here
@@ -185,6 +207,11 @@ impl PeerConnector {
                     message: format!("Failed to connect: {}", e),
                 })
         }
+    }
+    
+    /// Create a channel with optional TLS
+    async fn create_channel(&self, endpoint: &str) -> BlixardResult<Channel> {
+        Self::create_channel_static(&self.node, endpoint).await
     }
     
     /// Establish connection to a peer
@@ -271,9 +298,11 @@ impl PeerConnector {
             Ok(channel) => {
                 let client = ClusterServiceClient::new(channel);
                         
-                        // Store the connection
-                        let mut connections = self.connections.write().await;
-                        connections.insert(peer.id, client.clone());
+                        // Store the connection (only if pooling is disabled)
+                        if self.connection_pool.is_none() {
+                            let mut connections = self.connections.write().await;
+                            connections.insert(peer.id, client.clone());
+                        }
                         
                         // Increment connection count
                         {
@@ -347,10 +376,60 @@ impl PeerConnector {
         Ok(())
     }
     
+    /// Get a pooled connection guard (automatically returns connection when dropped)
+    pub async fn get_pooled_connection(&self, peer_id: u64) -> BlixardResult<PooledConnectionGuard> {
+        if let Some(ref pool) = self.connection_pool {
+            // Get peer info to find endpoint
+            let peers = self.node.get_peers().await;
+            let peer = peers.iter()
+                .find(|p| p.id == peer_id)
+                .ok_or_else(|| BlixardError::NotFound {
+                    resource: format!("Peer {}", peer_id),
+                })?;
+            
+            let endpoint = if false { // TLS removed
+                format!("https://{}", peer.address)
+            } else {
+                format!("http://{}", peer.address)
+            };
+            
+            let client = pool.get_connection(peer_id, &endpoint).await?;
+            Ok(PooledConnectionGuard::new(peer_id, client, pool.clone()))
+        } else {
+            Err(BlixardError::Configuration {
+                message: "Connection pooling is disabled".to_string(),
+            })
+        }
+    }
+    
     /// Get connection to a peer
     pub async fn get_connection(&self, peer_id: u64) -> Option<ClusterServiceClient<Channel>> {
-        let connections = self.connections.read().await;
-        connections.get(&peer_id).cloned()
+        // If pooling is enabled, get from pool
+        if let Some(ref pool) = self.connection_pool {
+            // Get peer info to find endpoint
+            let peers = self.node.get_peers().await;
+            if let Some(peer) = peers.iter().find(|p| p.id == peer_id) {
+                let endpoint = if false { // TLS removed
+                    format!("https://{}", peer.address)
+                } else {
+                    format!("http://{}", peer.address)
+                };
+                
+                match pool.get_connection(peer_id, &endpoint).await {
+                    Ok(client) => Some(client),
+                    Err(e) => {
+                        tracing::debug!("Failed to get pooled connection for peer {}: {}", peer_id, e);
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        } else {
+            // Use legacy connection map
+            let connections = self.connections.read().await;
+            connections.get(&peer_id).cloned()
+        }
     }
     
     /// Send buffered messages after connection is established
@@ -514,6 +593,49 @@ impl PeerConnector {
     
     /// Start background task to maintain connections
     pub async fn start_connection_maintenance(self: Arc<Self>) {
+        // Connection pool cleanup task (if pooling is enabled)
+        if let Some(ref pool) = self.connection_pool {
+            let pool_clone = pool.clone();
+            let mut shutdown_rx = self.shutdown_rx.clone();
+            let cleanup_interval = config_global::get().cluster.peer.connection_pool.cleanup_interval_secs;
+            
+            let cleanup_task = tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(cleanup_interval));
+                
+                loop {
+                    tokio::select! {
+                        _ = shutdown_rx.changed() => {
+                            if *shutdown_rx.borrow() {
+                                tracing::info!("[PEER-CONN] Connection pool cleanup task shutting down");
+                                break;
+                            }
+                        }
+                        _ = interval.tick() => {
+                            pool_clone.cleanup_connections().await;
+                            let stats = pool_clone.get_stats().await;
+                            tracing::debug!(
+                                "[POOL] Stats: {} total, {} active, {} idle, {} peers",
+                                stats.total_connections,
+                                stats.active_connections,
+                                stats.idle_connections,
+                                stats.peer_count
+                            );
+                            
+                            // Update metrics
+                            crate::metrics_otel::record_connection_pool_stats(
+                                stats.total_connections,
+                                stats.active_connections,
+                                stats.idle_connections,
+                            );
+                        }
+                    }
+                }
+            });
+            
+            let mut tasks = self.background_tasks.lock().await;
+            tasks.push(cleanup_task);
+        }
+        
         // Connection establishment task
         let self_clone = self.clone();
         let mut shutdown_rx = self.shutdown_rx.clone();
