@@ -12,6 +12,11 @@ use std::sync::Arc;
 use tempfile::TempDir;
 
 async fn create_test_scheduler() -> (VmScheduler, Arc<Database>, TempDir) {
+    // Initialize metrics system for tests if not already initialized
+    if blixard_core::metrics_otel::try_metrics().is_none() {
+        let _ = blixard_core::metrics_otel::init_noop();
+    }
+    
     let temp_dir = TempDir::new().unwrap();
     let db_path = temp_dir.path().join("test.db");
     let database = Arc::new(Database::create(&db_path).unwrap());

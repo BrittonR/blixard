@@ -11,6 +11,7 @@ pub mod storage;
 pub mod vm_backend;
 pub mod vm_scheduler;
 pub mod anti_affinity;
+pub mod resource_management;
 pub mod network_isolated_backend;
 pub mod peer_connector;
 pub mod connection_pool;

@@ -9,6 +9,9 @@ use crate::raft_manager::{WorkerCapabilities, WorkerStatus};
 use crate::storage::{WORKER_TABLE, WORKER_STATUS_TABLE, VM_STATE_TABLE};
 use crate::metrics_otel;
 use crate::anti_affinity::{AntiAffinityChecker, AntiAffinityRules};
+use crate::resource_management::{
+    NodeResourceState, OvercommitPolicy, ResourceReservation, ClusterResourceManager,
+};
 
 /// VM placement strategy for determining where to place VMs
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,12 +146,28 @@ pub struct PlacementDecision {
 /// VM Scheduler for automatic placement of VMs across cluster nodes
 pub struct VmScheduler {
     database: Arc<Database>,
+    resource_manager: Arc<tokio::sync::RwLock<ClusterResourceManager>>,
 }
 
 impl VmScheduler {
     /// Create a new VM scheduler
     pub fn new(database: Arc<Database>) -> Self {
-        Self { database }
+        Self { 
+            database,
+            resource_manager: Arc::new(tokio::sync::RwLock::new(
+                ClusterResourceManager::new(OvercommitPolicy::moderate())
+            )),
+        }
+    }
+    
+    /// Create a new VM scheduler with custom overcommit policy
+    pub fn with_overcommit_policy(database: Arc<Database>, policy: OvercommitPolicy) -> Self {
+        Self { 
+            database,
+            resource_manager: Arc::new(tokio::sync::RwLock::new(
+                ClusterResourceManager::new(policy)
+            )),
+        }
     }
     
     /// Schedule a VM placement based on resource requirements and strategy
@@ -501,6 +520,151 @@ impl VmScheduler {
         }
         
         Ok(summary)
+    }
+    
+    /// Update the resource manager with node information
+    pub async fn sync_resource_manager(&self) -> BlixardResult<()> {
+        let read_txn = self.database.begin_read()?;
+        let worker_table = read_txn.open_table(WORKER_TABLE)?;
+        let status_table = read_txn.open_table(WORKER_STATUS_TABLE)?;
+        
+        let mut resource_manager = self.resource_manager.write().await;
+        
+        // Sync all worker nodes
+        for result in worker_table.iter()? {
+            let (key, value) = result?;
+            let node_id = u64::from_le_bytes(key.value().try_into().unwrap());
+            
+            // Check if worker is online
+            if let Ok(Some(status_data)) = status_table.get(key.value()) {
+                if status_data.value().first() == Some(&(WorkerStatus::Online as u8)) {
+                    let (_name, capabilities): (String, WorkerCapabilities) = 
+                        bincode::deserialize(value.value())?;
+                    
+                    // Register or update node in resource manager
+                    resource_manager.register_node(
+                        node_id,
+                        capabilities.cpu_cores,
+                        capabilities.memory_mb,
+                        capabilities.disk_gb,
+                    );
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Schedule VM placement with resource reservation support
+    pub async fn schedule_vm_placement_with_reservation(
+        &self,
+        vm_config: &VmConfig,
+        strategy: PlacementStrategy,
+        reservation_priority: Option<u32>,
+    ) -> BlixardResult<PlacementDecision> {
+        // First sync resource manager with current state
+        self.sync_resource_manager().await?;
+        
+        // Schedule placement using normal logic
+        let decision = self.schedule_vm_placement(vm_config, strategy).await?;
+        
+        // If successful and reservation requested, create a reservation
+        if let Some(priority) = reservation_priority {
+            let mut resource_manager = self.resource_manager.write().await;
+            
+            if let Some(node_state) = resource_manager.get_node_state_mut(decision.selected_node_id) {
+                let reservation = ResourceReservation {
+                    id: format!("vm-{}-reservation", vm_config.name),
+                    owner: vm_config.name.clone(),
+                    cpu_cores: vm_config.vcpus,
+                    memory_mb: vm_config.memory as u64,
+                    disk_gb: 10, // Default disk reservation
+                    priority,
+                    is_hard: true,
+                    expires_at: None, // Permanent until VM is deleted
+                };
+                
+                // Try to add reservation
+                if let Err(e) = node_state.add_reservation(reservation) {
+                    tracing::warn!(
+                        "Failed to create reservation for VM {} on node {}: {}",
+                        vm_config.name, decision.selected_node_id, e
+                    );
+                }
+            }
+        }
+        
+        Ok(decision)
+    }
+    
+    /// Get resource utilization considering overcommit
+    pub async fn get_node_resource_utilization(&self, node_id: u64) -> BlixardResult<Option<(f64, f64, f64)>> {
+        let resource_manager = self.resource_manager.read().await;
+        
+        if let Some(node_state) = resource_manager.get_node_state(node_id) {
+            Ok(Some(node_state.utilization_percentages()))
+        } else {
+            Ok(None)
+        }
+    }
+    
+    /// Update overcommit policy for a specific node
+    pub async fn update_node_overcommit_policy(
+        &self,
+        node_id: u64,
+        policy: OvercommitPolicy,
+    ) -> BlixardResult<()> {
+        let mut resource_manager = self.resource_manager.write().await;
+        resource_manager.update_node_policy(node_id, policy)
+    }
+    
+    /// Get nodes that support overcommit
+    pub async fn get_overcommit_capable_nodes(&self) -> BlixardResult<Vec<u64>> {
+        let resource_manager = self.resource_manager.read().await;
+        let _summary = resource_manager.cluster_summary();
+        
+        // Return all nodes that have overcommit enabled
+        let mut capable_nodes = Vec::new();
+        for (node_id, state) in resource_manager.node_states.iter() {
+            if state.overcommit_policy.cpu_overcommit_ratio > 1.0 ||
+               state.overcommit_policy.memory_overcommit_ratio > 1.0 ||
+               state.overcommit_policy.disk_overcommit_ratio > 1.0 {
+                capable_nodes.push(*node_id);
+            }
+        }
+        
+        Ok(capable_nodes)
+    }
+    
+    /// Create a resource reservation for system use
+    pub async fn create_system_reservation(
+        &self,
+        node_id: u64,
+        cpu_cores: u32,
+        memory_mb: u64,
+        disk_gb: u64,
+        reservation_id: &str,
+    ) -> BlixardResult<()> {
+        let mut resource_manager = self.resource_manager.write().await;
+        
+        if let Some(node_state) = resource_manager.get_node_state_mut(node_id) {
+            let reservation = ResourceReservation {
+                id: reservation_id.to_string(),
+                owner: "system".to_string(),
+                cpu_cores,
+                memory_mb,
+                disk_gb,
+                priority: 1000, // High priority for system reservations
+                is_hard: true,
+                expires_at: None,
+            };
+            
+            node_state.add_reservation(reservation)?;
+        } else {
+            return Err(BlixardError::NodeNotFound { node_id });
+        }
+        
+        Ok(())
     }
 }
 

@@ -94,6 +94,12 @@ pub enum BlixardError {
     
     #[error("Quota exceeded for {resource}: limit {limit}, requested {requested}")]
     QuotaExceeded { resource: String, limit: u64, requested: u64 },
+    
+    #[error("Node not found: {node_id}")]
+    NodeNotFound { node_id: u64 },
+    
+    #[error("Insufficient resources: requested {requested}, available {available}")]
+    InsufficientResources { requested: String, available: String },
 }
 
 pub type Result<T> = std::result::Result<T, BlixardError>;
