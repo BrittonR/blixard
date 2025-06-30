@@ -1,259 +1,437 @@
-# Blixard Implementation Plan
+# Cedar Policy Engine Migration Plan
 
-## Current Status (2025-01-30)
+## Overview
 
-## Progress Summary
+This plan outlines the migration from Blixard's current custom RBAC implementation to AWS Cedar Policy Engine, a purpose-built authorization language that provides fine-grained, attribute-based access control with formal verification capabilities.
 
-### ✅ Completed Features
-1. **Priority-Based Scheduling and Preemption** (Phase 1)
-   - Added priority field to VmConfig (0-1000 scale)
-   - Implemented PriorityScheduler with preemption support
-   - Added preemption policies (immediate vs graceful)
-   - Created comprehensive tests for priority scheduling
-   - Integrated with existing placement strategies
+## Why Cedar?
 
-2. **Multi-Datacenter Awareness** (Phase 2)
-   - Added NodeTopology struct with datacenter/zone/rack hierarchy
-   - Implemented LocalityPreference for VM placement constraints
-   - Added datacenter latency tracking in scheduler
-   - Created new placement strategies: LocalityAware, SpreadAcrossFailureDomains, CostOptimized
-   - Integrated topology information with worker registration
+1. **Formal Verification**: Cedar policies can be mathematically proven correct
+2. **Policy as Code**: Declarative policies separate from application logic
+3. **Performance**: Sub-millisecond policy evaluation with indexed retrieval
+4. **Rich Policy Language**: Supports RBAC, ABAC, and complex conditional logic
+5. **Tooling**: Built-in validation, testing, and analysis tools
+6. **Production-Ready**: Used by AWS for critical authorization decisions
 
-3. **Production Hardening** (Phase 5 - Partial)
-   - **Configuration Hot-Reload**: File watching with debouncing for runtime config updates
-   - **Automated State Backups**: Scheduled backups with compression and retention policies
-   - **Point-in-Time Recovery**: Transaction log and incremental backup support
-   - **Compliance and Audit Logging**: Comprehensive security event tracking with tamper-evident logs
+## Current State Analysis
 
-### ✅ Completed Features
+### Existing RBAC System
+- Simple role-based permissions (admin, operator, viewer)
+- Fixed permission set: ClusterRead/Write/Admin, VmRead/Write/Delete/Execute, NodeRead/Write/Admin
+- Basic resource types: Cluster, Vm(String), Node(u64)
+- Token-based authentication with SHA256 hashing
+- In-memory role and permission storage
 
-1. **Performance Optimizations**
-   - Connection pooling for gRPC clients with configurable limits
-   - Batch processing for Raft proposals with configurable batch sizes
-   
-2. **Advanced Scheduling**
-   - Anti-affinity rules (hard/soft constraints) for VM placement
-   - Resource reservations with priority levels
-   - Overcommit policies (conservative/moderate/aggressive profiles)
+### Integration Points
+- gRPC middleware for auth enforcement
+- SecurityManager for token validation
+- Permission checks in all service implementations
+- Multi-tenancy support via tenant ID extraction
 
-3. **Core Infrastructure** (Previously Completed)
-   - Multi-node clustering with Raft consensus
-   - VM orchestration via microvm.nix
-   - Dynamic membership management
-   - Network partition handling
-   - Byzantine failure resilience
-   - Comprehensive observability (metrics, tracing, logs)
-   - Security layer (mTLS, RBAC, authentication)
+## Migration Strategy
 
-## Next Implementation Phases
+### Phase 1: Cedar Foundation (Week 1)
 
-### Phase 1: Priority-Based Scheduling and Preemption (High Priority)
+#### 1.1 Add Cedar Dependencies
+```toml
+# Cargo.toml
+[dependencies]
+cedar-policy = "3.0"
+cedar-policy-core = "3.0"
+cedar-policy-validator = "3.0"
+```
 
-**Goal**: Implement a priority system for VMs with preemption capabilities
+#### 1.2 Define Cedar Schema
+Create `cedar/schema.cedarschema.json`:
+```json
+{
+  "Blixard": {
+    "entityTypes": {
+      "User": {
+        "memberOfTypes": ["Role", "Tenant"],
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "email": { "type": "String" },
+            "tenant_id": { "type": "String" },
+            "created_at": { "type": "Long" }
+          }
+        }
+      },
+      "Role": {
+        "memberOfTypes": ["Tenant"],
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "name": { "type": "String" },
+            "description": { "type": "String" }
+          }
+        }
+      },
+      "Tenant": {
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "name": { "type": "String" },
+            "tier": { "type": "String", "enum": ["free", "pro", "enterprise"] },
+            "quota_cpu": { "type": "Long" },
+            "quota_memory": { "type": "Long" },
+            "quota_vms": { "type": "Long" }
+          }
+        }
+      },
+      "VM": {
+        "memberOfTypes": ["Node", "Tenant"],
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "name": { "type": "String" },
+            "node_id": { "type": "Long" },
+            "tenant_id": { "type": "String" },
+            "cpu": { "type": "Long" },
+            "memory": { "type": "Long" },
+            "priority": { "type": "Long" },
+            "preemptible": { "type": "Boolean" },
+            "state": { "type": "String" }
+          }
+        }
+      },
+      "Node": {
+        "memberOfTypes": ["Cluster"],
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "id": { "type": "Long" },
+            "address": { "type": "String" },
+            "capacity_cpu": { "type": "Long" },
+            "capacity_memory": { "type": "Long" },
+            "available_cpu": { "type": "Long" },
+            "available_memory": { "type": "Long" }
+          }
+        }
+      },
+      "Cluster": {
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "name": { "type": "String" },
+            "region": { "type": "String" }
+          }
+        }
+      }
+    },
+    "actions": {
+      "readCluster": { "appliesTo": { "principalTypes": ["User", "Role"], "resourceTypes": ["Cluster"] } },
+      "manageCluster": { "appliesTo": { "principalTypes": ["User", "Role"], "resourceTypes": ["Cluster"] } },
+      "joinCluster": { "appliesTo": { "principalTypes": ["User", "Role"], "resourceTypes": ["Cluster"] } },
+      "leaveCluster": { "appliesTo": { "principalTypes": ["User", "Role"], "resourceTypes": ["Cluster"] } },
+      
+      "readNode": { "appliesTo": { "principalTypes": ["User", "Role"], "resourceTypes": ["Node"] } },
+      "manageNode": { "appliesTo": { "principalTypes": ["User", "Role"], "resourceTypes": ["Node"] } },
+      
+      "createVM": { "appliesTo": { "principalTypes": ["User", "Role"], "resourceTypes": ["Tenant", "Node"] } },
+      "readVM": { "appliesTo": { "principalTypes": ["User", "Role"], "resourceTypes": ["VM"] } },
+      "updateVM": { "appliesTo": { "principalTypes": ["User", "Role"], "resourceTypes": ["VM"] } },
+      "deleteVM": { "appliesTo": { "principalTypes": ["User", "Role"], "resourceTypes": ["VM"] } },
+      "executeVM": { "appliesTo": { "principalTypes": ["User", "Role"], "resourceTypes": ["VM"] } },
+      
+      "readMetrics": { "appliesTo": { "principalTypes": ["User", "Role"], "resourceTypes": ["Node", "VM", "Cluster"] } },
+      "manageBackups": { "appliesTo": { "principalTypes": ["User", "Role"], "resourceTypes": ["Cluster", "VM"] } }
+    }
+  }
+}
+```
 
-**Tasks**:
-1. Add priority field to VmConfig (0-1000 scale)
-2. Implement priority queue in VM scheduler
-3. Add preemption logic:
-   - Define preemptible vs non-preemptible VMs
-   - Implement graceful preemption with configurable grace period
-   - Add forced preemption for critical workloads
-4. Create preemption policies:
-   - Never preempt
-   - Preempt lower priority only
-   - Cost-aware preemption
-5. Add metrics for preemption events
-6. Implement VM migration support for preempted workloads
+#### 1.3 Create Cedar Policy Engine Module
+Create `src/cedar_authz.rs`:
+```rust
+use cedar_policy::{Authorizer, Context, Decision, Entities, PolicySet, Request, Schema};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use crate::error::{BlixardError, BlixardResult};
 
-**Estimated Effort**: 2-3 days
+pub struct CedarAuthz {
+    authorizer: Authorizer,
+    policy_set: Arc<RwLock<PolicySet>>,
+    schema: Schema,
+    entities: Arc<RwLock<Entities>>,
+}
 
-### Phase 2: Multi-Datacenter Awareness (Medium Priority)
+impl CedarAuthz {
+    pub fn new() -> BlixardResult<Self> {
+        // Initialize Cedar with schema
+    }
+    
+    pub async fn is_authorized(
+        &self,
+        principal: &str,
+        action: &str,
+        resource: &str,
+        context: Context,
+    ) -> BlixardResult<bool> {
+        // Perform Cedar authorization check
+    }
+}
+```
 
-**Goal**: Enable cluster spanning multiple datacenters with locality awareness
+### Phase 2: Policy Migration (Week 1-2)
 
-**Tasks**:
-1. Add datacenter/zone/rack topology to node configuration
-2. Implement locality-aware placement strategies:
-   - Same datacenter preference
-   - Cross-datacenter for HA
-   - Bandwidth-aware placement
-3. Add network latency considerations
-4. Implement datacenter failover policies
-5. Add cross-datacenter replication for critical VMs
-6. Create datacenter affinity/anti-affinity rules
+#### 2.1 Convert Existing Roles to Cedar Policies
 
-**Estimated Effort**: 3-4 days
+Create `cedar/policies/base_roles.cedar`:
+```cedar
+// Admin Role - Full system access
+permit(
+    principal in Role::"admin",
+    action in [
+        Action::"readCluster", Action::"manageCluster", 
+        Action::"joinCluster", Action::"leaveCluster",
+        Action::"readNode", Action::"manageNode",
+        Action::"createVM", Action::"readVM", Action::"updateVM", 
+        Action::"deleteVM", Action::"executeVM",
+        Action::"readMetrics", Action::"manageBackups"
+    ],
+    resource
+);
 
-### Phase 3: Cost-Aware Placement (Low Priority)
+// Operator Role - Manage VMs and read cluster state
+permit(
+    principal in Role::"operator",
+    action in [
+        Action::"readCluster", Action::"readNode",
+        Action::"createVM", Action::"readVM", Action::"updateVM", 
+        Action::"deleteVM", Action::"executeVM",
+        Action::"readMetrics"
+    ],
+    resource
+);
 
-**Goal**: Optimize VM placement based on cost considerations
+// Viewer Role - Read-only access
+permit(
+    principal in Role::"viewer",
+    action in [
+        Action::"readCluster", Action::"readNode",
+        Action::"readVM", Action::"readMetrics"
+    ],
+    resource
+);
+```
 
-**Tasks**:
-1. Add cost model to nodes:
-   - Per-resource pricing (CPU, memory, disk, network)
-   - Time-based pricing (peak vs off-peak)
-   - Spot instance support
-2. Implement cost optimization strategies:
-   - Minimize cost
-   - Balance cost vs performance
-   - Budget constraints
-3. Add cost tracking and reporting
-4. Implement cost alerts and budgets
-5. Create cost-based preemption policies
+#### 2.2 Add Advanced Policies
 
-**Estimated Effort**: 2-3 days
+Create `cedar/policies/advanced.cedar`:
+```cedar
+// Multi-tenancy: Users can only access resources in their tenant
+permit(
+    principal,
+    action,
+    resource
+) when {
+    principal.tenant_id == resource.tenant_id
+};
 
-### Phase 4: Advanced Resource Management (Medium Priority)
+// Resource quotas: Deny VM creation if tenant quota exceeded
+forbid(
+    principal,
+    action == Action::"createVM",
+    resource in Tenant
+) when {
+    resource.quota_vms <= context.current_vm_count
+};
 
-**Goal**: Enhance resource management with more sophisticated features
+// Time-based access: Operators can only delete VMs during maintenance windows
+forbid(
+    principal in Role::"operator",
+    action == Action::"deleteVM",
+    resource
+) unless {
+    context.hour >= 22 || context.hour <= 6
+};
 
-**Tasks**:
-1. Implement resource quotas per tenant/namespace
-2. Add resource bursting capabilities
-3. Implement memory ballooning support
-4. Add CPU pinning and NUMA awareness
-5. Implement GPU/accelerator scheduling
-6. Add resource prediction based on historical usage
-7. Implement vertical autoscaling for VMs
+// Priority-based protection: Prevent deletion of high-priority VMs by non-admins
+forbid(
+    principal,
+    action == Action::"deleteVM",
+    resource
+) when {
+    resource.priority >= 900 && !(principal in Role::"admin")
+};
 
-**Estimated Effort**: 4-5 days
+// Node capacity enforcement
+forbid(
+    principal,
+    action == Action::"createVM",
+    resource in Node
+) when {
+    resource.available_cpu < context.requested_cpu ||
+    resource.available_memory < context.requested_memory
+};
+```
 
-### Phase 5: Production Hardening (High Priority)
+### Phase 3: Integration (Week 2) ✅ COMPLETE
 
-**Goal**: Prepare system for production deployment
+#### 3.1 Update Security Manager
+Modify `src/security.rs` to integrate Cedar:
+```rust
+pub struct SecurityManager {
+    cedar_authz: Arc<CedarAuthz>,
+    // ... existing fields
+}
 
-**Tasks**:
-1. Implement configuration hot-reload
-2. Add backup and disaster recovery:
-   - Automated state backups
-   - Point-in-time recovery
-   - Cross-region backup replication
-3. Implement operational runbooks:
-   - Automated remediation for common issues
-   - Playbook integration
-   - On-call procedures
-4. Add chaos engineering framework
-5. Implement canary deployments for system updates
-6. Add compliance and audit logging
+impl SecurityManager {
+    pub async fn check_permission_cedar(
+        &self,
+        user_id: &str,
+        action: &str,
+        resource: &str,
+        context: HashMap<String, Value>,
+    ) -> BlixardResult<bool> {
+        self.cedar_authz.is_authorized(user_id, action, resource, context).await
+    }
+}
+```
 
-**Estimated Effort**: 5-7 days
+#### 3.2 Update Middleware
+Modify `src/grpc_server/common/middleware.rs`:
+```rust
+pub async fn authenticate_and_authorize_cedar<T>(
+    &self,
+    request: Request<T>,
+    action: &str,
+    resource_type: &str,
+) -> Result<(Request<T>, AuthContext), Status> {
+    // Extract auth token
+    let auth_context = self.authenticate(request)?;
+    
+    // Build Cedar context
+    let context = self.build_cedar_context(&auth_context);
+    
+    // Check authorization with Cedar
+    let authorized = self.security_manager
+        .check_permission_cedar(
+            &auth_context.user_id,
+            action,
+            resource_type,
+            context
+        )
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?;
+    
+    if !authorized {
+        return Err(Status::permission_denied("Insufficient permissions"));
+    }
+    
+    Ok((request, auth_context))
+}
+```
 
-### Phase 6: Developer Experience (Medium Priority)
+### Phase 4: Service Updates (Week 2-3)
 
-**Goal**: Improve developer and operator experience
+#### 4.1 Update Each gRPC Service
+Example for VM Service:
+```rust
+// src/grpc_server/services/vm_service.rs
+async fn create_vm(&self, request: Request<CreateVmRequest>) -> Result<Response<CreateVmResponse>, Status> {
+    let (request, auth_context) = self.middleware
+        .authenticate_and_authorize_cedar(
+            request,
+            "createVM",
+            &format!("Tenant::{}", auth_context.tenant_id)
+        )
+        .await?;
+    
+    // ... rest of implementation
+}
+```
 
-**Tasks**:
-1. Create CLI improvements:
-   - Interactive mode
-   - Shell completion
-   - Rich output formatting
-2. Implement web UI dashboard:
-   - Real-time cluster visualization
-   - VM management interface
-   - Resource utilization graphs
-3. Add API client libraries (Python, Go, JavaScript)
-4. Create Terraform provider
-5. Implement GitOps integration
-6. Add development environment tooling
+### Phase 5: Testing and Validation (Week 3)
 
-**Estimated Effort**: 5-7 days
+#### 5.1 Policy Validation Tests
+Create `tests/cedar_policy_tests.rs`:
+```rust
+#[test]
+fn test_policy_validation() {
+    // Validate all policies against schema
+    // Test for policy conflicts
+    // Verify coverage of all actions
+}
 
-## Implementation Order Recommendation
+#[test]
+fn test_authorization_scenarios() {
+    // Test multi-tenancy isolation
+    // Test role-based permissions
+    // Test quota enforcement
+    // Test time-based access
+}
+```
 
-Based on priority and dependencies:
+#### 5.2 Integration Tests
+Update existing auth tests to use Cedar policies.
 
-1. **Priority-Based Scheduling and Preemption** (Phase 1)
-   - Critical for production workloads
-   - Builds on existing scheduler
-   
-2. **Production Hardening** (Phase 5)
-   - Essential for reliability
-   - Should be done early to catch issues
-   
-3. **Multi-Datacenter Awareness** (Phase 2)
-   - Important for scalability
-   - Enables geographic distribution
-   
-4. **Advanced Resource Management** (Phase 4)
-   - Enhances existing resource system
-   - Improves efficiency
-   
-5. **Developer Experience** (Phase 6)
-   - Improves adoption
-   - Can be developed in parallel
-   
-6. **Cost-Aware Placement** (Phase 3)
-   - Nice to have
-   - Can be added later
+### Phase 6: Migration Tools (Week 3-4)
 
-## Technical Debt and Improvements
+#### 6.1 Role Migration Tool
+Create `tools/migrate_roles_to_cedar.rs`:
+```rust
+// Tool to convert existing role assignments to Cedar entities
+// Generate Cedar entity files from current user/role mappings
+```
 
-### Known Issues to Address:
-1. Anti-affinity test failures (serialization issue)
-2. Some tests still use sleep() instead of condition-based waiting
-3. Connection pool metrics need enhancement
-4. Batch processor could use adaptive sizing
+#### 6.2 Policy Management CLI
+Extend CLI with Cedar commands:
+```bash
+blixard policy validate    # Validate Cedar policies
+blixard policy list       # List active policies
+blixard policy add        # Add new policy
+blixard policy test       # Test authorization scenarios
+```
 
-### Code Quality Improvements:
-1. Add more property-based tests
-2. Improve error messages and context
-3. Add performance benchmarks
-4. Document internal APIs
-5. Add integration test suite
+### Phase 7: Documentation and Deployment (Week 4)
 
-### Architecture Enhancements:
-1. Consider event sourcing for state changes
-2. Add plugin system for custom schedulers
-3. Implement scheduler framework for extensibility
-4. Add support for custom resource types
+#### 7.1 Documentation
+- Policy authoring guide
+- Common policy patterns
+- Migration guide for operators
+- Troubleshooting guide
 
-## Metrics and Success Criteria
+#### 7.2 Gradual Rollout
+1. Deploy with Cedar in shadow mode (log decisions, don't enforce)
+2. Compare Cedar decisions with existing RBAC
+3. Enable Cedar enforcement for read operations
+4. Enable Cedar for all operations
+5. Remove old RBAC code
 
-### Performance Targets:
-- VM scheduling decision: < 100ms
-- Cluster state propagation: < 500ms
-- Resource allocation: < 50ms
-- Preemption decision: < 200ms
+## Benefits After Migration
 
-### Scalability Targets:
-- Support 1000+ nodes per cluster
-- Handle 10,000+ VMs
-- Process 1000+ scheduling requests/second
-- Maintain consistency with 5+ datacenters
+1. **Enhanced Security**: Mathematically proven policy correctness
+2. **Flexibility**: Complex policies without code changes
+3. **Auditability**: All policies in declarative files
+4. **Performance**: Optimized policy evaluation engine
+5. **Maintainability**: Clear separation of authorization logic
+6. **Compliance**: Better support for regulatory requirements
 
-### Reliability Targets:
-- 99.99% API availability
-- < 1 minute recovery from node failure
-- Zero data loss during failures
-- < 5 second failover time
+## Risk Mitigation
+
+1. **Shadow Mode**: Run Cedar alongside existing system initially
+2. **Policy Validation**: Automated testing of all policy changes
+3. **Rollback Plan**: Keep old RBAC code until Cedar is proven
+4. **Monitoring**: Detailed metrics on authorization decisions
+5. **Training**: Team education on Cedar policy language
+
+## Success Metrics
+
+- Zero authorization-related security incidents
+- Sub-millisecond authorization latency (p99)
+- 100% policy test coverage
+- Reduced time to implement new access control requirements
+- Improved audit compliance scores
 
 ## Next Steps
 
-### Continue with Phase 5: Production Hardening
-- [ ] Cross-region backup replication for disaster recovery
-- [ ] Automated remediation for common operational issues
-- [ ] Chaos engineering framework for reliability testing
-- [ ] Canary deployments for safe system updates
-
-### Then Phase 3: Cost Optimization
-- [ ] Implement spot/preemptible instance support
-- [ ] Add cost-aware scheduling with budget constraints
-- [ ] Create resource usage tracking and billing integration
-- [ ] Implement instance type recommendations
-- [ ] Add cost optimization policies
-
-### Remaining Phases
-1. **Phase 4: Advanced Resource Management**
-   - Resource quotas per tenant
-   - Memory ballooning and CPU pinning
-   - GPU/accelerator scheduling
-   - Vertical autoscaling
-
-2. **Phase 6: Developer Experience**
-   - CLI improvements and web UI
-   - API client libraries
-   - Terraform provider
-   - GitOps integration
+1. Review and approve migration plan
+2. Set up Cedar development environment
+3. Begin Phase 1 implementation
+4. Schedule weekly progress reviews
 
 ---
 

@@ -73,6 +73,12 @@ sha2 = "0.10"
 hex = "0.4"
 rcgen = { version = "0.11", features = ["pem"] }
 time = "0.3"
+hmac = "0.12"
+
+# Cedar Policy Engine
+cedar-policy = "3.0"
+cedar-policy-core = "3.0"
+cedar-policy-validator = "3.0"
 
 # VM management dependencies  
 tera = "1.19"

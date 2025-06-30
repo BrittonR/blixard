@@ -9,6 +9,7 @@
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::config_v2::{SecurityConfig, TlsConfig, AuthConfig};
+use crate::cedar_authz::CedarAuthz;
 use std::sync::Arc;
 use std::path::Path;
 use std::collections::HashMap;
@@ -31,6 +32,9 @@ pub struct SecurityManager {
     
     /// Secrets manager
     secrets_manager: SecretsManager,
+    
+    /// Cedar authorization engine
+    cedar_authz: Option<Arc<CedarAuthz>>,
 }
 
 /// TLS certificate management
@@ -183,11 +187,37 @@ impl SecurityManager {
         // Initialize secrets manager
         let secrets_manager = SecretsManager::new()?;
         
+        // Initialize Cedar authorization if enabled
+        let cedar_authz = if config.auth.enabled {
+            // Look for Cedar files in standard locations
+            let schema_path = Path::new("cedar/schema.cedarschema.json");
+            let policies_dir = Path::new("cedar/policies");
+            
+            if schema_path.exists() && policies_dir.exists() {
+                match CedarAuthz::new(schema_path, policies_dir).await {
+                    Ok(cedar) => {
+                        info!("Initialized Cedar authorization engine");
+                        Some(Arc::new(cedar))
+                    }
+                    Err(e) => {
+                        warn!("Failed to initialize Cedar authorization: {}", e);
+                        None
+                    }
+                }
+            } else {
+                info!("Cedar files not found, using traditional RBAC");
+                None
+            }
+        } else {
+            None
+        };
+        
         Ok(Self {
             config,
             tls_manager,
             auth_manager,
             secrets_manager,
+            cedar_authz,
         })
     }
     
@@ -253,6 +283,79 @@ impl SecurityManager {
                 message: "Authentication is disabled".to_string(),
             })
         }
+    }
+    
+    /// Check permission using Cedar policy engine
+    pub async fn check_permission_cedar(
+        &self,
+        user_id: &str,
+        action: &str,
+        resource: &str,
+        context: HashMap<String, serde_json::Value>,
+    ) -> BlixardResult<bool> {
+        if let Some(ref cedar) = self.cedar_authz {
+            // Build principal EntityUid
+            let principal = format!("User::\"{}\"", user_id);
+            
+            // Build action EntityUid
+            let cedar_action = format!("Action::\"{}\"", action);
+            
+            // Use Cedar for authorization
+            cedar.is_authorized(&principal, &cedar_action, resource, context).await
+        } else {
+            // Fall back to traditional RBAC if Cedar is not available
+            warn!("Cedar not available, falling back to traditional RBAC");
+            
+            // Convert Cedar action to Permission enum
+            let permission = self.cedar_action_to_permission(action)?;
+            self.check_permission(user_id, &permission).await
+        }
+    }
+    
+    /// Convert Cedar action string to Permission enum for fallback
+    fn cedar_action_to_permission(&self, action: &str) -> BlixardResult<Permission> {
+        match action {
+            "readCluster" | "readNode" => Ok(Permission::ClusterRead),
+            "manageCluster" | "joinCluster" | "leaveCluster" => Ok(Permission::ClusterWrite),
+            "readVM" => Ok(Permission::VmRead),
+            "createVM" | "updateVM" | "deleteVM" | "executeVM" => Ok(Permission::VmWrite),
+            "readMetrics" => Ok(Permission::MetricsRead),
+            "manageBackups" | "manageNode" => Ok(Permission::Admin),
+            _ => Err(BlixardError::AuthorizationError {
+                message: format!("Unknown action: {}", action),
+            }),
+        }
+    }
+    
+    /// Build resource EntityUid based on resource type and ID
+    pub fn build_resource_uid(resource_type: &str, resource_id: &str) -> String {
+        format!("{}::\"{}\"", resource_type, resource_id)
+    }
+    
+    /// Add entity to Cedar authorization engine
+    pub async fn add_cedar_entity(
+        &self,
+        entity_type: &str,
+        entity_id: &str,
+        attributes: HashMap<String, serde_json::Value>,
+        parents: Vec<String>,
+    ) -> BlixardResult<()> {
+        if let Some(ref cedar) = self.cedar_authz {
+            cedar.add_entity(entity_type, entity_id, attributes, parents).await
+        } else {
+            // No-op if Cedar is not available
+            Ok(())
+        }
+    }
+    
+    /// Reload Cedar policies from disk
+    pub async fn reload_cedar_policies(&self) -> BlixardResult<()> {
+        if let Some(ref cedar) = self.cedar_authz {
+            let policies_dir = Path::new("cedar/policies");
+            cedar.reload_policies(policies_dir).await?;
+            info!("Reloaded Cedar policies");
+        }
+        Ok(())
     }
 }
 

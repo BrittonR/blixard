@@ -5,18 +5,21 @@
 
 use crate::{
     grpc_security::{GrpcSecurityMiddleware, SecurityContext},
-    security::Permission,
+    security::{Permission, SecurityManager},
     quota_manager::QuotaManager,
     resource_quotas::ApiOperation,
     authenticate_grpc, optional_authenticate_grpc,
 };
 use std::sync::Arc;
+use std::collections::HashMap;
 use tonic::{Request, Status};
+use chrono::{Datelike, Timelike};
 
 /// Unified middleware for gRPC services
 #[derive(Clone)]
 pub struct GrpcMiddleware {
     security: Option<GrpcSecurityMiddleware>,
+    security_manager: Option<Arc<SecurityManager>>,
     quota_manager: Option<Arc<QuotaManager>>,
 }
 
@@ -24,10 +27,12 @@ impl GrpcMiddleware {
     /// Create new middleware instance
     pub fn new(
         security: Option<GrpcSecurityMiddleware>,
+        security_manager: Option<Arc<SecurityManager>>,
         quota_manager: Option<Arc<QuotaManager>>,
     ) -> Self {
         Self {
             security,
+            security_manager,
             quota_manager,
         }
     }
@@ -152,6 +157,67 @@ impl GrpcMiddleware {
                 tracing::error!("Failed to update resource usage: {}", e);
             }
         }
+    }
+    
+    /// Authenticate and authorize using Cedar policy engine
+    pub async fn authenticate_and_authorize_cedar<T>(
+        &self,
+        request: &Request<T>,
+        action: &str,
+        resource_type: &str,
+        resource_id: &str,
+    ) -> Result<(SecurityContext, String), Status> {
+        // First authenticate to get user context
+        let permission = Permission::ClusterRead; // Default permission for authentication only
+        let security_context = self.authenticate(request, permission).await?;
+        
+        // Extract tenant ID
+        let tenant_id = extract_tenant_id(request);
+        
+        // If we have a security manager with Cedar, use it for authorization
+        if let Some(ref security_manager) = self.security_manager {
+            // Get user ID from security context
+            let user_id = security_context.user.as_ref()
+                .ok_or_else(|| Status::unauthenticated("No user identity"))?;
+            
+            // Build Cedar context with request metadata
+            let mut cedar_context = HashMap::new();
+            
+            // Add tenant information
+            cedar_context.insert("tenant_id".to_string(), serde_json::json!(tenant_id));
+            
+            // Add current time for time-based policies
+            let now = chrono::Utc::now();
+            cedar_context.insert("hour".to_string(), serde_json::json!(now.hour()));
+            cedar_context.insert("day_of_week".to_string(), serde_json::json!(now.weekday().num_days_from_monday()));
+            
+            // Add resource metadata if available
+            if let Some(ref quota_manager) = self.quota_manager {
+                if let Ok(usage) = quota_manager.get_tenant_usage(&tenant_id).await {
+                    cedar_context.insert("current_vm_count".to_string(), serde_json::json!(usage.vm_count));
+                    cedar_context.insert("current_cpu_usage".to_string(), serde_json::json!(usage.cpu_usage));
+                    cedar_context.insert("current_memory_usage".to_string(), serde_json::json!(usage.memory_usage));
+                }
+            }
+            
+            // Build resource EntityUid
+            let resource_uid = SecurityManager::build_resource_uid(resource_type, resource_id);
+            
+            // Check Cedar authorization
+            let authorized = security_manager
+                .check_permission_cedar(user_id, action, &resource_uid, cedar_context)
+                .await
+                .map_err(|e| Status::internal(format!("Authorization error: {}", e)))?;
+            
+            if !authorized {
+                return Err(Status::permission_denied(format!(
+                    "Cedar policy denied: {} -> {} on {}",
+                    user_id, action, resource_uid
+                )));
+            }
+        }
+        
+        Ok((security_context, tenant_id))
     }
 }
 

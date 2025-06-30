@@ -1,0 +1,158 @@
+{
+  "Blixard": {
+    "entityTypes": {
+      "User": {
+        "memberOfTypes": ["Role", "Tenant"],
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "email": { "type": "String" },
+            "tenant_id": { "type": "String" },
+            "created_at": { "type": "Long" }
+          }
+        }
+      },
+      "Role": {
+        "memberOfTypes": ["Tenant"],
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "name": { "type": "String" },
+            "description": { "type": "String" }
+          }
+        }
+      },
+      "Tenant": {
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "name": { "type": "String" },
+            "tier": { "type": "String" },
+            "quota_cpu": { "type": "Long" },
+            "quota_memory": { "type": "Long" },
+            "quota_vms": { "type": "Long" }
+          }
+        }
+      },
+      "VM": {
+        "memberOfTypes": ["Node", "Tenant"],
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "name": { "type": "String" },
+            "node_id": { "type": "Long" },
+            "tenant_id": { "type": "String" },
+            "cpu": { "type": "Long" },
+            "memory": { "type": "Long" },
+            "priority": { "type": "Long" },
+            "preemptible": { "type": "Boolean" },
+            "state": { "type": "String" }
+          }
+        }
+      },
+      "Node": {
+        "memberOfTypes": ["Cluster"],
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "id": { "type": "Long" },
+            "address": { "type": "String" },
+            "capacity_cpu": { "type": "Long" },
+            "capacity_memory": { "type": "Long" },
+            "available_cpu": { "type": "Long" },
+            "available_memory": { "type": "Long" }
+          }
+        }
+      },
+      "Cluster": {
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "name": { "type": "String" },
+            "region": { "type": "String" }
+          }
+        }
+      }
+    },
+    "actions": {
+      "readCluster": { 
+        "appliesTo": { 
+          "principalTypes": ["User", "Role"], 
+          "resourceTypes": ["Cluster"] 
+        } 
+      },
+      "manageCluster": { 
+        "appliesTo": { 
+          "principalTypes": ["User", "Role"], 
+          "resourceTypes": ["Cluster"] 
+        } 
+      },
+      "joinCluster": { 
+        "appliesTo": { 
+          "principalTypes": ["User", "Role"], 
+          "resourceTypes": ["Cluster"] 
+        } 
+      },
+      "leaveCluster": { 
+        "appliesTo": { 
+          "principalTypes": ["User", "Role"], 
+          "resourceTypes": ["Cluster"] 
+        } 
+      },
+      "readNode": { 
+        "appliesTo": { 
+          "principalTypes": ["User", "Role"], 
+          "resourceTypes": ["Node"] 
+        } 
+      },
+      "manageNode": { 
+        "appliesTo": { 
+          "principalTypes": ["User", "Role"], 
+          "resourceTypes": ["Node"] 
+        } 
+      },
+      "createVM": { 
+        "appliesTo": { 
+          "principalTypes": ["User", "Role"], 
+          "resourceTypes": ["Tenant", "Node"] 
+        } 
+      },
+      "readVM": { 
+        "appliesTo": { 
+          "principalTypes": ["User", "Role"], 
+          "resourceTypes": ["VM"] 
+        } 
+      },
+      "updateVM": { 
+        "appliesTo": { 
+          "principalTypes": ["User", "Role"], 
+          "resourceTypes": ["VM"] 
+        } 
+      },
+      "deleteVM": { 
+        "appliesTo": { 
+          "principalTypes": ["User", "Role"], 
+          "resourceTypes": ["VM"] 
+        } 
+      },
+      "executeVM": { 
+        "appliesTo": { 
+          "principalTypes": ["User", "Role"], 
+          "resourceTypes": ["VM"] 
+        } 
+      },
+      "readMetrics": { 
+        "appliesTo": { 
+          "principalTypes": ["User", "Role"], 
+          "resourceTypes": ["Node", "VM", "Cluster"] 
+        } 
+      },
+      "manageBackups": { 
+        "appliesTo": { 
+          "principalTypes": ["User", "Role"], 
+          "resourceTypes": ["Cluster", "VM"] 
+        } 
+      }
+    }
+  }
+}

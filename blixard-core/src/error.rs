@@ -77,6 +77,9 @@ pub enum BlixardError {
     #[error("Security error: {message}")]
     Security { message: String },
     
+    #[error("Authorization error: {message}")]
+    AuthorizationError { message: String },
+    
     #[error("Resource not found: {resource}")]
     NotFound { resource: String },
     

@@ -29,7 +29,7 @@ impl ClusterServiceImpl {
         node: Arc<SharedNodeState>,
         security_middleware: Option<crate::grpc_security::GrpcSecurityMiddleware>,
     ) -> Self {
-        let middleware = GrpcMiddleware::new(security_middleware, None);
+        let middleware = GrpcMiddleware::new(security_middleware, None, None);
         
         Self {
             node,

@@ -37,7 +37,8 @@ impl VmServiceImpl {
         node: Arc<SharedNodeState>,
         security_middleware: Option<crate::grpc_security::GrpcSecurityMiddleware>,
     ) -> Self {
-        let middleware = GrpcMiddleware::new(security_middleware, None);
+        // Note: Security manager will be None here, Cedar auth will use fallback
+        let middleware = GrpcMiddleware::new(security_middleware, None, None);
         
         Self {
             node,
@@ -51,7 +52,8 @@ impl VmServiceImpl {
         security_middleware: Option<crate::grpc_security::GrpcSecurityMiddleware>,
     ) -> Self {
         let quota_manager = node.get_quota_manager().await;
-        let middleware = GrpcMiddleware::new(security_middleware, quota_manager);
+        let security_manager = node.get_security_manager().await;
+        let middleware = GrpcMiddleware::new(security_middleware, security_manager, quota_manager);
         
         Self {
             node,
