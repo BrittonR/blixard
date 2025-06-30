@@ -24,6 +24,10 @@ pub struct GrpcMiddleware {
 }
 
 impl GrpcMiddleware {
+    /// Check if Cedar authorization is available
+    pub fn has_cedar(&self) -> bool {
+        self.security_manager.is_some()
+    }
     /// Create new middleware instance
     pub fn new(
         security: Option<GrpcSecurityMiddleware>,

@@ -83,10 +83,23 @@ impl VmServiceImpl {
         &self,
         request: Request<CreateVmRequest>,
     ) -> Result<Response<CreateVmResponse>, Status> {
-        // Authenticate and check rate limits
-        let (_ctx, tenant_id) = self.middleware
-            .authenticate_and_rate_limit(&request, Permission::VmWrite, ApiOperation::VmCreate)
-            .await?;
+        // Use Cedar for authorization if available
+        let node_id = self.node.get_id();
+        let (_ctx, tenant_id) = if self.middleware.has_cedar() {
+            self.middleware
+                .authenticate_and_authorize_cedar(
+                    &request,
+                    "createVM",
+                    "Node",
+                    &node_id.to_string(),
+                )
+                .await?
+        } else {
+            // Fall back to traditional RBAC
+            self.middleware
+                .authenticate_and_rate_limit(&request, Permission::VmWrite, ApiOperation::VmCreate)
+                .await?
+        };
         
         let req = instrument_grpc!(self.node, request, "create_vm");
         
@@ -129,10 +142,26 @@ impl VmServiceImpl {
         &self,
         request: Request<StartVmRequest>,
     ) -> Result<Response<StartVmResponse>, Status> {
-        // Authenticate
-        let _ctx = self.middleware
-            .authenticate(&request, Permission::VmWrite)
-            .await?;
+        // Get VM name from request for Cedar resource ID
+        let vm_name = request.get_ref().name.clone();
+        
+        // Use Cedar for authorization if available
+        let _ctx = if self.middleware.has_cedar() {
+            let (_ctx, _tenant_id) = self.middleware
+                .authenticate_and_authorize_cedar(
+                    &request,
+                    "updateVM",
+                    "VM",
+                    &vm_name,
+                )
+                .await?;
+            _ctx
+        } else {
+            // Fall back to traditional RBAC
+            self.middleware
+                .authenticate(&request, Permission::VmWrite)
+                .await?
+        };
         
         let req = instrument_grpc!(self.node, request, "start_vm");
         
@@ -156,10 +185,26 @@ impl VmServiceImpl {
         &self,
         request: Request<StopVmRequest>,
     ) -> Result<Response<StopVmResponse>, Status> {
-        // Authenticate
-        let _ctx = self.middleware
-            .authenticate(&request, Permission::VmWrite)
-            .await?;
+        // Get VM name from request for Cedar resource ID
+        let vm_name = request.get_ref().name.clone();
+        
+        // Use Cedar for authorization if available
+        let _ctx = if self.middleware.has_cedar() {
+            let (_ctx, _tenant_id) = self.middleware
+                .authenticate_and_authorize_cedar(
+                    &request,
+                    "updateVM",
+                    "VM",
+                    &vm_name,
+                )
+                .await?;
+            _ctx
+        } else {
+            // Fall back to traditional RBAC
+            self.middleware
+                .authenticate(&request, Permission::VmWrite)
+                .await?
+        };
         
         let req = instrument_grpc!(self.node, request, "stop_vm");
         
@@ -183,10 +228,25 @@ impl VmServiceImpl {
         &self,
         request: Request<DeleteVmRequest>,
     ) -> Result<Response<DeleteVmResponse>, Status> {
-        // Authenticate and check rate limits
-        let (_ctx, tenant_id) = self.middleware
-            .authenticate_and_rate_limit(&request, Permission::VmWrite, ApiOperation::VmDelete)
-            .await?;
+        // Get VM name from request for Cedar resource ID
+        let vm_name = request.get_ref().name.clone();
+        
+        // Use Cedar for authorization if available
+        let (_ctx, tenant_id) = if self.middleware.has_cedar() {
+            self.middleware
+                .authenticate_and_authorize_cedar(
+                    &request,
+                    "deleteVM",
+                    "VM",
+                    &vm_name,
+                )
+                .await?
+        } else {
+            // Fall back to traditional RBAC with rate limiting
+            self.middleware
+                .authenticate_and_rate_limit(&request, Permission::VmWrite, ApiOperation::VmDelete)
+                .await?
+        };
         
         let req = instrument_grpc!(self.node, request, "delete_vm");
         
@@ -232,10 +292,24 @@ impl VmServiceImpl {
         &self,
         request: Request<ListVmsRequest>,
     ) -> Result<Response<ListVmsResponse>, Status> {
-        // Authenticate
-        let _ctx = self.middleware
-            .authenticate(&request, Permission::VmRead)
-            .await?;
+        // Use Cedar for authorization if available
+        let _ctx = if self.middleware.has_cedar() {
+            let cluster_id = "default"; // List operates at cluster level
+            let (_ctx, _tenant_id) = self.middleware
+                .authenticate_and_authorize_cedar(
+                    &request,
+                    "readVM",
+                    "Cluster",
+                    cluster_id,
+                )
+                .await?;
+            _ctx
+        } else {
+            // Fall back to traditional RBAC
+            self.middleware
+                .authenticate(&request, Permission::VmRead)
+                .await?
+        };
         
         let _req = instrument_grpc!(self.node, request, "list_vms");
         
@@ -267,10 +341,26 @@ impl VmServiceImpl {
         &self,
         request: Request<GetVmStatusRequest>,
     ) -> Result<Response<GetVmStatusResponse>, Status> {
-        // Authenticate
-        let _ctx = self.middleware
-            .authenticate(&request, Permission::VmRead)
-            .await?;
+        // Get VM name from request for Cedar resource ID
+        let vm_name = request.get_ref().name.clone();
+        
+        // Use Cedar for authorization if available
+        let _ctx = if self.middleware.has_cedar() {
+            let (_ctx, _tenant_id) = self.middleware
+                .authenticate_and_authorize_cedar(
+                    &request,
+                    "readVM",
+                    "VM",
+                    &vm_name,
+                )
+                .await?;
+            _ctx
+        } else {
+            // Fall back to traditional RBAC
+            self.middleware
+                .authenticate(&request, Permission::VmRead)
+                .await?
+        };
         
         let req = instrument_grpc!(self.node, request, "get_vm_status");
         
@@ -305,10 +395,26 @@ impl VmServiceImpl {
         &self,
         request: Request<MigrateVmRequest>,
     ) -> Result<Response<MigrateVmResponse>, Status> {
-        // Authenticate
-        let _ctx = self.middleware
-            .authenticate(&request, Permission::VmWrite)
-            .await?;
+        // Get VM name from request for Cedar resource ID
+        let vm_name = request.get_ref().vm_name.clone();
+        
+        // Use Cedar for authorization if available
+        let _ctx = if self.middleware.has_cedar() {
+            let (_ctx, _tenant_id) = self.middleware
+                .authenticate_and_authorize_cedar(
+                    &request,
+                    "updateVM",
+                    "VM",
+                    &vm_name,
+                )
+                .await?;
+            _ctx
+        } else {
+            // Fall back to traditional RBAC
+            self.middleware
+                .authenticate(&request, Permission::VmWrite)
+                .await?
+        };
         
         let req = instrument_grpc!(self.node, request, "migrate_vm");
         
@@ -353,10 +459,23 @@ impl VmServiceImpl {
         &self,
         request: Request<CreateVmWithSchedulingRequest>,
     ) -> Result<Response<CreateVmWithSchedulingResponse>, Status> {
-        // Authenticate and check rate limits
-        let (_ctx, tenant_id) = self.middleware
-            .authenticate_and_rate_limit(&request, Permission::VmWrite, ApiOperation::VmCreate)
-            .await?;
+        // Use Cedar for authorization if available
+        let cluster_id = "default"; // Scheduling happens at cluster level
+        let (_ctx, tenant_id) = if self.middleware.has_cedar() {
+            self.middleware
+                .authenticate_and_authorize_cedar(
+                    &request,
+                    "createVM",
+                    "Cluster",
+                    cluster_id,
+                )
+                .await?
+        } else {
+            // Fall back to traditional RBAC with rate limiting
+            self.middleware
+                .authenticate_and_rate_limit(&request, Permission::VmWrite, ApiOperation::VmCreate)
+                .await?
+        };
         
         let req = instrument_grpc!(self.node, request, "create_vm_with_scheduling");
         
@@ -382,10 +501,24 @@ impl VmServiceImpl {
         &self,
         request: Request<ScheduleVmPlacementRequest>,
     ) -> Result<Response<ScheduleVmPlacementResponse>, Status> {
-        // Authenticate
-        let _ctx = self.middleware
-            .authenticate(&request, Permission::VmRead)
-            .await?;
+        // Use Cedar for authorization if available
+        let cluster_id = "default"; // Scheduling queries cluster resources
+        let _ctx = if self.middleware.has_cedar() {
+            let (_ctx, _tenant_id) = self.middleware
+                .authenticate_and_authorize_cedar(
+                    &request,
+                    "readCluster",
+                    "Cluster",
+                    cluster_id,
+                )
+                .await?;
+            _ctx
+        } else {
+            // Fall back to traditional RBAC
+            self.middleware
+                .authenticate(&request, Permission::VmRead)
+                .await?
+        };
         
         let req = instrument_grpc!(self.node, request, "schedule_vm_placement");
         
