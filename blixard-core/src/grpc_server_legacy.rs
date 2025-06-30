@@ -743,6 +743,7 @@ impl ClusterService for BlixardGrpcService {
             ip_address: None,
             metadata: None,
             anti_affinity: None,
+            ..Default::default()
         };
 
         // Check quota limits before creating VM
@@ -1386,6 +1387,7 @@ impl ClusterService for BlixardGrpcService {
             ip_address: None,
             metadata: None,
             anti_affinity: None,
+            ..Default::default()
         };
 
         // Check quota limits before creating VM (no specific node yet)
@@ -1484,6 +1486,7 @@ impl ClusterService for BlixardGrpcService {
             ip_address: None,
             metadata: None,
             anti_affinity: None,
+            ..Default::default()
         };
 
         // Schedule VM placement

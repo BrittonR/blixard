@@ -289,6 +289,7 @@ mod tests {
             ip_address: None,
             metadata: None,
             anti_affinity: None,
+            ..Default::default()
         };
         
         let vm2 = VmConfig {
@@ -300,6 +301,7 @@ mod tests {
             ip_address: None,
             metadata: None,
             anti_affinity: None,
+            ..Default::default()
         };
         
         let vm3 = VmConfig {
@@ -311,6 +313,7 @@ mod tests {
             ip_address: None,
             metadata: None,
             anti_affinity: None,
+            ..Default::default()
         };
         
         // First two VMs should succeed

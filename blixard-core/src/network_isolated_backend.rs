@@ -236,6 +236,7 @@ mod tests {
             ip_address: Some("10.0.0.10".to_string()),
             metadata: None,
             anti_affinity: None,
+            ..Default::default()
         };
         
         // Should succeed regardless of privilege level

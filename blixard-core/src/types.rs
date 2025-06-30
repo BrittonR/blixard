@@ -28,6 +28,10 @@ pub struct VmConfig {
     pub metadata: Option<std::collections::HashMap<String, String>>, // Metadata for Nix images, etc.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub anti_affinity: Option<AntiAffinityRules>, // Anti-affinity rules for placement
+    #[serde(default = "default_priority")]
+    pub priority: u32, // Priority level (0-1000, higher is more important)
+    #[serde(default = "default_preemptible")]
+    pub preemptible: bool, // Whether this VM can be preempted
 }
 
 impl Default for VmConfig {
@@ -41,12 +45,41 @@ impl Default for VmConfig {
             ip_address: None,
             metadata: None,
             anti_affinity: None,
+            priority: default_priority(),
+            preemptible: default_preemptible(),
         }
+    }
+}
+
+impl VmConfig {
+    /// Validate the VM configuration
+    pub fn validate(&self) -> Result<(), String> {
+        if self.priority > 1000 {
+            return Err(format!("Priority must be between 0 and 1000, got {}", self.priority));
+        }
+        if self.name.is_empty() {
+            return Err("VM name cannot be empty".to_string());
+        }
+        if self.vcpus == 0 {
+            return Err("VM must have at least 1 vCPU".to_string());
+        }
+        if self.memory == 0 {
+            return Err("VM must have at least 1 MB of memory".to_string());
+        }
+        Ok(())
     }
 }
 
 fn default_tenant() -> String {
     "default".to_string()
+}
+
+fn default_priority() -> u32 {
+    500 // Default to middle priority
+}
+
+fn default_preemptible() -> bool {
+    true // Default to preemptible for better resource utilization
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

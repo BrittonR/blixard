@@ -135,6 +135,7 @@ mod tests {
         let service = ExampleVmService {
             rate_limiter,
             metrics_recorder: GlobalMetricsRecorder,
+            ..Default::default()
         };
         
         // Test VM creation
@@ -147,6 +148,7 @@ mod tests {
             tenant_id: "test-tenant".to_string(),
             metadata: None,
             anti_affinity: None,
+            ..Default::default()
         };
         
         let result = service.create_vm("test-tenant", config).await;

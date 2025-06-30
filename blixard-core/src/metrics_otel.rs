@@ -66,6 +66,7 @@ pub struct Metrics {
     pub vm_placement_attempts: Counter<u64>,
     pub vm_placement_failures: Counter<u64>,
     pub vm_placement_duration: Histogram<f64>,
+    pub vm_preemptions_total: Counter<u64>,
     
     // Storage metrics
     pub storage_writes: Counter<u64>,
@@ -279,6 +280,10 @@ impl Metrics {
             vm_placement_duration: meter
                 .f64_histogram("vm.placement.duration")
                 .with_description("Duration of VM placement decisions in seconds")
+                .init(),
+            vm_preemptions_total: meter
+                .u64_counter("vm.preemptions.total")
+                .with_description("Total number of VM preemptions")
                 .init(),
             
             // Storage metrics
@@ -502,6 +507,18 @@ pub fn record_vm_operation(operation: &str, success: bool) {
         }
         _ => {} // Unknown operation
     }
+}
+
+/// Record VM preemption event
+pub fn record_vm_preemption(vm_name: &str, node_id: u64, priority: u32, preemption_type: &str) {
+    let metrics = metrics();
+    let attrs = &[
+        KeyValue::new("node_id", node_id.to_string()),
+        KeyValue::new("priority", priority.to_string()),
+        KeyValue::new("type", preemption_type.to_string()),
+    ];
+    
+    metrics.vm_preemptions_total.add(1, attrs);
 }
 
 /// Record P2P image import operation

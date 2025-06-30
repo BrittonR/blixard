@@ -13,6 +13,31 @@ use crate::resource_management::{
     NodeResourceState, OvercommitPolicy, ResourceReservation, ClusterResourceManager,
 };
 
+/// Preemption policy for controlling VM preemption behavior
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PreemptionPolicy {
+    /// Never preempt any VMs
+    Never,
+    /// Only preempt VMs with lower priority than the requesting VM
+    LowerPriorityOnly,
+    /// Preempt based on cost optimization
+    CostAware {
+        /// Maximum cost increase allowed for preemption (percentage)
+        max_cost_increase: f64,
+    },
+}
+
+/// Configuration for graceful preemption
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreemptionConfig {
+    /// Grace period in seconds before forceful preemption
+    pub grace_period_secs: u64,
+    /// Whether to attempt live migration first
+    pub try_live_migration: bool,
+    /// Policy for preemption decisions
+    pub policy: PreemptionPolicy,
+}
+
 /// VM placement strategy for determining where to place VMs
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PlacementStrategy {
@@ -24,6 +49,13 @@ pub enum PlacementStrategy {
     RoundRobin,
     /// Place VM on specific node (manual placement)
     Manual { node_id: u64 },
+    /// Priority-based placement with optional preemption
+    PriorityBased { 
+        /// Base strategy to use for placement among candidates
+        base_strategy: Box<PlacementStrategy>,
+        /// Enable preemption of lower priority VMs
+        enable_preemption: bool,
+    },
 }
 
 /// Resource requirements for VM placement
@@ -131,6 +163,10 @@ impl NodeResourceUsage {
                 // Manual placement doesn't use scoring
                 0.0
             }
+            PlacementStrategy::PriorityBased { base_strategy, .. } => {
+                // Use the base strategy for scoring
+                self.placement_score(base_strategy)
+            }
         }
     }
 }
@@ -141,6 +177,18 @@ pub struct PlacementDecision {
     pub selected_node_id: u64,
     pub reason: String,
     pub alternative_nodes: Vec<u64>,
+    pub preemption_candidates: Vec<PreemptionCandidate>,
+}
+
+/// Information about a VM that could be preempted
+#[derive(Debug, Clone)]
+pub struct PreemptionCandidate {
+    pub vm_name: String,
+    pub node_id: u64,
+    pub priority: u32,
+    pub vcpus: u32,
+    pub memory: u32,
+    pub preemptible: bool,
 }
 
 /// VM Scheduler for automatic placement of VMs across cluster nodes
@@ -224,6 +272,60 @@ impl VmScheduler {
         }
         
         if candidate_nodes.is_empty() {
+            // Check if this is a priority-based placement with preemption enabled
+            if let PlacementStrategy::PriorityBased { enable_preemption: true, .. } = &strategy {
+                // Try to find nodes where preemption could make room
+                let mut preemption_options = Vec::new();
+                
+                for usage in &node_usage {
+                    // Check if node has the required features
+                    if !requirements.required_features.iter().all(|f| usage.capabilities.features.contains(f)) {
+                        continue;
+                    }
+                    
+                    // Find preemptible VMs on this node
+                    let preemption_candidates = self.find_preemption_candidates(
+                        usage.node_id,
+                        requirements.vcpus,
+                        requirements.memory_mb,
+                        vm_config.priority,
+                    ).await?;
+                    
+                    if !preemption_candidates.is_empty() {
+                        // Calculate if preempting these VMs would free enough resources
+                        let freed_vcpus: u32 = preemption_candidates.iter().map(|c| c.vcpus).sum();
+                        let freed_memory: u64 = preemption_candidates.iter().map(|c| c.memory as u64).sum();
+                        
+                        if usage.available_vcpus() + freed_vcpus >= requirements.vcpus &&
+                           usage.available_memory_mb() + freed_memory >= requirements.memory_mb {
+                            preemption_options.push((usage, preemption_candidates));
+                        }
+                    }
+                }
+                
+                if !preemption_options.is_empty() {
+                    // Select the best node for preemption (fewest VMs to preempt)
+                    let (selected_node, preemption_candidates) = preemption_options
+                        .into_iter()
+                        .min_by_key(|(_, candidates)| candidates.len())
+                        .unwrap();
+                    
+                    let reason = format!(
+                        "Selected node {} using {:?} strategy with preemption. Will preempt {} VMs to free resources",
+                        selected_node.node_id,
+                        strategy,
+                        preemption_candidates.len()
+                    );
+                    
+                    return Ok(PlacementDecision {
+                        selected_node_id: selected_node.node_id,
+                        reason,
+                        alternative_nodes: vec![],
+                        preemption_candidates,
+                    });
+                }
+            }
+            
             return Err(BlixardError::SchedulingError {
                 message: format!(
                     "No nodes can accommodate VM '{}' (requires: {}vCPU, {}MB RAM, {}GB disk, features: {:?}, anti-affinity: {})",
@@ -274,6 +376,7 @@ impl VmScheduler {
             selected_node_id: selected_node.node_id,
             reason,
             alternative_nodes,
+            preemption_candidates: vec![], // Will be populated for priority-based placement
         };
         
         // Record successful placement metrics
@@ -321,6 +424,7 @@ impl VmScheduler {
             selected_node_id: node_id,
             reason: format!("Manual placement on node {}", node_id),
             alternative_nodes: vec![],
+            preemption_candidates: vec![],
         })
     }
     
@@ -340,6 +444,10 @@ impl VmScheduler {
                     .ok_or_else(|| BlixardError::SchedulingError {
                         message: "No candidate nodes available".to_string(),
                     })
+            }
+            PlacementStrategy::PriorityBased { base_strategy, .. } => {
+                // Use the base strategy for selection
+                self.select_best_node(candidates, base_strategy)
             }
             _ => {
                 // For resource-based strategies, use placement scoring
@@ -745,6 +853,153 @@ impl VmScheduler {
         Ok(AntiAffinityChecker::new(vm_distribution))
     }
     
+    /// Find preemptible VMs on a node that could free up resources
+    async fn find_preemption_candidates(
+        &self,
+        node_id: u64,
+        required_vcpus: u32,
+        required_memory: u64,
+        requesting_priority: u32,
+    ) -> BlixardResult<Vec<PreemptionCandidate>> {
+        let read_txn = self.database.begin_read()?;
+        let vm_table = read_txn.open_table(VM_STATE_TABLE)?;
+        
+        let mut candidates = Vec::new();
+        let mut total_freed_vcpus = 0u32;
+        let mut total_freed_memory = 0u64;
+        
+        // Collect all VMs on this node
+        let mut node_vms: Vec<(crate::types::VmState, u32, bool)> = Vec::new();
+        for vm_result in vm_table.iter()? {
+            let (_, vm_data) = vm_result?;
+            let vm_state: crate::types::VmState = bincode::deserialize(vm_data.value())?;
+            
+            if vm_state.node_id == node_id {
+                match vm_state.status {
+                    crate::types::VmStatus::Running | crate::types::VmStatus::Starting => {
+                        // Only consider VMs with lower priority that are preemptible
+                        if vm_state.config.priority < requesting_priority && vm_state.config.preemptible {
+                            node_vms.push((
+                                vm_state.clone(),
+                                vm_state.config.priority,
+                                vm_state.config.preemptible,
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        // Sort by priority (ascending) so we preempt lowest priority first
+        node_vms.sort_by_key(|(_, priority, _)| *priority);
+        
+        // Select VMs to preempt until we have enough resources
+        for (vm_state, priority, preemptible) in node_vms {
+            if total_freed_vcpus >= required_vcpus && total_freed_memory >= required_memory {
+                break; // We have enough resources
+            }
+            
+            candidates.push(PreemptionCandidate {
+                vm_name: vm_state.config.name.clone(),
+                node_id,
+                priority,
+                vcpus: vm_state.config.vcpus,
+                memory: vm_state.config.memory,
+                preemptible,
+            });
+            
+            total_freed_vcpus += vm_state.config.vcpus;
+            total_freed_memory += vm_state.config.memory as u64;
+        }
+        
+        Ok(candidates)
+    }
+    
+    /// Execute preemption for the given candidates with graceful shutdown
+    pub async fn execute_preemption(
+        &self,
+        preemption_candidates: &[PreemptionCandidate],
+        config: &PreemptionConfig,
+    ) -> BlixardResult<Vec<String>> {
+        let mut preempted_vms = Vec::new();
+        
+        for candidate in preemption_candidates {
+            info!(
+                "Initiating preemption of VM '{}' (priority: {}) on node {}",
+                candidate.vm_name, candidate.priority, candidate.node_id
+            );
+            
+            // Check if live migration is requested and possible
+            if config.try_live_migration && candidate.preemptible {
+                // TODO: Attempt live migration first
+                info!("Live migration not yet implemented for VM '{}'", candidate.vm_name);
+            }
+            
+            // Send graceful shutdown signal
+            // TODO: This should be done through the VM manager
+            // For now, we'll just track that it needs to be preempted
+            preempted_vms.push(candidate.vm_name.clone());
+            
+            // Record preemption metrics
+            metrics_otel::record_vm_preemption(
+                &candidate.vm_name,
+                candidate.node_id,
+                candidate.priority,
+                "graceful",
+            );
+        }
+        
+        Ok(preempted_vms)
+    }
+    
+    /// Execute forced preemption for critical workloads
+    pub async fn execute_forced_preemption(
+        &self,
+        preemption_candidates: &[PreemptionCandidate],
+    ) -> BlixardResult<Vec<String>> {
+        let mut preempted_vms = Vec::new();
+        
+        for candidate in preemption_candidates {
+            info!(
+                "Executing FORCED preemption of VM '{}' (priority: {}) on node {} for critical workload",
+                candidate.vm_name, candidate.priority, candidate.node_id
+            );
+            
+            // TODO: Immediately stop the VM through the VM manager
+            // This bypasses graceful shutdown for critical situations
+            preempted_vms.push(candidate.vm_name.clone());
+            
+            // Record forced preemption metrics
+            metrics_otel::record_vm_preemption(
+                &candidate.vm_name,
+                candidate.node_id,
+                candidate.priority,
+                "forced",
+            );
+        }
+        
+        Ok(preempted_vms)
+    }
+    
+    /// Check if preemption is allowed based on policy
+    pub fn is_preemption_allowed(
+        &self,
+        policy: &PreemptionPolicy,
+        requesting_priority: u32,
+        candidate_priority: u32,
+    ) -> bool {
+        match policy {
+            PreemptionPolicy::Never => false,
+            PreemptionPolicy::LowerPriorityOnly => candidate_priority < requesting_priority,
+            PreemptionPolicy::CostAware { max_cost_increase } => {
+                // For now, just check priority
+                // TODO: Implement cost calculation
+                candidate_priority < requesting_priority && *max_cost_increase > 0.0
+            }
+        }
+    }
+
     /// Select the best node considering anti-affinity soft constraints
     fn select_best_node_with_anti_affinity<'a>(
         &self,
@@ -849,6 +1104,7 @@ mod tests {
             ip_address: None,
             metadata: None,
             anti_affinity: None,
+            ..Default::default()
         };
         
         let requirements = VmResourceRequirements::from(&vm_config);

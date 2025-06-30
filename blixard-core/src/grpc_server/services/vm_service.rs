@@ -70,6 +70,7 @@ impl VmServiceImpl {
             tenant_id: "default".to_string(), // Will be overridden by tenant from request
             metadata: None,
             anti_affinity: None,
+            ..Default::default()
         }
     }
 }

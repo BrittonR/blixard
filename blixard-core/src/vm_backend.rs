@@ -676,6 +676,7 @@ mod tests {
             ip_address: None,
             metadata: None,
             anti_affinity: None,
+            ..Default::default()
         };
         
         backend.create_vm(&vm_config, 1).await.unwrap();
