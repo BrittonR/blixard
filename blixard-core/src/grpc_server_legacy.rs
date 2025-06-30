@@ -365,6 +365,7 @@ impl ClusterService for BlixardGrpcService {
                     node_id: req.node_id,
                     address: req.bind_address.clone(),
                     capabilities,
+                    topology: crate::types::NodeTopology::default(), // Use default topology for legacy endpoint
                 };
                 
                 let (response_tx, _response_rx) = tokio::sync::oneshot::channel();

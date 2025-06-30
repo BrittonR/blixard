@@ -12,6 +12,8 @@ use crate::anti_affinity::{AntiAffinityChecker, AntiAffinityRules};
 use crate::resource_management::{
     NodeResourceState, OvercommitPolicy, ResourceReservation, ClusterResourceManager,
 };
+use crate::types::{NodeTopology, LocalityPreference};
+use std::collections::HashMap;
 
 /// Preemption policy for controlling VM preemption behavior
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +58,27 @@ pub enum PlacementStrategy {
         /// Enable preemption of lower priority VMs
         enable_preemption: bool,
     },
+    /// Locality-aware placement that prioritizes nodes based on datacenter/zone preferences
+    LocalityAware {
+        /// Base strategy to use within selected datacenter/zone
+        base_strategy: Box<PlacementStrategy>,
+        /// Whether to strictly enforce locality (fail if no nodes match)
+        strict: bool,
+    },
+    /// Spread across failure domains (datacenters/zones) for high availability
+    SpreadAcrossFailureDomains {
+        /// Minimum number of failure domains to spread across
+        min_domains: u32,
+        /// Level to spread at: "datacenter", "zone", or "rack"
+        spread_level: String,
+    },
+    /// Cost-optimized placement considering datacenter costs and network transfer costs
+    CostOptimized {
+        /// Maximum cost increase allowed vs cheapest option (percentage)
+        max_cost_increase: f64,
+        /// Whether to consider network transfer costs
+        include_network_costs: bool,
+    },
 }
 
 /// Resource requirements for VM placement
@@ -87,6 +110,7 @@ pub struct NodeResourceUsage {
     pub used_memory_mb: u64,
     pub used_disk_gb: u64,
     pub running_vms: u32,
+    pub topology: NodeTopology,
 }
 
 impl NodeResourceUsage {
@@ -167,6 +191,20 @@ impl NodeResourceUsage {
                 // Use the base strategy for scoring
                 self.placement_score(base_strategy)
             }
+            PlacementStrategy::LocalityAware { base_strategy, .. } => {
+                // Use the base strategy for scoring after locality filtering
+                self.placement_score(base_strategy)
+            }
+            PlacementStrategy::SpreadAcrossFailureDomains { .. } => {
+                // Score based on VM count in the failure domain
+                // Lower VM count = higher score
+                1.0 / (1.0 + self.running_vms as f64)
+            }
+            PlacementStrategy::CostOptimized { .. } => {
+                // TODO: Implement cost-based scoring
+                // For now, use resource availability as proxy
+                self.placement_score(&PlacementStrategy::MostAvailable)
+            }
         }
     }
 }
@@ -191,10 +229,14 @@ pub struct PreemptionCandidate {
     pub preemptible: bool,
 }
 
+/// Network latency between datacenters (in milliseconds)
+pub type DatacenterLatencyMap = HashMap<(String, String), u32>;
+
 /// VM Scheduler for automatic placement of VMs across cluster nodes
 pub struct VmScheduler {
     database: Arc<Database>,
     resource_manager: Arc<tokio::sync::RwLock<ClusterResourceManager>>,
+    datacenter_latencies: Arc<tokio::sync::RwLock<DatacenterLatencyMap>>,
 }
 
 impl VmScheduler {
@@ -205,6 +247,7 @@ impl VmScheduler {
             resource_manager: Arc::new(tokio::sync::RwLock::new(
                 ClusterResourceManager::new(OvercommitPolicy::moderate())
             )),
+            datacenter_latencies: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         }
     }
     
@@ -215,7 +258,79 @@ impl VmScheduler {
             resource_manager: Arc::new(tokio::sync::RwLock::new(
                 ClusterResourceManager::new(policy)
             )),
+            datacenter_latencies: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         }
+    }
+    
+    /// Update network latency between datacenters
+    pub async fn update_datacenter_latency(&self, dc1: &str, dc2: &str, latency_ms: u32) {
+        let mut latencies = self.datacenter_latencies.write().await;
+        // Store bidirectionally
+        latencies.insert((dc1.to_string(), dc2.to_string()), latency_ms);
+        latencies.insert((dc2.to_string(), dc1.to_string()), latency_ms);
+    }
+    
+    /// Get network latency between two datacenters
+    pub async fn get_datacenter_latency(&self, dc1: &str, dc2: &str) -> Option<u32> {
+        let latencies = self.datacenter_latencies.read().await;
+        latencies.get(&(dc1.to_string(), dc2.to_string())).copied()
+    }
+    
+    /// Apply locality preferences to filter and score nodes
+    async fn apply_locality_preferences<'a>(
+        &self,
+        candidates: Vec<&'a NodeResourceUsage>,
+        locality_pref: &LocalityPreference,
+    ) -> BlixardResult<Vec<&'a NodeResourceUsage>> {
+        let mut filtered_candidates = candidates;
+        
+        // Filter out excluded datacenters
+        if !locality_pref.excluded_datacenters.is_empty() {
+            filtered_candidates.retain(|node| {
+                !locality_pref.excluded_datacenters.contains(&node.topology.datacenter)
+            });
+        }
+        
+        // If preferred datacenter is specified, prioritize it
+        if let Some(ref preferred_dc) = locality_pref.preferred_datacenter {
+            let in_preferred_dc: Vec<_> = filtered_candidates.iter()
+                .filter(|node| &node.topology.datacenter == preferred_dc)
+                .copied()
+                .collect();
+            
+            if !in_preferred_dc.is_empty() {
+                // If we have nodes in preferred DC, use only those
+                filtered_candidates = in_preferred_dc;
+                
+                // Further filter by preferred zone if specified
+                if let Some(ref preferred_zone) = locality_pref.preferred_zone {
+                    let in_preferred_zone: Vec<_> = filtered_candidates.iter()
+                        .filter(|node| &node.topology.zone == preferred_zone)
+                        .copied()
+                        .collect();
+                    
+                    if !in_preferred_zone.is_empty() {
+                        filtered_candidates = in_preferred_zone;
+                    }
+                }
+            }
+        }
+        
+        // Apply latency constraints if specified
+        if let Some(max_latency_ms) = locality_pref.max_latency_ms {
+            // For now, we'll just check if nodes are in the same datacenter
+            // In a real implementation, we'd measure actual latencies
+            // TODO: Implement actual latency checking
+            info!("Max latency constraint of {}ms specified (not fully implemented)", max_latency_ms);
+        }
+        
+        if filtered_candidates.is_empty() {
+            return Err(BlixardError::SchedulingError {
+                message: "No nodes match locality preferences".to_string(),
+            });
+        }
+        
+        Ok(filtered_candidates)
     }
     
     /// Schedule a VM placement based on resource requirements and strategy
@@ -269,6 +384,42 @@ impl VmScheduler {
                     }
                 }
             });
+        }
+        
+        // Apply locality preferences based on strategy
+        if !candidate_nodes.is_empty() {
+            match &strategy {
+                PlacementStrategy::LocalityAware { strict, .. } => {
+                    // For LocalityAware strategy, always apply VM's locality preferences
+                    match self.apply_locality_preferences(candidate_nodes.clone(), &vm_config.locality_preference).await {
+                        Ok(filtered) => candidate_nodes = filtered,
+                        Err(e) => {
+                            if *strict {
+                                // In strict mode, fail if no nodes match locality preferences
+                                return Err(BlixardError::SchedulingError {
+                                    message: format!("Strict locality requirement not met: {}", e),
+                                });
+                            } else {
+                                info!("Failed to apply locality preferences: {}", e);
+                                // Continue with unfiltered candidates if not strict
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    // For other strategies, apply locality preferences if specified but don't fail
+                    if !vm_config.locality_preference.preferred_datacenter.is_none() || 
+                       !vm_config.locality_preference.excluded_datacenters.is_empty() {
+                        match self.apply_locality_preferences(candidate_nodes.clone(), &vm_config.locality_preference).await {
+                            Ok(filtered) => candidate_nodes = filtered,
+                            Err(e) => {
+                                info!("Failed to apply locality preferences: {}", e);
+                                // Continue with unfiltered candidates
+                            }
+                        }
+                    }
+                }
+            }
         }
         
         if candidate_nodes.is_empty() {
@@ -449,6 +600,61 @@ impl VmScheduler {
                 // Use the base strategy for selection
                 self.select_best_node(candidates, base_strategy)
             }
+            PlacementStrategy::LocalityAware { base_strategy, .. } => {
+                // Use the base strategy after locality filtering
+                self.select_best_node(candidates, base_strategy)
+            }
+            PlacementStrategy::SpreadAcrossFailureDomains { spread_level, .. } => {
+                // Group nodes by failure domain and select least used domain
+                let mut domain_usage: HashMap<String, u32> = HashMap::new();
+                for node in &candidates {
+                    let domain = match spread_level.as_str() {
+                        "datacenter" => &node.topology.datacenter,
+                        "zone" => &node.topology.zone,
+                        "rack" => &node.topology.rack,
+                        _ => &node.topology.datacenter,
+                    };
+                    *domain_usage.entry(domain.clone()).or_insert(0) += node.running_vms;
+                }
+                
+                // Find domain with least VMs
+                let least_used_domain = domain_usage.iter()
+                    .min_by_key(|(_, count)| *count)
+                    .map(|(domain, _)| domain.clone());
+                
+                if let Some(target_domain) = least_used_domain {
+                    // Select best node within target domain
+                    let domain_candidates: Vec<_> = candidates.iter()
+                        .filter(|node| {
+                            let domain = match spread_level.as_str() {
+                                "datacenter" => &node.topology.datacenter,
+                                "zone" => &node.topology.zone,
+                                "rack" => &node.topology.rack,
+                                _ => &node.topology.datacenter,
+                            };
+                            domain == &target_domain
+                        })
+                        .copied()
+                        .collect();
+                    
+                    if !domain_candidates.is_empty() {
+                        self.select_best_node(domain_candidates, &PlacementStrategy::MostAvailable)
+                    } else {
+                        Err(BlixardError::SchedulingError {
+                            message: "No nodes available in selected failure domain".to_string(),
+                        })
+                    }
+                } else {
+                    Err(BlixardError::SchedulingError {
+                        message: "No failure domains available".to_string(),
+                    })
+                }
+            }
+            PlacementStrategy::CostOptimized { .. } => {
+                // For now, use most available as placeholder
+                // TODO: Implement cost-based scoring
+                self.select_best_node(candidates, &PlacementStrategy::MostAvailable)
+            }
             _ => {
                 // For resource-based strategies, use placement scoring
                 candidates
@@ -473,6 +679,7 @@ impl VmScheduler {
         let worker_table = read_txn.open_table(WORKER_TABLE)?;
         let status_table = read_txn.open_table(WORKER_STATUS_TABLE)?;
         let vm_table = read_txn.open_table(VM_STATE_TABLE)?;
+        let topology_table = read_txn.open_table(crate::storage::NODE_TOPOLOGY_TABLE)?;
         
         let mut node_usage = Vec::new();
         
@@ -502,6 +709,14 @@ impl VmScheduler {
             // Calculate current resource usage from running VMs
             let (used_vcpus, used_memory_mb, used_disk_gb, running_vms) = self.calculate_node_usage(&vm_table, node_id)?;
             
+            // Load topology information for this node
+            let topology = if let Ok(Some(topology_data)) = topology_table.get(node_id_bytes.value()) {
+                bincode::deserialize(topology_data.value())
+                    .unwrap_or_else(|_| NodeTopology::default())
+            } else {
+                NodeTopology::default()
+            };
+            
             node_usage.push(NodeResourceUsage {
                 node_id,
                 capabilities,
@@ -509,6 +724,7 @@ impl VmScheduler {
                 used_memory_mb,
                 used_disk_gb,
                 running_vms,
+                topology,
             });
         }
         
@@ -522,6 +738,7 @@ impl VmScheduler {
         let worker_table = read_txn.open_table(WORKER_TABLE)?;
         let status_table = read_txn.open_table(WORKER_STATUS_TABLE)?;
         let vm_table = read_txn.open_table(VM_STATE_TABLE)?;
+        let topology_table = read_txn.open_table(crate::storage::NODE_TOPOLOGY_TABLE)?;
         
         let node_id_bytes = node_id.to_le_bytes();
         
@@ -547,6 +764,14 @@ impl VmScheduler {
         // Calculate current resource usage
         let (used_vcpus, used_memory_mb, used_disk_gb, running_vms) = self.calculate_node_usage(&vm_table, node_id)?;
         
+        // Load topology information for this node
+        let topology = if let Ok(Some(topology_data)) = topology_table.get(node_id_bytes.as_slice()) {
+            bincode::deserialize(topology_data.value())
+                .unwrap_or_else(|_| NodeTopology::default())
+        } else {
+            NodeTopology::default()
+        };
+        
         Ok(NodeResourceUsage {
             node_id,
             capabilities,
@@ -554,6 +779,7 @@ impl VmScheduler {
             used_memory_mb,
             used_disk_gb,
             running_vms,
+            topology,
         })
     }
     

@@ -2,6 +2,27 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use crate::anti_affinity::AntiAffinityRules;
 
+/// Node topology information for multi-datacenter awareness
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct NodeTopology {
+    /// Datacenter identifier (e.g., "us-east-1", "eu-west-1")
+    pub datacenter: String,
+    /// Availability zone within the datacenter (e.g., "zone-a", "zone-b")
+    pub zone: String,
+    /// Rack identifier within the zone (e.g., "rack-42")
+    pub rack: String,
+}
+
+impl Default for NodeTopology {
+    fn default() -> Self {
+        Self {
+            datacenter: "default-dc".to_string(),
+            zone: "default-zone".to_string(),
+            rack: "default-rack".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeConfig {
     pub id: u64,
@@ -12,6 +33,8 @@ pub struct NodeConfig {
     pub vm_backend: String, // Backend type: "mock", "microvm", "docker", etc.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transport_config: Option<crate::transport::config::TransportConfig>,
+    #[serde(default)]
+    pub topology: NodeTopology, // Datacenter/zone/rack topology information
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +55,8 @@ pub struct VmConfig {
     pub priority: u32, // Priority level (0-1000, higher is more important)
     #[serde(default = "default_preemptible")]
     pub preemptible: bool, // Whether this VM can be preempted
+    #[serde(default)]
+    pub locality_preference: LocalityPreference, // Datacenter locality preferences
 }
 
 impl Default for VmConfig {
@@ -47,6 +72,7 @@ impl Default for VmConfig {
             anti_affinity: None,
             priority: default_priority(),
             preemptible: default_preemptible(),
+            locality_preference: LocalityPreference::default(),
         }
     }
 }
@@ -129,4 +155,34 @@ pub struct VmMigrationTask {
     pub target_node_id: u64,
     pub live_migration: bool,
     pub force: bool,
+}
+
+/// Locality preferences for VM placement across datacenters
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalityPreference {
+    /// Preferred datacenter for primary placement
+    pub preferred_datacenter: Option<String>,
+    /// Preferred zone within the datacenter
+    pub preferred_zone: Option<String>,
+    /// Whether to enforce same-datacenter placement for all instances
+    pub enforce_same_datacenter: bool,
+    /// Whether to spread across zones for high availability
+    pub spread_across_zones: bool,
+    /// Maximum network latency tolerance in milliseconds
+    pub max_latency_ms: Option<u32>,
+    /// List of excluded datacenters
+    pub excluded_datacenters: Vec<String>,
+}
+
+impl Default for LocalityPreference {
+    fn default() -> Self {
+        Self {
+            preferred_datacenter: None,
+            preferred_zone: None,
+            enforce_same_datacenter: false,
+            spread_across_zones: false,
+            max_latency_ms: None,
+            excluded_datacenters: Vec::new(),
+        }
+    }
 }

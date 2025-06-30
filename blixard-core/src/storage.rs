@@ -44,6 +44,7 @@ pub const TASK_RESULT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new
 // Worker management tables
 pub const WORKER_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("workers");
 pub const WORKER_STATUS_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("worker_status");
+pub const NODE_TOPOLOGY_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("node_topology");
 
 // Quota management tables
 pub const TENANT_QUOTA_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("tenant_quotas");
@@ -709,6 +710,40 @@ impl RedbRaftStorage {
         write_txn.commit()?;
         Ok(())
     }
+    
+    /// Save node topology information
+    pub fn save_node_topology(&self, node_id: u64, topology: &crate::types::NodeTopology) -> BlixardResult<()> {
+        let write_txn = self.database.begin_write()?;
+        {
+            let mut table = write_txn.open_table(NODE_TOPOLOGY_TABLE)?;
+            let serialized = bincode::serialize(topology)
+                .map_err(|e| BlixardError::Serialization {
+                    operation: "serialize node topology".to_string(),
+                    source: Box::new(e),
+                })?;
+            table.insert(node_id.to_le_bytes().as_slice(), serialized.as_slice())?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+    
+    /// Get node topology information
+    pub fn get_node_topology(&self, node_id: u64) -> BlixardResult<Option<crate::types::NodeTopology>> {
+        let read_txn = self.database.begin_read()?;
+        
+        if let Ok(table) = read_txn.open_table(NODE_TOPOLOGY_TABLE) {
+            if let Ok(Some(data)) = table.get(node_id.to_le_bytes().as_slice()) {
+                let topology = bincode::deserialize(data.value())
+                    .map_err(|e| BlixardError::Serialization {
+                        operation: "deserialize node topology".to_string(),
+                        source: Box::new(e),
+                    })?;
+                return Ok(Some(topology));
+            }
+        }
+        
+        Ok(None)
+    }
 }
 
 /// Initialize all required database tables
@@ -726,6 +761,7 @@ pub fn init_database_tables(database: &Arc<Database>) -> BlixardResult<()> {
     let _ = write_txn.open_table(TASK_RESULT_TABLE)?;
     let _ = write_txn.open_table(WORKER_TABLE)?;
     let _ = write_txn.open_table(WORKER_STATUS_TABLE)?;
+    let _ = write_txn.open_table(NODE_TOPOLOGY_TABLE)?;
     let _ = write_txn.open_table(TENANT_QUOTA_TABLE)?;
     
     write_txn.commit()?;

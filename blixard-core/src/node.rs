@@ -555,6 +555,9 @@ impl Node {
             features: vec!["microvm".to_string()],
         };
         
+        // Get topology from node config
+        let topology = self.shared.config.topology.clone();
+        
         if peer_addr.is_none() {
             // Bootstrap mode: When starting as a single-node cluster, we can write
             // directly to the database. This is the ONLY exception to the rule that
@@ -586,7 +589,7 @@ impl Node {
             }
         } else {
             // Join existing cluster via Raft proposal - use the new method
-            self.shared.register_worker_through_raft(node_id, address, capabilities).await?;
+            self.shared.register_worker_through_raft(node_id, address, capabilities, topology).await?;
         }
         
         Ok(())

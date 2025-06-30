@@ -56,7 +56,7 @@ pub enum ProposalData {
     ReassignTask { task_id: String, from_node: u64, to_node: u64 },
     
     // Worker management
-    RegisterWorker { node_id: u64, address: String, capabilities: WorkerCapabilities },
+    RegisterWorker { node_id: u64, address: String, capabilities: WorkerCapabilities, topology: crate::types::NodeTopology },
     UpdateWorkerStatus { node_id: u64, status: WorkerStatus },
     RemoveWorker { node_id: u64 },
     
@@ -161,8 +161,8 @@ impl RaftStateMachine {
             ProposalData::CompleteTask { task_id, result } => {
                 self.apply_complete_task(write_txn, &task_id, &result)?;
             }
-            ProposalData::RegisterWorker { node_id, address, capabilities } => {
-                self.apply_register_worker(write_txn, node_id, &address, &capabilities)?;
+            ProposalData::RegisterWorker { node_id, address, capabilities, topology } => {
+                self.apply_register_worker(write_txn, node_id, &address, &capabilities, &topology)?;
             }
             ProposalData::UpdateWorkerStatus { node_id, status } => {
                 self.apply_update_worker_status(write_txn, node_id, status)?;
@@ -281,12 +281,18 @@ impl RaftStateMachine {
         Ok(())
     }
 
-    fn apply_register_worker(&self, txn: WriteTransaction, node_id: u64, address: &str, capabilities: &WorkerCapabilities) -> BlixardResult<()> {
-        use crate::storage::{WORKER_TABLE, WORKER_STATUS_TABLE};
+    fn apply_register_worker(&self, txn: WriteTransaction, node_id: u64, address: &str, capabilities: &WorkerCapabilities, topology: &crate::types::NodeTopology) -> BlixardResult<()> {
+        use crate::storage::{WORKER_TABLE, WORKER_STATUS_TABLE, NODE_TOPOLOGY_TABLE};
         
         let worker_data = bincode::serialize(&(address, capabilities))
             .map_err(|e| BlixardError::Serialization {
                 operation: "serialize worker info".to_string(),
+                source: Box::new(e),
+            })?;
+        
+        let topology_data = bincode::serialize(topology)
+            .map_err(|e| BlixardError::Serialization {
+                operation: "serialize node topology".to_string(),
                 source: Box::new(e),
             })?;
         
@@ -298,6 +304,10 @@ impl RaftStateMachine {
             // Set initial status
             let mut status_table = txn.open_table(WORKER_STATUS_TABLE)?;
             status_table.insert(node_id.to_le_bytes().as_slice(), [WorkerStatus::Online as u8].as_slice())?;
+            
+            // Store topology info
+            let mut topology_table = txn.open_table(NODE_TOPOLOGY_TABLE)?;
+            topology_table.insert(node_id.to_le_bytes().as_slice(), topology_data.as_slice())?;
         }
         
         txn.commit()?;

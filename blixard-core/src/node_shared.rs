@@ -1159,6 +1159,7 @@ impl SharedNodeState {
         node_id: u64,
         address: String,
         capabilities: crate::raft_manager::WorkerCapabilities,
+        topology: crate::types::NodeTopology,
     ) -> BlixardResult<()> {
         use crate::raft_manager::{ProposalData, RaftProposal};
         use tokio::sync::oneshot;
@@ -1180,6 +1181,7 @@ impl SharedNodeState {
             node_id,
             address,
             capabilities,
+            topology,
         };
         
         let (response_tx, response_rx) = oneshot::channel();
