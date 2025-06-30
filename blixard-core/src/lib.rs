@@ -21,6 +21,8 @@ pub mod config_global;
 pub mod config_hot_reload;
 pub mod backup_manager;
 pub mod transaction_log;
+pub mod audit_log;
+pub mod audit_integration;
 pub mod metrics_otel;
 pub mod metrics_server;
 pub mod tracing_otel;
