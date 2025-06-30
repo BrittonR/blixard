@@ -111,6 +111,9 @@ pub struct SharedNodeState {
     // Security manager for authentication and authorization
     security_manager: RwLock<Option<Arc<crate::security::SecurityManager>>>,
     
+    // Observability manager for metrics and tracing
+    observability_manager: RwLock<Option<Arc<crate::observability::ObservabilityManager>>>,
+    
     // Track running state
     is_running: RwLock<bool>,
     
@@ -151,6 +154,7 @@ impl SharedNodeState {
             vm_manager: RwLock::new(None),
             quota_manager: RwLock::new(None),
             security_manager: RwLock::new(None),
+            observability_manager: RwLock::new(None),
             is_running: RwLock::new(false),
             is_initialized: RwLock::new(false),
             raft_status: RwLock::new(RaftStatus {
@@ -218,6 +222,16 @@ impl SharedNodeState {
     /// Get the security manager
     pub async fn get_security_manager(&self) -> Option<Arc<crate::security::SecurityManager>> {
         self.security_manager.read().await.clone()
+    }
+    
+    /// Set the observability manager
+    pub async fn set_observability_manager(&self, observability_manager: Arc<crate::observability::ObservabilityManager>) {
+        *self.observability_manager.write().await = Some(observability_manager);
+    }
+    
+    /// Get the observability manager
+    pub async fn get_observability_manager(&self) -> Option<Arc<crate::observability::ObservabilityManager>> {
+        self.observability_manager.read().await.clone()
     }
     
     /// Get the VM manager

@@ -22,6 +22,11 @@ pub mod quota_manager;
 pub mod security;
 pub mod grpc_security;
 pub mod cert_generator;
+pub mod auth_interceptor;
+pub mod rbac;
+pub mod tls_config;
+pub mod quota_system;
+pub mod observability;
 // P2P implementation
 pub mod iroh_transport;
 pub mod p2p_image_store;

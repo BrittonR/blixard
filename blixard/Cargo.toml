@@ -17,6 +17,9 @@ dialoguer = "0.11"
 
 # Error handling
 thiserror = "1.0"
+
+# For examples
+tempfile = "3.8"
 anyhow = "1.0"
 color-eyre = "0.6"
 
@@ -70,6 +73,10 @@ path = "../examples/metrics_demo.rs"
 [[example]]
 name = "grpc_with_auth"
 path = "../examples/grpc_with_auth.rs"
+
+[[example]]
+name = "secure_cluster_demo"
+path = "../examples/secure_cluster_demo.rs"
 
 [[example]]
 name = "p2p_image_sharing"

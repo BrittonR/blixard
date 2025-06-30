@@ -91,6 +91,9 @@ pub enum BlixardError {
     
     #[error("P2P error: {0}")]
     P2PError(String),
+    
+    #[error("Quota exceeded for {resource}: limit {limit}, requested {requested}")]
+    QuotaExceeded { resource: String, limit: u64, requested: u64 },
 }
 
 pub type Result<T> = std::result::Result<T, BlixardError>;

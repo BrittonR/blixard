@@ -114,6 +114,15 @@ impl Node {
         let config = crate::config_global::get();
         let security_manager = Arc::new(crate::security::SecurityManager::new(config.security.clone()).await?);
         self.shared.set_security_manager(security_manager).await;
+        
+        // Initialize observability (metrics and tracing)
+        if config.observability.metrics.enabled || config.observability.tracing.enabled {
+            tracing::info!("Initializing observability (metrics: {}, tracing: {})",
+                         config.observability.metrics.enabled,
+                         config.observability.tracing.enabled);
+            let observability_manager = Arc::new(crate::observability::ObservabilityManager::new(config.observability.clone()).await?);
+            self.shared.set_observability_manager(observability_manager).await;
+        }
 
         // Initialize P2P manager if enabled OR if using Iroh transport
         let using_iroh_transport = matches!(
