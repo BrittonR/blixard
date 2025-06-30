@@ -19,6 +19,11 @@ pub mod iroh_vm_service;
 pub mod iroh_raft_transport;
 pub mod raft_transport_adapter;
 
+// Iroh security modules
+pub mod iroh_middleware;
+pub mod iroh_secure_vm_service;
+pub mod secure_iroh_protocol_handler;
+
 #[cfg(test)]
 mod tests;
 
