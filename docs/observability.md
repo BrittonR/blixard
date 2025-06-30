@@ -6,8 +6,13 @@ This guide covers the observability features in Blixard, including metrics and d
 
 Blixard provides comprehensive observability through:
 - **Metrics**: Prometheus-compatible metrics for monitoring system health
-- **Distributed Tracing**: OpenTelemetry-based tracing for request flow analysis
+- **Distributed Tracing**: OpenTelemetry-based tracing for request flow analysis  
 - **Structured Logging**: Contextual logging with trace correlation
+- **Cloud Export**: Native support for AWS, GCP, Azure, and Datadog
+- **Exemplars**: Trace-to-metrics correlation for debugging
+- **Dashboards**: Pre-built Grafana dashboards for visualization
+- **Alerting**: Production-ready Prometheus alert rules
+- **Runbooks**: Operational procedures for incident response
 
 ## Metrics
 
@@ -198,42 +203,114 @@ service:
 
 ## Cloud Provider Integration
 
+Blixard now includes native cloud provider support. Simply set the provider and credentials:
+
 ### AWS X-Ray
 ```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-# Run AWS ADOT Collector configured for X-Ray
+export BLIXARD_CLOUD_PROVIDER=aws
+export AWS_REGION=us-west-2
+# Uses IAM role or AWS credentials automatically
 ```
 
 ### Google Cloud Operations
 ```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
-# Run OTel Collector with googlecloud exporter
+export BLIXARD_CLOUD_PROVIDER=gcp
+export GCP_PROJECT=your-project-id
+# Uses Application Default Credentials
 ```
 
 ### Azure Monitor
 ```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=https://dc.services.visualstudio.com/v2/track
-export OTEL_EXPORTER_OTLP_HEADERS=X-API-Key=your-instrumentation-key
+export BLIXARD_CLOUD_PROVIDER=azure
+export AZURE_INSTRUMENTATION_KEY=your-key
 ```
 
 ### Datadog
 ```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+export BLIXARD_CLOUD_PROVIDER=datadog
 export DD_API_KEY=your-api-key
-# Run Datadog Agent with OTLP receiver
+export DD_SITE=datadoghq.com  # or datadoghq.eu
 ```
 
-See `examples/otlp-config.yaml` for more detailed cloud provider configurations.
+See the [Cloud Observability Guide](./cloud-observability.md) for detailed configuration.
 
 ## Grafana Dashboards
 
-Import the example dashboard from `examples/grafana-dashboard.json` which includes:
-- gRPC request rates and latencies
-- Raft consensus metrics
-- VM lifecycle metrics
-- Storage operation metrics
-- Cluster health overview
+We provide comprehensive Grafana dashboards:
+
+### Quick Start
+Import `/monitoring/grafana/dashboards/blixard-comprehensive.json` for:
+- **Cluster Overview**: Node health, resource usage, Raft state
+- **Raft Consensus**: Proposals, commits, leader changes
+- **Network & gRPC**: Request rates, latencies, peer connections  
+- **VM Management**: Operations, health checks, recovery
+- **VM Placement**: Scheduling success, resource allocation
+- **Storage Performance**: Read/write operations and latencies
+- **P2P Distribution**: Transfer rates, cache efficiency, verification
+
+### Dashboard Features
+- Auto-refresh every 10 seconds
+- Prometheus datasource selector
+- Time range controls
+- Drill-down capabilities
+
+## Prometheus Alerting
+
+Production-ready alert rules are provided in `/monitoring/prometheus/alerts/blixard-alerts.yml`:
+
+### Alert Categories
+- **Cluster Health**: Node availability, health status
+- **Raft Consensus**: Leader election, proposal failures
+- **Resource Usage**: CPU, memory, disk thresholds  
+- **VM Operations**: Creation/start failures, health checks
+- **Network/gRPC**: Error rates, latency, connectivity
+- **Storage**: Operation latency, throughput
+- **P2P Transfers**: Verification failures, transfer errors
+
+### Setting Up Alerts
+```yaml
+# prometheus.yml
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['localhost:9093']
+
+rule_files:
+  - '/path/to/blixard-alerts.yml'
+```
+
+## Operational Runbooks
+
+Each alert has a corresponding runbook in `/docs/runbooks/`:
+- Step-by-step diagnostic procedures
+- Common resolution scenarios
+- Recovery verification steps
+- Prevention recommendations
+
+See the [Runbook Index](./runbooks/README.md) for the complete list.
+
+## Exemplar Support
+
+Blixard supports exemplars for trace-to-metrics correlation:
+
+### How It Works
+- Metrics recorded within trace context automatically include trace IDs
+- Prometheus stores these as exemplars with metric samples
+- Grafana can jump from metric spikes to distributed traces
+
+### Using Exemplars
+```rust
+// Automatic exemplar recording
+use blixard_core::observability::exemplars::integrations::*;
+
+// Record metric with trace context
+record_grpc_request_with_trace("CreateVm", duration, success);
+```
+
+### Viewing Exemplars
+1. In Grafana, enable exemplars in datasource settings
+2. Look for dots on graph lines indicating exemplars
+3. Click to see trace ID and jump to trace view
 
 ## Troubleshooting
 
@@ -262,8 +339,14 @@ Import the example dashboard from `examples/grafana-dashboard.json` which includ
 
 ## Future Enhancements
 
-- Exemplars linking metrics to traces
+- ✅ ~~Exemplars linking metrics to traces~~ (Implemented)
+- ✅ ~~Cloud provider integrations~~ (AWS, GCP, Azure, Datadog supported)  
+- ✅ ~~Production dashboards~~ (Comprehensive Grafana dashboard)
+- ✅ ~~Alert rules~~ (Complete Prometheus alerting)
+- ✅ ~~Operational runbooks~~ (Alert response procedures)
 - Custom span processors for business logic
 - Baggage propagation for request metadata
 - Log correlation with trace IDs
-- Profiling integration
+- Continuous profiling integration
+- Service dependency mapping
+- Automated anomaly detection

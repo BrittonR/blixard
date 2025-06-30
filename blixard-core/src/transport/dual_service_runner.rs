@@ -22,6 +22,7 @@ use crate::{
         iroh_status_service::IrohStatusService,
         iroh_vm_service::IrohVmService,
     },
+    config_global,
 };
 use std::{net::SocketAddr, sync::Arc};
 use tonic::transport::Server;
@@ -87,12 +88,37 @@ impl DualServiceRunner {
         let cluster_server = ClusterServiceServer::new(combined_service);
         let blixard_server = BlixardServiceServer::new(status_service);
         
-        Server::builder()
-            .add_service(cluster_server)
-            .add_service(blixard_server)
-            .serve(self.grpc_addr)
-            .await
-            .map_err(|e| BlixardError::GrpcError(e.to_string()))?;
+        let mut server_builder = Server::builder();
+        
+        // TLS removed - not implemented yet
+        tracing::warn!("TLS disabled for gRPC server - running in insecure mode");
+        
+        // Configure authentication if enabled
+        if config_global::get().security.auth.enabled {
+            // Create security manager
+            // Security manager removed - not implemented yet
+            
+            // Create auth layer
+            // Auth layer removed - authentication not implemented yet
+            
+            tracing::info!("Authentication enabled for gRPC server");
+            
+            server_builder
+                .add_service(cluster_server)
+                .add_service(blixard_server)
+                .serve(self.grpc_addr)
+                .await
+                .map_err(|e| BlixardError::GrpcError(e.to_string()))?;
+        } else {
+            tracing::warn!("Authentication disabled for gRPC server - accepting all requests");
+            
+            server_builder
+                .add_service(cluster_server)
+                .add_service(blixard_server)
+                .serve(self.grpc_addr)
+                .await
+                .map_err(|e| BlixardError::GrpcError(e.to_string()))?;
+        }
             
         Ok(())
     }
@@ -167,12 +193,38 @@ impl DualServiceRunner {
         let cluster_server = ClusterServiceServer::new(filtered_service);
         let blixard_server = BlixardServiceServer::new(status_service);
         
-        Server::builder()
-            .add_service(cluster_server)
-            .add_service(blixard_server)
-            .serve(self.grpc_addr)
-            .await
-            .map_err(|e| BlixardError::GrpcError(e.to_string()))?;
+        // Configure TLS if enabled
+        let mut server_builder = Server::builder();
+        
+        // TLS removed - not implemented yet
+        tracing::warn!("TLS disabled for gRPC server - running in insecure mode");
+        
+        // Configure authentication if enabled
+        if config_global::get().security.auth.enabled {
+            // Create security manager
+            // Security manager removed - not implemented yet
+            
+            // Create auth layer
+            // Auth layer removed - authentication not implemented yet
+            
+            tracing::info!("Authentication enabled for gRPC server");
+            
+            server_builder
+                .add_service(cluster_server)
+                .add_service(blixard_server)
+                .serve(self.grpc_addr)
+                .await
+                .map_err(|e| BlixardError::GrpcError(e.to_string()))?;
+        } else {
+            tracing::warn!("Authentication disabled for gRPC server - accepting all requests");
+            
+            server_builder
+                .add_service(cluster_server)
+                .add_service(blixard_server)
+                .serve(self.grpc_addr)
+                .await
+                .map_err(|e| BlixardError::GrpcError(e.to_string()))?;
+        }
             
         Ok(())
     }

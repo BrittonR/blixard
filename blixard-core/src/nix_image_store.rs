@@ -284,7 +284,7 @@ impl NixImageStore {
         }
 
         // Deduplicate chunks across existing images
-        let (unique_chunks, dedup_stats) = self.deduplicate_chunks(&all_chunks).await?;
+        let (unique_chunks, dedup_count) = self.deduplicate_chunks(&all_chunks).await?;
         
         info!(
             "Chunking complete: {} total chunks, {} unique ({:.1}% deduplication)",
@@ -335,12 +335,11 @@ impl NixImageStore {
         record_p2p_image_import(artifact_type_str, true, total_size);
         
         // Record deduplication metrics
-        let chunks_deduplicated = all_chunks.len() - unique_chunks.len();
-        for _ in 0..chunks_deduplicated {
+        for _ in 0..dedup_count {
             record_p2p_chunk_transfer(0, true);
         }
 
-        info!("Successfully imported {} with {} chunks", name, all_chunks.len());
+        info!("Successfully imported {} with {} chunks ({}  deduplicated)", name, metadata.chunk_hashes.len(), dedup_count);
         Ok(metadata)
     }
 
@@ -554,100 +553,6 @@ impl NixImageStore {
         Ok(chunks)
     }
 
-    async fn deduplicate_chunks(
-        &self,
-        chunks: &[ChunkMetadata],
-    ) -> BlixardResult<(Vec<ChunkMetadata>, HashMap<String, usize>)> {
-        let mut unique_chunks = Vec::new();
-        let mut dedup_stats = HashMap::new();
-        let chunk_index = self.chunk_index.read().await;
-
-        for chunk in chunks {
-            if chunk_index.contains_key(&chunk.hash) {
-                *dedup_stats.entry(chunk.hash.clone()).or_insert(0) += 1;
-            } else {
-                unique_chunks.push(chunk.clone());
-            }
-        }
-
-        Ok((unique_chunks, dedup_stats))
-    }
-
-    async fn upload_chunks(&self, chunks: &[ChunkMetadata]) -> BlixardResult<Hash> {
-        // For now, create a manifest of chunks and upload that
-        let manifest = serde_json::to_vec(chunks)?;
-        let hash = self.p2p_manager.share_data(&manifest).await?;
-        Ok(hash)
-    }
-
-    async fn get_nix_closure(&self, path: &Path) -> BlixardResult<Vec<PathBuf>> {
-        use tokio::process::Command;
-        
-        let output = Command::new("nix-store")
-            .args(&["-qR", &path.to_string_lossy()])
-            .output()
-            .await?;
-
-        if !output.status.success() {
-            return Err(BlixardError::Internal {
-                message: format!("Failed to get Nix closure: {}", String::from_utf8_lossy(&output.stderr)),
-            });
-        }
-
-        let paths = String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .map(PathBuf::from)
-            .collect();
-
-        Ok(paths)
-    }
-
-    async fn get_nix_dependencies(&self, path: &Path) -> BlixardResult<Vec<String>> {
-        use tokio::process::Command;
-        
-        let output = Command::new("nix-store")
-            .args(&["-q", "--references", &path.to_string_lossy()])
-            .output()
-            .await?;
-
-        if !output.status.success() {
-            // Not all paths have references, that's OK
-            return Ok(Vec::new());
-        }
-
-        let deps = String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .map(String::from)
-            .collect();
-
-        Ok(deps)
-    }
-
-    fn extract_derivation_hash(&self, path: &Path) -> Option<String> {
-        // Extract hash from Nix store path
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .and_then(|name| name.split('-').next())
-            .map(String::from)
-    }
-
-    async fn detect_runtime_requirements(&self, paths: &[&Path]) -> BlixardResult<RuntimeRequirements> {
-        // Simple detection based on common patterns
-        // In production, would parse VM configs or container manifests
-        Ok(RuntimeRequirements {
-            min_kernel: Some("5.10".to_string()),
-            cpu_features: vec![],
-            min_memory_mb: 256,
-            hypervisor_features: vec!["virtio".to_string()],
-        })
-    }
-
-    async fn extract_oci_manifest_digest(&self, tar_path: &Path) -> BlixardResult<String> {
-        // In a real implementation, would extract and parse OCI manifest
-        // For now, return a placeholder
-        Ok(format!("sha256:{:x}", md5::compute(tar_path.to_string_lossy().as_bytes())))
-    }
-
     async fn store_metadata(&self, metadata: &NixImageMetadata) -> BlixardResult<()> {
         let mut cache = self.metadata_cache.write().await;
         cache.insert(metadata.id.clone(), metadata.clone());
@@ -723,7 +628,7 @@ impl NixImageStore {
         let iroh_hash = Hash::from_str(hash)
             .map_err(|e| BlixardError::Internal { message: e.to_string() })?;
         
-        self.p2p_manager.download_data(iroh_hash).await
+        self.p2p_manager.download_data(&iroh_hash).await
     }
 
     async fn store_chunk(&self, hash: &str, data: &[u8]) -> BlixardResult<()> {
@@ -1186,9 +1091,8 @@ impl NixImageStore {
         let hash_bytes = hasher.finalize();
         
         // Convert to Iroh hash format
-        Hash::from_bytes(hash_bytes.into()).map_err(|e| BlixardError::Internal {
-            message: format!("Failed to create hash: {}", e),
-        })
+        // Note: This creates a hash of the concatenated hashes, not a proper content hash
+        Ok(Hash::new(&hash_bytes))
     }
 }
 
@@ -1249,8 +1153,8 @@ mod tests {
             },
         ];
         
-        let (unique, stats) = store.deduplicate_chunks(&chunks).await.unwrap();
+        let (unique, dedup_count) = store.deduplicate_chunks(&chunks).await.unwrap();
         assert_eq!(unique.len(), 2);
-        assert_eq!(stats.get("hash1"), None); // First occurrence not in stats
+        assert_eq!(dedup_count, 0); // No duplicates in test data
     }
 }

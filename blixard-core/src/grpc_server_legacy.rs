@@ -741,6 +741,7 @@ impl ClusterService for BlixardGrpcService {
             memory: req.memory_mb,
             tenant_id: tenant_id.clone(),
             ip_address: None,
+            metadata: None,
         };
 
         // Check quota limits before creating VM
@@ -1382,6 +1383,7 @@ impl ClusterService for BlixardGrpcService {
             memory: req.memory_mb,
             tenant_id: tenant_id.clone(),
             ip_address: None,
+            metadata: None,
         };
 
         // Check quota limits before creating VM (no specific node yet)
@@ -1478,6 +1480,7 @@ impl ClusterService for BlixardGrpcService {
             memory: req.memory_mb,
             tenant_id: "default".to_string(), // Use default tenant for scheduling requests
             ip_address: None,
+            metadata: None,
         };
 
         // Schedule VM placement

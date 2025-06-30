@@ -38,6 +38,7 @@ pub fn test_vm_config(name: &str) -> VmConfig {
         vcpus: 1,
         tenant_id: "default".to_string(),
         ip_address: None,
+        metadata: None,
     }
 }
 

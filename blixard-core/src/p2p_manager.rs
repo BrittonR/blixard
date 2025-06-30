@@ -345,6 +345,46 @@ impl P2pManager {
         self.active_transfers.read().await.values().cloned().collect()
     }
     
+    /// Hash data using Blake3
+    pub async fn hash_data(&self, data: &[u8]) -> BlixardResult<iroh_blobs::Hash> {
+        use iroh_blobs::Hash;
+        Ok(Hash::new(data))
+    }
+    
+    /// Share data through P2P network
+    pub async fn share_data(&self, data: Vec<u8>, name: &str) -> BlixardResult<iroh_blobs::Hash> {
+        // For now, just store it locally and return the hash
+        let hash = self.hash_data(&data).await?;
+        // TODO: Actually share through iroh
+        info!("Sharing data {} with hash {}", name, hash);
+        Ok(hash)
+    }
+    
+    /// Store metadata
+    pub async fn store_metadata(&self, key: &str, value: &[u8]) -> BlixardResult<()> {
+        // TODO: Implement metadata storage
+        debug!("Storing metadata for key: {}", key);
+        Ok(())
+    }
+    
+    /// Get metadata
+    pub async fn get_metadata(&self, key: &str) -> BlixardResult<Vec<u8>> {
+        // TODO: Implement metadata retrieval
+        debug!("Getting metadata for key: {}", key);
+        Err(BlixardError::NotImplemented {
+            feature: "metadata retrieval".to_string(),
+        })
+    }
+    
+    /// Download data from P2P network
+    pub async fn download_data(&self, hash: &iroh_blobs::Hash) -> BlixardResult<Vec<u8>> {
+        // TODO: Implement P2P download
+        warn!("P2P download not implemented for hash: {}", hash);
+        Err(BlixardError::NotImplemented {
+            feature: "P2P download".to_string(),
+        })
+    }
+    
     /// Start peer discovery task
     fn start_peer_discovery(&self) {
         let _peers = self.peers.clone();

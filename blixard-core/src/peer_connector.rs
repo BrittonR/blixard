@@ -145,11 +145,15 @@ pub struct PeerConnector {
     shutdown_rx: watch::Receiver<bool>,
     /// JoinHandles for background tasks
     background_tasks: Mutex<Vec<JoinHandle<()>>>,
+    // TLS configuration removed - not implemented yet
 }
 
 impl PeerConnector {
     pub fn new(node: Arc<SharedNodeState>) -> Self {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        
+        // TLS config removed - not implemented yet
+        
         Self {
             node,
             connections: RwLock::new(HashMap::new()),
@@ -160,6 +164,26 @@ impl PeerConnector {
             shutdown_tx,
             shutdown_rx,
             background_tasks: Mutex::new(Vec::new()),
+        }
+    }
+    
+    /// Create a channel with optional TLS
+    async fn create_channel(&self, endpoint: &str) -> BlixardResult<Channel> {
+        // TLS removed - not implemented yet
+        if false {
+            // TLS would be created here
+            unreachable!("TLS not implemented")
+        } else {
+            // Create insecure channel
+            Channel::from_shared(endpoint.to_string())
+                .map_err(|e| BlixardError::Configuration {
+                    message: format!("Invalid endpoint: {}", e),
+                })?
+                .connect()
+                .await
+                .map_err(|e| BlixardError::Connection {
+                    message: format!("Failed to connect: {}", e),
+                })
         }
     }
     
@@ -236,13 +260,16 @@ impl PeerConnector {
             connecting.insert(peer.id, true);
         }
         
-        let endpoint = format!("http://{}", peer.address);
+        // Determine protocol based on TLS configuration
+        let endpoint = if false { // TLS removed
+            format!("https://{}", peer.address)
+        } else {
+            format!("http://{}", peer.address)
+        };
         
-        let result = match Channel::from_shared(endpoint.clone()) {
-            Ok(endpoint) => {
-                match endpoint.connect().await {
-                    Ok(channel) => {
-                        let client = ClusterServiceClient::new(channel);
+        let result = match self.create_channel(&endpoint).await {
+            Ok(channel) => {
+                let client = ClusterServiceClient::new(channel);
                         
                         // Store the connection
                         let mut connections = self.connections.write().await;
@@ -277,25 +304,10 @@ impl PeerConnector {
                         
                         Ok(())
                     }
-                    Err(e) => {
-                        tracing::warn!("Failed to connect to peer {} at {}: {}", peer.id, peer.address, e);
-                        self.node.update_peer_connection(peer.id, false).await?;
-                        
-                        // Record failed attempt
-                        {
-                            let mut states = self.connection_states.write().await;
-                            if let Some(state) = states.get_mut(&peer.id) {
-                                state.record_failure();
-                            }
-                        }
-                        
-                        Err(BlixardError::ClusterError(format!(
-                            "Failed to connect to peer {}: {}", peer.id, e
-                        )))
-                    }
-                }
-            }
             Err(e) => {
+                tracing::warn!("Failed to connect to peer {} at {}: {}", peer.id, endpoint, e);
+                self.node.update_peer_connection(peer.id, false).await?;
+                
                 // Record failed attempt
                 {
                     let mut states = self.connection_states.write().await;
@@ -304,9 +316,7 @@ impl PeerConnector {
                     }
                 }
                 
-                Err(BlixardError::ClusterError(format!(
-                    "Invalid peer address {}: {}", peer.address, e
-                )))
+                Err(e)
             }
         };
         

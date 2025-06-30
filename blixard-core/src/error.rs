@@ -35,6 +35,12 @@ pub enum BlixardError {
     #[error("Configuration error: {0}")]
     ConfigError(String),
     
+    #[error("Configuration error: {message}")]
+    Configuration { message: String },
+    
+    #[error("Connection error: {message}")]
+    Connection { message: String },
+    
     #[error("Network error: {0}")]
     NetworkError(#[from] tonic::transport::Error),
     

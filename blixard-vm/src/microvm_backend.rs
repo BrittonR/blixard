@@ -275,15 +275,13 @@ impl MicrovmBackend {
                 
                 // The actual download/preparation would happen in start_vm
                 // For now, we'll set up the module to reference the image
-                let nixos_module = vm_types::NixModule::Inline {
-                    content: format!(r#"
-                        # Reference P2P-distributed Nix image
-                        # Image ID: {}
-                        # This will be resolved to actual paths during VM start
-                        boot.loader.grub.enable = false;
-                        boot.isContainer = true;
-                    "#, nix_image_id),
-                };
+                let nixos_module = vm_types::NixModule::Inline(format!(r#"
+                    # Reference P2P-distributed Nix image
+                    # Image ID: {}
+                    # This will be resolved to actual paths during VM start
+                    boot.loader.grub.enable = false;
+                    boot.isContainer = true;
+                "#, nix_image_id));
                 
                 (vec![nixos_module], None)
             } else {
@@ -356,16 +354,14 @@ impl MicrovmBackend {
         
         if let Some(vm_config) = configs.get_mut(vm_name) {
             // Update the NixOS module to reference the downloaded image
-            let image_module = vm_types::NixModule::Inline {
-                content: format!(r#"
-                    # Use P2P-downloaded Nix image
-                    imports = [ {} ];
-                    
-                    # Override boot configuration for microVM
-                    boot.loader.grub.enable = false;
-                    boot.isContainer = true;
-                "#, image_path.display()),
-            };
+            let image_module = vm_types::NixModule::Inline(format!(r#"
+                # Use P2P-downloaded Nix image
+                imports = [ {} ];
+                
+                # Override boot configuration for microVM
+                boot.loader.grub.enable = false;
+                boot.isContainer = true;
+            "#, image_path.display()));
             
             // Replace or add the image module
             vm_config.nixos_modules = vec![image_module];
@@ -599,6 +595,7 @@ impl VmBackend for MicrovmBackend {
                 memory: vm_config.memory,
                 ip_address: None,  // TODO: Extract from VM config if available
                 tenant_id: "default".to_string(),  // TODO: Extract from VM config
+                metadata: None,
             };
             
             // Get current status
@@ -627,6 +624,7 @@ impl VmBackend for MicrovmBackend {
                                 memory: 512,
                                 ip_address: None,  // TODO: Extract from VM config if available
                                 tenant_id: "default".to_string(),  // TODO: Extract from VM config
+                                metadata: None,
                             };
                             
                             let status = self.get_vm_status(vm_name).await?

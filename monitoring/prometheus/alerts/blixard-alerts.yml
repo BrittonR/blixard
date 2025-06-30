@@ -1,0 +1,345 @@
+groups:
+  - name: blixard_cluster_health
+    interval: 30s
+    rules:
+      # Cluster Health Alerts
+      - alert: ClusterNodeDown
+        expr: up{job="blixard"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: cluster
+        annotations:
+          summary: "Blixard node {{ $labels.instance }} is down"
+          description: "Node {{ $labels.instance }} has been unreachable for more than 2 minutes"
+          runbook_url: "https://docs.blixard.io/runbooks/node-down"
+
+      - alert: ClusterUnhealthyNodes
+        expr: (cluster_nodes_total - cluster_nodes_healthy) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: cluster
+        annotations:
+          summary: "{{ $value }} unhealthy nodes in cluster"
+          description: "The cluster has {{ $value }} nodes that are not healthy"
+          runbook_url: "https://docs.blixard.io/runbooks/unhealthy-nodes"
+
+      - alert: ClusterLowNodeCount
+        expr: cluster_nodes_total < 3
+        for: 5m
+        labels:
+          severity: warning
+          component: cluster
+        annotations:
+          summary: "Cluster running with only {{ $value }} nodes"
+          description: "The cluster has less than 3 nodes, which may impact availability"
+          runbook_url: "https://docs.blixard.io/runbooks/low-node-count"
+
+  - name: blixard_raft_consensus
+    interval: 30s
+    rules:
+      - alert: RaftNoLeader
+        expr: sum(raft_is_leader) == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: raft
+        annotations:
+          summary: "No Raft leader elected"
+          description: "The cluster has no elected Raft leader for more than 1 minute"
+          runbook_url: "https://docs.blixard.io/runbooks/no-raft-leader"
+
+      - alert: RaftHighProposalFailureRate
+        expr: rate(raft_proposals_failed[5m]) / rate(raft_proposals_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: raft
+        annotations:
+          summary: "High Raft proposal failure rate: {{ $value | humanizePercentage }}"
+          description: "More than 10% of Raft proposals are failing"
+          runbook_url: "https://docs.blixard.io/runbooks/high-proposal-failures"
+
+      - alert: RaftFrequentLeaderChanges
+        expr: rate(raft_leader_changes[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: raft
+        annotations:
+          summary: "Frequent Raft leader changes"
+          description: "Raft leader is changing more than once every 10 seconds"
+          runbook_url: "https://docs.blixard.io/runbooks/leader-instability"
+
+      - alert: RaftLagBehind
+        expr: (raft_commit_index - raft_applied_index) > 1000
+        for: 5m
+        labels:
+          severity: warning
+          component: raft
+        annotations:
+          summary: "Raft applied index lagging behind commit index"
+          description: "Node {{ $labels.instance }} has {{ $value }} unapplied entries"
+          runbook_url: "https://docs.blixard.io/runbooks/raft-lag"
+
+  - name: blixard_resource_usage
+    interval: 30s
+    rules:
+      - alert: ClusterHighCPUUsage
+        expr: (cluster_vcpus_used / cluster_vcpus_total) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+          component: resources
+        annotations:
+          summary: "Cluster CPU usage at {{ $value | humanizePercentage }}"
+          description: "Cluster is using more than 90% of available CPU resources"
+          runbook_url: "https://docs.blixard.io/runbooks/high-cpu-usage"
+
+      - alert: ClusterHighMemoryUsage
+        expr: (cluster_memory_mb_used / cluster_memory_mb_total) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+          component: resources
+        annotations:
+          summary: "Cluster memory usage at {{ $value | humanizePercentage }}"
+          description: "Cluster is using more than 90% of available memory"
+          runbook_url: "https://docs.blixard.io/runbooks/high-memory-usage"
+
+      - alert: ClusterHighDiskUsage
+        expr: (cluster_disk_gb_used / cluster_disk_gb_total) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+          component: resources
+        annotations:
+          summary: "Cluster disk usage at {{ $value | humanizePercentage }}"
+          description: "Cluster is using more than 85% of available disk space"
+          runbook_url: "https://docs.blixard.io/runbooks/high-disk-usage"
+
+      - alert: NodeResourceExhaustion
+        expr: node_vcpus_available < 2 or node_memory_mb_available < 1024 or node_disk_gb_available < 10
+        for: 5m
+        labels:
+          severity: warning
+          component: resources
+        annotations:
+          summary: "Node {{ $labels.instance }} running low on resources"
+          description: "Node has less than 2 vCPUs, 1GB RAM, or 10GB disk available"
+          runbook_url: "https://docs.blixard.io/runbooks/node-resource-exhaustion"
+
+  - name: blixard_vm_operations
+    interval: 30s
+    rules:
+      - alert: VMHighFailureRate
+        expr: |
+          (
+            rate(vm_create_failed[5m]) / rate(vm_create_total[5m]) > 0.1 or
+            rate(vm_start_failed[5m]) / rate(vm_start_total[5m]) > 0.1
+          )
+        for: 5m
+        labels:
+          severity: warning
+          component: vm
+        annotations:
+          summary: "High VM operation failure rate"
+          description: "More than 10% of VM operations are failing"
+          runbook_url: "https://docs.blixard.io/runbooks/vm-operation-failures"
+
+      - alert: VMHealthCheckFailures
+        expr: rate(vm_health_check_failed[5m]) / rate(vm_health_checks_total[5m]) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          component: vm
+        annotations:
+          summary: "High VM health check failure rate: {{ $value | humanizePercentage }}"
+          description: "More than 20% of VM health checks are failing"
+          runbook_url: "https://docs.blixard.io/runbooks/vm-health-failures"
+
+      - alert: VMRecoveryFailures
+        expr: rate(vm_recovery_failed[5m]) > rate(vm_recovery_success[5m])
+        for: 10m
+        labels:
+          severity: critical
+          component: vm
+        annotations:
+          summary: "VM recovery failing more often than succeeding"
+          description: "VM automatic recovery is experiencing high failure rates"
+          runbook_url: "https://docs.blixard.io/runbooks/vm-recovery-failures"
+
+      - alert: VMPlacementFailures
+        expr: rate(vm_placement_failures[5m]) / rate(vm_placement_attempts[5m]) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          component: vm
+        annotations:
+          summary: "High VM placement failure rate: {{ $value | humanizePercentage }}"
+          description: "More than 20% of VM placement attempts are failing"
+          runbook_url: "https://docs.blixard.io/runbooks/vm-placement-failures"
+
+  - name: blixard_network_grpc
+    interval: 30s
+    rules:
+      - alert: GRPCHighErrorRate
+        expr: |
+          sum by (method) (rate(grpc_requests_failed[5m])) / 
+          sum by (method) (rate(grpc_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: grpc
+        annotations:
+          summary: "High gRPC error rate for {{ $labels.method }}: {{ $value | humanizePercentage }}"
+          description: "Method {{ $labels.method }} has more than 5% error rate"
+          runbook_url: "https://docs.blixard.io/runbooks/grpc-errors"
+
+      - alert: GRPCHighLatency
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(grpc_request_duration_bucket[5m])) by (le, method)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: grpc
+        annotations:
+          summary: "High gRPC latency for {{ $labels.method }}"
+          description: "95th percentile latency for {{ $labels.method }} is {{ $value }}s"
+          runbook_url: "https://docs.blixard.io/runbooks/grpc-latency"
+
+      - alert: PeerConnectionLoss
+        expr: peer_connections_active < (count(up{job="blixard"}) - 1)
+        for: 5m
+        labels:
+          severity: warning
+          component: network
+        annotations:
+          summary: "Node {{ $labels.instance }} missing peer connections"
+          description: "Node is not connected to all other cluster nodes"
+          runbook_url: "https://docs.blixard.io/runbooks/peer-connection-loss"
+
+      - alert: PeerReconnectStorm
+        expr: rate(peer_reconnect_attempts[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: network
+        annotations:
+          summary: "High peer reconnection rate on {{ $labels.instance }}"
+          description: "Node is attempting more than 1 reconnection per second"
+          runbook_url: "https://docs.blixard.io/runbooks/reconnect-storm"
+
+  - name: blixard_storage
+    interval: 30s
+    rules:
+      - alert: StorageHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(storage_write_duration_bucket[5m])) by (le, table)
+          ) > 0.5 or
+          histogram_quantile(0.95,
+            sum(rate(storage_read_duration_bucket[5m])) by (le, table)
+          ) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "High storage latency for table {{ $labels.table }}"
+          description: "95th percentile latency exceeds thresholds (write: 500ms, read: 200ms)"
+          runbook_url: "https://docs.blixard.io/runbooks/storage-latency"
+
+      - alert: StorageHighThroughput
+        expr: |
+          sum(rate(storage_writes[1m])) > 10000 or
+          sum(rate(storage_reads[1m])) > 50000
+        for: 5m
+        labels:
+          severity: info
+          component: storage
+        annotations:
+          summary: "High storage throughput detected"
+          description: "Storage operations exceeding normal thresholds"
+          runbook_url: "https://docs.blixard.io/runbooks/storage-throughput"
+
+  - name: blixard_p2p_transfers
+    interval: 30s
+    rules:
+      - alert: P2PHighFailureRate
+        expr: |
+          rate(p2p_image_imports_failed[5m]) / rate(p2p_image_imports_total[5m]) > 0.1 or
+          rate(p2p_image_downloads_failed[5m]) / rate(p2p_image_downloads_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: p2p
+        annotations:
+          summary: "High P2P transfer failure rate"
+          description: "More than 10% of P2P transfers are failing"
+          runbook_url: "https://docs.blixard.io/runbooks/p2p-failures"
+
+      - alert: P2PLowCacheHitRate
+        expr: |
+          rate(p2p_cache_hits[5m]) / 
+          (rate(p2p_cache_hits[5m]) + rate(p2p_cache_misses[5m])) < 0.5
+        for: 10m
+        labels:
+          severity: info
+          component: p2p
+        annotations:
+          summary: "Low P2P cache hit rate: {{ $value | humanizePercentage }}"
+          description: "P2P cache hit rate below 50%, may impact performance"
+          runbook_url: "https://docs.blixard.io/runbooks/p2p-cache"
+
+      - alert: P2PVerificationFailures
+        expr: rate(p2p_verification_failed[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          component: p2p
+        annotations:
+          summary: "P2P image verification failures detected"
+          description: "Image verification is failing, potential data integrity issues"
+          runbook_url: "https://docs.blixard.io/runbooks/p2p-verification"
+
+      - alert: P2PHighActiveTransfers
+        expr: p2p_active_transfers > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: p2p
+        annotations:
+          summary: "High number of concurrent P2P transfers: {{ $value }}"
+          description: "More than 10 concurrent P2P transfers may impact network performance"
+          runbook_url: "https://docs.blixard.io/runbooks/p2p-congestion"
+
+  - name: blixard_system_health
+    interval: 30s
+    rules:
+      - alert: ServiceDown
+        expr: up{job="blixard"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Blixard service down on {{ $labels.instance }}"
+          description: "The Blixard service has been down for more than 1 minute"
+          runbook_url: "https://docs.blixard.io/runbooks/service-down"
+
+      - alert: MetricsCollectionFailure
+        expr: |
+          increase(prometheus_target_scrapes_sample_out_of_order_total[5m]) > 0 or
+          increase(prometheus_target_scrapes_sample_duplicate_timestamp_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: monitoring
+        annotations:
+          summary: "Metrics collection issues on {{ $labels.instance }}"
+          description: "Prometheus is encountering issues collecting metrics"
+          runbook_url: "https://docs.blixard.io/runbooks/metrics-collection"
