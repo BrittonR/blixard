@@ -71,7 +71,7 @@ where
             match security_manager.authenticate_token(token).await {
                 Ok(auth_result) if auth_result.authenticated => {
                     // Token is valid, proceed with the request
-                    // TODO: Add user context to request extensions for RBAC checks
+                    // TODO: Add user context to request extensions for Cedar authorization
                     inner.call(req).await
                 }
                 _ => {

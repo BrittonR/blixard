@@ -470,7 +470,6 @@ impl AuthManager {
                 return Ok(AuthResult {
                     authenticated: false,
                     user: None,
-                    permissions: vec![],
                     auth_method: "token".to_string(),
                 });
             }

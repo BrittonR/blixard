@@ -12,7 +12,6 @@ use crate::{
     tracing_otel,
     resource_quotas::{ResourceRequest, ApiOperation},
     grpc_security::{GrpcSecurityMiddleware, SecurityContext},
-    security::Permission,
     proto::{
         cluster_service_server::{ClusterService, ClusterServiceServer},
         blixard_service_server::{BlixardService, BlixardServiceServer},

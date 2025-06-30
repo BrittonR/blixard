@@ -1,9 +1,9 @@
-//! gRPC security middleware for authentication and authorization
+//! gRPC security middleware for authentication
 //!
 //! This module provides middleware to integrate security features with gRPC:
 //! - Authentication via tokens or mTLS
-//! - Authorization via RBAC permissions
 //! - Security context propagation
+//! - Authorization is handled by Cedar policies
 
 use crate::security::{SecurityManager, AuthResult, extract_auth_token};
 use crate::error::{BlixardError, BlixardResult};
@@ -66,26 +66,6 @@ impl GrpcSecurityMiddleware {
                 auth_method: auth_result.auth_method,
             })
         }
-    }
-    
-    /// Check if the security context has the required permission
-    pub async fn check_permission(&self, context: &SecurityContext, permission: &Permission) -> BlixardResult<bool> {
-        // Admin permission bypasses all checks
-        if context.permissions.contains(&Permission::Admin) {
-            return Ok(true);
-        }
-        
-        // Check if the specific permission is granted
-        if context.permissions.contains(permission) {
-            return Ok(true);
-        }
-        
-        // If user is authenticated, check role-based permissions
-        if let Some(ref user) = context.user {
-            return self.security_manager.check_permission(user, permission).await;
-        }
-        
-        Ok(false)
     }
     
     /// Convert security errors to gRPC status codes
