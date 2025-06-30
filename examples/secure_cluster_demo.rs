@@ -53,21 +53,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Configure observability
     let observability_config = ObservabilityConfig {
+        logging: blixard_core::config_v2::LoggingConfig {
+            level: "info".to_string(),
+            format: "pretty".to_string(),
+            timestamps: true,
+            file: None,
+            rotation: blixard_core::config_v2::LogRotationConfig {
+                enabled: false,
+                max_size_mb: 100,
+                max_files: 5,
+            },
+        },
         metrics: blixard_core::config_v2::MetricsConfig {
             enabled: true,
-            endpoint: None, // Use default endpoint
-            export_interval_secs: 10,
-            service_name: "blixard-secure-demo".to_string(),
-            environment: "demo".to_string(),
-            exemplars_enabled: true,
+            prefix: "blixard_secure_demo".to_string(),
+            runtime_metrics: true,
         },
         tracing: blixard_core::config_v2::TracingConfig {
             enabled: true,
-            endpoint: None,
-            sampling_rate: 1.0, // Sample all traces for demo
+            otlp_endpoint: None,
             service_name: "blixard-secure-demo".to_string(),
-            environment: "demo".to_string(),
-            propagation_format: "w3c".to_string(),
+            sampling_ratio: 1.0,
+            span_events: false,
         },
     };
     
@@ -190,13 +197,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("\nObservability status:");
         info!("  Metrics enabled: {}", observability.metrics_enabled());
         info!("  Tracing enabled: {}", observability.tracing_enabled());
-        
-        // Record some demo metrics
-        if let Some(metrics) = observability.metrics() {
-            metrics.increment_vm_operation_count("create", true);
-            metrics.increment_vm_operation_count("create", false);
-            metrics.record_task_duration("demo_task", 1.5);
-        }
     }
     
     info!("\nSecure cluster demo completed successfully!");

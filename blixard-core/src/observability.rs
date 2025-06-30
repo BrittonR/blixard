@@ -5,18 +5,16 @@
 
 use crate::error::BlixardResult;
 use crate::config_v2::ObservabilityConfig;
-use crate::metrics_otel::Metrics;
 use std::sync::Arc;
 use tracing::info;
 
 /// Unified observability manager
-#[derive(Debug)]
 pub struct ObservabilityManager {
     /// Configuration
     config: ObservabilityConfig,
     
-    /// Metrics instance
-    metrics: Option<Arc<Metrics>>,
+    /// Whether metrics are enabled
+    metrics_enabled: bool,
     
     /// Whether tracing is enabled
     tracing_enabled: bool,
@@ -27,42 +25,32 @@ impl ObservabilityManager {
     pub async fn new(config: ObservabilityConfig) -> BlixardResult<Self> {
         info!("Initializing observability manager");
         
-        // Initialize metrics if enabled
-        let metrics = if config.metrics.enabled {
-            // For now, we just create a global Metrics instance
-            // In production, this would be configured with the OTLP exporter
-            info!("Metrics enabled");
-            Some(Arc::new(Metrics::global()))
+        // Check if metrics are enabled
+        let metrics_enabled = config.metrics.enabled;
+        if metrics_enabled {
+            info!("Metrics enabled with prefix: {}", config.metrics.prefix);
         } else {
             info!("Metrics disabled");
-            None
-        };
+        }
         
-        // Initialize tracing if enabled
-        let tracing_enabled = if config.tracing.enabled {
-            // Tracing is initialized globally via tracing_otel
+        // Check if tracing is enabled
+        let tracing_enabled = config.tracing.enabled;
+        if tracing_enabled {
             info!("Tracing enabled");
-            true
         } else {
             info!("Tracing disabled");
-            false
-        };
+        }
         
         Ok(Self {
             config,
-            metrics,
+            metrics_enabled,
             tracing_enabled,
         })
     }
     
-    /// Get the metrics instance
-    pub fn metrics(&self) -> Option<Arc<Metrics>> {
-        self.metrics.clone()
-    }
-    
     /// Check if metrics are enabled
     pub fn metrics_enabled(&self) -> bool {
-        self.metrics.is_some()
+        self.metrics_enabled
     }
     
     /// Check if tracing is enabled
@@ -84,21 +72,28 @@ impl ObservabilityManager {
 /// Create a default observability configuration for development
 pub fn default_dev_observability_config() -> ObservabilityConfig {
     ObservabilityConfig {
+        logging: crate::config_v2::LoggingConfig {
+            level: "info".to_string(),
+            format: "pretty".to_string(),
+            timestamps: true,
+            file: None,
+            rotation: crate::config_v2::LogRotationConfig {
+                enabled: false,
+                max_size_mb: 100,
+                max_files: 5,
+            },
+        },
         metrics: crate::config_v2::MetricsConfig {
             enabled: false,
-            endpoint: None,
-            export_interval_secs: 60,
-            service_name: "blixard".to_string(),
-            environment: "dev".to_string(),
-            exemplars_enabled: false,
+            prefix: "blixard".to_string(),
+            runtime_metrics: false,
         },
         tracing: crate::config_v2::TracingConfig {
             enabled: false,
-            endpoint: None,
-            sampling_rate: 0.1,
+            otlp_endpoint: None,
             service_name: "blixard".to_string(),
-            environment: "dev".to_string(),
-            propagation_format: "w3c".to_string(),
+            sampling_ratio: 0.1,
+            span_events: false,
         },
     }
 }

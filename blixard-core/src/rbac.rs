@@ -218,7 +218,7 @@ mod tests {
     
     #[test]
     fn test_default_roles() {
-        let rbac = RbacManager::new();
+        let mut rbac = RbacManager::new();
         
         // Admin should have all permissions
         rbac.assign_role("admin_user", "admin").unwrap();
