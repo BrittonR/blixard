@@ -35,7 +35,6 @@ pub mod security;
 pub mod grpc_security;
 pub mod cert_generator;
 pub mod auth_interceptor;
-pub mod rbac;
 pub mod tls_config;
 pub mod cedar_authz;
 pub mod quota_system;

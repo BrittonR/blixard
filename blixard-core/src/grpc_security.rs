@@ -5,7 +5,7 @@
 //! - Authorization via RBAC permissions
 //! - Security context propagation
 
-use crate::security::{SecurityManager, AuthResult, Permission, extract_auth_token};
+use crate::security::{SecurityManager, AuthResult, extract_auth_token};
 use crate::error::{BlixardError, BlixardResult};
 use std::sync::Arc;
 use tonic::{Request, Status};
@@ -52,7 +52,6 @@ impl GrpcSecurityMiddleware {
             Ok(SecurityContext {
                 authenticated: auth_result.authenticated,
                 user: auth_result.user,
-                permissions: auth_result.permissions,
                 auth_method: auth_result.auth_method,
             })
         } else {
@@ -64,7 +63,6 @@ impl GrpcSecurityMiddleware {
             Ok(SecurityContext {
                 authenticated: auth_result.authenticated,
                 user: auth_result.user,
-                permissions: auth_result.permissions,
                 auth_method: auth_result.auth_method,
             })
         }
@@ -103,9 +101,10 @@ impl GrpcSecurityMiddleware {
 }
 
 /// Macro to add authentication to gRPC methods
+/// Note: Authorization is now handled by Cedar policies, not by this macro
 #[macro_export]
 macro_rules! authenticate_grpc {
-    ($middleware:expr, $request:expr, $permission:expr) => {{
+    ($middleware:expr, $request:expr) => {{
         let security_context = match $middleware.authenticate_request(&$request).await {
             Ok(context) => context,
             Err(e) => {
@@ -115,17 +114,6 @@ macro_rules! authenticate_grpc {
         
         if !security_context.authenticated {
             return Err(tonic::Status::unauthenticated("Authentication required"));
-        }
-        
-        let has_permission = match $middleware.check_permission(&security_context, &$permission).await {
-            Ok(allowed) => allowed,
-            Err(e) => {
-                return Err($crate::grpc_security::GrpcSecurityMiddleware::security_error_to_status(e));
-            }
-        };
-        
-        if !has_permission {
-            return Err(tonic::Status::permission_denied(format!("Permission denied: {:?}", $permission)));
         }
         
         Ok(security_context)
@@ -151,7 +139,6 @@ impl From<AuthResult> for SecurityContext {
         Self {
             authenticated: auth_result.authenticated,
             user: auth_result.user,
-            permissions: auth_result.permissions,
             auth_method: auth_result.auth_method,
         }
     }
@@ -160,7 +147,7 @@ impl From<AuthResult> for SecurityContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::{default_dev_security_config, Permission};
+    use crate::security::default_dev_security_config;
     use tonic::metadata::MetadataMap;
     
     #[tokio::test]
@@ -175,51 +162,6 @@ mod tests {
         // Should succeed with disabled authentication
         let context = middleware.authenticate_request(&request).await.unwrap();
         assert!(context.authenticated);
-        assert!(context.permissions.contains(&Permission::Admin));
-    }
-    
-    #[tokio::test]
-    async fn test_permission_checking() {
-        let config = default_dev_security_config();
-        let security_manager = Arc::new(SecurityManager::new(config).await.unwrap());
-        let middleware = GrpcSecurityMiddleware::new(security_manager);
-        
-        let context = SecurityContext {
-            authenticated: true,
-            user: Some("test-user".to_string()),
-            permissions: vec![Permission::VmRead],
-            auth_method: "token".to_string(),
-        };
-        
-        // Should have VmRead permission
-        let has_read = middleware.check_permission(&context, &Permission::VmRead).await.unwrap();
-        assert!(has_read);
-        
-        // Should not have VmWrite permission
-        let has_write = middleware.check_permission(&context, &Permission::VmWrite).await.unwrap();
-        assert!(!has_write);
-    }
-    
-    #[tokio::test]
-    async fn test_admin_permission_bypass() {
-        let config = default_dev_security_config();
-        let security_manager = Arc::new(SecurityManager::new(config).await.unwrap());
-        let middleware = GrpcSecurityMiddleware::new(security_manager);
-        
-        let admin_context = SecurityContext {
-            authenticated: true,
-            user: Some("admin".to_string()),
-            permissions: vec![Permission::Admin],
-            auth_method: "token".to_string(),
-        };
-        
-        // Admin should have all permissions
-        let has_vm_read = middleware.check_permission(&admin_context, &Permission::VmRead).await.unwrap();
-        let has_vm_write = middleware.check_permission(&admin_context, &Permission::VmWrite).await.unwrap();
-        let has_cluster_write = middleware.check_permission(&admin_context, &Permission::ClusterWrite).await.unwrap();
-        
-        assert!(has_vm_read);
-        assert!(has_vm_write);
-        assert!(has_cluster_write);
+        assert_eq!(context.user, Some("anonymous".to_string()));
     }
 }

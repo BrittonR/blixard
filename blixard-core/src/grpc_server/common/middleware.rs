@@ -5,7 +5,7 @@
 
 use crate::{
     grpc_security::{GrpcSecurityMiddleware, SecurityContext},
-    security::{Permission, SecurityManager},
+    security::SecurityManager,
     quota_manager::QuotaManager,
     resource_quotas::ApiOperation,
     authenticate_grpc, optional_authenticate_grpc,
@@ -41,20 +41,18 @@ impl GrpcMiddleware {
         }
     }
     
-    /// Authenticate request with required permission
+    /// Authenticate request (authorization is handled by Cedar)
     pub async fn authenticate<T>(
         &self,
         request: &Request<T>,
-        permission: Permission,
     ) -> Result<SecurityContext, Status> {
         if let Some(ref middleware) = self.security {
-            authenticate_grpc!(middleware, request, permission)
+            authenticate_grpc!(middleware, request)
         } else {
-            // Development mode - return admin context
+            // Development mode - return system context
             Ok(SecurityContext {
                 authenticated: true,
                 user: Some("system".to_string()),
-                permissions: vec![Permission::Admin],
                 auth_method: "none".to_string(),
             })
         }
@@ -68,11 +66,10 @@ impl GrpcMiddleware {
         if let Some(ref middleware) = self.security {
             optional_authenticate_grpc!(middleware, request)
         } else {
-            // Development mode - return admin context
+            // Development mode - return system context
             Some(SecurityContext {
                 authenticated: true,
                 user: Some("system".to_string()),
-                permissions: vec![Permission::Admin],
                 auth_method: "none".to_string(),
             })
         }
@@ -82,11 +79,10 @@ impl GrpcMiddleware {
     pub async fn authenticate_and_rate_limit<T>(
         &self,
         request: &Request<T>,
-        permission: Permission,
         operation: ApiOperation,
     ) -> Result<(SecurityContext, String), Status> {
         // First authenticate
-        let security_context = self.authenticate(request, permission).await?;
+        let security_context = self.authenticate(request).await?;
         
         // Extract tenant ID
         let tenant_id = extract_tenant_id(request);
@@ -172,8 +168,7 @@ impl GrpcMiddleware {
         resource_id: &str,
     ) -> Result<(SecurityContext, String), Status> {
         // First authenticate to get user context
-        let permission = Permission::ClusterRead; // Default permission for authentication only
-        let security_context = self.authenticate(request, permission).await?;
+        let security_context = self.authenticate(request).await?;
         
         // Extract tenant ID
         let tenant_id = extract_tenant_id(request);

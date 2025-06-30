@@ -5,7 +5,7 @@
 //! - Mutual TLS (mTLS) authentication 
 //! - Token-based authentication
 //! - Secure secrets management
-//! - Role-based access control (RBAC)
+//! - Cedar policy-based authorization
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::config_v2::{SecurityConfig, TlsConfig, AuthConfig};
@@ -85,9 +85,6 @@ pub struct TokenInfo {
     /// Token expiration timestamp
     pub expires_at: Option<std::time::SystemTime>,
     
-    /// Permissions granted by this token
-    pub permissions: Vec<Permission>,
-    
     /// When the token was created
     pub created_at: std::time::SystemTime,
     
@@ -101,39 +98,8 @@ pub struct UserRole {
     /// Role name
     pub role: String,
     
-    /// Permissions granted by this role
-    pub permissions: Vec<Permission>,
-    
     /// Resource restrictions (tenant isolation)
     pub resource_restrictions: Vec<String>,
-}
-
-/// System permissions
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum Permission {
-    /// Read cluster status
-    ClusterRead,
-    
-    /// Modify cluster configuration
-    ClusterWrite,
-    
-    /// Read VM information
-    VmRead,
-    
-    /// Create/modify/delete VMs
-    VmWrite,
-    
-    /// Submit and manage tasks
-    TaskWrite,
-    
-    /// View task status
-    TaskRead,
-    
-    /// Access metrics and monitoring
-    MetricsRead,
-    
-    /// Administrative access
-    Admin,
 }
 
 /// Encrypted secret storage
@@ -157,9 +123,6 @@ pub struct AuthResult {
     
     /// User identity (if authenticated)
     pub user: Option<String>,
-    
-    /// Granted permissions
-    pub permissions: Vec<Permission>,
     
     /// Authentication method used
     pub auth_method: String,
@@ -205,7 +168,7 @@ impl SecurityManager {
                     }
                 }
             } else {
-                info!("Cedar files not found, using traditional RBAC");
+                warn!("Cedar files not found - authorization will fail");
                 None
             }
         } else {
@@ -244,23 +207,12 @@ impl SecurityManager {
         if let Some(ref auth_manager) = self.auth_manager {
             auth_manager.authenticate_token(token).await
         } else {
-            // If authentication is disabled, allow all requests with admin permissions
+            // If authentication is disabled, allow all requests
             Ok(AuthResult {
                 authenticated: true,
                 user: Some("anonymous".to_string()),
-                permissions: vec![Permission::Admin],
                 auth_method: "disabled".to_string(),
             })
-        }
-    }
-    
-    /// Check if a user has the required permission
-    pub async fn check_permission(&self, user: &str, permission: &Permission) -> BlixardResult<bool> {
-        if let Some(ref auth_manager) = self.auth_manager {
-            auth_manager.check_permission(user, permission).await
-        } else {
-            // If authentication is disabled, allow all permissions
-            Ok(true)
         }
     }
     
@@ -275,9 +227,9 @@ impl SecurityManager {
     }
     
     /// Generate a new API token for a user
-    pub async fn generate_token(&mut self, user: &str, permissions: Vec<Permission>, expires_in: Option<std::time::Duration>) -> BlixardResult<String> {
+    pub async fn generate_token(&mut self, user: &str, expires_in: Option<std::time::Duration>) -> BlixardResult<String> {
         if let Some(ref mut auth_manager) = self.auth_manager {
-            auth_manager.generate_token(user, permissions, expires_in).await
+            auth_manager.generate_token(user, expires_in).await
         } else {
             Err(BlixardError::Security {
                 message: "Authentication is disabled".to_string(),
@@ -303,27 +255,10 @@ impl SecurityManager {
             // Use Cedar for authorization
             cedar.is_authorized(&principal, &cedar_action, resource, context).await
         } else {
-            // Fall back to traditional RBAC if Cedar is not available
-            warn!("Cedar not available, falling back to traditional RBAC");
-            
-            // Convert Cedar action to Permission enum
-            let permission = self.cedar_action_to_permission(action)?;
-            self.check_permission(user_id, &permission).await
-        }
-    }
-    
-    /// Convert Cedar action string to Permission enum for fallback
-    fn cedar_action_to_permission(&self, action: &str) -> BlixardResult<Permission> {
-        match action {
-            "readCluster" | "readNode" => Ok(Permission::ClusterRead),
-            "manageCluster" | "joinCluster" | "leaveCluster" => Ok(Permission::ClusterWrite),
-            "readVM" => Ok(Permission::VmRead),
-            "createVM" | "updateVM" | "deleteVM" | "executeVM" => Ok(Permission::VmWrite),
-            "readMetrics" => Ok(Permission::MetricsRead),
-            "manageBackups" | "manageNode" => Ok(Permission::Admin),
-            _ => Err(BlixardError::AuthorizationError {
-                message: format!("Unknown action: {}", action),
-            }),
+            // Cedar is required for authorization
+            Err(BlixardError::AuthorizationError {
+                message: "Cedar authorization engine not initialized".to_string(),
+            })
         }
     }
     
@@ -505,32 +440,18 @@ impl AuthManager {
         // Admin role - full access
         user_roles.insert("admin".to_string(), UserRole {
             role: "admin".to_string(),
-            permissions: vec![Permission::Admin],
             resource_restrictions: vec![],
         });
         
         // Read-only role
         user_roles.insert("readonly".to_string(), UserRole {
             role: "readonly".to_string(),
-            permissions: vec![
-                Permission::ClusterRead,
-                Permission::VmRead,
-                Permission::TaskRead,
-                Permission::MetricsRead,
-            ],
             resource_restrictions: vec![],
         });
         
         // VM operator role
         user_roles.insert("vm-operator".to_string(), UserRole {
             role: "vm-operator".to_string(),
-            permissions: vec![
-                Permission::ClusterRead,
-                Permission::VmRead,
-                Permission::VmWrite,
-                Permission::TaskRead,
-                Permission::TaskWrite,
-            ],
             resource_restrictions: vec![],
         });
         
@@ -560,7 +481,6 @@ impl AuthManager {
                     return Ok(AuthResult {
                         authenticated: false,
                         user: None,
-                        permissions: vec![],
                         auth_method: "token".to_string(),
                     });
                 }
@@ -569,45 +489,19 @@ impl AuthManager {
             Ok(AuthResult {
                 authenticated: true,
                 user: Some(token_info.user.clone()),
-                permissions: token_info.permissions.clone(),
                 auth_method: "token".to_string(),
             })
         } else {
             Ok(AuthResult {
                 authenticated: false,
                 user: None,
-                permissions: vec![],
                 auth_method: "token".to_string(),
             })
         }
     }
     
-    /// Check if a user has a specific permission
-    async fn check_permission(&self, user: &str, permission: &Permission) -> BlixardResult<bool> {
-        let user_roles = self.user_roles.read().await;
-        
-        // Check if user has a predefined role that grants this permission
-        if let Some(role) = user_roles.get(user) {
-            if role.permissions.contains(&Permission::Admin) || role.permissions.contains(permission) {
-                return Ok(true);
-            }
-        }
-        
-        // Check token permissions directly (for users with token-based permissions)
-        let valid_tokens = self.valid_tokens.read().await;
-        for token_info in valid_tokens.values() {
-            if token_info.user == user {
-                if token_info.permissions.contains(&Permission::Admin) || token_info.permissions.contains(permission) {
-                    return Ok(true);
-                }
-            }
-        }
-        
-        Ok(false)
-    }
-    
     /// Generate a new API token
-    async fn generate_token(&mut self, user: &str, permissions: Vec<Permission>, expires_in: Option<std::time::Duration>) -> BlixardResult<String> {
+    async fn generate_token(&mut self, user: &str, expires_in: Option<std::time::Duration>) -> BlixardResult<String> {
         // Generate a cryptographically secure random token
         let token = Self::generate_secure_token();
         let token_hash = Self::hash_token(&token);
@@ -620,7 +514,6 @@ impl AuthManager {
             token_hash: token_hash.clone(),
             user: user.to_string(),
             expires_at,
-            permissions,
             created_at: std::time::SystemTime::now(),
             active: true,
         };
@@ -809,7 +702,6 @@ mod tests {
         // Generate a token
         let token = security_manager.generate_token(
             "test-user",
-            vec![Permission::VmRead],
             Some(std::time::Duration::from_secs(3600))
         ).await.unwrap();
         
@@ -817,7 +709,6 @@ mod tests {
         let auth_result = security_manager.authenticate_token(&token).await.unwrap();
         assert!(auth_result.authenticated);
         assert_eq!(auth_result.user.unwrap(), "test-user");
-        assert!(auth_result.permissions.contains(&Permission::VmRead));
         
         // Test invalid token
         let invalid_result = security_manager.authenticate_token("invalid-token").await.unwrap();

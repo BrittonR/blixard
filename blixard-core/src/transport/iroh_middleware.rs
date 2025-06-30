@@ -5,7 +5,7 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
-    security::{SecurityManager, Permission},
+    security::SecurityManager,
     quota_manager::QuotaManager,
     resource_quotas::ApiOperation,
 };
@@ -198,34 +198,11 @@ impl IrohMiddleware {
                 .check_permission_cedar(&auth_context.user_id, action, &resource_uid, cedar_context)
                 .await
         } else {
-            // Fall back to role-based check
-            self.check_permission_fallback(auth_context, action).await
+            // Cedar is required for authorization
+            Err(BlixardError::AuthorizationError {
+                message: "Cedar authorization engine not available".to_string(),
+            })
         }
-    }
-    
-    /// Fallback permission check when Cedar is not available
-    async fn check_permission_fallback(&self, auth_context: &IrohAuthContext, action: &str) -> BlixardResult<bool> {
-        // Map Cedar actions to traditional permissions
-        let permission = match action {
-            "readCluster" | "readNode" => Permission::ClusterRead,
-            "manageCluster" | "joinCluster" | "leaveCluster" => Permission::ClusterWrite,
-            "readVM" => Permission::VmRead,
-            "createVM" | "updateVM" | "deleteVM" | "executeVM" => Permission::VmWrite,
-            "readMetrics" => Permission::MetricsRead,
-            _ => return Ok(false),
-        };
-        
-        // Check if any role grants this permission
-        // Simple implementation - in production, would check role definitions
-        Ok(auth_context.roles.iter().any(|role| {
-            match role.as_str() {
-                "admin" => true, // Admin has all permissions
-                "operator" => matches!(permission, Permission::VmRead | Permission::VmWrite | Permission::ClusterRead),
-                "viewer" => matches!(permission, Permission::VmRead | Permission::ClusterRead | Permission::MetricsRead),
-                "cluster_node" => matches!(permission, Permission::ClusterRead | Permission::ClusterWrite),
-                _ => false,
-            }
-        }))
     }
     
     /// Check and update resource quotas

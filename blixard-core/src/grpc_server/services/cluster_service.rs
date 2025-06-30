@@ -12,7 +12,6 @@ use crate::{
         ClusterStatusRequest, ClusterStatusResponse,
         RaftMessageRequest, RaftMessageResponse,
     },
-    security::Permission,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -46,24 +45,16 @@ impl ClusterService for ClusterServiceImpl {
         &self,
         request: Request<JoinRequest>,
     ) -> Result<Response<JoinResponse>, Status> {
-        // Use Cedar for authorization if available
+        // Use Cedar for authorization
         let cluster_id = "default";
-        let _ctx = if self.middleware.has_cedar() {
-            let (_ctx, _tenant_id) = self.middleware
-                .authenticate_and_authorize_cedar(
-                    &request,
-                    "joinCluster",
-                    "Cluster",
-                    cluster_id,
-                )
-                .await?;
-            _ctx
-        } else {
-            // Fall back to traditional RBAC
-            self.middleware
-                .authenticate(&request, Permission::ClusterWrite)
-                .await?
-        };
+        let (_ctx, _tenant_id) = self.middleware
+            .authenticate_and_authorize_cedar(
+                &request,
+                "joinCluster",
+                "Cluster",
+                cluster_id,
+            )
+            .await?;
         
         Err(Status::unimplemented("join_cluster not implemented"))
     }
@@ -72,24 +63,16 @@ impl ClusterService for ClusterServiceImpl {
         &self,
         request: Request<LeaveRequest>,
     ) -> Result<Response<LeaveResponse>, Status> {
-        // Use Cedar for authorization if available
+        // Use Cedar for authorization
         let cluster_id = "default";
-        let _ctx = if self.middleware.has_cedar() {
-            let (_ctx, _tenant_id) = self.middleware
-                .authenticate_and_authorize_cedar(
-                    &request,
-                    "leaveCluster",
-                    "Cluster",
-                    cluster_id,
-                )
-                .await?;
-            _ctx
-        } else {
-            // Fall back to traditional RBAC
-            self.middleware
-                .authenticate(&request, Permission::ClusterWrite)
-                .await?
-        };
+        let (_ctx, _tenant_id) = self.middleware
+            .authenticate_and_authorize_cedar(
+                &request,
+                "leaveCluster",
+                "Cluster",
+                cluster_id,
+            )
+            .await?;
         
         Err(Status::unimplemented("leave_cluster not implemented"))
     }
@@ -100,24 +83,16 @@ impl ClusterService for ClusterServiceImpl {
     ) -> Result<Response<ClusterStatusResponse>, Status> {
         use crate::proto::{NodeInfo, NodeState};
         
-        // Use Cedar for authorization if available
+        // Use Cedar for authorization
         let cluster_id = "default";
-        let _ctx = if self.middleware.has_cedar() {
-            let (_ctx, _tenant_id) = self.middleware
-                .authenticate_and_authorize_cedar(
-                    &request,
-                    "readCluster",
-                    "Cluster",
-                    cluster_id,
-                )
-                .await?;
-            _ctx
-        } else {
-            // Fall back to traditional RBAC
-            self.middleware
-                .authenticate(&request, Permission::ClusterRead)
-                .await?
-        };
+        let (_ctx, _tenant_id) = self.middleware
+            .authenticate_and_authorize_cedar(
+                &request,
+                "readCluster",
+                "Cluster",
+                cluster_id,
+            )
+            .await?;
         
         // Get cluster status from Raft configuration (authoritative source)
         let (leader_id, node_ids, term) = self.node.get_cluster_status().await
@@ -208,22 +183,14 @@ impl ClusterService for ClusterServiceImpl {
     ) -> Result<Response<RaftMessageResponse>, Status> {
         // Raft messages are internal cluster operations - require cluster admin
         let cluster_id = "default";
-        let _ctx = if self.middleware.has_cedar() {
-            let (_ctx, _tenant_id) = self.middleware
-                .authenticate_and_authorize_cedar(
-                    &request,
-                    "manageCluster",
-                    "Cluster",
-                    cluster_id,
-                )
-                .await?;
-            _ctx
-        } else {
-            // Fall back to traditional RBAC
-            self.middleware
-                .authenticate(&request, Permission::Admin)
-                .await?
-        };
+        let (_ctx, _tenant_id) = self.middleware
+            .authenticate_and_authorize_cedar(
+                &request,
+                "forwardRaft",
+                "Cluster",
+                cluster_id,
+            )
+            .await?;
         
         Err(Status::unimplemented("send_raft_message not implemented"))
     }
