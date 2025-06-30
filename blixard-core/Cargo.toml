@@ -84,6 +84,7 @@ iroh-docs = "0.35"
 
 # Compression
 flate2 = "1.0"
+zstd = "0.13"
 
 # Hashing
 md5 = "0.7"

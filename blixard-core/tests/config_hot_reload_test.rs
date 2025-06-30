@@ -1,0 +1,164 @@
+use blixard_core::config_v2::Config;
+use blixard_core::config_hot_reload::{ConfigWatcher, ReloadableConfig};
+use std::sync::Arc;
+use std::time::Duration;
+use tempfile::NamedTempFile;
+use std::io::Write;
+use tokio::time;
+
+#[tokio::test]
+async fn test_config_hot_reload() {
+    // Create initial config file
+    let mut config_file = NamedTempFile::new().unwrap();
+    let initial_config = r#"
+[node]
+bind_address = "127.0.0.1:7001"
+data_dir = "/tmp/blixard"
+vm_backend = "mock"
+
+[observability.logging]
+level = "info"
+
+[observability.metrics]
+enabled = true
+
+[vm.scheduler]
+overcommit_ratio = 1.5
+"#;
+    config_file.write_all(initial_config.as_bytes()).unwrap();
+    config_file.flush().unwrap();
+    
+    // Load initial configuration
+    let config = Config::from_file(config_file.path()).unwrap();
+    
+    // Create config watcher
+    let mut watcher = ConfigWatcher::new(config_file.path().to_path_buf(), config);
+    let mut rx = watcher.subscribe();
+    
+    // Start watching
+    watcher.start().await.unwrap();
+    
+    // Verify initial config
+    {
+        let reloadable = rx.borrow();
+        assert_eq!(reloadable.logging_level, "info");
+        assert_eq!(reloadable.metrics_enabled, true);
+        assert_eq!(reloadable.scheduler_overcommit_ratio, 1.5);
+    }
+    
+    // Wait a bit for watcher to stabilize
+    time::sleep(Duration::from_millis(100)).await;
+    
+    // Update configuration file
+    let updated_config = r#"
+[node]
+bind_address = "127.0.0.1:7001"
+data_dir = "/tmp/blixard"
+vm_backend = "mock"
+
+[observability.logging]
+level = "debug"
+
+[observability.metrics]
+enabled = false
+
+[vm.scheduler]
+overcommit_ratio = 2.0
+"#;
+    config_file.write_all(updated_config.as_bytes()).unwrap();
+    config_file.flush().unwrap();
+    
+    // Wait for reload
+    time::sleep(Duration::from_secs(1)).await;
+    
+    // Check if configuration was reloaded
+    let mut changed = false;
+    for _ in 0..10 {
+        if rx.has_changed().unwrap_or(false) {
+            changed = true;
+            break;
+        }
+        time::sleep(Duration::from_millis(100)).await;
+    }
+    
+    assert!(changed, "Configuration should have been reloaded");
+    
+    // Verify updated config
+    {
+        let reloadable = rx.borrow();
+        assert_eq!(reloadable.logging_level, "debug");
+        assert_eq!(reloadable.metrics_enabled, false);
+        assert_eq!(reloadable.scheduler_overcommit_ratio, 2.0);
+    }
+    
+    // Stop watcher
+    watcher.stop().await;
+}
+
+#[tokio::test]
+async fn test_manual_reload() {
+    // Create config file
+    let mut config_file = NamedTempFile::new().unwrap();
+    let initial_config = r#"
+[node]
+bind_address = "127.0.0.1:7001"
+data_dir = "/tmp/blixard"
+vm_backend = "mock"
+
+[observability.logging]
+level = "info"
+"#;
+    config_file.write_all(initial_config.as_bytes()).unwrap();
+    config_file.flush().unwrap();
+    
+    // Load initial configuration
+    let config = Config::from_file(config_file.path()).unwrap();
+    
+    // Create config watcher (without starting it)
+    let watcher = ConfigWatcher::new(config_file.path().to_path_buf(), config);
+    let mut rx = watcher.subscribe();
+    
+    // Update configuration file
+    let updated_config = r#"
+[node]
+bind_address = "127.0.0.1:7001"
+data_dir = "/tmp/blixard"
+vm_backend = "mock"
+
+[observability.logging]
+level = "warn"
+"#;
+    config_file.write_all(updated_config.as_bytes()).unwrap();
+    config_file.flush().unwrap();
+    
+    // Manually trigger reload
+    watcher.reload().await.unwrap();
+    
+    // Check if configuration was updated
+    assert!(rx.has_changed().unwrap_or(false));
+    
+    let reloadable = rx.borrow();
+    assert_eq!(reloadable.logging_level, "warn");
+}
+
+#[test]
+fn test_reloadable_config_fields() {
+    let mut config = Config::default();
+    
+    // Set various fields
+    config.observability.logging.level = "debug".to_string();
+    config.observability.metrics.enabled = false;
+    config.observability.tracing.sampling_ratio = 0.5;
+    config.vm.scheduler.overcommit_ratio = 2.5;
+    config.cluster.peer.max_retries = 10;
+    
+    // Convert to reloadable
+    let reloadable = ReloadableConfig::from(&config);
+    
+    // Verify all fields
+    assert_eq!(reloadable.logging_level, "debug");
+    assert_eq!(reloadable.metrics_enabled, false);
+    assert_eq!(reloadable.tracing_sampling_ratio, 0.5);
+    assert_eq!(reloadable.scheduler_overcommit_ratio, 2.5);
+    assert_eq!(reloadable.peer_max_retries, 10);
+}
