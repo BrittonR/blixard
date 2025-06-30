@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use crate::anti_affinity::AntiAffinityRules;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeConfig {
@@ -25,6 +26,23 @@ pub struct VmConfig {
     pub ip_address: Option<String>, // VM IP address for network isolation
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<std::collections::HashMap<String, String>>, // Metadata for Nix images, etc.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anti_affinity: Option<AntiAffinityRules>, // Anti-affinity rules for placement
+}
+
+impl Default for VmConfig {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            config_path: String::new(),
+            vcpus: 1,
+            memory: 1024,
+            tenant_id: default_tenant(),
+            ip_address: None,
+            metadata: None,
+            anti_affinity: None,
+        }
+    }
 }
 
 fn default_tenant() -> String {

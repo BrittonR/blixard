@@ -234,6 +234,8 @@ mod tests {
             memory: 1024,
             tenant_id: "tenant1".to_string(),
             ip_address: Some("10.0.0.10".to_string()),
+            metadata: None,
+            anti_affinity: None,
         };
         
         // Should succeed regardless of privilege level

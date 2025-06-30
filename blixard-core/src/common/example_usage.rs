@@ -98,6 +98,8 @@ async fn grpc_handler_example(
         config_path: format!("/vms/{}.yaml", req.name),
         ip_address: None,
         tenant_id: tenant_id.to_string(),
+        metadata: None,
+        anti_affinity: None,
     };
     
     // Call service method and convert errors to Status
@@ -144,6 +146,7 @@ mod tests {
             ip_address: None,
             tenant_id: "test-tenant".to_string(),
             metadata: None,
+            anti_affinity: None,
         };
         
         let result = service.create_vm("test-tenant", config).await;

@@ -1,12 +1,14 @@
 use std::sync::Arc;
 use redb::{Database, ReadableTable};
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::types::VmConfig;
 use crate::raft_manager::{WorkerCapabilities, WorkerStatus};
 use crate::storage::{WORKER_TABLE, WORKER_STATUS_TABLE, VM_STATE_TABLE};
 use crate::metrics_otel;
+use crate::anti_affinity::{AntiAffinityChecker, AntiAffinityRules};
 
 /// VM placement strategy for determining where to place VMs
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,17 +82,41 @@ impl NodeResourceUsage {
         match strategy {
             PlacementStrategy::MostAvailable => {
                 // Favor nodes with most available resources (percentage-based)
-                let cpu_available_pct = self.available_vcpus() as f64 / self.capabilities.cpu_cores as f64;
-                let mem_available_pct = self.available_memory_mb() as f64 / self.capabilities.memory_mb as f64;
-                let disk_available_pct = self.available_disk_gb() as f64 / self.capabilities.disk_gb as f64;
+                let cpu_available_pct = if self.capabilities.cpu_cores > 0 {
+                    self.available_vcpus() as f64 / self.capabilities.cpu_cores as f64
+                } else {
+                    0.0
+                };
+                let mem_available_pct = if self.capabilities.memory_mb > 0 {
+                    self.available_memory_mb() as f64 / self.capabilities.memory_mb as f64
+                } else {
+                    0.0
+                };
+                let disk_available_pct = if self.capabilities.disk_gb > 0 {
+                    self.available_disk_gb() as f64 / self.capabilities.disk_gb as f64
+                } else {
+                    0.0
+                };
                 
                 (cpu_available_pct + mem_available_pct + disk_available_pct) / 3.0
             }
             PlacementStrategy::LeastAvailable => {
                 // Favor nodes with least available resources (bin packing)
-                let cpu_used_pct = self.used_vcpus as f64 / self.capabilities.cpu_cores as f64;
-                let mem_used_pct = self.used_memory_mb as f64 / self.capabilities.memory_mb as f64;
-                let disk_used_pct = self.used_disk_gb as f64 / self.capabilities.disk_gb as f64;
+                let cpu_used_pct = if self.capabilities.cpu_cores > 0 {
+                    self.used_vcpus as f64 / self.capabilities.cpu_cores as f64
+                } else {
+                    0.0
+                };
+                let mem_used_pct = if self.capabilities.memory_mb > 0 {
+                    self.used_memory_mb as f64 / self.capabilities.memory_mb as f64
+                } else {
+                    0.0
+                };
+                let disk_used_pct = if self.capabilities.disk_gb > 0 {
+                    self.used_disk_gb as f64 / self.capabilities.disk_gb as f64
+                } else {
+                    0.0
+                };
                 
                 (cpu_used_pct + mem_used_pct + disk_used_pct) / 3.0
             }
@@ -137,7 +163,7 @@ impl VmScheduler {
         
         // Handle manual placement first
         if let PlacementStrategy::Manual { node_id } = strategy {
-            let result = self.validate_manual_placement(node_id, &requirements).await;
+            let result = self.validate_manual_placement(node_id, &requirements, vm_config.anti_affinity.as_ref()).await;
             let duration = start_time.elapsed().as_secs_f64();
             metrics_otel::record_vm_placement_attempt(&strategy_name, result.is_ok(), duration);
             return result;
@@ -152,40 +178,77 @@ impl VmScheduler {
             });
         }
         
+        // Build anti-affinity checker if rules are specified
+        let anti_affinity_checker = if vm_config.anti_affinity.is_some() {
+            Some(self.build_anti_affinity_checker().await?)
+        } else {
+            None
+        };
+        
         // Filter nodes that can accommodate the VM
-        let candidate_nodes: Vec<_> = node_usage
+        let mut candidate_nodes: Vec<_> = node_usage
             .iter()
             .filter(|usage| usage.can_accommodate(&requirements))
             .collect();
         
+        // Apply anti-affinity hard constraints if present
+        if let (Some(rules), Some(checker)) = (vm_config.anti_affinity.as_ref(), &anti_affinity_checker) {
+            candidate_nodes.retain(|usage| {
+                match checker.check_hard_constraints(rules, usage.node_id) {
+                    Ok(()) => true,
+                    Err(reason) => {
+                        info!("Node {} excluded by anti-affinity: {}", usage.node_id, reason);
+                        false
+                    }
+                }
+            });
+        }
+        
         if candidate_nodes.is_empty() {
             return Err(BlixardError::SchedulingError {
                 message: format!(
-                    "No nodes can accommodate VM '{}' (requires: {}vCPU, {}MB RAM, {}GB disk, features: {:?})",
+                    "No nodes can accommodate VM '{}' (requires: {}vCPU, {}MB RAM, {}GB disk, features: {:?}, anti-affinity: {})",
                     vm_config.name,
                     requirements.vcpus,
                     requirements.memory_mb,
                     requirements.disk_gb,
-                    requirements.required_features
+                    requirements.required_features,
+                    vm_config.anti_affinity.is_some()
                 ),
             });
         }
         
-        // Select the best node based on strategy
-        let selected_node = self.select_best_node(candidate_nodes, &strategy)?;
+        // Select the best node based on strategy and anti-affinity soft constraints
+        let selected_node = self.select_best_node_with_anti_affinity(
+            candidate_nodes,
+            &strategy,
+            vm_config.anti_affinity.as_ref(),
+            anti_affinity_checker.as_ref()
+        )?;
+        
         let alternative_nodes: Vec<u64> = node_usage
             .iter()
-            .filter(|usage| usage.node_id != selected_node.node_id && usage.can_accommodate(&requirements))
+            .filter(|usage| {
+                usage.node_id != selected_node.node_id && 
+                usage.can_accommodate(&requirements) &&
+                // Check anti-affinity for alternatives too
+                if let (Some(rules), Some(checker)) = (vm_config.anti_affinity.as_ref(), &anti_affinity_checker) {
+                    checker.check_hard_constraints(rules, usage.node_id).is_ok()
+                } else {
+                    true
+                }
+            })
             .map(|usage| usage.node_id)
             .collect();
         
         let reason = format!(
-            "Selected node {} using {:?} strategy. Available: {}vCPU, {}MB RAM, {}GB disk",
+            "Selected node {} using {:?} strategy. Available: {}vCPU, {}MB RAM, {}GB disk{}",
             selected_node.node_id,
             strategy,
             selected_node.available_vcpus(),
             selected_node.available_memory_mb(),
-            selected_node.available_disk_gb()
+            selected_node.available_disk_gb(),
+            if vm_config.anti_affinity.is_some() { " (anti-affinity rules applied)" } else { "" }
         );
         
         let decision = PlacementDecision {
@@ -206,6 +269,7 @@ impl VmScheduler {
         &self,
         node_id: u64,
         requirements: &VmResourceRequirements,
+        anti_affinity_rules: Option<&AntiAffinityRules>,
     ) -> BlixardResult<PlacementDecision> {
         let node_usage = self.get_node_resource_usage(node_id).await?;
         
@@ -222,6 +286,16 @@ impl VmScheduler {
                     node_usage.available_disk_gb()
                 ),
             });
+        }
+        
+        // Check anti-affinity constraints if present
+        if let Some(rules) = anti_affinity_rules {
+            let checker = self.build_anti_affinity_checker().await?;
+            if let Err(reason) = checker.check_hard_constraints(rules, node_id) {
+                return Err(BlixardError::SchedulingError {
+                    message: format!("Manual placement on node {} violates anti-affinity: {}", node_id, reason),
+                });
+            }
         }
         
         Ok(PlacementDecision {
@@ -469,6 +543,96 @@ impl ClusterResourceSummary {
     }
 }
 
+impl VmScheduler {
+    /// Build anti-affinity checker from current VM distribution
+    async fn build_anti_affinity_checker(&self) -> BlixardResult<AntiAffinityChecker> {
+        let read_txn = self.database.begin_read()?;
+        let vm_table = read_txn.open_table(VM_STATE_TABLE)?;
+        
+        let mut vm_distribution = Vec::new();
+        
+        // Collect VM distribution with their anti-affinity groups
+        for vm_result in vm_table.iter()? {
+            let (vm_name_key, vm_data) = vm_result?;
+            let vm_name = vm_name_key.value().to_string();
+            
+            let vm_state: crate::types::VmState = bincode::deserialize(vm_data.value())?;
+            
+            // Only consider running/starting VMs
+            match vm_state.status {
+                crate::types::VmStatus::Running | crate::types::VmStatus::Starting => {
+                    let mut groups = Vec::new();
+                    
+                    // Extract anti-affinity groups from this VM
+                    if let Some(rules) = &vm_state.config.anti_affinity {
+                        for rule in &rules.rules {
+                            groups.push(rule.group_key.clone());
+                        }
+                    }
+                    
+                    if !groups.is_empty() {
+                        vm_distribution.push((vm_name, groups, vm_state.node_id));
+                    }
+                }
+                _ => {}
+            }
+        }
+        
+        Ok(AntiAffinityChecker::new(vm_distribution))
+    }
+    
+    /// Select the best node considering anti-affinity soft constraints
+    fn select_best_node_with_anti_affinity<'a>(
+        &self,
+        candidates: Vec<&'a NodeResourceUsage>,
+        strategy: &PlacementStrategy,
+        anti_affinity_rules: Option<&AntiAffinityRules>,
+        checker: Option<&AntiAffinityChecker>,
+    ) -> BlixardResult<&'a NodeResourceUsage> {
+        // If no anti-affinity rules, use regular selection
+        if anti_affinity_rules.is_none() || checker.is_none() {
+            return self.select_best_node(candidates, strategy);
+        }
+        
+        let rules = anti_affinity_rules.unwrap();
+        let checker = checker.unwrap();
+        
+        // Calculate combined scores (placement score - anti-affinity penalty)
+        let scored_candidates: Vec<(&NodeResourceUsage, f64)> = candidates
+            .iter()
+            .map(|&usage| {
+                let placement_score = usage.placement_score(strategy);
+                let anti_affinity_penalty = checker.calculate_soft_constraint_penalty(rules, usage.node_id);
+                
+                // Normalize penalty to be in similar range as placement score (0-1)
+                let normalized_penalty = anti_affinity_penalty / 10.0; // Adjust scale as needed
+                let combined_score = placement_score - normalized_penalty;
+                
+                (usage, combined_score)
+            })
+            .collect();
+        
+        // Log scoring details for debugging
+        for (usage, score) in &scored_candidates {
+            let placement_score = usage.placement_score(strategy);
+            let penalty = checker.calculate_soft_constraint_penalty(rules, usage.node_id);
+            info!(
+                "Node {} scoring - placement: {:.3}, anti-affinity penalty: {:.3}, combined: {:.3}",
+                usage.node_id, placement_score, penalty, score
+            );
+        }
+        
+        // Select node with highest combined score
+        scored_candidates
+            .into_iter()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(usage, _)| usage)
+            .ok_or_else(|| BlixardError::SchedulingError {
+                message: "No candidate nodes available after anti-affinity scoring".to_string(),
+            })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -519,6 +683,8 @@ mod tests {
             memory: 8192,
             tenant_id: "default".to_string(),
             ip_address: None,
+            metadata: None,
+            anti_affinity: None,
         };
         
         let requirements = VmResourceRequirements::from(&vm_config);

@@ -39,6 +39,7 @@ pub fn test_vm_config(name: &str) -> VmConfig {
         tenant_id: "default".to_string(),
         ip_address: None,
         metadata: None,
+        anti_affinity: None,
     }
 }
 

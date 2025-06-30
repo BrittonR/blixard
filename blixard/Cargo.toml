@@ -97,3 +97,7 @@ path = "../examples/raft_batch_demo.rs"
 [[example]]
 name = "raft_batch_simple_demo"
 path = "../examples/raft_batch_simple_demo.rs"
+
+[[example]]
+name = "anti_affinity_demo"
+path = "../examples/anti_affinity_demo.rs"

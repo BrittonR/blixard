@@ -166,6 +166,7 @@ impl VmService for VmServiceImpl {
             tenant_id: "default".to_string(),
             ip_address: None,
             metadata: None,
+            anti_affinity: None,
         };
         
         // Send command through Raft consensus

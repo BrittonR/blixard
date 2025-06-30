@@ -288,6 +288,7 @@ mod tests {
             tenant_id: "test-tenant".to_string(),
             ip_address: None,
             metadata: None,
+            anti_affinity: None,
         };
         
         let vm2 = VmConfig {
@@ -298,6 +299,7 @@ mod tests {
             tenant_id: "test-tenant".to_string(),
             ip_address: None,
             metadata: None,
+            anti_affinity: None,
         };
         
         let vm3 = VmConfig {
@@ -308,6 +310,7 @@ mod tests {
             tenant_id: "test-tenant".to_string(),
             ip_address: None,
             metadata: None,
+            anti_affinity: None,
         };
         
         // First two VMs should succeed

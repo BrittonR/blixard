@@ -10,6 +10,7 @@ pub mod raft_batch_processor;
 pub mod storage;
 pub mod vm_backend;
 pub mod vm_scheduler;
+pub mod anti_affinity;
 pub mod network_isolated_backend;
 pub mod peer_connector;
 pub mod connection_pool;

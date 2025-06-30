@@ -596,6 +596,7 @@ impl VmBackend for MicrovmBackend {
                 ip_address: None,  // TODO: Extract from VM config if available
                 tenant_id: "default".to_string(),  // TODO: Extract from VM config
                 metadata: None,
+                anti_affinity: None,
             };
             
             // Get current status
@@ -625,6 +626,7 @@ impl VmBackend for MicrovmBackend {
                                 ip_address: None,  // TODO: Extract from VM config if available
                                 tenant_id: "default".to_string(),  // TODO: Extract from VM config
                                 metadata: None,
+                                anti_affinity: None,
                             };
                             
                             let status = self.get_vm_status(vm_name).await?

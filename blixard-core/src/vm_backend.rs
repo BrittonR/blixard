@@ -674,6 +674,8 @@ mod tests {
             memory: 512,
             tenant_id: "default".to_string(),
             ip_address: None,
+            metadata: None,
+            anti_affinity: None,
         };
         
         backend.create_vm(&vm_config, 1).await.unwrap();
