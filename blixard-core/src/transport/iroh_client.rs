@@ -21,6 +21,7 @@ use std::time::Duration;
 use tracing::{debug, error};
 
 /// Client for making Iroh RPC calls
+#[derive(Clone)]
 pub struct IrohClient {
     endpoint: Arc<iroh::Endpoint>,
     node_addr: iroh::NodeAddr,
@@ -280,6 +281,22 @@ impl IrohClient {
         
         match response {
             VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::GetStatus { found, vm_info }) => {
+                let vm_info = vm_info.map(|data| crate::iroh_types::VmInfo {
+                    name: data.name,
+                    state: match data.state.as_str() {
+                        "Creating" => 1,
+                        "Starting" => 2,
+                        "Running" => 3,
+                        "Stopping" => 4,
+                        "Stopped" => 5,
+                        "Failed" => 6,
+                        _ => 0,
+                    },
+                    node_id: data.node_id,
+                    vcpus: data.vcpus,
+                    memory_mb: data.memory_mb,
+                    ip_address: data.ip_address,
+                });
                 Ok(crate::iroh_types::GetVmStatusResponse { found, vm_info })
             }
             _ => Err(BlixardError::Internal {
@@ -297,6 +314,22 @@ impl IrohClient {
         
         match response {
             VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::List { vms }) => {
+                let vms = vms.into_iter().map(|data| crate::iroh_types::VmInfo {
+                    name: data.name,
+                    state: match data.state.as_str() {
+                        "Creating" => 1,
+                        "Starting" => 2,
+                        "Running" => 3,
+                        "Stopping" => 4,
+                        "Stopped" => 5,
+                        "Failed" => 6,
+                        _ => 0,
+                    },
+                    node_id: data.node_id,
+                    vcpus: data.vcpus,
+                    memory_mb: data.memory_mb,
+                    ip_address: data.ip_address,
+                }).collect();
                 Ok(crate::iroh_types::ListVmsResponse { vms })
             }
             _ => Err(BlixardError::Internal {
@@ -307,6 +340,7 @@ impl IrohClient {
 }
 
 /// Wrapper client that provides a gRPC-like interface but uses Iroh underneath
+#[derive(Clone)]
 pub struct IrohClusterServiceClient {
     client: IrohClient,
 }

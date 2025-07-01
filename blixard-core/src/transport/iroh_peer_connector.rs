@@ -159,6 +159,32 @@ impl IrohClient {
         })
     }
     
+    // VM operation proxy methods
+    pub async fn create_vm(&self, name: String, config_path: String, vcpus: u32, memory_mb: u32) -> BlixardResult<crate::iroh_types::CreateVmResponse> {
+        // Create the actual Iroh RPC client
+        let client = crate::transport::iroh_client::IrohClient::new(
+            Arc::new(self.endpoint.clone()),
+            self.node_addr.clone(),
+        );
+        client.create_vm(name, config_path, vcpus, memory_mb).await
+    }
+    
+    pub async fn start_vm(&self, name: String) -> BlixardResult<crate::iroh_types::StartVmResponse> {
+        let client = crate::transport::iroh_client::IrohClient::new(
+            Arc::new(self.endpoint.clone()),
+            self.node_addr.clone(),
+        );
+        client.start_vm(name).await
+    }
+    
+    pub async fn stop_vm(&self, name: String) -> BlixardResult<crate::iroh_types::StopVmResponse> {
+        let client = crate::transport::iroh_client::IrohClient::new(
+            Arc::new(self.endpoint.clone()),
+            self.node_addr.clone(),
+        );
+        client.stop_vm(name).await
+    }
+    
     /// Get the RPC client
     pub fn rpc_client(&self) -> &Arc<crate::transport::iroh_service::IrohRpcClient> {
         &self.rpc_client
@@ -243,8 +269,53 @@ impl IrohPeerConnector {
         Ok(())
     }
     
-    /// Connect to a peer using their node ID and address info
-    pub async fn connect_to_peer(&self, peer_id: u64) -> BlixardResult<IrohClient> {
+    /// Connect to a peer using a discovered NodeAddr
+    pub async fn connect_to_peer(&self, peer_id: u64, node_addr: NodeAddr) -> BlixardResult<()> {
+        let metrics = metrics();
+        let peer_attrs = vec![attributes::peer_id(peer_id)];
+        let _timer = Timer::with_attributes(
+            metrics.grpc_request_duration.clone(),
+            peer_attrs.clone()
+        );
+        metrics.peer_reconnect_attempts.add(1, &peer_attrs);
+        
+        // Check if already connected
+        if self.connections.contains_key(&peer_id) {
+            tracing::debug!("Already connected to peer {}", peer_id);
+            return Ok(());
+        }
+        
+        // Attempt connection
+        match IrohClient::new(self.endpoint.clone(), node_addr.clone()).await {
+            Ok(client) => {
+                // Store connection
+                self.connections.insert(peer_id, client);
+                
+                // Update connection count
+                {
+                    let mut count = self.connection_count.lock().await;
+                    *count += 1;
+                }
+                
+                // Update peer status
+                self.node.update_peer_connection(peer_id, true).await?;
+                
+                // Process buffered messages
+                self.send_buffered_messages(peer_id).await;
+                
+                tracing::info!("Connected to peer {} via Iroh discovery", peer_id);
+                Ok(())
+            }
+            Err(e) => {
+                // Update peer status
+                self.node.update_peer_connection(peer_id, false).await?;
+                Err(e)
+            }
+        }
+    }
+    
+    /// Connect to a peer using their node ID (looks up address from peer info)
+    pub async fn connect_to_peer_by_id(&self, peer_id: u64) -> BlixardResult<IrohClient> {
         let metrics = metrics();
         let peer_attrs = vec![attributes::peer_id(peer_id)];
         let _timer = Timer::with_attributes(
@@ -460,7 +531,19 @@ impl IrohPeerConnector {
         if let Some(client) = self.connections.get(&peer_id) {
             Ok(client.clone())
         } else {
-            self.connect_to_peer(peer_id).await
+            // Get peer info and convert to NodeAddr
+            let peer_info = self.get_peer_info(peer_id).await?;
+            let node_addr = self.peer_info_to_node_addr(&peer_info)?;
+            
+            // Connect and return the client
+            self.connect_to_peer(peer_id, node_addr).await?;
+            
+            // Return the newly connected client
+            self.connections.get(&peer_id)
+                .map(|entry| entry.clone())
+                .ok_or_else(|| BlixardError::Internal {
+                    message: "Failed to retrieve client after connection".to_string(),
+                })
         }
     }
     

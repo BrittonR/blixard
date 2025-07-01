@@ -18,7 +18,7 @@ use crate::{
 use async_trait::async_trait;
 use bytes::Bytes;
 use iroh::{
-    protocol::ProtocolHandler,
+    protocol::{ProtocolHandler, AcceptError},
     endpoint::Connection,
 };
 use std::{
@@ -33,6 +33,15 @@ use tracing::{debug, error, info, warn};
 pub struct SecureServiceRegistry {
     services: Arc<RwLock<HashMap<String, Arc<dyn SecureIrohService>>>>,
     middleware: Arc<IrohMiddleware>,
+}
+
+impl std::fmt::Debug for SecureServiceRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecureServiceRegistry")
+            .field("middleware", &self.middleware)
+            .field("services", &"<dyn SecureIrohService>")
+            .finish()
+    }
 }
 
 impl SecureServiceRegistry {
@@ -55,7 +64,7 @@ impl SecureServiceRegistry {
 }
 
 /// Secure RPC protocol handler with Cedar authorization
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SecureRpcProtocolHandler {
     registry: Arc<SecureServiceRegistry>,
     middleware: Arc<IrohMiddleware>,
@@ -91,27 +100,36 @@ impl SecureRpcProtocolHandler {
             Err(e) => {
                 error!("Authentication failed: {}", e);
                 // Send error response
-                let error_response = RpcResponse {
-                    request_id: 0,
+                let _error_response = RpcResponse {
                     success: false,
                     error: Some(format!("Authentication failed: {}", e)),
-                    payload: Bytes::new(),
+                    payload: None,
                 };
-                let _ = write_message(&mut send, &error_response).await;
+                // TODO: Need to handle write_message parameters properly
                 return Err(e);
             }
         };
         
         loop {
             // Read request
-            let request = match read_message::<RpcRequest>(&mut recv).await {
-                Ok(Some(req)) => req,
-                Ok(None) => {
-                    debug!("Client closed connection");
-                    break;
-                }
+            let (header, payload) = match read_message(&mut recv).await {
+                Ok(result) => result,
                 Err(e) => {
                     error!("Failed to read request: {}", e);
+                    break;
+                }
+            };
+            
+            if header.msg_type != MessageType::Request {
+                error!("Expected Request, got {:?}", header.msg_type);
+                break;
+            }
+            
+            // Deserialize the RPC request
+            let request: RpcRequest = match deserialize_payload(&payload) {
+                Ok(req) => req,
+                Err(e) => {
+                    error!("Failed to deserialize request: {}", e);
                     break;
                 }
             };
@@ -121,24 +139,23 @@ impl SecureRpcProtocolHandler {
             // Process request with authorization
             let response = match self.process_authorized_request(&connection, &auth_context, request.clone()).await {
                 Ok(payload) => RpcResponse {
-                    request_id: request.request_id,
                     success: true,
                     error: None,
-                    payload,
+                    payload: Some(payload),
                 },
                 Err(e) => {
                     error!("Request processing failed: {}", e);
                     RpcResponse {
-                        request_id: request.request_id,
                         success: false,
                         error: Some(e.to_string()),
-                        payload: Bytes::new(),
+                        payload: None,
                     }
                 }
             };
             
             // Send response
-            if let Err(e) = write_message(&mut send, &response).await {
+            let response_bytes = serialize_payload(&response)?;
+            if let Err(e) = write_message(&mut send, MessageType::Response, header.request_id, &response_bytes).await {
                 error!("Failed to send response: {}", e);
                 break;
             }
@@ -172,9 +189,9 @@ impl SecureRpcProtocolHandler {
     }
 }
 
-#[async_trait]
 impl ProtocolHandler for SecureRpcProtocolHandler {
-    async fn accept(&self, connection: Connection) -> BlixardResult<()> {
+    fn accept<'a>(&'a self, connection: Connection) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AcceptError>> + Send + 'a>> {
+        Box::pin(async move {
         debug!("Accepting secure RPC connection from {:?}", connection.remote_node_id());
         
         // Accept bidirectional stream
@@ -182,9 +199,7 @@ impl ProtocolHandler for SecureRpcProtocolHandler {
             Ok(streams) => streams,
             Err(e) => {
                 error!("Failed to accept bidirectional stream: {}", e);
-                return Err(BlixardError::Connection {
-                    message: format!("Failed to accept stream: {}", e),
-                });
+                return Err(AcceptError::from_err(e));
             }
         };
         
@@ -198,6 +213,7 @@ impl ProtocolHandler for SecureRpcProtocolHandler {
         debug!("Connection closed");
         
         Ok(())
+        })
     }
 }
 

@@ -103,15 +103,15 @@ impl IrohServiceRunner {
                 Some(incoming) => {
                     let services = services.clone();
                     tokio::spawn(async move {
-                        match incoming.accept().await {
-                            Ok((connection, alpn)) => {
-                                if alpn.as_bytes() != BLIXARD_ALPN {
-                                    warn!("Rejected connection with unknown ALPN: {:?}", alpn);
-                                    return;
-                                }
+                        match incoming.await {
+                            Ok(connection) => {
+                                // ALPN is already checked during handshake
 
                                 let remote_node_id = connection.remote_node_id();
-                                info!("Accepted connection from {}", remote_node_id);
+                                match remote_node_id {
+                                    Ok(node_id) => info!("Accepted connection from {}", node_id),
+                                    Err(e) => info!("Accepted connection from unknown node: {}", e),
+                                }
 
                                 // Handle all streams on this connection
                                 loop {
@@ -172,22 +172,20 @@ impl IrohServiceRunner {
         // Handle the request
         let response = match service.handle_call(&request.method, request.payload).await {
             Ok(result) => RpcResponse {
-                request_id: request.request_id,
                 success: true,
-                payload: result,
+                payload: Some(result),
                 error: None,
             },
             Err(e) => RpcResponse {
-                request_id: request.request_id,
                 success: false,
-                payload: Bytes::new(),
+                payload: None,
                 error: Some(e.to_string()),
             },
         };
         
         // Send the response
         let response_bytes = crate::transport::iroh_protocol::serialize_payload(&response)?;
-        write_message(&mut send, MessageType::Response, response_bytes).await?;
+        write_message(&mut send, MessageType::Response, header.request_id, &response_bytes).await?;
         
         Ok(())
     }
@@ -200,19 +198,13 @@ pub async fn start_iroh_services(
 ) -> BlixardResult<JoinHandle<()>> {
     // Get or create Iroh endpoint
     let endpoint = if let Some(p2p_manager) = shared_state.get_p2p_manager().await {
-        match p2p_manager.endpoint() {
-            Ok(endpoint) => endpoint,
-            Err(e) => {
-                return Err(BlixardError::Internal {
-                    message: format!("Failed to get Iroh endpoint: {}", e),
-                });
-            }
-        }
+        let (endpoint, _node_id) = p2p_manager.get_endpoint();
+        Arc::new(endpoint)
     } else {
         // Create a new Iroh endpoint if P2P manager isn't available
         let endpoint = Endpoint::builder()
-            .discovery(Box::new(DnsDiscovery::n0_dns()))
-            .bind(0)
+            .discovery(DnsDiscovery::n0_dns())
+            .bind()
             .await
             .map_err(|e| BlixardError::Internal {
                 message: format!("Failed to create Iroh endpoint: {}", e),

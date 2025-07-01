@@ -89,13 +89,13 @@ impl IrohService for IrohStatusService {
                 let _request: GetRaftStatusRequest = deserialize_payload(&payload)?;
                 
                 // Get Raft status
-                let proto_response = self.service.get_raft_status().await?;
+                let proto_response = self.service.node.get_raft_status().await?;
                 
                 // Convert to wrapper type
                 let response = GetRaftStatusResponse {
                     is_leader: proto_response.is_leader,
                     node_id: proto_response.node_id,
-                    leader_id: proto_response.leader_id,
+                    leader_id: proto_response.leader_id.unwrap_or(0),
                     term: proto_response.term,
                     state: proto_response.state,
                 };

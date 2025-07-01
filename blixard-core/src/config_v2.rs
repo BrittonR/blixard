@@ -5,6 +5,76 @@
 //! - Supports environment variable overrides
 //! - Validates configuration values
 //! - Supports hot-reload for non-critical settings
+//!
+//! # Example Configuration
+//!
+//! ```toml
+//! # Node configuration
+//! [node]
+//! id = 1
+//! bind_address = "127.0.0.1:7001"
+//! data_dir = "./data"
+//! vm_backend = "microvm"
+//! debug = false
+//!
+//! # Cluster configuration
+//! [cluster]
+//! bootstrap = false
+//! join_address = "127.0.0.1:7002"
+//!
+//! # Network configuration
+//! [network.iroh]
+//! max_message_size = 67108864
+//! connection_timeout = "10s"
+//! keepalive_interval = "10s"
+//! home_relay = "https://relay.iroh.network"
+//! discovery_port = 0
+//!
+//! # Discovery configuration
+//! [network.discovery]
+//! enable_static = true
+//! enable_dns = false
+//! enable_mdns = true
+//! refresh_interval = 30
+//! node_stale_timeout = 300
+//!
+//! # Static seed nodes
+//! [[network.discovery.static_nodes.seeds]]
+//! node_id = "kyt7jjyhhg5xzlwtqwwgrkwhdtmqag6tg2nqwhz4o4nzqhj3a"
+//! addresses = ["127.0.0.1:7002", "192.168.1.100:7002"]
+//! name = "seed-node-1"
+//!
+//! [[network.discovery.static_nodes.seeds]]
+//! node_id = "mln8jjyhhg5xzlwtqwwgrkwhdtmqag6tg2nqwhz4o4nzqhj3b"
+//! addresses = ["10.0.0.5:7002"]
+//! name = "seed-node-2"
+//!
+//! # DNS discovery
+//! [network.discovery.dns]
+//! domains = ["_iroh._tcp.blixard.local", "_blixard._tcp.example.com"]
+//! dns_server = "8.8.8.8:53"  # Optional, uses system DNS if not specified
+//! query_timeout = 5
+//!
+//! # mDNS discovery
+//! [network.discovery.mdns]
+//! service_name = "_blixard-iroh._tcp.local"
+//! enable_ipv4 = true
+//! enable_ipv6 = true
+//! ttl = 120
+//!
+//! # Security configuration
+//! [security.tls]
+//! enabled = true
+//! cert_file = "/path/to/cert.pem"
+//! key_file = "/path/to/key.pem"
+//! ca_file = "/path/to/ca.pem"
+//! require_client_cert = true
+//!
+//! [security.auth]
+//! enabled = true
+//! method = "token"
+//! token_file = "/path/to/tokens.json"
+//! ```
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -274,6 +344,9 @@ pub struct NetworkConfig {
     
     /// HTTP metrics server settings
     pub metrics: MetricsServerConfig,
+    
+    /// Node discovery configuration
+    pub discovery: DiscoveryConfig,
 }
 
 /// Iroh transport configuration
@@ -310,6 +383,87 @@ pub struct MetricsServerConfig {
     
     /// Metrics path
     pub path: String,
+}
+
+/// Discovery configuration for finding Iroh nodes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DiscoveryConfig {
+    /// Enable static discovery from configuration
+    pub enable_static: bool,
+    
+    /// Enable DNS-based discovery
+    pub enable_dns: bool,
+    
+    /// Enable mDNS for local network discovery
+    pub enable_mdns: bool,
+    
+    /// How often to refresh discovery information (in seconds)
+    pub refresh_interval: u64,
+    
+    /// Maximum age before considering a node stale (in seconds)
+    pub node_stale_timeout: u64,
+    
+    /// Static nodes configuration
+    pub static_nodes: StaticNodesConfig,
+    
+    /// DNS discovery settings
+    pub dns: DnsDiscoveryConfig,
+    
+    /// mDNS discovery settings
+    pub mdns: MdnsDiscoveryConfig,
+}
+
+/// Static nodes configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StaticNodesConfig {
+    /// List of static seed nodes
+    pub seeds: Vec<StaticNodeEntry>,
+}
+
+/// A static node entry
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StaticNodeEntry {
+    /// Node ID (base32-encoded)
+    pub node_id: String,
+    
+    /// Network addresses where the node can be reached
+    pub addresses: Vec<String>,
+    
+    /// Optional human-readable name
+    pub name: Option<String>,
+}
+
+/// DNS discovery configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DnsDiscoveryConfig {
+    /// DNS domains to query for SRV records
+    pub domains: Vec<String>,
+    
+    /// DNS server to use (empty for system default)
+    pub dns_server: Option<String>,
+    
+    /// Query timeout in seconds
+    pub query_timeout: u64,
+}
+
+/// mDNS discovery configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MdnsDiscoveryConfig {
+    /// Service name to advertise and discover
+    pub service_name: String,
+    
+    /// Enable IPv4 multicast
+    pub enable_ipv4: bool,
+    
+    /// Enable IPv6 multicast
+    pub enable_ipv6: bool,
+    
+    /// TTL for mDNS packets
+    pub ttl: u32,
 }
 
 /// VM configuration
@@ -680,6 +834,7 @@ impl Default for NetworkConfig {
         Self {
             iroh: IrohTransportConfig::default(),
             metrics: MetricsServerConfig::default(),
+            discovery: DiscoveryConfig::default(),
         }
     }
 }
@@ -857,6 +1012,50 @@ impl Default for ImageCacheConfig {
     }
 }
 
+impl Default for DiscoveryConfig {
+    fn default() -> Self {
+        Self {
+            enable_static: true,
+            enable_dns: false,
+            enable_mdns: true,
+            refresh_interval: 30,
+            node_stale_timeout: 300, // 5 minutes
+            static_nodes: StaticNodesConfig::default(),
+            dns: DnsDiscoveryConfig::default(),
+            mdns: MdnsDiscoveryConfig::default(),
+        }
+    }
+}
+
+impl Default for StaticNodesConfig {
+    fn default() -> Self {
+        Self {
+            seeds: Vec::new(),
+        }
+    }
+}
+
+impl Default for DnsDiscoveryConfig {
+    fn default() -> Self {
+        Self {
+            domains: vec!["_iroh._tcp.blixard.local".to_string()],
+            dns_server: None,
+            query_timeout: 5,
+        }
+    }
+}
+
+impl Default for MdnsDiscoveryConfig {
+    fn default() -> Self {
+        Self {
+            service_name: "_blixard-iroh._tcp.local".to_string(),
+            enable_ipv4: true,
+            enable_ipv6: true,
+            ttl: 120,
+        }
+    }
+}
+
 // Configuration loading and management
 
 impl Config {
@@ -1000,6 +1199,47 @@ impl Config {
             }
         }
         
+        // Validate discovery configuration
+        if self.network.discovery.refresh_interval == 0 {
+            return Err(BlixardError::ConfigError(
+                "Discovery refresh interval must be greater than 0".to_string()
+            ));
+        }
+        
+        if self.network.discovery.node_stale_timeout == 0 {
+            return Err(BlixardError::ConfigError(
+                "Discovery node stale timeout must be greater than 0".to_string()
+            ));
+        }
+        
+        // Validate static node entries
+        for (i, node) in self.network.discovery.static_nodes.seeds.iter().enumerate() {
+            if node.node_id.is_empty() {
+                return Err(BlixardError::ConfigError(
+                    format!("Static node {} has empty node_id", i)
+                ));
+            }
+            if node.addresses.is_empty() {
+                return Err(BlixardError::ConfigError(
+                    format!("Static node {} has no addresses", i)
+                ));
+            }
+        }
+        
+        // Validate DNS configuration
+        if self.network.discovery.enable_dns && self.network.discovery.dns.domains.is_empty() {
+            return Err(BlixardError::ConfigError(
+                "DNS discovery enabled but no domains configured".to_string()
+            ));
+        }
+        
+        // Validate mDNS configuration
+        if self.network.discovery.enable_mdns && self.network.discovery.mdns.service_name.is_empty() {
+            return Err(BlixardError::ConfigError(
+                "mDNS discovery enabled but service name is empty".to_string()
+            ));
+        }
+        
         Ok(())
     }
     
@@ -1015,7 +1255,12 @@ impl Config {
             "vm.scheduler.default_strategy" |
             "vm.scheduler.overcommit_ratio" |
             "network.iroh.keepalive_interval" |
-            "network.iroh.connection_timeout" => true,
+            "network.iroh.connection_timeout" |
+            "network.discovery.refresh_interval" |
+            "network.discovery.node_stale_timeout" |
+            "network.discovery.enable_static" |
+            "network.discovery.enable_dns" |
+            "network.discovery.enable_mdns" => true,
             
             // Non-reloadable settings (require restart)
             _ => false,
@@ -1101,6 +1346,18 @@ pub async fn reload<P: AsRef<Path>>(config_path: P) -> BlixardResult<()> {
         config_write.observability = new_config.observability.clone();
         config_write.cluster.peer.health_check_interval = new_config.cluster.peer.health_check_interval;
         config_write.cluster.peer.failure_threshold = new_config.cluster.peer.failure_threshold;
+        config_write.cluster.worker.resource_update_interval = new_config.cluster.worker.resource_update_interval;
+        config_write.vm.scheduler.default_strategy = new_config.vm.scheduler.default_strategy.clone();
+        config_write.vm.scheduler.overcommit_ratio = new_config.vm.scheduler.overcommit_ratio;
+        config_write.network.iroh.keepalive_interval = new_config.network.iroh.keepalive_interval;
+        config_write.network.iroh.connection_timeout = new_config.network.iroh.connection_timeout;
+        
+        // Apply discovery configuration changes
+        config_write.network.discovery.refresh_interval = new_config.network.discovery.refresh_interval;
+        config_write.network.discovery.node_stale_timeout = new_config.network.discovery.node_stale_timeout;
+        config_write.network.discovery.enable_static = new_config.network.discovery.enable_static;
+        config_write.network.discovery.enable_dns = new_config.network.discovery.enable_dns;
+        config_write.network.discovery.enable_mdns = new_config.network.discovery.enable_mdns;
         
         drop(config_write);
         
@@ -1193,6 +1450,41 @@ impl ConfigBuilder {
     
     pub fn security_auth_token_file(mut self, token_file: impl Into<PathBuf>) -> Self {
         self.config.security.auth.token_file = Some(token_file.into());
+        self
+    }
+    
+    /// Discovery configuration methods
+    pub fn discovery_enable_static(mut self, enabled: bool) -> Self {
+        self.config.network.discovery.enable_static = enabled;
+        self
+    }
+    
+    pub fn discovery_enable_dns(mut self, enabled: bool) -> Self {
+        self.config.network.discovery.enable_dns = enabled;
+        self
+    }
+    
+    pub fn discovery_enable_mdns(mut self, enabled: bool) -> Self {
+        self.config.network.discovery.enable_mdns = enabled;
+        self
+    }
+    
+    pub fn discovery_add_static_node(mut self, node_id: impl Into<String>, addresses: Vec<String>, name: Option<String>) -> Self {
+        self.config.network.discovery.static_nodes.seeds.push(StaticNodeEntry {
+            node_id: node_id.into(),
+            addresses,
+            name,
+        });
+        self
+    }
+    
+    pub fn discovery_add_dns_domain(mut self, domain: impl Into<String>) -> Self {
+        self.config.network.discovery.dns.domains.push(domain.into());
+        self
+    }
+    
+    pub fn discovery_mdns_service_name(mut self, service_name: impl Into<String>) -> Self {
+        self.config.network.discovery.mdns.service_name = service_name.into();
         self
     }
     

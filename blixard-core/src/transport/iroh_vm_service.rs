@@ -106,7 +106,7 @@ impl IrohVmService {
     }
     
     /// Handle VM operation request
-    async fn handle_vm_operation(&self, request: VmOperationRequest) -> BlixardResult<VmOperationResponse> {
+    pub async fn handle_vm_operation(&self, request: VmOperationRequest) -> BlixardResult<VmOperationResponse> {
         match request {
             VmOperationRequest::Create { name, config_path: _, vcpus, memory_mb } => {
                 match self.vm_service.create_vm(name.clone(), vcpus, memory_mb).await {
@@ -222,7 +222,7 @@ impl IrohVmService {
     }
     
     /// Handle VM image operations
-    async fn handle_image_request(&self, request: VmImageRequest) -> BlixardResult<VmImageResponse> {
+    pub async fn handle_image_request(&self, request: VmImageRequest) -> BlixardResult<VmImageResponse> {
         match request {
             VmImageRequest::ShareImage { image_name, image_path, description, tags } => {
                 self.share_vm_image(image_name, image_path, description, tags).await

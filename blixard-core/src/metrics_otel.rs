@@ -854,7 +854,7 @@ pub fn record_vm_recovery_attempt(vm_name: &str, recovery_type: &str) {
     ];
     
     // Use existing VM operation metrics as proxy
-    metrics.vm_operation_total.add(1, attrs);
+    metrics.vm_create_total.add(1, attrs);
 }
 
 /// Record remediation action
@@ -867,5 +867,5 @@ pub fn record_remediation_action(issue_type: &str, action: &str) {
     
     // Use a general counter for remediation actions
     // In a real implementation, we'd add a specific metric for this
-    metrics.backup_operations_total.add(1, attrs);
+    metrics.grpc_requests_total.add(1, attrs);
 }

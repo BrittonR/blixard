@@ -63,7 +63,7 @@ impl SecureIrohVmService {
                 Ok(VmResponse::Operation(response))
             }
             VmRequest::Image(img) => {
-                let response = self.inner.handle_vm_image_request(img).await?;
+                let response = self.inner.handle_image_request(img).await?;
                 Ok(VmResponse::Image(response))
             }
         }
@@ -209,7 +209,7 @@ impl IrohService for SecureIrohVmService {
                         serialize_payload(&VmResponse::Operation(response))
                     }
                     VmRequest::Image(img) => {
-                        let response = self.inner.handle_vm_image_request(img).await?;
+                        let response = self.inner.handle_image_request(img).await?;
                         serialize_payload(&VmResponse::Image(response))
                     }
                 }

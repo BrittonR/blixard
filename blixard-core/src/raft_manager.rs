@@ -8,6 +8,7 @@ use slog::{Logger, o, info, warn, error, Drain};
 use redb::{Database, WriteTransaction, ReadableTable};
 use chrono::Utc;
 use serde::{Serialize, Deserialize};
+use base64::{Engine as _, engine::general_purpose};
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::storage::{RedbRaftStorage, SnapshotData, VM_STATE_TABLE, CLUSTER_STATE_TABLE, 
@@ -1199,13 +1200,7 @@ impl RaftManager {
                     
                     // Also ensure we have a connection to this peer
                     if let Some(peer_connector) = shared.get_peer_connector().await {
-                        let peer_info_clone = peer_info.clone();
-                        let connector = peer_connector.clone();
-                        tokio::spawn(async move {
-                            if let Err(e) = connector.connect_to_peer(&peer_info_clone).await {
-                                tracing::warn!("[RAFT-MSG] Failed to connect to message sender {}: {}", from, e);
-                            }
-                        });
+                        self.connect_to_peer_with_p2p(peer_connector, &peer_info).await;
                     }
                 }
             }
@@ -1456,15 +1451,9 @@ impl RaftManager {
                         // Proactively connect to the new peer
                         if let Some(peer_connector) = shared.get_peer_connector().await {
                             if let Some(peer_info) = shared.get_peer(conf_change.node_id).await {
-                                let connector = peer_connector.clone();
-                                let peer_info_clone = peer_info.clone();
-                                tokio::spawn(async move {
-                                    tracing::info!("[RAFT-CONF] Proactively connecting to new peer {} at {}", 
-                                        peer_info_clone.id, peer_info_clone.address);
-                                    if let Err(e) = connector.connect_to_peer(&peer_info_clone).await {
-                                        tracing::warn!("[RAFT-CONF] Failed to connect to new peer: {}", e);
-                                    }
-                                });
+                                tracing::info!("[RAFT-CONF] Proactively connecting to new peer {} at {}", 
+                                    peer_info.id, peer_info.address);
+                                self.connect_to_peer_with_p2p(peer_connector, &peer_info).await;
                             }
                         }
                     }
@@ -2026,15 +2015,9 @@ impl RaftManager {
                                                 // Proactively connect to the new peer
                                                 if let Some(peer_connector) = shared.get_peer_connector().await {
                                                     if let Some(peer_info) = shared.get_peer(cc.node_id).await {
-                                                        let connector = peer_connector.clone();
-                                                        let peer_info_clone = peer_info.clone();
-                                                        tokio::spawn(async move {
-                                                            tracing::info!("[RAFT-CONF] Proactively connecting to new peer {} at {}", 
-                                                                peer_info_clone.id, peer_info_clone.address);
-                                                            if let Err(e) = connector.connect_to_peer(&peer_info_clone).await {
-                                                                tracing::warn!("[RAFT-CONF] Failed to connect to new peer: {}", e);
-                                                            }
-                                                        });
+                                                        tracing::info!("[RAFT-CONF] Proactively connecting to new peer {} at {}", 
+                                                            peer_info.id, peer_info.address);
+                                                        self.connect_to_peer_with_p2p(peer_connector, &peer_info).await;
                                                     }
                                                 }
                                             }
@@ -2405,6 +2388,45 @@ impl RaftManager {
                 message: "Failed to send outgoing Raft message".to_string(),
             })?;
         Ok(())
+    }
+    
+    /// Helper function to connect to a peer using P2P info
+    async fn connect_to_peer_with_p2p(&self, peer_connector: Arc<crate::transport::iroh_peer_connector::IrohPeerConnector>, peer_info: &crate::node_shared::PeerInfo) {
+        // Try to create NodeAddr from PeerInfo
+        if let Some(p2p_node_id) = &peer_info.p2p_node_id {
+            // Parse the base64 encoded node ID
+            if let Ok(node_id_bytes) = general_purpose::STANDARD.decode(p2p_node_id) {
+                if node_id_bytes.len() == 32 {
+                    let mut bytes = [0u8; 32];
+                    bytes.copy_from_slice(&node_id_bytes);
+                    if let Ok(node_id) = iroh::NodeId::from_bytes(&bytes) {
+                        let mut node_addr = iroh::NodeAddr::new(node_id);
+                    
+                        // Add direct addresses
+                        for addr_str in &peer_info.p2p_addresses {
+                            if let Ok(addr) = addr_str.parse() {
+                                node_addr = node_addr.with_direct_addresses([addr]);
+                            }
+                        }
+                    
+                        // Add relay URL if available
+                        if let Some(relay_url) = &peer_info.p2p_relay_url {
+                            if let Ok(url) = relay_url.parse() {
+                                node_addr = node_addr.with_relay_url(url);
+                            }
+                        }
+                    
+                        let peer_id = peer_info.id;
+                        let peer_address = peer_info.address.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = peer_connector.connect_to_peer(peer_id, node_addr).await {
+                                tracing::warn!("[RAFT-MSG] Failed to connect to peer {} at {}: {}", peer_id, peer_address, e);
+                            }
+                        });
+                    }
+                }
+            }
+        }
     }
     
     /// Check if any followers need snapshots and trigger sending

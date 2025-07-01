@@ -18,6 +18,7 @@ use tracing::{debug, error, info, warn};
 use crate::error::{BlixardError, BlixardResult};
 
 /// Cedar authorization engine
+#[derive(Debug)]
 pub struct CedarAuthz {
     /// Cedar authorizer instance
     authorizer: Authorizer,
@@ -35,9 +36,9 @@ impl CedarAuthz {
         // Load schema
         let schema_str = tokio::fs::read_to_string(schema_path)
             .await
-            .map_err(|e| BlixardError::ConfigurationError {
-                message: format!("Failed to read Cedar schema: {}", e),
-            })?;
+            .map_err(|e| BlixardError::ConfigError(
+                format!("Failed to read Cedar schema: {}", e)
+            ))?;
 
         // In Cedar 3.x, schema loading is done differently
         // For now, we'll store the schema as an option and use basic validation
@@ -67,39 +68,39 @@ impl CedarAuthz {
         // Read all .cedar files in the directory
         let mut entries = tokio::fs::read_dir(policies_dir)
             .await
-            .map_err(|e| BlixardError::ConfigurationError {
-                message: format!("Failed to read policies directory: {}", e),
-            })?;
+            .map_err(|e| BlixardError::ConfigError(
+                format!("Failed to read policies directory: {}", e)
+            ))?;
 
         while let Some(entry) = entries
             .next_entry()
             .await
-            .map_err(|e| BlixardError::ConfigurationError {
-                message: format!("Failed to read directory entry: {}", e),
-            })?
+            .map_err(|e| BlixardError::ConfigError(
+                format!("Failed to read directory entry: {}", e)
+            ))?
         {
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) == Some("cedar") {
                 let policy_text = tokio::fs::read_to_string(&path)
                     .await
-                    .map_err(|e| BlixardError::ConfigurationError {
-                        message: format!("Failed to read policy file {:?}: {}", path, e),
-                    })?;
+                    .map_err(|e| BlixardError::ConfigError(
+                        format!("Failed to read policy file {:?}: {}", path, e)
+                    ))?;
 
                 // Parse policies from text
-                let parsed_policies = PolicySet::from_str(&policy_text).map_err(|e| {
-                    BlixardError::ConfigurationError {
-                        message: format!("Failed to parse policy file {:?}: {}", path, e),
-                    }
-                })?;
+                let parsed_policies = PolicySet::from_str(&policy_text).map_err(|e| 
+                    BlixardError::ConfigError(
+                        format!("Failed to parse policy file {:?}: {}", path, e)
+                    )
+                )?;
 
                 // Add policies to set
                 for policy in parsed_policies.policies() {
-                    policy_set.add(policy.clone()).map_err(|e| {
-                        BlixardError::ConfigurationError {
-                            message: format!("Failed to add policy: {}", e),
-                        }
-                    })?;
+                    policy_set.add(policy.clone()).map_err(|e| 
+                        BlixardError::ConfigError(
+                            format!("Failed to add policy: {}", e)
+                        )
+                    )?;
                 }
 
                 info!("Loaded Cedar policies from {:?}", path);
@@ -141,13 +142,20 @@ impl CedarAuthz {
         // Convert context to Cedar context
         let cedar_context = self.build_cedar_context(context)?;
 
+        // Get schema if available
+        let schema_guard = self.schema.read().await;
+        let schema_ref = schema_guard.as_ref();
+
         // Create authorization request with optional context
         let request = Request::new(
             Some(principal_uid),
             Some(action_uid),
             Some(resource_uid),
             cedar_context,
-        );
+            schema_ref,
+        ).map_err(|e| BlixardError::AuthorizationError {
+            message: format!("Failed to create authorization request: {}", e),
+        })?;
 
         // Get current policy set and entities
         let policy_set = self.policy_set.read().await;

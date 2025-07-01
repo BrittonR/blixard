@@ -125,11 +125,8 @@ impl Node {
         }
 
         // Initialize P2P manager if enabled OR if using Iroh transport
-        let using_iroh_transport = matches!(
-            self.shared.config.transport_config.as_ref().unwrap_or(&crate::transport::config::TransportConfig::default()),
-            crate::transport::config::TransportConfig::Iroh(_) | 
-            crate::transport::config::TransportConfig::Dual { .. }
-        );
+        // With the new transport config, we consider Iroh transport enabled if transport_config is present
+        let using_iroh_transport = self.shared.config.transport_config.is_some();
         
         if config.p2p.enabled || using_iroh_transport {
             tracing::info!("Initializing P2P manager (P2P enabled: {}, Iroh transport: {})", 
@@ -240,10 +237,29 @@ impl Node {
         
         // Create Iroh peer connector
         let peer_connector = Arc::new(IrohPeerConnector::new(
+            raft_transport.endpoint().as_ref().clone(),
             self.shared.clone(),
-            raft_transport.endpoint().clone(),
         ));
         self.shared.set_peer_connector(peer_connector.clone()).await;
+        
+        // Initialize discovery manager if we have discovery configured
+        // This is done after peer connector is set so auto-connect can work
+        if let Ok(discovery_config) = Self::create_discovery_config(&self.shared.config) {
+            // Check if we have any discovery methods enabled or static nodes configured
+            if discovery_config.enable_static || discovery_config.enable_dns || discovery_config.enable_mdns || !discovery_config.static_nodes.is_empty() {
+                tracing::info!("Initializing discovery manager (static={}, dns={}, mdns={}, static_nodes={})", 
+                    discovery_config.enable_static, discovery_config.enable_dns, discovery_config.enable_mdns, discovery_config.static_nodes.len());
+                let mut discovery_manager = crate::discovery::DiscoveryManager::new(discovery_config);
+                
+                // Start discovery process
+                if let Err(e) = discovery_manager.start().await {
+                    tracing::warn!("Failed to start discovery manager: {}", e);
+                }
+                
+                let discovery_arc = Arc::new(discovery_manager);
+                self.shared.set_discovery_manager(discovery_arc).await;
+            }
+        }
         
         // Start transport maintenance
         raft_transport.start_maintenance().await;
@@ -354,18 +370,8 @@ impl Node {
                             }
                             Err(e) => {
                                 tracing::error!("Failed to recreate Raft transport: {}", e);
-                                // Fall back to PeerConnector if available
-                                if let Some(peer_connector) = shared.get_peer_connector().await {
-                                    let peer_connector_clone = peer_connector.clone();
-                                    tokio::spawn(async move {
-                                        let mut outgoing_rx = outgoing_rx;
-                                        while let Some((to, msg)) = outgoing_rx.recv().await {
-                                            if let Err(e) = peer_connector_clone.send_raft_message(to, msg).await {
-                                                tracing::warn!("Failed to send Raft message to {}: {}", to, e);
-                                            }
-                                        }
-                                    });
-                                }
+                                // Without RaftTransport, we can't send Raft messages
+                                tracing::error!("No transport available for Raft messages - node cannot participate in consensus");
                             }
                         }
                         
@@ -404,7 +410,7 @@ impl Node {
             if let Some(peer) = self.shared.get_peer(1).await {
                 // For gRPC mode, use PeerConnector if available
                 if let Some(peer_connector) = self.shared.get_peer_connector().await {
-                    let _ = peer_connector.connect_to_peer(&peer).await;
+                    let _ = peer_connector.connect_to_peer_by_id(peer.id).await;
                     tracing::info!("Pre-connected to leader at {} before sending join request", join_addr);
                 }
                 // For Iroh mode, connection will be established when sending messages
@@ -427,8 +433,10 @@ impl Node {
     pub async fn send_join_request(&self) -> BlixardResult<()> {
         if let Some(join_addr) = &self.shared.config.join_addr {
             tracing::info!("Sending join request to {}", join_addr);
-            // Create gRPC client to join node
-            let endpoint = format!("http://{}", join_addr);
+            
+            // Discovery will be handled by the discovery manager if configured
+            // For now, we'll use the join address directly
+            
             // TODO: Implement Iroh client for join operation
             // For now, return error since Iroh transport is not fully implemented
             return Err(BlixardError::NotImplemented {
@@ -783,6 +791,45 @@ impl Node {
         // Create directory if it doesn't exist and return default
         let _ = std::fs::create_dir_all(data_dir);
         crate::config_global::get().cluster.worker.default_disk_gb
+    }
+    
+    /// Create discovery configuration from node config
+    fn create_discovery_config(config: &NodeConfig) -> BlixardResult<crate::discovery::DiscoveryConfig> {
+        let mut discovery_config = crate::discovery::DiscoveryConfig::default();
+        
+        // If we have a join address, add it as a static node
+        if let Some(join_addr) = &config.join_addr {
+            // Try to parse the join address to get the node ID
+            // For now, we'll use "bootstrap" as the key
+            discovery_config.static_nodes.insert(
+                "bootstrap".to_string(),
+                vec![join_addr.clone()],
+            );
+        }
+        
+        // Check environment for additional static nodes
+        if let Ok(static_nodes) = std::env::var("BLIXARD_STATIC_NODES") {
+            // Format: node1=addr1,node2=addr2
+            for entry in static_nodes.split(',') {
+                if let Some((node_id, addr)) = entry.split_once('=') {
+                    discovery_config.static_nodes.insert(
+                        node_id.trim().to_string(),
+                        vec![addr.trim().to_string()],
+                    );
+                }
+            }
+        }
+        
+        // Enable/disable discovery methods based on environment
+        if let Ok(enable_dns) = std::env::var("BLIXARD_ENABLE_DNS_DISCOVERY") {
+            discovery_config.enable_dns = enable_dns.to_lowercase() == "true";
+        }
+        
+        if let Ok(enable_mdns) = std::env::var("BLIXARD_ENABLE_MDNS_DISCOVERY") {
+            discovery_config.enable_mdns = enable_mdns.to_lowercase() == "true";
+        }
+        
+        Ok(discovery_config)
     }
     
     /// Initialize VM backend with custom registry (for applications to register backends)

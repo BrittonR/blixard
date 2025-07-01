@@ -1,5 +1,7 @@
 pub mod orchestrator;
 pub mod tui;
+pub mod node_discovery;
+pub mod discovery_manager;
 
 pub use orchestrator::BlixardOrchestrator;
 

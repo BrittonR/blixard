@@ -1,4 +1,5 @@
 //! Cross-region backup replication for disaster recovery
+use raft::Storage;
 //!
 //! This module provides functionality to replicate backups across multiple
 //! regions for disaster recovery and data durability.

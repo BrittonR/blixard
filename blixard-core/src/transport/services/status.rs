@@ -28,7 +28,7 @@ pub trait StatusService: Send + Sync {
 /// Status service implementation
 #[derive(Clone)]
 pub struct StatusServiceImpl {
-    node: Arc<SharedNodeState>,
+    pub node: Arc<SharedNodeState>,
 }
 
 impl StatusServiceImpl {
@@ -65,11 +65,11 @@ impl StatusService for StatusServiceImpl {
             let (address, state) = if node_id == self.node.get_id() {
                 // Self
                 let state = if raft_status.is_leader {
-                    NodeState::Leader
+                    NodeState::NodeStateLeader
                 } else if raft_status.state == "candidate" {
-                    NodeState::Candidate
+                    NodeState::NodeStateCandidate
                 } else {
-                    NodeState::Follower
+                    NodeState::NodeStateFollower
                 };
                 (self.node.get_bind_addr().to_string(), state)
             } else {
@@ -81,10 +81,10 @@ impl StatusService for StatusServiceImpl {
                     
                 // For peers, we can determine if they're the leader
                 let state = if Some(node_id) == raft_status.leader_id {
-                    NodeState::Leader
+                    NodeState::NodeStateLeader
                 } else {
                     // We don't have enough info to know if they're candidates or followers
-                    NodeState::Follower
+                    NodeState::NodeStateFollower
                 };
                 (peer_addr, state)
             };

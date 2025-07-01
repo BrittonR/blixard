@@ -597,6 +597,9 @@ impl VmBackend for MicrovmBackend {
                 tenant_id: "default".to_string(),  // TODO: Extract from VM config
                 metadata: None,
                 anti_affinity: None,
+                priority: 500,  // Default medium priority
+                preemptible: false,  // Default to non-preemptible
+                locality_preference: Default::default(),
             };
             
             // Get current status
@@ -627,6 +630,9 @@ impl VmBackend for MicrovmBackend {
                                 tenant_id: "default".to_string(),  // TODO: Extract from VM config
                                 metadata: None,
                                 anti_affinity: None,
+                                priority: 500,  // Default medium priority
+                                preemptible: false,  // Default to non-preemptible
+                                locality_preference: Default::default(),
                             };
                             
                             let status = self.get_vm_status(vm_name).await?

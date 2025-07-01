@@ -91,7 +91,7 @@ impl NodeIdentityRegistry {
 }
 
 /// Iroh middleware for authorization
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct IrohMiddleware {
     security_manager: Option<Arc<SecurityManager>>,
     quota_manager: Option<Arc<QuotaManager>>,
@@ -119,7 +119,10 @@ impl IrohMiddleware {
     
     /// Authenticate connection and get auth context
     pub async fn authenticate_connection(&self, connection: &Connection) -> BlixardResult<IrohAuthContext> {
-        let node_id = connection.remote_node_id();
+        let node_id = connection.remote_node_id()
+            .map_err(|e| BlixardError::Security {
+                message: format!("Failed to get remote node ID: {}", e),
+            })?;
         
         // Look up user identity from node ID
         if let Some((user_id, roles, tenant_id)) = self.identity_registry.get_user_identity(&node_id).await {
@@ -183,11 +186,10 @@ impl IrohMiddleware {
             
             // Add resource metadata if available from quota manager
             if let Some(ref quota_manager) = self.quota_manager {
-                if let Ok(usage) = quota_manager.get_tenant_usage(&auth_context.tenant_id).await {
-                    cedar_context.insert("current_vm_count".to_string(), serde_json::json!(usage.vm_count));
-                    cedar_context.insert("current_cpu_usage".to_string(), serde_json::json!(usage.cpu_usage));
-                    cedar_context.insert("current_memory_usage".to_string(), serde_json::json!(usage.memory_usage));
-                }
+                let usage = quota_manager.get_tenant_usage(&auth_context.tenant_id).await;
+                cedar_context.insert("current_vm_count".to_string(), serde_json::json!(usage.vm_usage.active_vms));
+                cedar_context.insert("current_cpu_usage".to_string(), serde_json::json!(usage.vm_usage.used_vcpus));
+                cedar_context.insert("current_memory_usage".to_string(), serde_json::json!(usage.vm_usage.used_memory_mb));
             }
             
             // Build resource EntityUid
@@ -212,7 +214,10 @@ impl IrohMiddleware {
         resource_request: &crate::resource_quotas::ResourceRequest,
     ) -> BlixardResult<()> {
         if let Some(ref quota_manager) = self.quota_manager {
-            quota_manager.check_resource_quota(resource_request).await?;
+            quota_manager.check_resource_quota(resource_request).await
+                .map_err(|e| BlixardError::Internal {
+                    message: format!("Quota check failed: {}", e),
+                })?;
         }
         Ok(())
     }

@@ -44,7 +44,7 @@ impl RaftTransport {
         
         Ok(RaftTransport {
             iroh: iroh_transport,
-            endpoint,
+            endpoint: Arc::new(endpoint),
         })
     }
     

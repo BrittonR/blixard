@@ -228,12 +228,13 @@ async fn reload_config(
         config.vm.scheduler.rebalance_interval = new_config.vm.scheduler.rebalance_interval;
         config.vm.scheduler.overcommit_ratio = new_config.vm.scheduler.overcommit_ratio;
         config.cluster.peer.connection_timeout = new_config.cluster.peer.connection_timeout;
-        config.cluster.peer.retry_interval = new_config.cluster.peer.retry_interval;
-        config.cluster.peer.max_retries = new_config.cluster.peer.max_retries;
-        config.storage.compaction_interval = new_config.storage.compaction_interval;
-        config.storage.snapshot_interval = new_config.storage.snapshot_interval;
-        config.vm.health_check.interval = new_config.vm.health_check.interval;
-        config.vm.health_check.timeout = new_config.vm.health_check.timeout;
+        // TODO: These fields don't exist in the current config structure
+        // config.cluster.peer.retry_interval = new_config.cluster.peer.retry_interval;
+        // config.cluster.peer.max_retries = new_config.cluster.peer.max_retries;
+        // config.storage.compaction_interval = new_config.storage.compaction_interval;
+        // config.storage.snapshot_interval = new_config.storage.snapshot_interval;
+        // config.vm.health_check.interval = new_config.vm.health_check.interval;
+        // config.vm.health_check.timeout = new_config.vm.health_check.timeout;
         
         // Notify watchers
         let reloadable = ReloadableConfig::from(&*config);

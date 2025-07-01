@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::{mpsc, RwLock};
 use tokio::time;
+use raft::Storage;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};

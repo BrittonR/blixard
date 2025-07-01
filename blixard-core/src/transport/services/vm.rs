@@ -145,12 +145,12 @@ impl VmServiceImpl {
     /// Convert internal VM status to proto
     fn vm_status_to_proto(status: &InternalVmStatus) -> VmState {
         match status {
-            InternalVmStatus::Creating => VmState::Created,
-            InternalVmStatus::Starting => VmState::Starting,
-            InternalVmStatus::Running => VmState::Running,
-            InternalVmStatus::Stopping => VmState::Stopping,
-            InternalVmStatus::Stopped => VmState::Stopped,
-            InternalVmStatus::Failed => VmState::Failed,
+            InternalVmStatus::Creating => VmState::VmStateCreated,
+            InternalVmStatus::Starting => VmState::VmStateStarting,
+            InternalVmStatus::Running => VmState::VmStateRunning,
+            InternalVmStatus::Stopping => VmState::VmStateStopping,
+            InternalVmStatus::Stopped => VmState::VmStateStopped,
+            InternalVmStatus::Failed => VmState::VmStateFailed,
         }
     }
 }

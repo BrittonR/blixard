@@ -7,7 +7,7 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::node_shared::SharedNodeState;
 use crate::transport::iroh_cluster_service::{ClusterOperations, Task, TaskRequest, TaskStatus};
 use crate::iroh_types::{NodeInfo, NodeState};
-use crate::raft_manager::{RaftConfChange, ConfChangeType};
+use crate::raft_manager::ConfChangeType;
 use async_trait::async_trait;
 use std::sync::Arc;
 use std::net::SocketAddr;
@@ -35,16 +35,10 @@ impl ClusterOperations for ClusterOperationsAdapter {
         })?;
         
         // Add peer to our peer list
-        self.shared_state.add_peer(node_id, addr).await;
+        self.shared_state.add_peer(node_id, addr.to_string()).await;
         
         // Propose configuration change through Raft
-        let conf_change = RaftConfChange {
-            change_type: ConfChangeType::AddNode,
-            node_id,
-            node_addr: Some(addr),
-        };
-        
-        match self.shared_state.propose_conf_change(conf_change).await {
+        match self.shared_state.propose_conf_change(ConfChangeType::AddNode, node_id, addr.to_string()).await {
             Ok(_) => {
                 info!("Node {} successfully joined cluster", node_id);
                 
@@ -52,11 +46,21 @@ impl ClusterOperations for ClusterOperationsAdapter {
                 let peers = self.shared_state.get_peers().await;
                 let status = self.shared_state.get_raft_status().await?;
                 
+                // Convert PeerInfo to NodeInfo
+                let node_infos: Vec<NodeInfo> = peers.iter().map(|p| NodeInfo {
+                    id: p.id,
+                    address: p.address.clone(),
+                    state: 0, // NodeStateUnknown
+                    p2p_node_id: p.p2p_node_id.clone().unwrap_or_default(),
+                    p2p_addresses: p.p2p_addresses.clone(),
+                    p2p_relay_url: p.p2p_relay_url.clone().unwrap_or_default(),
+                }).collect();
+                
                 // Get voters from Raft configuration
                 // For now, we'll return all peer IDs as voters
                 let voters: Vec<u64> = peers.iter().map(|p| p.id).collect();
                 
-                Ok((true, "Successfully joined cluster".to_string(), peers, voters))
+                Ok((true, "Successfully joined cluster".to_string(), node_infos, voters))
             }
             Err(e) => {
                 error!("Failed to join cluster: {}", e);
@@ -69,13 +73,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
         debug!("Leave cluster request for node {}", node_id);
         
         // Propose configuration change through Raft
-        let conf_change = RaftConfChange {
-            change_type: ConfChangeType::RemoveNode,
-            node_id,
-            node_addr: None,
-        };
-        
-        match self.shared_state.propose_conf_change(conf_change).await {
+        match self.shared_state.propose_conf_change(ConfChangeType::RemoveNode, node_id, String::new()).await {
             Ok(_) => {
                 info!("Node {} successfully left cluster", node_id);
                 
@@ -97,22 +95,26 @@ impl ClusterOperations for ClusterOperationsAdapter {
         // Get Raft status
         let raft_status = self.shared_state.get_raft_status().await?;
         
-        // Get all peers
-        let mut nodes = self.shared_state.get_peers().await;
+        // Get all peers and convert to NodeInfo
+        let peers = self.shared_state.get_peers().await;
+        let mut nodes: Vec<NodeInfo> = peers.iter().map(|p| NodeInfo {
+            id: p.id,
+            address: p.address.clone(),
+            state: 0, // NodeStateUnknown
+            p2p_node_id: p.p2p_node_id.clone().unwrap_or_default(),
+            p2p_addresses: p.p2p_addresses.clone(),
+            p2p_relay_url: p.p2p_relay_url.clone().unwrap_or_default(),
+        }).collect();
         
         // Add ourselves to the list
         let config = &self.shared_state.config;
         let self_info = NodeInfo {
             id: config.id,
-            address: config.bind_address.to_string(),
-            state: if raft_status.is_leader {
-                NodeState::Leader
-            } else {
-                NodeState::Follower
-            },
+            address: config.bind_addr.to_string(),
+            state: if raft_status.is_leader { 3 } else { 1 }, // Leader = 3, Follower = 1
             p2p_node_id: String::new(), // TODO: Get from P2P manager
             p2p_addresses: vec![],
-            p2p_relay_url: None,
+            p2p_relay_url: String::new(),
         };
         nodes.push(self_info);
         
@@ -166,9 +168,9 @@ impl ClusterOperations for ClusterOperationsAdapter {
                 };
                 
                 let (output, error, execution_time_ms) = if let Some(result) = result {
-                    let output = result.output.unwrap_or_default();
+                    let output = result.output.clone();
                     let error = result.error.unwrap_or_default();
-                    let execution_time_ms = result.end_time.saturating_sub(result.start_time);
+                    let execution_time_ms = result.execution_time_ms;
                     (output, error, execution_time_ms)
                 } else {
                     (String::new(), String::new(), 0)

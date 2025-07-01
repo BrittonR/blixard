@@ -231,6 +231,7 @@ impl IrohClusterService {
 }
 
 
+#[async_trait]
 impl IrohService for IrohClusterService {
     fn name(&self) -> &'static str {
         "cluster"

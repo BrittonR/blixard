@@ -9,7 +9,6 @@ use crate::vm_backend::VmManager;
 use crate::raft_manager::{RaftProposal, TaskSpec, TaskResult, RaftConfChange, ConfChangeType};
 use crate::transport::{
     iroh_vm_service::{VmRequest, VmResponse},
-    services::vm::{VmOperationRequest, VmOperationResponse},
 };
 
 /// # State Management in Blixard
@@ -138,6 +137,9 @@ pub struct SharedNodeState {
     
     // Our own P2P node address for sharing with peers
     p2p_node_addr: RwLock<Option<iroh::NodeAddr>>,
+    
+    // Discovery manager for automatic peer discovery (optional dependency)
+    discovery_manager: RwLock<Option<Arc<dyn std::any::Any + Send + Sync>>>,
 }
 
 /// Thread-safe wrapper for VM manager operations
@@ -172,6 +174,7 @@ impl SharedNodeState {
             peer_connector: RwLock::new(None),
             p2p_manager: RwLock::new(None),
             p2p_node_addr: RwLock::new(None),
+            discovery_manager: RwLock::new(None),
         }
     }
     
@@ -325,6 +328,17 @@ impl SharedNodeState {
         self.p2p_node_addr.read().await.clone()
     }
     
+    /// Set the discovery manager (using Any to avoid circular dependencies)
+    pub async fn set_discovery_manager<T: 'static + Send + Sync>(&self, manager: Arc<T>) {
+        *self.discovery_manager.write().await = Some(manager);
+    }
+    
+    /// Get the discovery manager as a specific type
+    pub async fn get_discovery_manager<T: 'static + Send + Sync>(&self) -> Option<Arc<T>> {
+        self.discovery_manager.read().await.as_ref()
+            .and_then(|any| any.clone().downcast::<T>().ok())
+    }
+    
     /// Get the Iroh endpoint for Raft transport
     pub async fn get_iroh_endpoint(&self) -> BlixardResult<(iroh::Endpoint, iroh::NodeId)> {
         // Get the P2P manager
@@ -446,7 +460,6 @@ impl SharedNodeState {
                     ))?;
                 
                 // Forward the request to the leader using Iroh
-                use crate::transport::services::vm::{VmOperationRequest, VmOperationResponse};
                 
                 // Get the peer connector
                 let peer_connector = self.get_peer_connector().await
@@ -463,39 +476,23 @@ impl SharedNodeState {
                 };
                 
                 // Connect to leader
-                let iroh_client = peer_connector.connect_to_peer(leader_id).await
+                let iroh_client = peer_connector.connect_to_peer_by_id(leader_id).await
                     .map_err(|e| BlixardError::Internal {
                         message: format!("Failed to connect to leader: {}", e),
                     })?;
                 
-                // Create the request
-                let request = VmRequest::Operation(VmOperationRequest::Create {
-                    name: vm_config.name.clone(),
-                    config_path: vm_config.config_path.clone(),
-                    vcpus: vm_config.vcpus,
-                    memory_mb: vm_config.memory,
-                });
+                // Make the RPC call using IrohClient's create_vm method
+                let response = iroh_client.create_vm(
+                    vm_config.name.clone(),
+                    vm_config.config_path.clone(),
+                    vm_config.vcpus,
+                    vm_config.memory,
+                ).await?;
                 
-                // Make the RPC call
-                let response: VmResponse = iroh_client.rpc_client()
-                    .call(iroh_client.node_addr().clone(), "vm", "create_vm", request)
-                    .await
-                    .map_err(|e| BlixardError::Internal {
-                        message: format!("Failed to forward VM creation to leader: {}", e),
-                    })?;
-                
-                // Handle response
-                match response {
-                    VmResponse::Operation(VmOperationResponse::Create { success, message, .. }) => {
-                        if success {
-                            Ok(())
-                        } else {
-                            Err(BlixardError::ClusterError(message))
-                        }
-                    }
-                    _ => Err(BlixardError::Internal {
-                        message: "Unexpected response type".to_string(),
-                    }),
+                if response.success {
+                    Ok(())
+                } else {
+                    Err(BlixardError::ClusterError(response.message))
                 }
             } else {
                 Err(BlixardError::ClusterError("No leader elected yet".to_string()))
@@ -662,7 +659,6 @@ impl SharedNodeState {
                     ))?;
                 
                 // Forward the request to the leader based on command type using Iroh
-                use crate::transport::services::vm::{VmOperationRequest, VmOperationResponse};
                 
                 // Get the peer connector
                 let peer_connector = self.get_peer_connector().await
@@ -671,60 +667,28 @@ impl SharedNodeState {
                     })?;
                 
                 // Connect to leader
-                let iroh_client = peer_connector.connect_to_peer(leader_id).await
+                let iroh_client = peer_connector.connect_to_peer_by_id(leader_id).await
                     .map_err(|e| BlixardError::Internal {
                         message: format!("Failed to connect to leader: {}", e),
                     })?;
                 
                 match &command {
                     VmCommand::Start { name } => {
-                        let request = VmRequest::Operation(VmOperationRequest::Start {
-                            name: name.clone(),
-                        });
+                        let response = iroh_client.start_vm(name.clone()).await?;
                         
-                        let response: VmResponse = iroh_client.rpc_client()
-                            .call(iroh_client.node_addr().clone(), "vm", "start_vm", request)
-                            .await
-                            .map_err(|e| BlixardError::Internal {
-                                message: format!("Failed to forward VM start to leader: {}", e),
-                            })?;
-                        
-                        match response {
-                            VmResponse::Operation(VmOperationResponse::Start { success, message }) => {
-                                if success {
-                                    Ok(())
-                                } else {
-                                    Err(BlixardError::ClusterError(message))
-                                }
-                            }
-                            _ => Err(BlixardError::Internal {
-                                message: "Unexpected response type".to_string(),
-                            }),
+                        if response.success {
+                            Ok(())
+                        } else {
+                            Err(BlixardError::ClusterError(response.message))
                         }
                     }
                     VmCommand::Stop { name } => {
-                        let request = VmRequest::Operation(VmOperationRequest::Stop {
-                            name: name.clone(),
-                        });
+                        let response = iroh_client.stop_vm(name.clone()).await?;
                         
-                        let response: VmResponse = iroh_client.rpc_client()
-                            .call(iroh_client.node_addr().clone(), "vm", "stop_vm", request)
-                            .await
-                            .map_err(|e| BlixardError::Internal {
-                                message: format!("Failed to forward VM stop to leader: {}", e),
-                            })?;
-                        
-                        match response {
-                            VmResponse::Operation(VmOperationResponse::Stop { success, message }) => {
-                                if success {
-                                    Ok(())
-                                } else {
-                                    Err(BlixardError::ClusterError(message))
-                                }
-                            }
-                            _ => Err(BlixardError::Internal {
-                                message: "Unexpected response type".to_string(),
-                            }),
+                        if response.success {
+                            Ok(())
+                        } else {
+                            Err(BlixardError::ClusterError(response.message))
                         }
                     }
                     _ => Err(BlixardError::Internal {
@@ -813,7 +777,7 @@ impl SharedNodeState {
                     })?;
                 
                 // Connect to leader
-                let iroh_client = peer_connector.connect_to_peer(leader_id).await
+                let iroh_client = peer_connector.connect_to_peer_by_id(leader_id).await
                     .map_err(|e| BlixardError::Internal {
                         message: format!("Failed to connect to leader: {}", e),
                     })?;
