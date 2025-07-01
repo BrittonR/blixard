@@ -86,6 +86,8 @@ pub enum ServiceType {
     Scheduling,
     Migration,
     Raft,
+    Cluster,
+    Task,
 }
 
 /// Raft transport preference

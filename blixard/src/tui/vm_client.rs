@@ -1,15 +1,13 @@
-use crate::BlixardResult;
+use crate::{BlixardResult, client::{UnifiedClient, get_transport_config}};
 use super::app::{VmInfo, PlacementStrategy, ClusterInfo, ClusterResourceInfo, NodeResourceInfo, ClusterNodeInfo};
 use blixard_core::{
     proto::{
-        cluster_service_client::ClusterServiceClient,
         CreateVmRequest, CreateVmWithSchedulingRequest, StartVmRequest, StopVmRequest, DeleteVmRequest, 
         GetVmStatusRequest, ListVmsRequest, ClusterStatusRequest, ClusterResourceSummaryRequest,
         ScheduleVmPlacementRequest,
     },
     types::VmStatus,
 };
-use tonic::transport::Channel;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -43,7 +41,7 @@ impl Default for RetryConfig {
 
 /// VM client for TUI operations with retry support
 pub struct VmClient {
-    client: ClusterServiceClient<Channel>,
+    client: UnifiedClient,
     retry_config: RetryConfig,
 }
 
@@ -53,12 +51,12 @@ impl VmClient {
     }
     
     pub async fn new_with_config(addr: &str, retry_config: RetryConfig) -> BlixardResult<Self> {
-        let endpoint = format!("http://{}", addr);
+        let transport_config = get_transport_config();
         
         // Try to connect with retries
         let client = Self::retry_operation(
             || async {
-                ClusterServiceClient::connect(endpoint.clone())
+                UnifiedClient::new(addr, transport_config.as_ref())
                     .await
                     .map_err(|e| crate::BlixardError::Internal {
                         message: format!("Failed to connect to blixard node: {}", e),
@@ -128,13 +126,11 @@ impl VmClient {
     }
 
     pub async fn list_vms(&mut self) -> BlixardResult<Vec<VmInfo>> {
-        let request = tonic::Request::new(ListVmsRequest {});
-        let response = self.client.list_vms(request).await
+        let request = ListVmsRequest {};
+        let resp = self.client.list_vms(request).await
             .map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to list VMs: {}", e),
             })?;
-
-        let resp = response.into_inner();
         let mut vms = Vec::new();
 
         for vm in resp.vms {
@@ -169,19 +165,18 @@ impl VmClient {
     }
 
     pub async fn create_vm(&mut self, name: &str, vcpus: u32, memory: u32) -> BlixardResult<()> {
-        let request = tonic::Request::new(CreateVmRequest {
+        let request = CreateVmRequest {
             name: name.to_string(),
             config_path: String::new(),
             vcpus,
             memory_mb: memory,
-        });
+        };
 
-        let response = self.client.create_vm(request).await
+        let resp = self.client.create_vm(request).await
             .map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to create VM: {}", e),
             })?;
 
-        let resp = response.into_inner();
         if !resp.success {
             return Err(crate::BlixardError::Internal {
                 message: format!("VM creation failed: {}", resp.message),
@@ -192,16 +187,15 @@ impl VmClient {
     }
 
     pub async fn start_vm(&mut self, name: &str) -> BlixardResult<()> {
-        let request = tonic::Request::new(StartVmRequest {
+        let request = StartVmRequest {
             name: name.to_string(),
-        });
+        };
 
-        let response = self.client.start_vm(request).await
+        let resp = self.client.start_vm(request).await
             .map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to start VM: {}", e),
             })?;
 
-        let resp = response.into_inner();
         if !resp.success {
             return Err(crate::BlixardError::Internal {
                 message: format!("VM start failed: {}", resp.message),
@@ -212,16 +206,15 @@ impl VmClient {
     }
 
     pub async fn stop_vm(&mut self, name: &str) -> BlixardResult<()> {
-        let request = tonic::Request::new(StopVmRequest {
+        let request = StopVmRequest {
             name: name.to_string(),
-        });
+        };
 
-        let response = self.client.stop_vm(request).await
+        let resp = self.client.stop_vm(request).await
             .map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to stop VM: {}", e),
             })?;
 
-        let resp = response.into_inner();
         if !resp.success {
             return Err(crate::BlixardError::Internal {
                 message: format!("VM stop failed: {}", resp.message),
@@ -232,16 +225,15 @@ impl VmClient {
     }
 
     pub async fn delete_vm(&mut self, name: &str) -> BlixardResult<()> {
-        let request = tonic::Request::new(DeleteVmRequest {
+        let request = DeleteVmRequest {
             name: name.to_string(),
-        });
+        };
 
-        let response = self.client.delete_vm(request).await
+        let resp = self.client.delete_vm(request).await
             .map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to delete VM: {}", e),
             })?;
 
-        let resp = response.into_inner();
         if !resp.success {
             return Err(crate::BlixardError::Internal {
                 message: format!("VM deletion failed: {}", resp.message),
@@ -253,16 +245,15 @@ impl VmClient {
 
     #[allow(dead_code)]
     pub async fn get_vm_status(&mut self, name: &str) -> BlixardResult<Option<VmInfo>> {
-        let request = tonic::Request::new(GetVmStatusRequest {
+        let request = GetVmStatusRequest {
             name: name.to_string(),
-        });
+        };
 
-        let response = self.client.get_vm_status(request).await
+        let resp = self.client.get_vm_status(request).await
             .map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to get VM status: {}", e),
             })?;
 
-        let resp = response.into_inner();
         if !resp.found {
             return Ok(None);
         }
@@ -296,14 +287,12 @@ impl VmClient {
     }
 
     pub async fn get_cluster_status(&mut self) -> BlixardResult<ClusterInfo> {
-        let request = tonic::Request::new(ClusterStatusRequest {});
+        let request = ClusterStatusRequest {};
         
-        let response = self.client.get_cluster_status(request).await
+        let status = self.client.get_cluster_status(request).await
             .map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to get cluster status: {}", e),
             })?;
-            
-        let status = response.into_inner();
         
         // Map all nodes with detailed info
         let nodes: Vec<ClusterNodeInfo> = status.nodes
@@ -358,20 +347,19 @@ impl VmClient {
             PlacementStrategy::Manual => 3, // PLACEMENT_STRATEGY_MANUAL
         };
         
-        let request = tonic::Request::new(CreateVmWithSchedulingRequest {
+        let request = CreateVmWithSchedulingRequest {
             name: name.to_string(),
             config_path: String::new(),
             vcpus,
             memory_mb: memory,
             strategy: strategy_proto,
-        });
+        };
 
-        let response = self.client.create_vm_with_scheduling(request).await
+        let resp = self.client.create_vm_with_scheduling(request).await
             .map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to create VM with scheduling: {}", e),
             })?;
 
-        let resp = response.into_inner();
         if !resp.success {
             return Err(crate::BlixardError::Internal {
                 message: format!("VM creation with scheduling failed: {}", resp.message),
@@ -384,14 +372,13 @@ impl VmClient {
     /// Get cluster resource summary
     #[allow(dead_code)]
     pub async fn get_cluster_resources(&mut self) -> BlixardResult<ClusterResourceInfo> {
-        let request = tonic::Request::new(ClusterResourceSummaryRequest {});
+        let request = ClusterResourceSummaryRequest {};
         
-        let response = self.client.get_cluster_resource_summary(request).await
+        let resp = self.client.get_cluster_resource_summary(request).await
             .map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to get cluster resources: {}", e),
             })?;
             
-        let resp = response.into_inner();
         if !resp.success {
             return Err(crate::BlixardError::Internal {
                 message: format!("Failed to get cluster resources: {}", resp.message),
@@ -449,20 +436,19 @@ impl VmClient {
             PlacementStrategy::Manual => 3,
         };
         
-        let request = tonic::Request::new(ScheduleVmPlacementRequest {
+        let request = ScheduleVmPlacementRequest {
             name: name.to_string(),
             config_path: String::new(),
             vcpus,
             memory_mb: memory,
             strategy: strategy_proto,
-        });
+        };
         
-        let response = self.client.schedule_vm_placement(request).await
+        let resp = self.client.schedule_vm_placement(request).await
             .map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to schedule VM placement: {}", e),
             })?;
             
-        let resp = response.into_inner();
         if !resp.success {
             return Err(crate::BlixardError::Internal {
                 message: format!("VM placement scheduling failed: {}", resp.message),
@@ -476,17 +462,16 @@ impl VmClient {
     pub async fn join_cluster(&mut self, node_id: u64, bind_address: &str) -> BlixardResult<String> {
         use blixard_core::proto::JoinRequest;
         
-        let request = tonic::Request::new(JoinRequest {
+        let request = JoinRequest {
             node_id,
             bind_address: bind_address.to_string(),
-        });
+        };
         
-        let response = self.client.join_cluster(request).await
+        let resp = self.client.join_cluster(request).await
             .map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to join cluster: {}", e),
             })?;
             
-        let resp = response.into_inner();
         if !resp.success {
             return Err(crate::BlixardError::Internal {
                 message: format!("Join cluster failed: {}", resp.message),
@@ -505,19 +490,18 @@ impl VmClient {
     ) -> BlixardResult<(u64, u64, String)> {
         use blixard_core::proto::MigrateVmRequest;
         
-        let request = tonic::Request::new(MigrateVmRequest {
+        let request = MigrateVmRequest {
             vm_name: vm_name.to_string(),
             target_node_id,
             live_migration,
             force: false,
-        });
+        };
         
-        let response = self.client.migrate_vm(request).await
+        let resp = self.client.migrate_vm(request).await
             .map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to migrate VM: {}", e),
             })?;
         
-        let resp = response.into_inner();
         if !resp.success {
             return Err(crate::BlixardError::Internal {
                 message: format!("VM migration failed: {}", resp.message),

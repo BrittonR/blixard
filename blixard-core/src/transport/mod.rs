@@ -18,6 +18,9 @@ pub mod iroh_status_service;
 pub mod iroh_vm_service;
 pub mod iroh_raft_transport;
 pub mod raft_transport_adapter;
+pub mod iroh_cluster_service;
+pub mod cluster_operations_adapter;
+pub mod iroh_client;
 
 // Iroh security modules
 pub mod iroh_middleware;
@@ -30,6 +33,9 @@ mod tests;
 use crate::error::{BlixardError, BlixardResult};
 use std::net::SocketAddr;
 use tonic::transport::Channel;
+
+/// ALPN protocol identifier for Blixard RPC
+pub const BLIXARD_ALPN: &[u8] = b"blixard/rpc/1";
 
 /// Transport types supported by Blixard
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

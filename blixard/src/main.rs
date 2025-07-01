@@ -9,9 +9,11 @@ use blixard::orchestrator::OrchestratorConfig;
 use blixard_core::config_v2::{Config, ConfigBuilder};
 
 mod tui;
+mod client;
+mod node_discovery;
 
 #[cfg(not(madsim))]
-use blixard_core::grpc_server::start_grpc_server;
+use blixard_core::transport::dual_service_runner::DualServiceRunner;
 
 #[derive(Parser)]
 #[command(name = "blixard")]
@@ -411,13 +413,33 @@ async fn main() -> BlixardResult<()> {
                             let shared_state = orchestrator.node().shared();
                             let actual_bind_address = orchestrator.bind_address();
                             
-                            // Keep orchestrator alive while running gRPC server
+                            // Keep orchestrator alive while running server
                             let _orchestrator = orchestrator;
                             
-                            // Start gRPC server (runs indefinitely)
-                            match start_grpc_server(shared_state, actual_bind_address).await {
-                                Ok(()) => tracing::info!("gRPC server shut down gracefully"),
-                                Err(e) => tracing::error!("gRPC server error: {}", e),
+                            // Start dual service runner (supports both gRPC and Iroh)
+                            let transport_config = config.transport.clone()
+                                .unwrap_or_else(|| blixard_core::transport::config::TransportConfig::default());
+                            
+                            // Get Iroh endpoint if using Iroh transport
+                            let iroh_endpoint = if matches!(&transport_config, 
+                                blixard_core::transport::config::TransportConfig::Iroh(_) |
+                                blixard_core::transport::config::TransportConfig::Dual { .. }) {
+                                shared_state.get_p2p_manager().await
+                                    .and_then(|p2p| p2p.endpoint().ok())
+                            } else {
+                                None
+                            };
+                            
+                            let runner = DualServiceRunner::new(
+                                shared_state,
+                                transport_config,
+                                actual_bind_address,
+                                iroh_endpoint,
+                            );
+                            
+                            match runner.serve_non_critical_services().await {
+                                Ok(()) => tracing::info!("Services shut down gracefully"),
+                                Err(e) => tracing::error!("Service error: {}", e),
                             }
                         }
                         pid => {
@@ -439,13 +461,33 @@ async fn main() -> BlixardResult<()> {
                     let shared_state = orchestrator.node().shared();
                     let actual_bind_address = orchestrator.bind_address();
                     
-                    // Keep orchestrator alive while running gRPC server
+                    // Keep orchestrator alive while running server
                     let _orchestrator = orchestrator;
                     
-                    // Start gRPC server
-                    match start_grpc_server(shared_state, actual_bind_address).await {
-                        Ok(()) => tracing::info!("gRPC server shut down gracefully"),
-                        Err(e) => tracing::error!("gRPC server error: {}", e),
+                    // Start dual service runner (supports both gRPC and Iroh)
+                    let transport_config = config.transport.clone()
+                        .unwrap_or_else(|| blixard_core::transport::config::TransportConfig::default());
+                    
+                    // Get Iroh endpoint if using Iroh transport
+                    let iroh_endpoint = if matches!(&transport_config, 
+                        blixard_core::transport::config::TransportConfig::Iroh(_) |
+                        blixard_core::transport::config::TransportConfig::Dual { .. }) {
+                        shared_state.get_p2p_manager().await
+                            .and_then(|p2p| p2p.endpoint().ok())
+                    } else {
+                        None
+                    };
+                    
+                    let runner = DualServiceRunner::new(
+                        shared_state,
+                        transport_config,
+                        actual_bind_address,
+                        iroh_endpoint,
+                    );
+                    
+                    match runner.serve_non_critical_services().await {
+                        Ok(()) => tracing::info!("Services shut down gracefully"),
+                        Err(e) => tracing::error!("Service error: {}", e),
                     }
                 }
             }
@@ -556,15 +598,18 @@ async fn handle_vm_logs(vm_name: &str, follow: bool, lines: u32) -> BlixardResul
 #[cfg(not(madsim))]
 async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
     use blixard_core::proto::{
-        cluster_service_client::ClusterServiceClient,
         CreateVmRequest, StartVmRequest, StopVmRequest, DeleteVmRequest, GetVmStatusRequest, ListVmsRequest,
     };
+    use crate::client::{UnifiedClient, get_transport_config};
     
     // Default to connecting to local node
     let local_addr = "127.0.0.1:7001";
     
-    // Connect to the local node
-    let mut client = ClusterServiceClient::connect(format!("http://{}", local_addr))
+    // Get transport configuration
+    let transport_config = get_transport_config();
+    
+    // Connect to the local node using unified client
+    let mut client = UnifiedClient::new(local_addr, transport_config.as_ref())
         .await
         .map_err(|e| BlixardError::Internal { 
             message: format!("Failed to connect to local node at {}: {}", local_addr, e)
@@ -572,16 +617,15 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
     
     match command {
         VmCommands::Create { name, vcpus, memory, config_path } => {
-            let request = tonic::Request::new(CreateVmRequest {
+            let request = CreateVmRequest {
                 name: name.clone(),
                 config_path,
                 vcpus,
                 memory_mb: memory,
-            });
+            };
             
             match client.create_vm(request).await {
-                Ok(response) => {
-                    let resp = response.into_inner();
+                Ok(resp) => {
                     if resp.success {
                         println!("Successfully created VM '{}'", name);
                         println!("VM ID: {}", resp.vm_id);
@@ -598,13 +642,12 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
             }
         }
         VmCommands::Start { name } => {
-            let request = tonic::Request::new(StartVmRequest {
+            let request = StartVmRequest {
                 name: name.clone(),
-            });
+            };
             
             match client.start_vm(request).await {
-                Ok(response) => {
-                    let resp = response.into_inner();
+                Ok(resp) => {
                     if resp.success {
                         println!("Successfully started VM '{}'", name);
                         println!("Message: {}", resp.message);
@@ -620,13 +663,12 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
             }
         }
         VmCommands::Stop { name } => {
-            let request = tonic::Request::new(StopVmRequest {
+            let request = StopVmRequest {
                 name: name.clone(),
-            });
+            };
             
             match client.stop_vm(request).await {
-                Ok(response) => {
-                    let resp = response.into_inner();
+                Ok(resp) => {
                     if resp.success {
                         println!("Successfully stopped VM '{}'", name);
                         println!("Message: {}", resp.message);
@@ -642,13 +684,12 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
             }
         }
         VmCommands::Delete { name } => {
-            let request = tonic::Request::new(DeleteVmRequest {
+            let request = DeleteVmRequest {
                 name: name.clone(),
-            });
+            };
             
             match client.delete_vm(request).await {
-                Ok(response) => {
-                    let resp = response.into_inner();
+                Ok(resp) => {
                     if resp.success {
                         println!("Successfully deleted VM '{}'", name);
                         println!("Message: {}", resp.message);
@@ -664,13 +705,12 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
             }
         }
         VmCommands::Status { name } => {
-            let request = tonic::Request::new(GetVmStatusRequest {
+            let request = GetVmStatusRequest {
                 name: name.clone(),
-            });
+            };
             
             match client.get_vm_status(request).await {
-                Ok(response) => {
-                    let resp = response.into_inner();
+                Ok(resp) => {
                     if resp.found {
                         let vm = resp.vm_info.unwrap();
                         println!("VM '{}' Status:", name);
@@ -696,11 +736,10 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
             }
         }
         VmCommands::List => {
-            let request = tonic::Request::new(ListVmsRequest {});
+            let request = ListVmsRequest {};
             
             match client.list_vms(request).await {
-                Ok(response) => {
-                    let resp = response.into_inner();
+                Ok(resp) => {
                     if resp.vms.is_empty() {
                         println!("No VMs found");
                     } else {
@@ -753,14 +792,17 @@ async fn handle_vm_command(_command: VmCommands) -> BlixardResult<()> {
 #[cfg(not(madsim))]
 async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
     use blixard_core::proto::{
-        cluster_service_client::ClusterServiceClient,
         JoinRequest, LeaveRequest, ClusterStatusRequest,
     };
+    use crate::client::{UnifiedClient, get_transport_config};
     
     match command {
         ClusterCommands::Join { peer, local_addr } => {
+            // Get transport configuration
+            let transport_config = get_transport_config();
+            
             // Connect to the local node
-            let mut client = ClusterServiceClient::connect(format!("http://{}", local_addr))
+            let mut client = UnifiedClient::new(&local_addr, transport_config.as_ref())
                 .await
                 .map_err(|e| BlixardError::Internal { 
                     message: format!("Failed to connect to local node: {}", e)
@@ -793,14 +835,13 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
             };
             
             // Send join request
-            let request = tonic::Request::new(JoinRequest {
+            let request = JoinRequest {
                 node_id,
                 bind_address,
-            });
+            };
             
             match client.join_cluster(request).await {
-                Ok(response) => {
-                    let resp = response.into_inner();
+                Ok(resp) => {
                     if resp.success {
                         println!("Successfully joined cluster through peer: {}", peer);
                         println!("Message: {}", resp.message);
@@ -816,21 +857,23 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
             }
         }
         ClusterCommands::Leave { node_id, local_addr } => {
+            // Get transport configuration
+            let transport_config = get_transport_config();
+            
             // Connect to the local node
-            let mut client = ClusterServiceClient::connect(format!("http://{}", local_addr))
+            let mut client = UnifiedClient::new(&local_addr, transport_config.as_ref())
                 .await
                 .map_err(|e| BlixardError::Internal { 
                     message: format!("Failed to connect to local node: {}", e)
                 })?;
             
             // Send leave request with the provided node ID
-            let request = tonic::Request::new(LeaveRequest {
+            let request = LeaveRequest {
                 node_id,
-            });
+            };
             
             match client.leave_cluster(request).await {
-                Ok(response) => {
-                    let resp = response.into_inner();
+                Ok(resp) => {
                     if resp.success {
                         println!("Successfully left the cluster");
                         println!("Message: {}", resp.message);
@@ -846,19 +889,21 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
             }
         }
         ClusterCommands::Status { addr } => {
+            // Get transport configuration
+            let transport_config = get_transport_config();
+            
             // Connect to the node
-            let mut client = ClusterServiceClient::connect(format!("http://{}", addr))
+            let mut client = UnifiedClient::new(&addr, transport_config.as_ref())
                 .await
                 .map_err(|e| BlixardError::Internal { 
                     message: format!("Failed to connect to node: {}", e)
                 })?;
             
             // Get cluster status
-            let request = tonic::Request::new(ClusterStatusRequest {});
+            let request = ClusterStatusRequest {};
             
             match client.get_cluster_status(request).await {
-                Ok(response) => {
-                    let status = response.into_inner();
+                Ok(status) => {
                     println!("Cluster Status:");
                     println!("  Leader ID: {}", status.leader_id);
                     println!("  Term: {}", status.term);

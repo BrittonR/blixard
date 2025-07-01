@@ -21,6 +21,8 @@ use crate::{
         iroh_health_service::IrohHealthService,
         iroh_status_service::IrohStatusService,
         iroh_vm_service::IrohVmService,
+        iroh_cluster_service::IrohClusterService,
+        cluster_operations_adapter::ClusterOperationsAdapter,
     },
     config_global,
 };
@@ -143,6 +145,11 @@ impl DualServiceRunner {
         let vm_service = IrohVmService::new(self.node.clone());
         server.register_service(vm_service).await;
         
+        // Create cluster operations adapter
+        let cluster_adapter = Arc::new(ClusterOperationsAdapter::new(self.node.clone()));
+        let cluster_service = IrohClusterService::new(cluster_adapter);
+        server.register_service(cluster_service).await;
+        
         // Start serving
         server.serve().await
     }
@@ -252,6 +259,12 @@ impl DualServiceRunner {
         if strategy.prefer_iroh_for.contains(&ServiceType::VmOps) {
             let vm_service = IrohVmService::new(self.node.clone());
             server.register_service(vm_service).await;
+        }
+        
+        if strategy.prefer_iroh_for.contains(&ServiceType::Cluster) {
+            let cluster_adapter = Arc::new(ClusterOperationsAdapter::new(self.node.clone()));
+            let cluster_service = IrohClusterService::new(cluster_adapter);
+            server.register_service(cluster_service).await;
         }
         
         // Start serving
