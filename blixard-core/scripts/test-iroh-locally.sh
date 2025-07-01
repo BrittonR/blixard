@@ -124,17 +124,43 @@ test_connectivity() {
     # Give nodes time to discover each other
     sleep 5
     
+    # Check for P2P connections established
+    echo -e "\n${YELLOW}Checking P2P connections...${NC}"
+    for i in $(seq 1 $NUM_NODES); do
+        local log_file="$LOG_DIR/node$i.log"
+        echo -e "\nNode $i P2P connections:"
+        
+        # Check for successful P2P connections
+        if grep -q "Successfully connected to P2P peer" "$log_file" 2>/dev/null; then
+            grep "Successfully connected to P2P peer" "$log_file" | tail -5
+            echo -e "${GREEN}✓ P2P connections established${NC}"
+        else
+            echo -e "${RED}✗ No P2P connections found${NC}"
+        fi
+        
+        # Check for connection attempts
+        echo "  Connection attempts:"
+        grep -E "(Establishing P2P connection|Attempting to connect to P2P peer)" "$log_file" 2>/dev/null | tail -5 || echo "    None found"
+        
+        # Check for failures
+        if grep -q "Failed to establish P2P connection" "$log_file" 2>/dev/null; then
+            echo -e "  ${RED}Connection failures:${NC}"
+            grep "Failed to establish P2P connection" "$log_file" | tail -3
+        fi
+    done
+    
     # Test health checks between nodes
+    echo -e "\n${YELLOW}Testing node connectivity...${NC}"
     for i in $(seq 1 $NUM_NODES); do
         for j in $(seq 1 $NUM_NODES); do
             if [[ $i -ne $j ]]; then
                 echo -n "Testing node $i -> node $j: "
                 
-                # Use the example program to test
-                if timeout 5 cargo run --example iroh_network_test 2>/dev/null | grep -q "completed successfully"; then
-                    echo -e "${GREEN}OK${NC}"
+                # Check if connection exists in logs
+                if grep -q "Successfully connected to P2P peer $j" "$LOG_DIR/node$i.log" 2>/dev/null; then
+                    echo -e "${GREEN}OK (P2P connected)${NC}"
                 else
-                    echo -e "${RED}FAILED${NC}"
+                    echo -e "${YELLOW}Not connected${NC}"
                 fi
             fi
         done
@@ -156,14 +182,26 @@ monitor_metrics() {
             echo "Node $i:"
             # Extract metrics from logs
             if [[ -f "$log_file" ]]; then
-                echo -n "  Connections: "
-                grep -c "connection established" "$log_file" 2>/dev/null || echo "0"
+                echo -n "  P2P Connections: "
+                grep -c "Successfully connected to P2P peer" "$log_file" 2>/dev/null || echo "0"
+                
+                echo -n "  Connection Attempts: "
+                grep -c "Establishing P2P connection" "$log_file" 2>/dev/null || echo "0"
+                
+                echo -n "  Connection Failures: "
+                grep -c "Failed to establish P2P connection" "$log_file" 2>/dev/null || echo "0"
                 
                 echo -n "  Messages sent: "
                 grep -c "message sent" "$log_file" 2>/dev/null || echo "0"
                 
                 echo -n "  Errors: "
                 grep -c "ERROR" "$log_file" 2>/dev/null || echo "0"
+                
+                # Show connected peers
+                local connected_peers=$(grep "Successfully connected to P2P peer" "$log_file" 2>/dev/null | sed 's/.*peer //' | sort -u | tr '\n' ',' | sed 's/,$//')
+                if [[ -n "$connected_peers" ]]; then
+                    echo "  Connected to peers: $connected_peers"
+                fi
             fi
             echo ""
         done

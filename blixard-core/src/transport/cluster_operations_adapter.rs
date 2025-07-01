@@ -11,7 +11,7 @@ use crate::raft_manager::ConfChangeType;
 use async_trait::async_trait;
 use std::sync::Arc;
 use std::net::SocketAddr;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 /// Adapter that implements ClusterOperations using SharedNodeState functionality
 pub struct ClusterOperationsAdapter {
@@ -26,16 +26,50 @@ impl ClusterOperationsAdapter {
 
 #[async_trait]
 impl ClusterOperations for ClusterOperationsAdapter {
-    async fn join_cluster(&self, node_id: u64, bind_address: String) -> BlixardResult<(bool, String, Vec<NodeInfo>, Vec<u64>)> {
-        debug!("Join cluster request for node {} at {}", node_id, bind_address);
+    async fn join_cluster(&self, node_id: u64, bind_address: String, p2p_node_id: Option<String>, p2p_addresses: Vec<String>, p2p_relay_url: Option<String>) -> BlixardResult<(bool, String, Vec<NodeInfo>, Vec<u64>)> {
+        debug!("Join cluster request for node {} at {} with P2P info: {:?}", node_id, bind_address, p2p_node_id);
         
         // Parse the bind address
         let addr: SocketAddr = bind_address.parse().map_err(|e| BlixardError::Internal {
             message: format!("Invalid bind address: {}", e),
         })?;
         
-        // Add peer to our peer list
-        self.shared_state.add_peer(node_id, addr.to_string()).await;
+        // Add peer to our peer list with P2P info
+        if p2p_node_id.is_some() || !p2p_addresses.is_empty() {
+            self.shared_state.add_peer_with_p2p(node_id, addr.to_string(), p2p_node_id.clone(), p2p_addresses.clone(), p2p_relay_url.clone()).await?;
+        } else {
+            self.shared_state.add_peer(node_id, addr.to_string()).await?;
+        }
+        
+        // If the joining node has P2P info, try to connect
+        if let Some(ref p2p_id) = p2p_node_id {
+            if let Ok(node_id_parsed) = p2p_id.parse::<iroh::NodeId>() {
+                if let Some(p2p_manager) = self.shared_state.get_p2p_manager().await {
+                    // Create NodeAddr from the P2P info
+                    let mut node_addr = iroh::NodeAddr::new(node_id_parsed);
+                    
+                    // Add relay URL if available
+                    if let Some(ref relay_url) = p2p_relay_url {
+                        if let Ok(relay) = relay_url.parse() {
+                            node_addr = node_addr.with_relay_url(relay);
+                        }
+                    }
+                    
+                    // Add direct addresses
+                    for addr_str in &p2p_addresses {
+                        if let Ok(addr) = addr_str.parse() {
+                            node_addr = node_addr.with_direct_addresses([addr]);
+                        }
+                    }
+                    
+                    // Try to connect
+                    info!("Attempting to connect to P2P peer {}", node_id);
+                    if let Err(e) = p2p_manager.connect_p2p_peer(node_id, &node_addr).await {
+                        warn!("Failed to establish P2P connection to node {}: {}", node_id, e);
+                    }
+                }
+            }
+        }
         
         // Propose configuration change through Raft
         match self.shared_state.propose_conf_change(ConfChangeType::AddNode, node_id, addr.to_string()).await {
@@ -43,8 +77,37 @@ impl ClusterOperations for ClusterOperationsAdapter {
                 info!("Node {} successfully joined cluster", node_id);
                 
                 // Get current cluster information
-                let peers = self.shared_state.get_peers().await;
+                let mut peers = self.shared_state.get_peers().await;
                 let status = self.shared_state.get_raft_status().await?;
+                
+                // Add our own info to the peers list
+                let our_id = self.shared_state.get_id();
+                let our_addr = self.shared_state.get_bind_addr().to_string();
+                
+                // Get our P2P info if available
+                let (our_p2p_node_id, our_p2p_addresses, our_p2p_relay_url) = if let Some(node_addr) = self.shared_state.get_p2p_node_addr().await {
+                    let p2p_id = node_addr.node_id.to_string();
+                    let p2p_addrs: Vec<String> = node_addr.direct_addresses().map(|a| a.to_string()).collect();
+                    let relay_url = node_addr.relay_url().map(|u| u.to_string());
+                    (Some(p2p_id), p2p_addrs, relay_url)
+                } else {
+                    (None, Vec::new(), None)
+                };
+                
+                // Create our peer info
+                let our_peer_info = crate::node_shared::PeerInfo {
+                    id: our_id,
+                    address: our_addr,
+                    is_connected: true,
+                    p2p_node_id: our_p2p_node_id.clone(),
+                    p2p_addresses: our_p2p_addresses.clone(),
+                    p2p_relay_url: our_p2p_relay_url.clone(),
+                };
+                
+                // Add ourselves to the peer list if not already there
+                if !peers.iter().any(|p| p.id == our_id) {
+                    peers.push(our_peer_info);
+                }
                 
                 // Convert PeerInfo to NodeInfo
                 let node_infos: Vec<NodeInfo> = peers.iter().map(|p| NodeInfo {
