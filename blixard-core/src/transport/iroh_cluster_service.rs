@@ -42,6 +42,9 @@ pub enum ClusterResponse {
 pub struct JoinClusterRequest {
     pub node_id: u64,
     pub bind_address: String,
+    pub p2p_node_id: Option<String>,
+    pub p2p_addresses: Vec<String>,
+    pub p2p_relay_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,7 +141,7 @@ pub struct Task {
 /// Trait for cluster operations
 #[async_trait]
 pub trait ClusterOperations: Send + Sync {
-    async fn join_cluster(&self, node_id: u64, bind_address: String) -> BlixardResult<(bool, String, Vec<NodeInfo>, Vec<u64>)>;
+    async fn join_cluster(&self, node_id: u64, bind_address: String, p2p_node_id: Option<String>, p2p_addresses: Vec<String>, p2p_relay_url: Option<String>) -> BlixardResult<(bool, String, Vec<NodeInfo>, Vec<u64>)>;
     async fn leave_cluster(&self, node_id: u64) -> BlixardResult<(bool, String)>;
     async fn get_cluster_status(&self) -> BlixardResult<(u64, Vec<NodeInfo>, u64)>;
     async fn submit_task(&self, task: TaskRequest) -> BlixardResult<(bool, String, u64)>;
@@ -160,7 +163,7 @@ impl IrohClusterService {
         match request {
             ClusterRequest::JoinCluster(req) => {
                 let (success, message, peers, voters) = self.operations
-                    .join_cluster(req.node_id, req.bind_address)
+                    .join_cluster(req.node_id, req.bind_address, req.p2p_node_id, req.p2p_addresses, req.p2p_relay_url)
                     .await?;
                 Ok(ClusterResponse::JoinCluster(JoinClusterResponse {
                     success,
@@ -254,10 +257,16 @@ impl IrohClusterClient {
         recv: &mut RecvStream,
         node_id: u64,
         bind_address: String,
+        p2p_node_id: Option<String>,
+        p2p_addresses: Vec<String>,
+        p2p_relay_url: Option<String>,
     ) -> BlixardResult<JoinClusterResponse> {
         let request = ClusterRequest::JoinCluster(JoinClusterRequest {
             node_id,
             bind_address,
+            p2p_node_id,
+            p2p_addresses,
+            p2p_relay_url,
         });
         
         let rpc_request = RpcRequest {

@@ -7,6 +7,26 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+// Simple Response wrapper to replace tonic::Response
+#[derive(Debug, Clone)]
+pub struct Response<T> {
+    inner: T,
+}
+
+impl<T> Response<T> {
+    pub fn new(inner: T) -> Self {
+        Self { inner }
+    }
+    
+    pub fn into_inner(self) -> T {
+        self.inner
+    }
+    
+    pub fn get_ref(&self) -> &T {
+        &self.inner
+    }
+}
+
 // ============================================================================
 // Cluster Management Types
 // ============================================================================
@@ -25,6 +45,8 @@ pub struct ClusterStatusResponse {
 pub struct JoinRequest {
     pub node_id: u64,
     pub bind_address: String,
+    /// Optional P2P node address information for the joining node
+    pub p2p_node_addr: Option<iroh::NodeAddr>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,6 +90,16 @@ pub enum NodeState {
 // ============================================================================
 // VM Management Types
 // ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VmConfig {
+    pub name: String,
+    pub cpu_cores: u32,
+    pub memory_mb: u32,
+    pub disk_gb: u32,
+    pub owner: String,
+    pub metadata: HashMap<String, String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateVmRequest {
@@ -203,6 +235,21 @@ pub struct TaskInfo {
     pub status: i32,  // Maps to TaskStatus enum
     pub worker_id: String,
     pub result: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskSchedulingRequest {
+    pub vm_name: String,
+    pub placement_strategy: String,
+    pub required_features: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskSchedulingResponse {
+    pub success: bool,
+    pub message: String,
+    pub worker_id: u64,
+    pub placement_score: f64,
 }
 
 // ============================================================================

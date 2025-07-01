@@ -57,7 +57,8 @@ impl P2pImageStore {
         let transport = IrohTransport::new(node_id, data_dir).await?;
         
         // Create or join the VM images document
-        transport.create_or_join_doc(DocumentType::VmImages, true).await?;
+        // TODO: Re-enable when Iroh document API is available
+        // transport.create_or_join_doc(DocumentType::VmImages, true).await?;
 
         Ok(Self {
             transport,

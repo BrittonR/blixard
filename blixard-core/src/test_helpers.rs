@@ -420,6 +420,7 @@ impl TestNodeBuilder {
             use_tailscale: false,
             vm_backend: "mock".to_string(), // Use mock backend for tests
             transport_config: None, // Use default transport
+            topology: Default::default(), // Use default topology for tests
         };
         
         // Create node

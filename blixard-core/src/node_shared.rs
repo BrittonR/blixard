@@ -998,6 +998,36 @@ impl SharedNodeState {
         Ok(())
     }
     
+    /// Add a peer with P2P information
+    pub async fn add_peer_with_p2p(&self, id: u64, address: String, p2p_node_id: Option<String>, p2p_addresses: Vec<String>, p2p_relay_url: Option<String>) -> BlixardResult<()> {
+        let mut peers = self.peers.write().await;
+        if peers.contains_key(&id) {
+            return Err(BlixardError::ClusterError(format!("Peer {} already exists", id)));
+        }
+        peers.insert(id, PeerInfo {
+            id,
+            address,
+            is_connected: false,
+            p2p_node_id,
+            p2p_addresses,
+            p2p_relay_url,
+        });
+        Ok(())
+    }
+    
+    /// Update P2P info for an existing peer
+    pub async fn update_peer_p2p_info(&self, id: u64, p2p_node_id: Option<String>, p2p_addresses: Vec<String>, p2p_relay_url: Option<String>) -> BlixardResult<()> {
+        let mut peers = self.peers.write().await;
+        if let Some(peer) = peers.get_mut(&id) {
+            peer.p2p_node_id = p2p_node_id;
+            peer.p2p_addresses = p2p_addresses;
+            peer.p2p_relay_url = p2p_relay_url;
+            Ok(())
+        } else {
+            Err(BlixardError::ClusterError(format!("Peer {} not found", id)))
+        }
+    }
+    
     /// Remove a peer
     pub async fn remove_peer(&self, id: u64) -> BlixardResult<()> {
         let mut peers = self.peers.write().await;
