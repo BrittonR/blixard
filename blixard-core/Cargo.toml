@@ -84,7 +84,7 @@ tera = "1.19"
 # P2P networking
 iroh = "0.90"
 iroh-blobs = "0.90"
-iroh-docs = "0.35"
+iroh-docs = { git = "https://github.com/n0-computer/iroh-docs", branch = "Frando/iroh-0.90" }
 
 # Compression
 flate2 = "1.0"
@@ -92,6 +92,7 @@ zstd = "0.13"
 
 # Hashing
 md5 = "0.7"
+blake3 = "1.5"
 
 # Encoding
 base64 = "0.21"

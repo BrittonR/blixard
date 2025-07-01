@@ -8,31 +8,45 @@ use tokio::time::sleep;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Minimal Iroh Test ===\n");
     
-    // Create an Iroh endpoint
+    // Create an Iroh endpoint - no discovery needed for basic test
     let endpoint = Endpoint::builder()
-        .discovery(Box::new(iroh::discovery::dns::DnsDiscovery::n0_dns()))
-        .bind(0)
+        .bind()
         .await?;
     
     println!("✓ Created Iroh endpoint");
     println!("  Node ID: {}", endpoint.node_id());
-    println!("  Bound to: {:?}", endpoint.bound_sockets());
+    
+    // Get our direct addresses
+    let addrs = endpoint.direct_addresses().await?;
+    println!("  Direct addresses:");
+    for addr in &addrs {
+        println!("    - {}", addr);
+    }
     
     // Test accepting connections in background
     let endpoint_clone = endpoint.clone();
     tokio::spawn(async move {
         println!("\n📡 Waiting for connections...");
         loop {
-            if let Some(incoming) = endpoint_clone.accept().await {
-                println!("  Incoming connection!");
-                match incoming.accept().await {
-                    Ok((connection, alpn)) => {
-                        println!("  Connected! ALPN: {:?}", std::str::from_utf8(alpn.as_bytes()));
-                        // Just accept and close
+            match endpoint_clone.accept().await {
+                Some(incoming) => {
+                    println!("  Incoming connection!");
+                    match incoming.await {
+                        Ok(connection) => {
+                            let remote_id = connection.remote_node_id();
+                            let alpn = connection.alpn();
+                            println!("  Connected! Remote: {}", remote_id);
+                            println!("  ALPN: {:?}", std::str::from_utf8(&alpn).unwrap_or("<invalid>"));
+                            // Just accept and close
+                        }
+                        Err(e) => {
+                            println!("  Connection error: {}", e);
+                        }
                     }
-                    Err(e) => {
-                        println!("  Connection error: {}", e);
-                    }
+                }
+                None => {
+                    // Endpoint closed
+                    break;
                 }
             }
         }
@@ -43,8 +57,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Try to connect to ourselves
     println!("\n🔄 Testing self-connection...");
-    let our_addr = NodeAddr::new(endpoint.node_id())
-        .with_direct_addresses(endpoint.bound_sockets());
+    let our_addr = NodeAddr {
+        node_id: endpoint.node_id(),
+        info: addrs.into(),
+    };
     
     match endpoint.connect(our_addr, b"test/1").await {
         Ok(connection) => {
