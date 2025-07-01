@@ -9,6 +9,7 @@
 use crate::error::{BlixardError, BlixardResult};
 use crate::iroh_transport_v2::{IrohTransportV2, DocumentType};
 use crate::p2p_image_store::P2pImageStore;
+use crate::discovery::DiscoveryManager;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::Arc;
@@ -162,7 +163,19 @@ impl P2pManager {
         data_dir: &Path,
         config: P2pConfig,
     ) -> BlixardResult<Self> {
-        let transport = Arc::new(IrohTransportV2::new(node_id, data_dir).await?);
+        Self::new_with_discovery(node_id, data_dir, config, None).await
+    }
+    
+    /// Create a new P2P manager with optional discovery
+    pub async fn new_with_discovery(
+        node_id: u64,
+        data_dir: &Path,
+        config: P2pConfig,
+        discovery_manager: Option<Arc<DiscoveryManager>>,
+    ) -> BlixardResult<Self> {
+        let transport = Arc::new(
+            IrohTransportV2::new_with_discovery(node_id, data_dir, discovery_manager).await?
+        );
         let image_store = Arc::new(P2pImageStore::new(node_id, data_dir).await?);
         
         let (event_tx, event_rx) = mpsc::channel(1000);

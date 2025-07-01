@@ -196,6 +196,34 @@ impl DiscoveryManager {
         })
     }
     
+    /// Add a discovered node directly (useful for testing and manual discovery)
+    pub async fn add_discovered_node(&self, node_info: IrohNodeInfo) -> BlixardResult<()> {
+        let mut nodes = self.nodes.write().await;
+        let is_new = !nodes.contains_key(&node_info.node_id);
+        nodes.insert(node_info.node_id, node_info.clone());
+        drop(nodes);
+        
+        // Notify subscribers
+        let event = if is_new {
+            DiscoveryEvent::NodeDiscovered(node_info)
+        } else {
+            DiscoveryEvent::NodeUpdated(node_info)
+        };
+        
+        let subscribers = self.subscribers.read().await;
+        for sender in subscribers.iter() {
+            let _ = sender.send(event.clone()).await;
+        }
+        
+        Ok(())
+    }
+    
+    /// Get all currently discovered nodes
+    pub async fn get_all_nodes(&self) -> BlixardResult<Vec<IrohNodeInfo>> {
+        let nodes = self.nodes.read().await;
+        Ok(nodes.values().cloned().collect())
+    }
+    
     /// Background task to aggregate events from all providers
     async fn event_aggregation_task(manager: Arc<RwLock<DiscoveryManager>>) {
         let mut interval = tokio::time::interval(Duration::from_secs(1));

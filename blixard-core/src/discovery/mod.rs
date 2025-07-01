@@ -19,12 +19,14 @@ use crate::error::BlixardResult;
 
 // Re-export submodules
 pub mod dns_discovery;
+pub mod iroh_discovery_bridge;
 pub mod manager;
 pub mod mdns_discovery;
 pub mod static_discovery;
 
 // Re-export commonly used types
 pub use manager::DiscoveryManager;
+pub use iroh_discovery_bridge::{IrohDiscoveryBridge, create_combined_discovery};
 
 /// Information about an Iroh node discovered in the network.
 #[derive(Debug, Clone, PartialEq, Eq)]

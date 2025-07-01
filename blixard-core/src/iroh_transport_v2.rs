@@ -4,6 +4,7 @@
 //! enabling direct connections between nodes for efficient data transfer.
 
 use crate::error::{BlixardError, BlixardResult};
+use crate::discovery::{DiscoveryManager, create_combined_discovery, IrohDiscoveryBridge};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -58,11 +59,22 @@ pub struct IrohTransportV2 {
     node_id: u64,
     /// Data directory
     data_dir: PathBuf,
+    /// Discovery bridge (if discovery is enabled)
+    discovery_bridge: Option<Arc<IrohDiscoveryBridge>>,
 }
 
 impl IrohTransportV2 {
-    /// Create a new Iroh transport instance
+    /// Create a new Iroh transport instance without discovery
     pub async fn new(node_id: u64, data_dir: &Path) -> BlixardResult<Self> {
+        Self::new_with_discovery(node_id, data_dir, None).await
+    }
+    
+    /// Create a new Iroh transport instance with optional discovery
+    pub async fn new_with_discovery(
+        node_id: u64, 
+        data_dir: &Path,
+        discovery_manager: Option<Arc<DiscoveryManager>>
+    ) -> BlixardResult<Self> {
         let iroh_data_dir = data_dir.join("iroh");
         std::fs::create_dir_all(&iroh_data_dir)?;
 
@@ -71,9 +83,34 @@ impl IrohTransportV2 {
         // Create secret key for this node
         let secret_key = SecretKey::generate(rand::thread_rng());
         
+        // Build endpoint with discovery if provided
+        let mut builder = Endpoint::builder()
+            .secret_key(secret_key);
+        
+        let discovery_bridge = if let Some(dm) = discovery_manager {
+            info!("Configuring Iroh endpoint with Blixard discovery");
+            
+            // Create discovery bridge
+            let bridge = Arc::new(IrohDiscoveryBridge::new(dm.clone()));
+            
+            // Start the bridge
+            bridge.start().await?;
+            
+            // Create combined discovery service
+            let discovery = create_combined_discovery(dm);
+            
+            // Configure endpoint with discovery
+            builder = builder.add_discovery(discovery);
+            
+            Some(bridge)
+        } else {
+            info!("Configuring Iroh endpoint with default n0 DNS discovery");
+            builder = builder.discovery_n0();
+            None
+        };
+        
         // Create endpoint
-        let endpoint = Endpoint::builder()
-            .secret_key(secret_key)
+        let endpoint = builder
             .bind()
             .await
             .map_err(|e| BlixardError::Internal {
@@ -90,6 +127,7 @@ impl IrohTransportV2 {
             documents: Arc::new(RwLock::new(HashMap::new())),
             node_id,
             data_dir: data_dir.to_path_buf(),
+            discovery_bridge,
         })
     }
 
@@ -300,6 +338,11 @@ impl IrohTransportV2 {
     /// Shutdown the Iroh transport
     pub async fn shutdown(self) -> BlixardResult<()> {
         info!("Shutting down Iroh transport v2");
+        
+        // Stop discovery bridge if present
+        if let Some(bridge) = &self.discovery_bridge {
+            bridge.stop().await?;
+        }
         
         // Close endpoint
         self.endpoint.close().await;
