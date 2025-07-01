@@ -1,6 +1,6 @@
 //! Example to stop a VM
 
-use blixard_core::proto::{
+use blixard_core::iroh_types::{
     cluster_service_client::ClusterServiceClient,
     StopVmRequest,
 };

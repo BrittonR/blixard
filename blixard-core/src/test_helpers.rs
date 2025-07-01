@@ -14,15 +14,16 @@ use std::env;
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Instant};
-use tonic::transport::Channel;
+// Removed tonic imports - using Iroh transport
 
 use crate::{
     node::Node,
     node_shared::SharedNodeState,
     types::NodeConfig,
-    grpc_server::start_grpc_server,
+    transport::iroh_service_runner::start_iroh_services,
     error::{BlixardError, BlixardResult},
-    proto::{cluster_service_client::ClusterServiceClient, HealthCheckRequest, LeaveRequest},
+    iroh_types::{HealthCheckRequest, LeaveRequest},
+    transport::iroh_cluster_service::IrohClusterServiceClient,
 };
 
 /// Global port allocator for tests
@@ -420,8 +421,8 @@ impl TestNodeBuilder {
         let state_clone = shared_state.clone();
         let addr_for_spawn = addr.clone();
         let server_handle = tokio::spawn(async move {
-            if let Err(e) = start_grpc_server(state_clone, addr_for_spawn).await {
-                tracing::error!("gRPC server task failed on {}: {}", addr_for_spawn, e);
+            if let Err(e) = start_iroh_services(state_clone, addr_for_spawn).await {
+                tracing::error!("Iroh service runner failed on {}: {}", addr_for_spawn, e);
                 // Don't panic - let the wait_for_server_ready detect the failure
             }
         });
@@ -883,7 +884,7 @@ impl TestClusterBuilder {
                     for _ in 0..3 {
                         if let Some(bootstrap_node) = nodes.get(&1) {
                             if let Ok(mut client) = bootstrap_node.client().await {
-                                let _ = client.health_check(crate::proto::HealthCheckRequest {}).await;
+                                let _ = client.health_check(crate::iroh_types::HealthCheckRequest {}).await;
                             }
                         }
                         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -985,7 +986,7 @@ impl TestClusterBuilder {
         // This ensures configuration changes are replicated to all nodes
         if node_count > 1 {
             if let Ok(mut client) = cluster.client(1).await {
-                let _ = client.health_check(crate::proto::HealthCheckRequest {}).await;
+                let _ = client.health_check(crate::iroh_types::HealthCheckRequest {}).await;
             }
         }
         

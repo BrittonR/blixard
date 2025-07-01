@@ -1,6 +1,6 @@
 //! Example to create a MicroVM with SSH access
 
-use blixard_core::proto::{
+use blixard_core::iroh_types::{
     cluster_service_client::ClusterServiceClient,
     CreateVmRequest,
 };

@@ -42,7 +42,7 @@ pub enum BlixardError {
     Connection { message: String },
     
     #[error("Network error: {0}")]
-    NetworkError(#[from] tonic::transport::Error),
+    NetworkError(String),
     
     #[error("Serialization error: {0}")]
     SerializationError(#[from] bincode::Error),

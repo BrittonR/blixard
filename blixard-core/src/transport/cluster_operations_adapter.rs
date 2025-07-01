@@ -6,7 +6,7 @@
 use crate::error::{BlixardError, BlixardResult};
 use crate::node_shared::SharedNodeState;
 use crate::transport::iroh_cluster_service::{ClusterOperations, Task, TaskRequest, TaskStatus};
-use crate::types::{NodeInfo, NodeState};
+use crate::iroh_types::{NodeInfo, NodeState};
 use crate::raft_manager::{RaftConfChange, ConfChangeType};
 use async_trait::async_trait;
 use std::sync::Arc;

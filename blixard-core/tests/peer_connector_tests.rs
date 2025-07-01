@@ -20,7 +20,7 @@ use blixard_core::test_helpers::timing;
 use blixard_core::node_shared::SharedNodeState;
 use blixard_core::peer_connector::PeerConnector;
 use blixard_core::types::NodeConfig;
-use blixard_core::proto::{
+use blixard_core::iroh_types::{
     cluster_service_server::{ClusterService, ClusterServiceServer},
     JoinRequest, JoinResponse,
     LeaveRequest, LeaveResponse,
@@ -262,57 +262,57 @@ impl ClusterService for MockClusterService {
     
     async fn create_vm_with_scheduling(
         &self,
-        _request: Request<blixard_core::proto::CreateVmWithSchedulingRequest>,
-    ) -> Result<Response<blixard_core::proto::CreateVmWithSchedulingResponse>, Status> {
+        _request: Request<blixard_core::iroh_types::CreateVmWithSchedulingRequest>,
+    ) -> Result<Response<blixard_core::iroh_types::CreateVmWithSchedulingResponse>, Status> {
         Err(Status::unimplemented("Not implemented in mock"))
     }
     
     async fn schedule_vm_placement(
         &self,
-        _request: Request<blixard_core::proto::ScheduleVmPlacementRequest>,
-    ) -> Result<Response<blixard_core::proto::ScheduleVmPlacementResponse>, Status> {
+        _request: Request<blixard_core::iroh_types::ScheduleVmPlacementRequest>,
+    ) -> Result<Response<blixard_core::iroh_types::ScheduleVmPlacementResponse>, Status> {
         Err(Status::unimplemented("Not implemented in mock"))
     }
     
     async fn get_cluster_resource_summary(
         &self,
-        _request: Request<blixard_core::proto::ClusterResourceSummaryRequest>,
-    ) -> Result<Response<blixard_core::proto::ClusterResourceSummaryResponse>, Status> {
+        _request: Request<blixard_core::iroh_types::ClusterResourceSummaryRequest>,
+    ) -> Result<Response<blixard_core::iroh_types::ClusterResourceSummaryResponse>, Status> {
         Err(Status::unimplemented("Not implemented in mock"))
     }
 
     async fn migrate_vm(
         &self,
-        _request: Request<blixard_core::proto::MigrateVmRequest>,
-    ) -> Result<Response<blixard_core::proto::MigrateVmResponse>, Status> {
+        _request: Request<blixard_core::iroh_types::MigrateVmRequest>,
+    ) -> Result<Response<blixard_core::iroh_types::MigrateVmResponse>, Status> {
         Err(Status::unimplemented("Not implemented in mock"))
     }
 
     async fn get_p2p_status(
         &self,
-        _request: Request<blixard_core::proto::GetP2pStatusRequest>,
-    ) -> Result<Response<blixard_core::proto::GetP2pStatusResponse>, Status> {
+        _request: Request<blixard_core::iroh_types::GetP2pStatusRequest>,
+    ) -> Result<Response<blixard_core::iroh_types::GetP2pStatusResponse>, Status> {
         Err(Status::unimplemented("Not implemented in mock"))
     }
 
     async fn share_vm_image(
         &self,
-        _request: Request<blixard_core::proto::ShareVmImageRequest>,
-    ) -> Result<Response<blixard_core::proto::ShareVmImageResponse>, Status> {
+        _request: Request<blixard_core::iroh_types::ShareVmImageRequest>,
+    ) -> Result<Response<blixard_core::iroh_types::ShareVmImageResponse>, Status> {
         Err(Status::unimplemented("Not implemented in mock"))
     }
 
     async fn get_vm_image(
         &self,
-        _request: Request<blixard_core::proto::GetVmImageRequest>,
-    ) -> Result<Response<blixard_core::proto::GetVmImageResponse>, Status> {
+        _request: Request<blixard_core::iroh_types::GetVmImageRequest>,
+    ) -> Result<Response<blixard_core::iroh_types::GetVmImageResponse>, Status> {
         Err(Status::unimplemented("Not implemented in mock"))
     }
 
     async fn list_p2p_images(
         &self,
-        _request: Request<blixard_core::proto::ListP2pImagesRequest>,
-    ) -> Result<Response<blixard_core::proto::ListP2pImagesResponse>, Status> {
+        _request: Request<blixard_core::iroh_types::ListP2pImagesRequest>,
+    ) -> Result<Response<blixard_core::iroh_types::ListP2pImagesResponse>, Status> {
         Err(Status::unimplemented("Not implemented in mock"))
     }
 }

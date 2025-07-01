@@ -2,8 +2,8 @@
 
 use blixard_core::common::test_helpers::{start_test_cluster, TestNode};
 use blixard_core::p2p::{P2pConfig, Transport};
-use blixard_core::proto::blixard_service_client::BlixardServiceClient;
-use blixard_core::proto::{
+use blixard_core::iroh_types::blixard_service_client::BlixardServiceClient;
+use blixard_core::iroh_types::{
     CreateVmRequest, GetNodeStatusRequest, GetVmRequest, HealthCheckRequest, ListVmsRequest,
     StopVmRequest, VmConfig as ProtoVmConfig,
 };

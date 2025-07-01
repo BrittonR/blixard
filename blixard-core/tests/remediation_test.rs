@@ -326,10 +326,10 @@ async fn test_network_partition_detection() {
     // Simulate a cluster with unreachable peers
     shared.update_cluster_info(|info| {
         info.peers = vec![
-            blixard_core::proto::PeerInfo { id: 2, address: "127.0.0.1:7002".to_string() },
-            blixard_core::proto::PeerInfo { id: 3, address: "127.0.0.1:7003".to_string() },
-            blixard_core::proto::PeerInfo { id: 4, address: "127.0.0.1:7004".to_string() },
-            blixard_core::proto::PeerInfo { id: 5, address: "127.0.0.1:7005".to_string() },
+            blixard_core::iroh_types::PeerInfo { id: 2, address: "127.0.0.1:7002".to_string() },
+            blixard_core::iroh_types::PeerInfo { id: 3, address: "127.0.0.1:7003".to_string() },
+            blixard_core::iroh_types::PeerInfo { id: 4, address: "127.0.0.1:7004".to_string() },
+            blixard_core::iroh_types::PeerInfo { id: 5, address: "127.0.0.1:7005".to_string() },
         ];
     }).await;
     

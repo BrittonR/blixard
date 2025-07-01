@@ -6,7 +6,7 @@ use blixard_core::transport::iroh_health_service::IrohHealthService;
 use blixard_core::node_shared::SharedNodeState;
 use blixard_core::types::NodeConfig;
 use blixard_core::transport::config::{TransportConfig, IrohConfig};
-use blixard_core::proto::{HealthCheckRequest, HealthCheckResponse};
+use blixard_core::iroh_types::{HealthCheckRequest, HealthCheckResponse};
 use iroh::{Endpoint, SecretKey, NodeAddr};
 use std::sync::Arc;
 use std::time::Duration;

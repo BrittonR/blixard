@@ -5,7 +5,7 @@
 use crate::{
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
-    proto,
+    iroh_types,
     transport::{
         iroh_protocol::{deserialize_payload, serialize_payload},
         iroh_service::IrohService,

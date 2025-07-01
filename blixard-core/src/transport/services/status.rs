@@ -6,15 +6,15 @@
 use crate::{
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
-    proto::{
+    iroh_types::{
         ClusterStatusRequest, ClusterStatusResponse, NodeInfo, NodeState,
-        GetRaftStatusRequest, GetRaftStatusResponse,
+        // GetRaftStatusRequest and GetRaftStatusResponse are defined in iroh_status_service
     },
     metrics_otel::{metrics, Timer, attributes},
 };
 use async_trait::async_trait;
 use std::sync::Arc;
-use tonic::{Request, Response, Status};
+// Removed tonic imports - using Iroh transport
 
 /// Trait for status query operations
 #[async_trait]
@@ -22,8 +22,7 @@ pub trait StatusService: Send + Sync {
     /// Get cluster status
     async fn get_cluster_status(&self) -> BlixardResult<ClusterStatusResponse>;
     
-    /// Get Raft status
-    async fn get_raft_status(&self) -> BlixardResult<GetRaftStatusResponse>;
+    // Raft status is now part of cluster status
 }
 
 /// Status service implementation
@@ -150,7 +149,7 @@ impl StatusService for StatusServiceImpl {
 
 /// gRPC adapter for status service - implements ClusterService partially
 #[async_trait]
-impl crate::proto::cluster_service_server::ClusterService for StatusServiceImpl {
+impl crate::iroh_types::cluster_service_server::ClusterService for StatusServiceImpl {
     async fn get_cluster_status(
         &self,
         _request: Request<ClusterStatusRequest>,
@@ -174,148 +173,148 @@ impl crate::proto::cluster_service_server::ClusterService for StatusServiceImpl 
     // Stub implementations for other methods required by the trait
     async fn join_cluster(
         &self,
-        _request: Request<crate::proto::JoinRequest>,
-    ) -> Result<Response<crate::proto::JoinResponse>, Status> {
+        _request: Request<crate::iroh_types::JoinRequest>,
+    ) -> Result<Response<crate::iroh_types::JoinResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn leave_cluster(
         &self,
-        _request: Request<crate::proto::LeaveRequest>,
-    ) -> Result<Response<crate::proto::LeaveResponse>, Status> {
+        _request: Request<crate::iroh_types::LeaveRequest>,
+    ) -> Result<Response<crate::iroh_types::LeaveResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn health_check(
         &self,
-        _request: Request<crate::proto::HealthCheckRequest>,
-    ) -> Result<Response<crate::proto::HealthCheckResponse>, Status> {
+        _request: Request<crate::iroh_types::HealthCheckRequest>,
+    ) -> Result<Response<crate::iroh_types::HealthCheckResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn send_raft_message(
         &self,
-        _request: Request<crate::proto::RaftMessageRequest>,
-    ) -> Result<Response<crate::proto::RaftMessageResponse>, Status> {
+        _request: Request<crate::iroh_types::RaftMessageRequest>,
+    ) -> Result<Response<crate::iroh_types::RaftMessageResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn submit_task(
         &self,
-        _request: Request<crate::proto::TaskRequest>,
-    ) -> Result<Response<crate::proto::TaskResponse>, Status> {
+        _request: Request<crate::iroh_types::TaskRequest>,
+    ) -> Result<Response<crate::iroh_types::TaskResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn get_task_status(
         &self,
-        _request: Request<crate::proto::TaskStatusRequest>,
-    ) -> Result<Response<crate::proto::TaskStatusResponse>, Status> {
+        _request: Request<crate::iroh_types::TaskStatusRequest>,
+    ) -> Result<Response<crate::iroh_types::TaskStatusResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn create_vm(
         &self,
-        _request: Request<crate::proto::CreateVmRequest>,
-    ) -> Result<Response<crate::proto::CreateVmResponse>, Status> {
+        _request: Request<crate::iroh_types::CreateVmRequest>,
+    ) -> Result<Response<crate::iroh_types::CreateVmResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn create_vm_with_scheduling(
         &self,
-        _request: Request<crate::proto::CreateVmWithSchedulingRequest>,
-    ) -> Result<Response<crate::proto::CreateVmWithSchedulingResponse>, Status> {
+        _request: Request<crate::iroh_types::CreateVmWithSchedulingRequest>,
+    ) -> Result<Response<crate::iroh_types::CreateVmWithSchedulingResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn start_vm(
         &self,
-        _request: Request<crate::proto::StartVmRequest>,
-    ) -> Result<Response<crate::proto::StartVmResponse>, Status> {
+        _request: Request<crate::iroh_types::StartVmRequest>,
+    ) -> Result<Response<crate::iroh_types::StartVmResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn stop_vm(
         &self,
-        _request: Request<crate::proto::StopVmRequest>,
-    ) -> Result<Response<crate::proto::StopVmResponse>, Status> {
+        _request: Request<crate::iroh_types::StopVmRequest>,
+    ) -> Result<Response<crate::iroh_types::StopVmResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn delete_vm(
         &self,
-        _request: Request<crate::proto::DeleteVmRequest>,
-    ) -> Result<Response<crate::proto::DeleteVmResponse>, Status> {
+        _request: Request<crate::iroh_types::DeleteVmRequest>,
+    ) -> Result<Response<crate::iroh_types::DeleteVmResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn list_vms(
         &self,
-        _request: Request<crate::proto::ListVmsRequest>,
-    ) -> Result<Response<crate::proto::ListVmsResponse>, Status> {
+        _request: Request<crate::iroh_types::ListVmsRequest>,
+    ) -> Result<Response<crate::iroh_types::ListVmsResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn get_vm_status(
         &self,
-        _request: Request<crate::proto::GetVmStatusRequest>,
-    ) -> Result<Response<crate::proto::GetVmStatusResponse>, Status> {
+        _request: Request<crate::iroh_types::GetVmStatusRequest>,
+    ) -> Result<Response<crate::iroh_types::GetVmStatusResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn migrate_vm(
         &self,
-        _request: Request<crate::proto::MigrateVmRequest>,
-    ) -> Result<Response<crate::proto::MigrateVmResponse>, Status> {
+        _request: Request<crate::iroh_types::MigrateVmRequest>,
+    ) -> Result<Response<crate::iroh_types::MigrateVmResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn schedule_vm_placement(
         &self,
-        _request: Request<crate::proto::ScheduleVmPlacementRequest>,
-    ) -> Result<Response<crate::proto::ScheduleVmPlacementResponse>, Status> {
+        _request: Request<crate::iroh_types::ScheduleVmPlacementRequest>,
+    ) -> Result<Response<crate::iroh_types::ScheduleVmPlacementResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn get_cluster_resource_summary(
         &self,
-        _request: Request<crate::proto::ClusterResourceSummaryRequest>,
-    ) -> Result<Response<crate::proto::ClusterResourceSummaryResponse>, Status> {
+        _request: Request<crate::iroh_types::ClusterResourceSummaryRequest>,
+    ) -> Result<Response<crate::iroh_types::ClusterResourceSummaryResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn get_p2p_status(
         &self,
-        _request: Request<crate::proto::GetP2pStatusRequest>,
-    ) -> Result<Response<crate::proto::GetP2pStatusResponse>, Status> {
+        _request: Request<crate::iroh_types::GetP2pStatusRequest>,
+    ) -> Result<Response<crate::iroh_types::GetP2pStatusResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn share_vm_image(
         &self,
-        _request: Request<crate::proto::ShareVmImageRequest>,
-    ) -> Result<Response<crate::proto::ShareVmImageResponse>, Status> {
+        _request: Request<crate::iroh_types::ShareVmImageRequest>,
+    ) -> Result<Response<crate::iroh_types::ShareVmImageResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn get_vm_image(
         &self,
-        _request: Request<crate::proto::GetVmImageRequest>,
-    ) -> Result<Response<crate::proto::GetVmImageResponse>, Status> {
+        _request: Request<crate::iroh_types::GetVmImageRequest>,
+    ) -> Result<Response<crate::iroh_types::GetVmImageResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
     
     async fn list_p2p_images(
         &self,
-        _request: Request<crate::proto::ListP2pImagesRequest>,
-    ) -> Result<Response<crate::proto::ListP2pImagesResponse>, Status> {
+        _request: Request<crate::iroh_types::ListP2pImagesRequest>,
+    ) -> Result<Response<crate::iroh_types::ListP2pImagesResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
 }
 
 /// gRPC adapter for status service - implements BlixardService
 #[async_trait]
-impl crate::proto::blixard_service_server::BlixardService for StatusServiceImpl {
+impl crate::iroh_types::blixard_service_server::BlixardService for StatusServiceImpl {
     async fn get_raft_status(
         &self,
         _request: Request<GetRaftStatusRequest>,
@@ -338,8 +337,8 @@ impl crate::proto::blixard_service_server::BlixardService for StatusServiceImpl 
     
     async fn propose_task(
         &self,
-        _request: Request<crate::proto::ProposeTaskRequest>,
-    ) -> Result<Response<crate::proto::ProposeTaskResponse>, Status> {
+        _request: Request<crate::iroh_types::ProposeTaskRequest>,
+    ) -> Result<Response<crate::iroh_types::ProposeTaskResponse>, Status> {
         Err(Status::unimplemented("Not implemented in status service"))
     }
 }

@@ -24,7 +24,7 @@ async fn test_leader_change_during_join() {
             .expect("Should have a leader");
         
         // Get cluster status to find leader ID
-        use blixard_core::proto::ClusterStatusRequest;
+        use blixard_core::iroh_types::ClusterStatusRequest;
         let status = leader_client.clone()
             .get_cluster_status(ClusterStatusRequest {})
             .await
@@ -99,7 +99,7 @@ async fn test_leader_change_during_join() {
     let mut final_leader_client = cluster.leader_client().await
         .expect("Should have a leader after recovery");
     
-    use blixard_core::proto::ClusterStatusRequest;
+    use blixard_core::iroh_types::ClusterStatusRequest;
     let final_status = final_leader_client
         .get_cluster_status(ClusterStatusRequest {})
         .await

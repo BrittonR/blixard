@@ -1,11 +1,11 @@
 //! Security module for Blixard cluster
 //!
 //! This module provides comprehensive security features including:
-//! - TLS certificate management
-//! - Mutual TLS (mTLS) authentication 
 //! - Token-based authentication
 //! - Secure secrets management
 //! - Cedar policy-based authorization
+//! 
+//! Note: Transport security is handled by Iroh's built-in QUIC/TLS 1.3
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::config_v2::{SecurityConfig, TlsConfig, AuthConfig};
@@ -15,7 +15,7 @@ use std::path::Path;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 use tokio::sync::RwLock;
-use tonic::transport::{Certificate, Identity, ServerTlsConfig, ClientTlsConfig};
+// Removed tonic TLS imports - Iroh uses its own security model based on node IDs
 use tracing::{info, warn};
 
 /// Security manager for handling all security operations
@@ -23,9 +23,6 @@ use tracing::{info, warn};
 pub struct SecurityManager {
     /// Configuration
     config: SecurityConfig,
-    
-    /// TLS certificate manager
-    tls_manager: Option<TlsManager>,
     
     /// Authentication manager
     auth_manager: Option<AuthManager>,
@@ -37,18 +34,7 @@ pub struct SecurityManager {
     cedar_authz: Option<Arc<CedarAuthz>>,
 }
 
-/// TLS certificate management
-#[derive(Debug)]
-pub struct TlsManager {
-    /// Server identity (certificate + private key)
-    server_identity: Option<Identity>,
-    
-    /// Root CA certificate
-    ca_cert: Option<Certificate>,
-    
-    /// Configuration
-    config: TlsConfig,
-}
+// TLS management removed - Iroh handles transport security via QUIC/TLS 1.3
 
 /// Authentication and authorization manager
 #[derive(Debug)]
@@ -133,12 +119,7 @@ impl SecurityManager {
     pub async fn new(config: SecurityConfig) -> BlixardResult<Self> {
         info!("Initializing security manager");
         
-        // Initialize TLS manager if enabled
-        let tls_manager = if config.tls.enabled {
-            Some(TlsManager::new(config.tls.clone()).await?)
-        } else {
-            None
-        };
+        // TLS is handled by Iroh's QUIC transport, no separate TLS manager needed
         
         // Initialize authentication manager if enabled
         let auth_manager = if config.auth.enabled {
@@ -177,30 +158,15 @@ impl SecurityManager {
         
         Ok(Self {
             config,
-            tls_manager,
             auth_manager,
             secrets_manager,
             cedar_authz,
         })
     }
     
-    /// Get server TLS configuration for gRPC
-    pub async fn get_server_tls_config(&self) -> BlixardResult<Option<ServerTlsConfig>> {
-        if let Some(ref tls_manager) = self.tls_manager {
-            tls_manager.get_server_tls_config().await
-        } else {
-            Ok(None)
-        }
-    }
+    // TLS configuration methods removed - Iroh handles transport security
     
-    /// Get client TLS configuration for gRPC
-    pub async fn get_client_tls_config(&self) -> BlixardResult<Option<ClientTlsConfig>> {
-        if let Some(ref tls_manager) = self.tls_manager {
-            tls_manager.get_client_tls_config().await
-        } else {
-            Ok(None)
-        }
-    }
+    // Client TLS also handled by Iroh
     
     /// Authenticate a request using the provided token
     pub async fn authenticate_token(&self, token: &str) -> BlixardResult<AuthResult> {
@@ -294,98 +260,7 @@ impl SecurityManager {
     }
 }
 
-impl TlsManager {
-    /// Create a new TLS manager
-    async fn new(config: TlsConfig) -> BlixardResult<Self> {
-        info!("Initializing TLS manager");
-        
-        let mut manager = Self {
-            server_identity: None,
-            ca_cert: None,
-            config,
-        };
-        
-        // Try to load certificates, but don't fail if they're missing
-        // This allows manager creation to succeed even with invalid certificate paths
-        if let Err(e) = manager.load_certificates().await {
-            warn!("Failed to load TLS certificates: {}", e);
-            info!("TLS manager created but certificates not loaded - TLS operations may fail");
-        }
-        
-        Ok(manager)
-    }
-    
-    /// Load TLS certificates from files
-    async fn load_certificates(&mut self) -> BlixardResult<()> {
-        // Load server certificate and key
-        if let (Some(cert_file), Some(key_file)) = (&self.config.cert_file, &self.config.key_file) {
-            let cert_pem = tokio::fs::read_to_string(cert_file).await
-                .map_err(|e| BlixardError::Security {
-                    message: format!("Failed to read certificate file {:?}: {}", cert_file, e),
-                })?;
-            
-            let key_pem = tokio::fs::read_to_string(key_file).await
-                .map_err(|e| BlixardError::Security {
-                    message: format!("Failed to read key file {:?}: {}", key_file, e),
-                })?;
-            
-            self.server_identity = Some(Identity::from_pem(cert_pem, key_pem));
-            info!("Loaded server certificate and key");
-        }
-        
-        // Load CA certificate
-        if let Some(ca_file) = &self.config.ca_file {
-            let ca_pem = tokio::fs::read_to_string(ca_file).await
-                .map_err(|e| BlixardError::Security {
-                    message: format!("Failed to read CA file {:?}: {}", ca_file, e),
-                })?;
-            
-            self.ca_cert = Some(Certificate::from_pem(ca_pem));
-            info!("Loaded CA certificate");
-        }
-        
-        Ok(())
-    }
-    
-    /// Get server TLS configuration
-    async fn get_server_tls_config(&self) -> BlixardResult<Option<ServerTlsConfig>> {
-        if let Some(ref identity) = self.server_identity {
-            let mut tls_config = ServerTlsConfig::new().identity(identity.clone());
-            
-            // Add CA certificate for client authentication
-            if let Some(ref ca_cert) = self.ca_cert {
-                tls_config = tls_config.client_ca_root(ca_cert.clone());
-                
-                if self.config.require_client_cert {
-                    info!("Requiring client certificates for mTLS");
-                }
-            }
-            
-            Ok(Some(tls_config))
-        } else {
-            Err(BlixardError::Security {
-                message: "TLS enabled but no server certificate configured".to_string(),
-            })
-        }
-    }
-    
-    /// Get client TLS configuration
-    async fn get_client_tls_config(&self) -> BlixardResult<Option<ClientTlsConfig>> {
-        let mut tls_config = ClientTlsConfig::new();
-        
-        // Add CA certificate for server verification
-        if let Some(ref ca_cert) = self.ca_cert {
-            tls_config = tls_config.ca_certificate(ca_cert.clone());
-        }
-        
-        // Add client certificate for mTLS
-        if let Some(ref identity) = self.server_identity {
-            tls_config = tls_config.identity(identity.clone());
-        }
-        
-        Ok(Some(tls_config))
-    }
-}
+// TlsManager implementation removed - Iroh handles all transport security via QUIC/TLS 1.3
 
 impl AuthManager {
     /// Create a new authentication manager

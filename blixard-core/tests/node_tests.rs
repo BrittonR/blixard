@@ -357,7 +357,7 @@ async fn test_database_persistence_across_restarts() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_database_concurrent_access() {
     use blixard_core::test_helpers::TestCluster;
-    use blixard_core::proto::{CreateVmRequest, ListVmsRequest};
+    use blixard_core::iroh_types::{CreateVmRequest, ListVmsRequest};
     
     // Create a test cluster with Raft consensus
     let cluster = TestCluster::builder()
@@ -451,7 +451,7 @@ async fn test_raft_manager_initialization() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_task_submission() {
     use blixard_core::test_helpers::TestCluster;
-    use blixard_core::proto::TaskRequest;
+    use blixard_core::iroh_types::TaskRequest;
     
     // Create a single-node cluster
     let cluster = TestCluster::builder()
@@ -492,7 +492,7 @@ async fn test_task_submission() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_task_status_retrieval() {
     use blixard_core::test_helpers::TestCluster;
-    use blixard_core::proto::{TaskRequest, TaskStatusRequest};
+    use blixard_core::iroh_types::{TaskRequest, TaskStatusRequest};
     
     // Create a single-node cluster
     let cluster = TestCluster::builder()
@@ -566,7 +566,7 @@ async fn test_bootstrap_mode_registration() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_cluster_status_after_join() {
     use blixard_core::test_helpers::TestCluster;
-    use blixard_core::proto::ClusterStatusRequest;
+    use blixard_core::iroh_types::ClusterStatusRequest;
     
     // Create a test cluster
     let cluster = TestCluster::builder()
@@ -599,7 +599,7 @@ async fn test_cluster_status_after_join() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_leave_cluster() {
     use blixard_core::test_helpers::TestCluster;
-    use blixard_core::proto::{ClusterStatusRequest, LeaveRequest};
+    use blixard_core::iroh_types::{ClusterStatusRequest, LeaveRequest};
     
     // Create a 2-node cluster to test leaving
     let cluster = TestCluster::builder()
@@ -728,7 +728,7 @@ async fn test_concurrent_start_stop() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_vm_lifecycle_operations() {
     use blixard_core::test_helpers::TestCluster;
-    use blixard_core::proto::{
+    use blixard_core::iroh_types::{
         CreateVmRequest, StartVmRequest, StopVmRequest, 
         GetVmStatusRequest, ListVmsRequest
     };
@@ -826,7 +826,7 @@ async fn test_vm_lifecycle_operations() {
 #[cfg(feature = "test-helpers")]
 async fn test_multiple_vm_operations() {
     use blixard_core::test_helpers::TestCluster;
-    use blixard_core::proto::{CreateVmRequest, ListVmsRequest};
+    use blixard_core::iroh_types::{CreateVmRequest, ListVmsRequest};
     
     let _ = tracing_subscriber::fmt::try_init();
     

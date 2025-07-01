@@ -13,7 +13,7 @@ mod client;
 mod node_discovery;
 
 #[cfg(not(madsim))]
-use blixard_core::transport::dual_service_runner::DualServiceRunner;
+use blixard_core::transport::iroh_service_runner::start_iroh_services;
 
 #[derive(Parser)]
 #[command(name = "blixard")]
@@ -416,28 +416,11 @@ async fn main() -> BlixardResult<()> {
                             // Keep orchestrator alive while running server
                             let _orchestrator = orchestrator;
                             
-                            // Start dual service runner (supports both gRPC and Iroh)
-                            let transport_config = config.transport.clone()
-                                .unwrap_or_else(|| blixard_core::transport::config::TransportConfig::default());
+                            // Start Iroh services
+                            let handle = start_iroh_services(shared_state, actual_bind_address).await?;
                             
-                            // Get Iroh endpoint if using Iroh transport
-                            let iroh_endpoint = if matches!(&transport_config, 
-                                blixard_core::transport::config::TransportConfig::Iroh(_) |
-                                blixard_core::transport::config::TransportConfig::Dual { .. }) {
-                                shared_state.get_p2p_manager().await
-                                    .and_then(|p2p| p2p.endpoint().ok())
-                            } else {
-                                None
-                            };
-                            
-                            let runner = DualServiceRunner::new(
-                                shared_state,
-                                transport_config,
-                                actual_bind_address,
-                                iroh_endpoint,
-                            );
-                            
-                            match runner.serve_non_critical_services().await {
+                            // Wait for the service to complete
+                            match handle.await {
                                 Ok(()) => tracing::info!("Services shut down gracefully"),
                                 Err(e) => tracing::error!("Service error: {}", e),
                             }
@@ -464,28 +447,11 @@ async fn main() -> BlixardResult<()> {
                     // Keep orchestrator alive while running server
                     let _orchestrator = orchestrator;
                     
-                    // Start dual service runner (supports both gRPC and Iroh)
-                    let transport_config = config.transport.clone()
-                        .unwrap_or_else(|| blixard_core::transport::config::TransportConfig::default());
+                    // Start Iroh services
+                    let handle = start_iroh_services(shared_state, actual_bind_address).await?;
                     
-                    // Get Iroh endpoint if using Iroh transport
-                    let iroh_endpoint = if matches!(&transport_config, 
-                        blixard_core::transport::config::TransportConfig::Iroh(_) |
-                        blixard_core::transport::config::TransportConfig::Dual { .. }) {
-                        shared_state.get_p2p_manager().await
-                            .and_then(|p2p| p2p.endpoint().ok())
-                    } else {
-                        None
-                    };
-                    
-                    let runner = DualServiceRunner::new(
-                        shared_state,
-                        transport_config,
-                        actual_bind_address,
-                        iroh_endpoint,
-                    );
-                    
-                    match runner.serve_non_critical_services().await {
+                    // Wait for the service to complete
+                    match handle.await {
                         Ok(()) => tracing::info!("Services shut down gracefully"),
                         Err(e) => tracing::error!("Service error: {}", e),
                     }

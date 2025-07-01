@@ -1,7 +1,7 @@
 use crate::{BlixardResult, client::{UnifiedClient, get_transport_config}};
 use super::app::{VmInfo, PlacementStrategy, ClusterInfo, ClusterResourceInfo, NodeResourceInfo, ClusterNodeInfo};
 use blixard_core::{
-    proto::{
+    iroh_types::{
         CreateVmRequest, CreateVmWithSchedulingRequest, StartVmRequest, StopVmRequest, DeleteVmRequest, 
         GetVmStatusRequest, ListVmsRequest, ClusterStatusRequest, ClusterResourceSummaryRequest,
         ScheduleVmPlacementRequest,
@@ -460,7 +460,7 @@ impl VmClient {
     
     /// Join a node to the cluster
     pub async fn join_cluster(&mut self, node_id: u64, bind_address: &str) -> BlixardResult<String> {
-        use blixard_core::proto::JoinRequest;
+        use blixard_core::iroh_types::JoinRequest;
         
         let request = JoinRequest {
             node_id,
@@ -488,7 +488,7 @@ impl VmClient {
         target_node_id: u64, 
         live_migration: bool
     ) -> BlixardResult<(u64, u64, String)> {
-        use blixard_core::proto::MigrateVmRequest;
+        use blixard_core::iroh_types::MigrateVmRequest;
         
         let request = MigrateVmRequest {
             vm_name: vm_name.to_string(),

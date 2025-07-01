@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use std::time::Duration;
 use crate::{
     error::BlixardResult,
-    proto::{
+    iroh_types::{
         cluster_service_client::ClusterServiceClient,
         blixard_service_client::BlixardServiceClient,
         JoinRequest, JoinResponse,

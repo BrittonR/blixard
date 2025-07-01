@@ -7,7 +7,7 @@ use crate::types::{NodeConfig, VmCommand};
 use crate::vm_backend::{VmManager, VmBackendRegistry};
 use crate::raft_manager::{RaftManager, RaftProposal, ProposalData};
 use crate::node_shared::SharedNodeState;
-use crate::peer_connector::PeerConnector;
+use crate::transport::iroh_peer_connector::IrohPeerConnector;
 use crate::vm_health_monitor::VmHealthMonitor;
 
 use redb::Database;
@@ -238,11 +238,12 @@ impl Node {
         // Store transport in node
         self.raft_transport = Some(raft_transport.clone());
         
-        // For backward compatibility, create PeerConnector for gRPC mode
-        if matches!(transport_config, crate::transport::config::TransportConfig::Grpc(_)) {
-            let peer_connector = Arc::new(PeerConnector::new(self.shared.clone()));
-            self.shared.set_peer_connector(peer_connector.clone()).await;
-        }
+        // Create Iroh peer connector
+        let peer_connector = Arc::new(IrohPeerConnector::new(
+            self.shared.clone(),
+            raft_transport.endpoint().clone(),
+        ));
+        self.shared.set_peer_connector(peer_connector.clone()).await;
         
         // Start transport maintenance
         raft_transport.start_maintenance().await;
@@ -428,20 +429,20 @@ impl Node {
             tracing::info!("Sending join request to {}", join_addr);
             // Create gRPC client to join node
             let endpoint = format!("http://{}", join_addr);
-            match tonic::transport::Channel::from_shared(endpoint.clone()) {
-                Ok(channel) => {
-                    match channel.connect().await {
-                        Ok(channel) => {
-                            let mut client = crate::proto::cluster_service_client::ClusterServiceClient::new(channel);
-                            let join_request = crate::proto::JoinRequest {
-                                node_id: self.shared.get_id(),
-                                bind_address: self.shared.get_bind_addr().to_string(),
-                            };
-                            
-                            match client.join_cluster(join_request).await {
-                                Ok(response) => {
-                                    let resp = response.into_inner();
-                                    if resp.success {
+            // Create Iroh client to join node
+            let client = crate::transport::iroh_cluster_service::IrohClusterServiceClient::new_from_address(join_addr).await
+                .map_err(|e| BlixardError::ClusterJoin {
+                    reason: format!("Failed to create Iroh client: {}", e),
+                })?;
+            
+            let join_request = crate::iroh_types::JoinRequest {
+                node_id: self.shared.get_id(),
+                bind_address: self.shared.get_bind_addr().to_string(),
+            };
+            
+            match client.join_cluster(join_request).await {
+                Ok(resp) => {
+                    if resp.success {
                                         tracing::info!("Successfully joined cluster at {}", join_addr);
                                         tracing::info!("Join response contains {} peers and {} voters", resp.peers.len(), resp.voters.len());
                                         
@@ -473,29 +474,15 @@ impl Node {
                                                 tracing::info!("Skipping self (node {}) in peer list", peer.id);
                                             }
                                         }
-                                    } else {
-                                        return Err(BlixardError::ClusterJoin {
-                                            reason: resp.message,
-                                        });
-                                    }
-                                }
-                                Err(e) => {
-                                    return Err(BlixardError::ClusterJoin {
-                                        reason: format!("Failed to send join request: {}", e),
-                                    });
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            return Err(BlixardError::ClusterJoin {
-                                reason: format!("Failed to connect to join address {}: {}", join_addr, e),
-                            });
-                        }
+                    } else {
+                        return Err(BlixardError::ClusterJoin {
+                            reason: resp.message,
+                        });
                     }
                 }
                 Err(e) => {
                     return Err(BlixardError::ClusterJoin {
-                        reason: format!("Invalid join address {}: {}", join_addr, e),
+                        reason: format!("Failed to send join request: {}", e),
                     });
                 }
             }

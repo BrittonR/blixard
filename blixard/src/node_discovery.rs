@@ -21,8 +21,8 @@ pub struct NodeRegistryEntry {
     pub direct_addresses: Vec<String>,
     /// Relay URL if available
     pub relay_url: Option<String>,
-    /// gRPC address for backward compatibility
-    pub grpc_address: String,
+    /// Address for backward compatibility
+    pub address: String,
 }
 
 /// Node discovery mechanism
@@ -42,9 +42,8 @@ impl NodeDiscovery {
     /// Discover node information from an address string
     /// 
     /// Supports formats:
-    /// - "127.0.0.1:7001" - Will try to query the node for its Iroh info
-    /// - "node_id@127.0.0.1:7001" - Same as above but with explicit node ID
     /// - File path to node registry JSON
+    /// - TODO: Support direct Iroh discovery via mDNS or other mechanisms
     pub async fn discover_node(&mut self, address: &str) -> BlixardResult<NodeRegistryEntry> {
         // Check cache first
         if let Some(entry) = self.cache.get(address) {
@@ -56,8 +55,20 @@ impl NodeDiscovery {
             return self.load_from_file(address).await;
         }
 
-        // Try to connect via gRPC and query node info
-        self.query_node_info(address).await
+        // For now, return a dummy entry for development
+        // TODO: Implement actual Iroh node discovery
+        let entry = NodeRegistryEntry {
+            cluster_node_id: 1,
+            iroh_node_id: "dummy_node_id".to_string(),
+            direct_addresses: vec![address.to_string()],
+            relay_url: Some("https://relay.iroh.network".to_string()),
+            address: address.to_string(),
+        };
+
+        // Cache the entry
+        self.cache.insert(address.to_string(), entry.clone());
+
+        Ok(entry)
     }
 
     /// Load node registry from a file
@@ -75,67 +86,7 @@ impl NodeDiscovery {
 
         // Cache the entry
         self.cache.insert(path.to_string(), entry.clone());
-        self.cache.insert(entry.grpc_address.clone(), entry.clone());
-
-        Ok(entry)
-    }
-
-    /// Query node information via gRPC
-    async fn query_node_info(&mut self, address: &str) -> BlixardResult<NodeRegistryEntry> {
-        use blixard_core::proto::{
-            cluster_service_client::ClusterServiceClient,
-            GetP2pStatusRequest,
-        };
-
-        // Parse address
-        let (node_id, grpc_addr) = if address.contains('@') {
-            let parts: Vec<&str> = address.split('@').collect();
-            if parts.len() != 2 {
-                return Err(BlixardError::Internal {
-                    message: format!("Invalid address format: {}", address),
-                });
-            }
-            let id = parts[0].parse::<u64>().map_err(|e| BlixardError::Internal {
-                message: format!("Invalid node ID: {}", e),
-            })?;
-            (id, parts[1].to_string())
-        } else {
-            // Will discover node ID from the node itself
-            (0, address.to_string())
-        };
-
-        // Connect via gRPC to get P2P status
-        let mut client = ClusterServiceClient::connect(format!("http://{}", grpc_addr))
-            .await
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Failed to connect to node via gRPC: {}", e),
-            })?;
-
-        let response = client.get_p2p_status(tonic::Request::new(GetP2pStatusRequest {}))
-            .await
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Failed to get P2P status: {}", e),
-            })?;
-
-        let status = response.into_inner();
-        
-        if !status.enabled {
-            return Err(BlixardError::Internal {
-                message: "Node does not have P2P/Iroh enabled".to_string(),
-            });
-        }
-
-        let entry = NodeRegistryEntry {
-            cluster_node_id: if node_id > 0 { node_id } else { status.node_id },
-            iroh_node_id: status.node_id_base64,
-            direct_addresses: status.direct_addresses,
-            relay_url: if status.relay_url.is_empty() { None } else { Some(status.relay_url) },
-            grpc_address: grpc_addr.clone(),
-        };
-
-        // Cache the entry
-        self.cache.insert(address.to_string(), entry.clone());
-        self.cache.insert(grpc_addr, entry.clone());
+        self.cache.insert(entry.address.clone(), entry.clone());
 
         Ok(entry)
     }

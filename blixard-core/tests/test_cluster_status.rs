@@ -8,7 +8,7 @@ mod tests {
         node::Node,
         node_shared::SharedNodeState,
         types::NodeConfig,
-        grpc_server::services::cluster_service::ClusterServiceImpl,
+        transport::services::status::StatusServiceImpl,
         proto::{
             cluster_service_server::ClusterService,
             ClusterStatusRequest,
@@ -33,8 +33,8 @@ mod tests {
         // Create shared node state
         let shared = Arc::new(SharedNodeState::new(config.clone()));
 
-        // Create cluster service
-        let service = ClusterServiceImpl::new(shared.clone(), None);
+        // Create status service
+        let service = StatusServiceImpl::new(shared.clone());
 
         // Create request
         let request = Request::new(ClusterStatusRequest {});

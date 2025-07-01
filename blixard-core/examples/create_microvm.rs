@@ -1,6 +1,6 @@
 //! Example to create and start a MicroVM using gRPC
 
-use blixard_core::proto::{
+use blixard_core::iroh_types::{
     cluster_service_client::ClusterServiceClient,
     CreateVmRequest, StartVmRequest, ListVmsRequest,
 };

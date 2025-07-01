@@ -83,8 +83,8 @@ impl ExampleVmService {
 /// Example: gRPC handler using patterns
 async fn grpc_handler_example(
     service: &ExampleVmService,
-    request: tonic::Request<crate::proto::CreateVmRequest>,
-) -> Result<tonic::Response<crate::proto::CreateVmResponse>, tonic::Status> {
+    request: tonic::Request<crate::iroh_types::CreateVmRequest>,
+) -> Result<tonic::Response<crate::iroh_types::CreateVmResponse>, tonic::Status> {
     let req = request.into_inner();
     
     // Extract tenant ID (would normally use middleware)
@@ -109,7 +109,7 @@ async fn grpc_handler_example(
         .map_err(crate::common::conversions::error_to_status)?;  // Convert to gRPC Status
         
     // Convert to proto response
-    let response = crate::proto::CreateVmResponse {
+    let response = crate::iroh_types::CreateVmResponse {
         success: true,
         message: format!("VM {} created successfully", vm_id),
         vm_id: vm_id.clone(),

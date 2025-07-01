@@ -290,7 +290,7 @@ async fn test_50_node_cluster_stress() {
             tenant_id: "test".to_string(),
         };
         
-        let request = blixard_core::proto::CreateVmRequest {
+        let request = blixard_core::iroh_types::CreateVmRequest {
             name: vm_config.name.clone(),
             config_path: vm_config.config_path,
             vcpus: vm_config.vcpus,

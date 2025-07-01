@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use madsim::time::{sleep, timeout};
-use blixard_core::proto::cluster_service_client::ClusterServiceClient;
-use blixard_core::proto::{RaftMessageRequest, RaftMessageResponse};
+use blixard_core::iroh_types::cluster_service_client::ClusterServiceClient;
+use blixard_core::iroh_types::{RaftMessageRequest, RaftMessageResponse};
 use blixard_core::test_helpers::{TestCluster, TestNode};
 use raft::prelude::*;
 use tonic::{Request, Response, Status};

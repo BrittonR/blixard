@@ -8,12 +8,12 @@ use crate::{
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
     nix_image_store::{NixImageStore, NixImageMetadata, NixArtifactType, TransferStats},
-    proto,
+    iroh_types,
 };
 use std::sync::Arc;
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
-use tonic::{Request, Response, Status};
+// Removed tonic imports - using Iroh transport
 use async_trait::async_trait;
 use tracing::{info, debug, warn};
 use serde::{Serialize, Deserialize};

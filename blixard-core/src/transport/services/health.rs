@@ -6,13 +6,13 @@
 use crate::{
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
-    proto::{HealthCheckRequest, HealthCheckResponse},
+    iroh_types::{HealthCheckRequest, HealthCheckResponse},
     transport::config::TransportConfig,
     metrics_otel::{metrics, Timer, attributes},
 };
 use async_trait::async_trait;
 use std::sync::Arc;
-use tonic::{Request, Response, Status};
+// Removed tonic imports - using Iroh transport
 
 /// Trait for health check operations
 #[async_trait]
@@ -80,7 +80,7 @@ impl HealthService for HealthServiceImpl {
 
 /// gRPC adapter for health service
 #[async_trait]
-impl crate::proto::cluster_service_server::ClusterService for HealthServiceImpl {
+impl crate::iroh_types::cluster_service_server::ClusterService for HealthServiceImpl {
     async fn health_check(
         &self,
         _request: Request<HealthCheckRequest>,
@@ -104,141 +104,141 @@ impl crate::proto::cluster_service_server::ClusterService for HealthServiceImpl 
     // Stub implementations for other methods required by the trait
     async fn join_cluster(
         &self,
-        _request: Request<crate::proto::JoinRequest>,
-    ) -> Result<Response<crate::proto::JoinResponse>, Status> {
+        _request: Request<crate::iroh_types::JoinRequest>,
+    ) -> Result<Response<crate::iroh_types::JoinResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn leave_cluster(
         &self,
-        _request: Request<crate::proto::LeaveRequest>,
-    ) -> Result<Response<crate::proto::LeaveResponse>, Status> {
+        _request: Request<crate::iroh_types::LeaveRequest>,
+    ) -> Result<Response<crate::iroh_types::LeaveResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn get_cluster_status(
         &self,
-        _request: Request<crate::proto::ClusterStatusRequest>,
-    ) -> Result<Response<crate::proto::ClusterStatusResponse>, Status> {
+        _request: Request<crate::iroh_types::ClusterStatusRequest>,
+    ) -> Result<Response<crate::iroh_types::ClusterStatusResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn send_raft_message(
         &self,
-        _request: Request<crate::proto::RaftMessageRequest>,
-    ) -> Result<Response<crate::proto::RaftMessageResponse>, Status> {
+        _request: Request<crate::iroh_types::RaftMessageRequest>,
+    ) -> Result<Response<crate::iroh_types::RaftMessageResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn submit_task(
         &self,
-        _request: Request<crate::proto::TaskRequest>,
-    ) -> Result<Response<crate::proto::TaskResponse>, Status> {
+        _request: Request<crate::iroh_types::TaskRequest>,
+    ) -> Result<Response<crate::iroh_types::TaskResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn get_task_status(
         &self,
-        _request: Request<crate::proto::TaskStatusRequest>,
-    ) -> Result<Response<crate::proto::TaskStatusResponse>, Status> {
+        _request: Request<crate::iroh_types::TaskStatusRequest>,
+    ) -> Result<Response<crate::iroh_types::TaskStatusResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn create_vm(
         &self,
-        _request: Request<crate::proto::CreateVmRequest>,
-    ) -> Result<Response<crate::proto::CreateVmResponse>, Status> {
+        _request: Request<crate::iroh_types::CreateVmRequest>,
+    ) -> Result<Response<crate::iroh_types::CreateVmResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn create_vm_with_scheduling(
         &self,
-        _request: Request<crate::proto::CreateVmWithSchedulingRequest>,
-    ) -> Result<Response<crate::proto::CreateVmWithSchedulingResponse>, Status> {
+        _request: Request<crate::iroh_types::CreateVmWithSchedulingRequest>,
+    ) -> Result<Response<crate::iroh_types::CreateVmWithSchedulingResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn start_vm(
         &self,
-        _request: Request<crate::proto::StartVmRequest>,
-    ) -> Result<Response<crate::proto::StartVmResponse>, Status> {
+        _request: Request<crate::iroh_types::StartVmRequest>,
+    ) -> Result<Response<crate::iroh_types::StartVmResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn stop_vm(
         &self,
-        _request: Request<crate::proto::StopVmRequest>,
-    ) -> Result<Response<crate::proto::StopVmResponse>, Status> {
+        _request: Request<crate::iroh_types::StopVmRequest>,
+    ) -> Result<Response<crate::iroh_types::StopVmResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn delete_vm(
         &self,
-        _request: Request<crate::proto::DeleteVmRequest>,
-    ) -> Result<Response<crate::proto::DeleteVmResponse>, Status> {
+        _request: Request<crate::iroh_types::DeleteVmRequest>,
+    ) -> Result<Response<crate::iroh_types::DeleteVmResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn list_vms(
         &self,
-        _request: Request<crate::proto::ListVmsRequest>,
-    ) -> Result<Response<crate::proto::ListVmsResponse>, Status> {
+        _request: Request<crate::iroh_types::ListVmsRequest>,
+    ) -> Result<Response<crate::iroh_types::ListVmsResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn get_vm_status(
         &self,
-        _request: Request<crate::proto::GetVmStatusRequest>,
-    ) -> Result<Response<crate::proto::GetVmStatusResponse>, Status> {
+        _request: Request<crate::iroh_types::GetVmStatusRequest>,
+    ) -> Result<Response<crate::iroh_types::GetVmStatusResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn migrate_vm(
         &self,
-        _request: Request<crate::proto::MigrateVmRequest>,
-    ) -> Result<Response<crate::proto::MigrateVmResponse>, Status> {
+        _request: Request<crate::iroh_types::MigrateVmRequest>,
+    ) -> Result<Response<crate::iroh_types::MigrateVmResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn schedule_vm_placement(
         &self,
-        _request: Request<crate::proto::ScheduleVmPlacementRequest>,
-    ) -> Result<Response<crate::proto::ScheduleVmPlacementResponse>, Status> {
+        _request: Request<crate::iroh_types::ScheduleVmPlacementRequest>,
+    ) -> Result<Response<crate::iroh_types::ScheduleVmPlacementResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn get_cluster_resource_summary(
         &self,
-        _request: Request<crate::proto::ClusterResourceSummaryRequest>,
-    ) -> Result<Response<crate::proto::ClusterResourceSummaryResponse>, Status> {
+        _request: Request<crate::iroh_types::ClusterResourceSummaryRequest>,
+    ) -> Result<Response<crate::iroh_types::ClusterResourceSummaryResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn get_p2p_status(
         &self,
-        _request: Request<crate::proto::GetP2pStatusRequest>,
-    ) -> Result<Response<crate::proto::GetP2pStatusResponse>, Status> {
+        _request: Request<crate::iroh_types::GetP2pStatusRequest>,
+    ) -> Result<Response<crate::iroh_types::GetP2pStatusResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn share_vm_image(
         &self,
-        _request: Request<crate::proto::ShareVmImageRequest>,
-    ) -> Result<Response<crate::proto::ShareVmImageResponse>, Status> {
+        _request: Request<crate::iroh_types::ShareVmImageRequest>,
+    ) -> Result<Response<crate::iroh_types::ShareVmImageResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn get_vm_image(
         &self,
-        _request: Request<crate::proto::GetVmImageRequest>,
-    ) -> Result<Response<crate::proto::GetVmImageResponse>, Status> {
+        _request: Request<crate::iroh_types::GetVmImageRequest>,
+    ) -> Result<Response<crate::iroh_types::GetVmImageResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
     
     async fn list_p2p_images(
         &self,
-        _request: Request<crate::proto::ListP2pImagesRequest>,
-    ) -> Result<Response<crate::proto::ListP2pImagesResponse>, Status> {
+        _request: Request<crate::iroh_types::ListP2pImagesRequest>,
+    ) -> Result<Response<crate::iroh_types::ListP2pImagesResponse>, Status> {
         Err(Status::unimplemented("Not implemented in health service"))
     }
 }

@@ -26,7 +26,7 @@ async fn wait_for_raft_processing() {
 }
 
 /// Helper to find VM in list by name
-fn find_vm_in_list<'a>(vms: &'a [blixard_core::proto::VmInfo], name: &str) -> Option<&'a blixard_core::proto::VmInfo> {
+fn find_vm_in_list<'a>(vms: &'a [blixard_core::iroh_types::VmInfo], name: &str) -> Option<&'a blixard_core::iroh_types::VmInfo> {
     vms.iter().find(|vm| vm.name == name)
 }
 

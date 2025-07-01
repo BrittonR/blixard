@@ -14,7 +14,7 @@ use std::net::SocketAddr;
 use madsim::time::{sleep, timeout};
 use madsim::net::{Endpoint, NetSim};
 use blixard_core::test_helpers::{TestCluster, TestNode};
-use blixard_core::proto::{SubmitTaskRequest, GetTaskStatusRequest};
+use blixard_core::iroh_types::{SubmitTaskRequest, GetTaskStatusRequest};
 use blixard_core::raft_manager::{TaskSpec, ResourceRequirements};
 
 /// Test basic network partition - majority/minority split

@@ -3,7 +3,6 @@
 //! This module organizes the gRPC services into focused submodules
 //! for better maintainability and testability.
 
-pub mod common;
 pub mod services;
 
 use crate::{
@@ -35,22 +34,6 @@ impl GrpcServiceBuilder {
         self
     }
     
-    /// Build VM service
-    pub fn build_vm_service(self) -> services::VmServiceImpl {
-        services::VmServiceImpl::new(
-            self.node.clone(),
-            self.security_middleware.clone(),
-        )
-    }
-    
-    /// Build cluster service
-    pub fn build_cluster_service(self) -> services::ClusterServiceImpl {
-        services::ClusterServiceImpl::new(
-            self.node.clone(),
-            self.security_middleware.clone(),
-        )
-    }
-    
     /// Build task service
     pub fn build_task_service(self) -> services::TaskServiceImpl {
         services::TaskServiceImpl::new(
@@ -67,6 +50,3 @@ impl GrpcServiceBuilder {
         )
     }
 }
-
-// Re-export the original service for backward compatibility during migration
-pub use crate::grpc_server_legacy::{BlixardGrpcService, start_grpc_server};

@@ -7,8 +7,8 @@ use crate::transport::iroh_protocol::{
     deserialize_payload, generate_request_id, read_message, serialize_payload,
     write_message, MessageType, RpcRequest, RpcResponse,
 };
-use crate::transport::iroh_service::{IrohService, ServiceHandler};
-use crate::types::{NodeInfo, NodeState};
+use crate::transport::iroh_service::IrohService;
+use crate::iroh_types::{NodeInfo, NodeState};
 use async_trait::async_trait;
 use bytes::Bytes;
 use iroh::endpoint::{RecvStream, SendStream};

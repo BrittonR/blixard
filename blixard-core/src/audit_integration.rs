@@ -4,14 +4,14 @@
 //! log security-relevant events throughout the system.
 
 use std::sync::Arc;
-use tonic::{Request, Status};
+// Removed tonic imports - using Iroh transport
 use crate::audit_log::{
     AuditLogger, AuditEvent, AuditCategory, AuditSeverity, AuditActor,
     AuditResource, AuditOutcome, log_authentication_failure, log_authorization,
 };
 use crate::error::BlixardResult;
 use crate::types::{VmCommand, VmStatus};
-use crate::proto;
+use crate::iroh_types;
 use chrono::Utc;
 use tracing::{info, warn};
 
@@ -27,55 +27,46 @@ impl AuditContext {
         Self { logger, node_id }
     }
     
-    /// Extract actor information from gRPC metadata
-    pub fn extract_actor(&self, request: &Request<impl std::fmt::Debug>) -> AuditActor {
-        let metadata = request.metadata();
-        
+    /// Extract actor information from request context
+    pub fn extract_actor(&self, headers: &std::collections::HashMap<String, String>) -> AuditActor {
         // Check for user authentication token
-        if let Some(user_id) = metadata.get("user-id").and_then(|v| v.to_str().ok()) {
-            let user_name = metadata.get("user-name")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("unknown")
-                .to_string();
+        if let Some(user_id) = headers.get("user-id") {
+            let user_name = headers.get("user-name")
+                .unwrap_or(&"unknown".to_string())
+                .clone();
             
-            let roles = metadata.get("user-roles")
-                .and_then(|v| v.to_str().ok())
+            let roles = headers.get("user-roles")
                 .map(|s| s.split(',').map(|r| r.trim().to_string()).collect())
                 .unwrap_or_default();
             
             AuditActor::User {
-                id: user_id.to_string(),
+                id: user_id.clone(),
                 name: user_name,
                 roles,
             }
-        } else if let Some(service) = metadata.get("service-name").and_then(|v| v.to_str().ok()) {
+        } else if let Some(service) = headers.get("service-name") {
             // Service authentication
-            let api_key_id = metadata.get("api-key-id")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string());
+            let api_key_id = headers.get("api-key-id").cloned();
             
             AuditActor::Service {
-                name: service.to_string(),
+                name: service.clone(),
                 api_key_id,
             }
         } else {
             // System component (internal calls)
             AuditActor::System {
-                component: "grpc-server".to_string(),
+                component: "iroh-server".to_string(),
                 node_id: self.node_id,
             }
         }
     }
     
-    /// Extract source IP from gRPC request
-    pub fn extract_source_ip(&self, request: &Request<impl std::fmt::Debug>) -> Option<String> {
-        request.remote_addr()
+    /// Extract source IP from request context
+    pub fn extract_source_ip(&self, remote_addr: Option<std::net::SocketAddr>, headers: &std::collections::HashMap<String, String>) -> Option<String> {
+        remote_addr
             .map(|addr| addr.to_string())
             .or_else(|| {
-                request.metadata()
-                    .get("x-forwarded-for")
-                    .and_then(|v| v.to_str().ok())
-                    .map(|s| s.to_string())
+                headers.get("x-forwarded-for").cloned()
             })
     }
     
@@ -436,7 +427,7 @@ mod tests {
     use super::*;
     use crate::audit_log::AuditConfig;
     use tempfile::TempDir;
-    use tonic::metadata::MetadataMap;
+    // Removed tonic metadata imports
     
     #[tokio::test]
     async fn test_audit_context_actor_extraction() {

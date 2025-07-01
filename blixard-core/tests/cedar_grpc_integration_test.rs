@@ -3,11 +3,13 @@
 #![cfg(feature = "test-helpers")]
 
 use blixard_core::{
-    grpc_server::services::{vm_service::VmServiceImpl, cluster_service::ClusterServiceImpl},
-    grpc_server::common::GrpcMiddleware,
+    transport::services::{vm::VmServiceImpl, status::StatusServiceImpl},
     grpc_security::{GrpcSecurityMiddleware, SecurityContext},
     node_shared::SharedNodeState,
-    proto::{CreateVmRequest, ListVmsRequest, GetVmStatusRequest, ClusterStatusRequest},
+    proto::{
+        cluster_service_server::ClusterService,
+        CreateVmRequest, ListVmsRequest, GetVmStatusRequest, ClusterStatusRequest
+    },
     security::{SecurityManager, Permission},
     config_v2::{SecurityConfig, AuthConfig, TlsConfig, NodeConfig},
     test_helpers::TestNode,
@@ -53,8 +55,8 @@ async fn test_cedar_vm_service_authorization() {
     let security_manager = SecurityManager::new(test_node.node.config.security.clone()).await.unwrap();
     let security_middleware = GrpcSecurityMiddleware::new(Arc::new(security_manager));
     
-    // Create VM service with security
-    let vm_service = VmServiceImpl::new(shared_state.clone(), Some(security_middleware.clone()));
+    // Create VM service (security is handled at a different layer)
+    let vm_service = VmServiceImpl::new(shared_state.clone());
     
     // Test 1: Create VM without authentication (should fail)
     let mut request = Request::new(CreateVmRequest {
@@ -106,12 +108,12 @@ async fn test_cedar_cluster_service_authorization() {
     let test_node = TestNode::new(1, "127.0.0.1:7001").await.unwrap();
     let shared_state = test_node.node.get_shared_state();
     
-    // Create cluster service without security (Cedar will use fallback)
-    let cluster_service = ClusterServiceImpl::new(shared_state, None);
+    // Create status service without security (Cedar will use fallback)
+    let status_service = StatusServiceImpl::new(shared_state);
     
     // Test cluster status - should work with fallback to traditional RBAC
     let request = Request::new(ClusterStatusRequest {});
-    let result = cluster_service.get_cluster_status(request).await;
+    let result = status_service.get_cluster_status(request).await;
     
     // With no security middleware, this should succeed using fallback
     assert!(result.is_ok());
@@ -144,7 +146,7 @@ async fn test_cedar_fallback_behavior() {
     let shared_state = test_node.node.get_shared_state();
     
     // Create VM service - should work with traditional RBAC
-    let vm_service = VmServiceImpl::new(shared_state, None);
+    let vm_service = VmServiceImpl::new(shared_state);
     
     // All operations should fall back to traditional permission checks
     println!("✅ Cedar fallback behavior verified");

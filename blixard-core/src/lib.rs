@@ -2,8 +2,6 @@ pub mod error;
 pub mod types;
 pub mod node;
 pub mod node_shared;
-pub mod grpc_server;
-pub mod grpc_server_legacy;
 pub mod raft_codec;
 pub mod raft_manager;
 pub mod raft_batch_processor;
@@ -13,8 +11,6 @@ pub mod vm_scheduler;
 pub mod anti_affinity;
 pub mod resource_management;
 pub mod network_isolated_backend;
-pub mod peer_connector;
-pub mod connection_pool;
 pub mod config_v2;
 pub mod config_watcher;
 pub mod config_global;
@@ -32,10 +28,7 @@ pub mod tracing_otel;
 pub mod resource_quotas;
 pub mod quota_manager;
 pub mod security;
-pub mod grpc_security;
 pub mod cert_generator;
-pub mod auth_interceptor;
-pub mod tls_config;
 pub mod cedar_authz;
 pub mod quota_system;
 pub mod observability;
@@ -62,7 +55,5 @@ pub mod test_helpers_concurrent;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_message_filter;
 
-// Include the generated proto code
-pub mod proto {
-    tonic::include_proto!("blixard");
-}
+// Native Rust types for Iroh transport
+pub mod iroh_types;
