@@ -364,6 +364,144 @@ impl IrohVmService {
             images: image_list,
         })
     }
+    
+    // VM Health Monitoring handlers
+    
+    /// Get VM health status
+    async fn handle_get_health_status(
+        &self,
+        request: crate::iroh_types::GetVmHealthStatusRequest,
+    ) -> BlixardResult<crate::iroh_types::GetVmHealthStatusResponse> {
+        // Get the VM health monitor from the node
+        let health_monitor = self.node.get_vm_health_monitor().await
+            .ok_or_else(|| BlixardError::Internal {
+                message: "VM health monitor not available".to_string(),
+            })?;
+        
+        // Get health status for the VM
+        let health_status = health_monitor.get_health_status(&request.vm_name).await;
+        
+        Ok(crate::iroh_types::GetVmHealthStatusResponse {
+            health_status,
+        })
+    }
+    
+    /// Add a health check to a VM
+    async fn handle_add_health_check(
+        &self,
+        request: crate::iroh_types::AddVmHealthCheckRequest,
+    ) -> BlixardResult<crate::iroh_types::AddVmHealthCheckResponse> {
+        // Get the VM health monitor from the node
+        let health_monitor = self.node.get_vm_health_monitor().await
+            .ok_or_else(|| BlixardError::Internal {
+                message: "VM health monitor not available".to_string(),
+            })?;
+        
+        // Add the health check
+        match health_monitor.add_health_check(&request.vm_name, request.health_check).await {
+            Ok(()) => Ok(crate::iroh_types::AddVmHealthCheckResponse {
+                success: true,
+                message: format!("Health check added successfully to VM '{}'", request.vm_name),
+            }),
+            Err(e) => Ok(crate::iroh_types::AddVmHealthCheckResponse {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+    
+    /// List health checks for a VM
+    async fn handle_list_health_checks(
+        &self,
+        request: crate::iroh_types::ListVmHealthChecksRequest,
+    ) -> BlixardResult<crate::iroh_types::ListVmHealthChecksResponse> {
+        // Get the VM health monitor from the node
+        let health_monitor = self.node.get_vm_health_monitor().await
+            .ok_or_else(|| BlixardError::Internal {
+                message: "VM health monitor not available".to_string(),
+            })?;
+        
+        // Get health checks for the VM
+        let health_checks = health_monitor.list_health_checks(&request.vm_name).await
+            .unwrap_or_else(|_| Vec::new());
+        
+        Ok(crate::iroh_types::ListVmHealthChecksResponse {
+            health_checks,
+        })
+    }
+    
+    /// Remove a health check from a VM
+    async fn handle_remove_health_check(
+        &self,
+        request: crate::iroh_types::RemoveVmHealthCheckRequest,
+    ) -> BlixardResult<crate::iroh_types::RemoveVmHealthCheckResponse> {
+        // Get the VM health monitor from the node
+        let health_monitor = self.node.get_vm_health_monitor().await
+            .ok_or_else(|| BlixardError::Internal {
+                message: "VM health monitor not available".to_string(),
+            })?;
+        
+        // Remove the health check
+        match health_monitor.remove_health_check(&request.vm_name, &request.check_name).await {
+            Ok(()) => Ok(crate::iroh_types::RemoveVmHealthCheckResponse {
+                success: true,
+                message: format!("Health check '{}' removed from VM '{}'", request.check_name, request.vm_name),
+            }),
+            Err(e) => Ok(crate::iroh_types::RemoveVmHealthCheckResponse {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+    
+    /// Toggle health monitoring for a VM
+    async fn handle_toggle_health_monitoring(
+        &self,
+        request: crate::iroh_types::ToggleVmHealthMonitoringRequest,
+    ) -> BlixardResult<crate::iroh_types::ToggleVmHealthMonitoringResponse> {
+        // Get the VM health monitor from the node
+        let health_monitor = self.node.get_vm_health_monitor().await
+            .ok_or_else(|| BlixardError::Internal {
+                message: "VM health monitor not available".to_string(),
+            })?;
+        
+        // Toggle health monitoring
+        let action = if request.enable { "enable" } else { "disable" };
+        match health_monitor.toggle_monitoring(&request.vm_name, request.enable).await {
+            Ok(()) => Ok(crate::iroh_types::ToggleVmHealthMonitoringResponse {
+                success: true,
+                message: format!("Health monitoring {} for VM '{}'", action, request.vm_name),
+            }),
+            Err(e) => Ok(crate::iroh_types::ToggleVmHealthMonitoringResponse {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+    
+    /// Configure recovery policy for a VM
+    async fn handle_configure_recovery_policy(
+        &self,
+        request: crate::iroh_types::ConfigureVmRecoveryPolicyRequest,
+    ) -> BlixardResult<crate::iroh_types::ConfigureVmRecoveryPolicyResponse> {
+        // Get the VM auto-recovery service from the node
+        let recovery_service = self.node.get_vm_auto_recovery().await
+            .ok_or_else(|| BlixardError::Internal {
+                message: "VM auto-recovery service not available".to_string(),
+            })?;
+        
+        // Configure the recovery policy
+        match recovery_service.configure_recovery_policy(&request.vm_name, request.policy).await {
+            Ok(()) => Ok(crate::iroh_types::ConfigureVmRecoveryPolicyResponse {
+                success: true,
+                message: format!("Recovery policy configured for VM '{}'", request.vm_name),
+            }),
+            Err(e) => Ok(crate::iroh_types::ConfigureVmRecoveryPolicyResponse {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
 }
 
 #[async_trait]
@@ -375,7 +513,9 @@ impl IrohService for IrohVmService {
     fn methods(&self) -> Vec<&'static str> {
         vec![
             "create", "start", "stop", "delete", "list", "get_status", "migrate",
-            "share_image", "get_image", "list_images"
+            "share_image", "get_image", "list_images",
+            "get_health_status", "add_health_check", "list_health_checks",
+            "remove_health_check", "toggle_health_monitoring", "configure_recovery_policy"
         ]
     }
     
@@ -408,6 +548,43 @@ impl IrohService for IrohVmService {
                 debug!("Handling VM image operation: {:?}", request);
                 
                 let response = self.handle_image_request(request).await?;
+                serialize_payload(&response)
+            }
+            
+            // VM health monitoring operations
+            "get_health_status" => {
+                let request: crate::iroh_types::GetVmHealthStatusRequest = deserialize_payload(&payload)?;
+                let response = self.handle_get_health_status(request).await?;
+                serialize_payload(&response)
+            }
+            
+            "add_health_check" => {
+                let request: crate::iroh_types::AddVmHealthCheckRequest = deserialize_payload(&payload)?;
+                let response = self.handle_add_health_check(request).await?;
+                serialize_payload(&response)
+            }
+            
+            "list_health_checks" => {
+                let request: crate::iroh_types::ListVmHealthChecksRequest = deserialize_payload(&payload)?;
+                let response = self.handle_list_health_checks(request).await?;
+                serialize_payload(&response)
+            }
+            
+            "remove_health_check" => {
+                let request: crate::iroh_types::RemoveVmHealthCheckRequest = deserialize_payload(&payload)?;
+                let response = self.handle_remove_health_check(request).await?;
+                serialize_payload(&response)
+            }
+            
+            "toggle_health_monitoring" => {
+                let request: crate::iroh_types::ToggleVmHealthMonitoringRequest = deserialize_payload(&payload)?;
+                let response = self.handle_toggle_health_monitoring(request).await?;
+                serialize_payload(&response)
+            }
+            
+            "configure_recovery_policy" => {
+                let request: crate::iroh_types::ConfigureVmRecoveryPolicyRequest = deserialize_payload(&payload)?;
+                let response = self.handle_configure_recovery_policy(request).await?;
                 serialize_payload(&response)
             }
             

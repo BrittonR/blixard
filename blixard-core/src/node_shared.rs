@@ -140,6 +140,12 @@ pub struct SharedNodeState {
     
     // Discovery manager for automatic peer discovery (optional dependency)
     discovery_manager: RwLock<Option<Arc<dyn std::any::Any + Send + Sync>>>,
+    
+    // VM health monitor for monitoring VM health
+    vm_health_monitor: RwLock<Option<Arc<crate::vm_health_monitor::VmHealthMonitor>>>,
+    
+    // VM auto-recovery service for automatic VM recovery
+    vm_auto_recovery: RwLock<Option<Arc<crate::vm_auto_recovery::VmAutoRecovery>>>,
 }
 
 /// Thread-safe wrapper for VM manager operations
@@ -175,6 +181,8 @@ impl SharedNodeState {
             p2p_manager: RwLock::new(None),
             p2p_node_addr: RwLock::new(None),
             discovery_manager: RwLock::new(None),
+            vm_health_monitor: RwLock::new(None),
+            vm_auto_recovery: RwLock::new(None),
         }
     }
     
@@ -337,6 +345,26 @@ impl SharedNodeState {
     pub async fn get_discovery_manager<T: 'static + Send + Sync>(&self) -> Option<Arc<T>> {
         self.discovery_manager.read().await.as_ref()
             .and_then(|any| any.clone().downcast::<T>().ok())
+    }
+    
+    /// Set the VM health monitor
+    pub async fn set_vm_health_monitor(&self, monitor: Arc<crate::vm_health_monitor::VmHealthMonitor>) {
+        *self.vm_health_monitor.write().await = Some(monitor);
+    }
+    
+    /// Get the VM health monitor
+    pub async fn get_vm_health_monitor(&self) -> Option<Arc<crate::vm_health_monitor::VmHealthMonitor>> {
+        self.vm_health_monitor.read().await.clone()
+    }
+    
+    /// Set the VM auto-recovery service
+    pub async fn set_vm_auto_recovery(&self, recovery: Arc<crate::vm_auto_recovery::VmAutoRecovery>) {
+        *self.vm_auto_recovery.write().await = Some(recovery);
+    }
+    
+    /// Get the VM auto-recovery service
+    pub async fn get_vm_auto_recovery(&self) -> Option<Arc<crate::vm_auto_recovery::VmAutoRecovery>> {
+        self.vm_auto_recovery.read().await.clone()
     }
     
     /// Get the Iroh endpoint for Raft transport

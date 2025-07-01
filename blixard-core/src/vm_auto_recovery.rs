@@ -13,7 +13,7 @@ use crate::{
 };
 
 /// Recovery policy for a failed VM
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RecoveryPolicy {
     /// Maximum number of restart attempts
     pub max_restart_attempts: u32,
@@ -278,6 +278,15 @@ impl VmAutoRecovery {
         states.iter()
             .map(|(name, state)| (name.clone(), (state.restart_attempts, state.exhausted)))
             .collect()
+    }
+    
+    /// Configure recovery policy for a specific VM
+    pub async fn configure_recovery_policy(&self, _vm_name: &str, _policy: RecoveryPolicy) -> BlixardResult<()> {
+        // TODO: Implement per-VM recovery policies
+        // For now, the VmAutoRecovery uses a global policy
+        // In the future, we could store per-VM policies in a HashMap
+        warn!("Per-VM recovery policies not implemented yet - using global policy");
+        Ok(())
     }
 }
 

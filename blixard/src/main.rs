@@ -154,6 +154,68 @@ enum VmCommands {
     },
     /// List all VMs
     List,
+    /// VM health monitoring operations
+    Health {
+        #[command(subcommand)]
+        command: VmHealthCommands,
+    },
+}
+
+#[derive(clap::Subcommand)]
+enum VmHealthCommands {
+    /// Get current health status of a VM
+    Status {
+        #[arg(long)]
+        name: String,
+    },
+    /// Add a health check to a VM
+    Add {
+        #[arg(long)]
+        vm_name: String,
+        #[arg(long)]
+        check_name: String,
+        #[arg(long)]
+        check_type: String, // http, tcp, script, console, process, guest-agent
+        #[arg(long)]
+        weight: Option<f32>,
+        #[arg(long)]
+        critical: bool,
+        /// Type-specific configuration in JSON format
+        #[arg(long)]
+        config: String,
+    },
+    /// List health checks for a VM
+    List {
+        #[arg(long)]
+        name: String,
+    },
+    /// Remove a health check from a VM
+    Remove {
+        #[arg(long)]
+        vm_name: String,
+        #[arg(long)]
+        check_name: String,
+    },
+    /// Enable/disable health monitoring for a VM
+    Toggle {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        enable: bool,
+    },
+    /// Configure recovery policy for a VM
+    Recovery {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        enable: Option<bool>,
+        #[arg(long)]
+        max_retries: Option<u32>,
+        #[arg(long)]
+        retry_delay_secs: Option<u64>,
+        #[arg(long)]
+        failure_threshold: Option<u32>,
+    },
 }
 
 #[derive(clap::Subcommand)]
@@ -738,9 +800,281 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
             let should_follow = follow && !no_follow;
             handle_vm_logs(&name, should_follow, lines).await?;
         }
+        VmCommands::Health { command } => {
+            handle_vm_health_command(command, &mut client).await?;
+        }
     }
     
     Ok(())
+}
+
+#[cfg(not(madsim))]
+async fn handle_vm_health_command(command: VmHealthCommands, client: &mut crate::client::UnifiedClient) -> BlixardResult<()> {
+    use blixard_core::vm_health_types::{HealthCheckType, VmHealthCheck};
+    
+    match command {
+        VmHealthCommands::Status { name } => {
+            match client.get_vm_health_status(&name).await {
+                Ok(health_status) => {
+                    if let Some(status) = health_status {
+                        println!("VM '{}' Health Status:", name);
+                        println!("  State: {:?}", status.state);
+                        println!("  Score: {:.1}%", status.score);
+                        println!("  Last Check: {:?}", status.last_check_time.elapsed().unwrap_or_default());
+                        if status.consecutive_failures > 0 {
+                            println!("  Consecutive Failures: {}", status.consecutive_failures);
+                        }
+                        
+                        if !status.check_results.is_empty() {
+                            println!("\nHealth Check Results:");
+                            for result in &status.check_results {
+                                let status_icon = if result.success { "✓" } else { "✗" };
+                                println!("  {} {}: {} ({}ms)", 
+                                    status_icon,
+                                    result.check_name,
+                                    result.message,
+                                    result.duration.as_millis()
+                                );
+                            }
+                        }
+                    } else {
+                        println!("No health status available for VM '{}'", name);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error getting health status for VM '{}': {}", name, e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        VmHealthCommands::Add { vm_name, check_name, check_type, weight, critical, config } => {
+            // Parse the health check type and config
+            let health_check_type = match parse_health_check_type(&check_type, &config) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("Invalid health check configuration: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            
+            let health_check = VmHealthCheck {
+                name: check_name.clone(),
+                check_type: health_check_type,
+                weight: weight.unwrap_or(1.0),
+                critical,
+            };
+            
+            match client.add_vm_health_check(&vm_name, health_check).await {
+                Ok(success) => {
+                    if success {
+                        println!("Successfully added health check '{}' to VM '{}'", check_name, vm_name);
+                    } else {
+                        eprintln!("Failed to add health check");
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error adding health check: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        VmHealthCommands::List { name } => {
+            match client.list_vm_health_checks(&name).await {
+                Ok(checks) => {
+                    if checks.is_empty() {
+                        println!("No health checks configured for VM '{}'", name);
+                    } else {
+                        println!("Health checks for VM '{}':", name);
+                        for check in checks {
+                            println!("  - {} ({})", check.name, match &check.check_type {
+                                HealthCheckType::Http { .. } => "HTTP",
+                                HealthCheckType::Tcp { .. } => "TCP",
+                                HealthCheckType::Script { .. } => "Script",
+                                HealthCheckType::Console { .. } => "Console",
+                                HealthCheckType::Process { .. } => "Process",
+                                HealthCheckType::GuestAgent { .. } => "Guest Agent",
+                            });
+                            println!("    Weight: {}, Critical: {}", check.weight, check.critical);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error listing health checks: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        VmHealthCommands::Remove { vm_name, check_name } => {
+            match client.remove_vm_health_check(&vm_name, &check_name).await {
+                Ok(success) => {
+                    if success {
+                        println!("Successfully removed health check '{}' from VM '{}'", check_name, vm_name);
+                    } else {
+                        eprintln!("Failed to remove health check");
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error removing health check: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        VmHealthCommands::Toggle { name, enable } => {
+            match client.toggle_vm_health_monitoring(&name, enable).await {
+                Ok(success) => {
+                    if success {
+                        let action = if enable { "enabled" } else { "disabled" };
+                        println!("Successfully {} health monitoring for VM '{}'", action, name);
+                    } else {
+                        eprintln!("Failed to toggle health monitoring");
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error toggling health monitoring: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        VmHealthCommands::Recovery { name, enable, max_retries, retry_delay_secs, failure_threshold } => {
+            use blixard_core::vm_auto_recovery::RecoveryPolicy;
+            use std::time::Duration;
+            
+            let policy = RecoveryPolicy {
+                enabled: enable.unwrap_or(true),
+                max_retries: max_retries.unwrap_or(3),
+                retry_delay: Duration::from_secs(retry_delay_secs.unwrap_or(30)),
+                failure_threshold: failure_threshold.unwrap_or(2),
+            };
+            
+            match client.configure_vm_recovery_policy(&name, policy).await {
+                Ok(success) => {
+                    if success {
+                        println!("Successfully configured recovery policy for VM '{}'", name);
+                        println!("  Enabled: {}", policy.enabled);
+                        println!("  Max Retries: {}", policy.max_retries);
+                        println!("  Retry Delay: {}s", policy.retry_delay.as_secs());
+                        println!("  Failure Threshold: {}", policy.failure_threshold);
+                    } else {
+                        eprintln!("Failed to configure recovery policy");
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error configuring recovery policy: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+fn parse_health_check_type(check_type: &str, config: &str) -> Result<HealthCheckType, String> {
+    use blixard_core::vm_health_types::HealthCheckType;
+    
+    let config_value: serde_json::Value = serde_json::from_str(config)
+        .map_err(|e| format!("Invalid JSON config: {}", e))?;
+    
+    match check_type {
+        "http" => {
+            let url = config_value["url"].as_str()
+                .ok_or("Missing 'url' in config")?
+                .to_string();
+            let expected_status = config_value["expected_status"].as_u64()
+                .ok_or("Missing 'expected_status' in config")? as u16;
+            let timeout_secs = config_value["timeout_secs"].as_u64().unwrap_or(10);
+            
+            let headers = if let Some(headers_val) = config_value["headers"].as_object() {
+                Some(headers_val.iter()
+                    .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
+                    .collect())
+            } else {
+                None
+            };
+            
+            Ok(HealthCheckType::Http {
+                url,
+                expected_status,
+                timeout_secs,
+                headers,
+            })
+        }
+        "tcp" => {
+            let address = config_value["address"].as_str()
+                .ok_or("Missing 'address' in config")?
+                .to_string();
+            let timeout_secs = config_value["timeout_secs"].as_u64().unwrap_or(5);
+            
+            Ok(HealthCheckType::Tcp {
+                address,
+                timeout_secs,
+            })
+        }
+        "script" => {
+            let command = config_value["command"].as_str()
+                .ok_or("Missing 'command' in config")?
+                .to_string();
+            let args = if let Some(args_val) = config_value["args"].as_array() {
+                args_val.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            } else {
+                vec![]
+            };
+            let expected_exit_code = config_value["expected_exit_code"].as_i64().unwrap_or(0) as i32;
+            let timeout_secs = config_value["timeout_secs"].as_u64().unwrap_or(10);
+            
+            Ok(HealthCheckType::Script {
+                command,
+                args,
+                expected_exit_code,
+                timeout_secs,
+            })
+        }
+        "console" => {
+            let healthy_pattern = config_value["healthy_pattern"].as_str()
+                .ok_or("Missing 'healthy_pattern' in config")?
+                .to_string();
+            let unhealthy_pattern = config_value["unhealthy_pattern"].as_str()
+                .map(|s| s.to_string());
+            let timeout_secs = config_value["timeout_secs"].as_u64().unwrap_or(5);
+            
+            Ok(HealthCheckType::Console {
+                healthy_pattern,
+                unhealthy_pattern,
+                timeout_secs,
+            })
+        }
+        "process" => {
+            let process_name = config_value["process_name"].as_str()
+                .ok_or("Missing 'process_name' in config")?
+                .to_string();
+            let min_instances = config_value["min_instances"].as_u64().unwrap_or(1) as u32;
+            
+            Ok(HealthCheckType::Process {
+                process_name,
+                min_instances,
+            })
+        }
+        "guest-agent" => {
+            let timeout_secs = config_value["timeout_secs"].as_u64().unwrap_or(5);
+            
+            Ok(HealthCheckType::GuestAgent {
+                timeout_secs,
+            })
+        }
+        _ => Err(format!("Unknown health check type: {}", check_type))
+    }
+}
+
+#[cfg(madsim)]
+async fn handle_vm_health_command(_command: VmHealthCommands, _client: &mut crate::client::UnifiedClient) -> BlixardResult<()> {
+    eprintln!("VM health commands are not available in simulation mode");
+    std::process::exit(1);
 }
 
 #[cfg(madsim)]

@@ -425,6 +425,44 @@ impl IrohClusterServiceClient {
         Ok(response.vms)
     }
     
+    // VM Health Monitoring operations
+    
+    /// Get VM health status
+    pub async fn get_vm_health_status(&self, vm_name: String) -> BlixardResult<crate::iroh_types::GetVmHealthStatusResponse> {
+        let request = crate::iroh_types::GetVmHealthStatusRequest { vm_name };
+        self.client.call_service("vm", "get_health_status", request).await
+    }
+    
+    /// Add a health check to a VM
+    pub async fn add_vm_health_check(&self, vm_name: String, health_check: crate::vm_health_types::HealthCheck) -> BlixardResult<crate::iroh_types::AddVmHealthCheckResponse> {
+        let request = crate::iroh_types::AddVmHealthCheckRequest { vm_name, health_check };
+        self.client.call_service("vm", "add_health_check", request).await
+    }
+    
+    /// List health checks for a VM
+    pub async fn list_vm_health_checks(&self, vm_name: String) -> BlixardResult<crate::iroh_types::ListVmHealthChecksResponse> {
+        let request = crate::iroh_types::ListVmHealthChecksRequest { vm_name };
+        self.client.call_service("vm", "list_health_checks", request).await
+    }
+    
+    /// Remove a health check from a VM
+    pub async fn remove_vm_health_check(&self, vm_name: String, check_name: String) -> BlixardResult<crate::iroh_types::RemoveVmHealthCheckResponse> {
+        let request = crate::iroh_types::RemoveVmHealthCheckRequest { vm_name, check_name };
+        self.client.call_service("vm", "remove_health_check", request).await
+    }
+    
+    /// Toggle health monitoring for a VM
+    pub async fn toggle_vm_health_monitoring(&self, vm_name: String, enable: bool) -> BlixardResult<crate::iroh_types::ToggleVmHealthMonitoringResponse> {
+        let request = crate::iroh_types::ToggleVmHealthMonitoringRequest { vm_name, enable };
+        self.client.call_service("vm", "toggle_health_monitoring", request).await
+    }
+    
+    /// Configure recovery policy for a VM
+    pub async fn configure_vm_recovery_policy(&self, vm_name: String, policy: crate::vm_auto_recovery::RecoveryPolicy) -> BlixardResult<crate::iroh_types::ConfigureVmRecoveryPolicyResponse> {
+        let request = crate::iroh_types::ConfigureVmRecoveryPolicyRequest { vm_name, policy };
+        self.client.call_service("vm", "configure_recovery_policy", request).await
+    }
+    
     /// Health check
     pub async fn health_check(&self, _request: crate::iroh_types::HealthCheckRequest) -> BlixardResult<Response<crate::iroh_types::HealthCheckResponse>> {
         // For now, just return a simple healthy response

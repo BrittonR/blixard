@@ -91,6 +91,75 @@ pub enum NodeState {
 // VM Management Types
 // ============================================================================
 
+// VM Health Monitoring Types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetVmHealthStatusRequest {
+    pub vm_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetVmHealthStatusResponse {
+    pub health_status: Option<crate::vm_health_types::VmHealthStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddVmHealthCheckRequest {
+    pub vm_name: String,
+    pub health_check: crate::vm_health_types::HealthCheck,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddVmHealthCheckResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListVmHealthChecksRequest {
+    pub vm_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListVmHealthChecksResponse {
+    pub health_checks: Vec<crate::vm_health_types::HealthCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoveVmHealthCheckRequest {
+    pub vm_name: String,
+    pub check_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoveVmHealthCheckResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToggleVmHealthMonitoringRequest {
+    pub vm_name: String,
+    pub enable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToggleVmHealthMonitoringResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigureVmRecoveryPolicyRequest {
+    pub vm_name: String,
+    pub policy: crate::vm_auto_recovery::RecoveryPolicy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigureVmRecoveryPolicyResponse {
+    pub success: bool,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VmConfig {
     pub name: String,

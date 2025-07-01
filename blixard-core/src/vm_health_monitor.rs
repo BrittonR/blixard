@@ -10,9 +10,11 @@ use crate::{
     vm_backend::VmManager,
     vm_auto_recovery::{VmAutoRecovery, RecoveryPolicy},
     types::VmStatus,
-    vm_health_types::{VmHealthStatus, HealthState, HealthCheckResult},
+    vm_health_types::{VmHealthStatus, HealthState, HealthCheckResult, HealthCheck, VmHealthCheckConfig},
     metrics_otel::{metrics, attributes},
 };
+use std::collections::HashMap;
+use tokio::sync::RwLock;
 
 /// Health monitor for VM processes
 /// 
@@ -32,6 +34,12 @@ pub struct VmHealthMonitor {
     check_interval: Duration,
     auto_recovery: Arc<VmAutoRecovery>,
     handle: Option<JoinHandle<()>>,
+    /// Per-VM health check configurations
+    health_configs: Arc<RwLock<HashMap<String, VmHealthCheckConfig>>>,
+    /// Per-VM health status tracking
+    health_statuses: Arc<RwLock<HashMap<String, VmHealthStatus>>>,
+    /// Health monitoring enabled status per VM
+    monitoring_enabled: Arc<RwLock<HashMap<String, bool>>>,
 }
 
 impl VmHealthMonitor {
@@ -51,6 +59,9 @@ impl VmHealthMonitor {
             check_interval,
             auto_recovery,
             handle: None,
+            health_configs: Arc::new(RwLock::new(HashMap::new())),
+            health_statuses: Arc::new(RwLock::new(HashMap::new())),
+            monitoring_enabled: Arc::new(RwLock::new(HashMap::new())),
         }
     }
     
@@ -69,6 +80,9 @@ impl VmHealthMonitor {
             check_interval,
             auto_recovery,
             handle: None,
+            health_configs: Arc::new(RwLock::new(HashMap::new())),
+            health_statuses: Arc::new(RwLock::new(HashMap::new())),
+            monitoring_enabled: Arc::new(RwLock::new(HashMap::new())),
         }
     }
     
@@ -393,6 +407,57 @@ impl VmHealthMonitor {
             ]);
         }
         
+        Ok(())
+    }
+    
+    // Public health monitoring methods for VM health configuration
+    
+    /// Get health status for a specific VM
+    pub async fn get_health_status(&self, vm_name: &str) -> Option<VmHealthStatus> {
+        self.health_statuses.read().await.get(vm_name).cloned()
+    }
+    
+    /// Add a health check to a VM
+    pub async fn add_health_check(&self, vm_name: &str, health_check: HealthCheck) -> BlixardResult<()> {
+        let mut configs = self.health_configs.write().await;
+        let config = configs.entry(vm_name.to_string()).or_insert_with(VmHealthCheckConfig::default);
+        
+        // Check if a health check with the same name already exists
+        if config.checks.iter().any(|c| c.name == health_check.name) {
+            return Err(BlixardError::ServiceAlreadyExists(format!("Health check '{}' already exists for VM '{}'", health_check.name, vm_name)));
+        }
+        
+        config.checks.push(health_check);
+        
+        // Enable monitoring for this VM by default
+        self.monitoring_enabled.write().await.insert(vm_name.to_string(), true);
+        
+        info!("Added health check to VM '{}'", vm_name);
+        Ok(())
+    }
+    
+    /// List health checks for a VM
+    pub async fn list_health_checks(&self, vm_name: &str) -> BlixardResult<Vec<HealthCheck>> {
+        let configs = self.health_configs.read().await;
+        Ok(configs.get(vm_name).map(|c| c.checks.clone()).unwrap_or_default())
+    }
+    
+    /// Remove a health check from a VM
+    pub async fn remove_health_check(&self, vm_name: &str, check_name: &str) -> BlixardResult<()> {
+        let mut configs = self.health_configs.write().await;
+        if let Some(config) = configs.get_mut(vm_name) {
+            config.checks.retain(|c| c.name != check_name);
+            info!("Removed health check '{}' from VM '{}'", check_name, vm_name);
+            Ok(())
+        } else {
+            Err(BlixardError::NotFound { resource: format!("VM '{}' has no health checks configured", vm_name) })
+        }
+    }
+    
+    /// Toggle health monitoring for a VM
+    pub async fn toggle_monitoring(&self, vm_name: &str, enable: bool) -> BlixardResult<()> {
+        self.monitoring_enabled.write().await.insert(vm_name.to_string(), enable);
+        info!("Health monitoring {} for VM '{}'", if enable { "enabled" } else { "disabled" }, vm_name);
         Ok(())
     }
 }

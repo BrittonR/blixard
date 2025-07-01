@@ -201,6 +201,32 @@ impl IrohClient {
             feature: "migrate_vm".to_string(),
         })
     }
+    
+    // VM Health Monitoring operations
+    
+    pub async fn get_vm_health_status(&mut self, vm_name: String) -> BlixardResult<blixard_core::iroh_types::GetVmHealthStatusResponse> {
+        self.client.get_vm_health_status(vm_name).await
+    }
+    
+    pub async fn add_vm_health_check(&mut self, vm_name: String, health_check: blixard_core::vm_health_types::HealthCheck) -> BlixardResult<blixard_core::iroh_types::AddVmHealthCheckResponse> {
+        self.client.add_vm_health_check(vm_name, health_check).await
+    }
+    
+    pub async fn list_vm_health_checks(&mut self, vm_name: String) -> BlixardResult<blixard_core::iroh_types::ListVmHealthChecksResponse> {
+        self.client.list_vm_health_checks(vm_name).await
+    }
+    
+    pub async fn remove_vm_health_check(&mut self, vm_name: String, check_name: String) -> BlixardResult<blixard_core::iroh_types::RemoveVmHealthCheckResponse> {
+        self.client.remove_vm_health_check(vm_name, check_name).await
+    }
+    
+    pub async fn toggle_vm_health_monitoring(&mut self, vm_name: String, enable: bool) -> BlixardResult<blixard_core::iroh_types::ToggleVmHealthMonitoringResponse> {
+        self.client.toggle_vm_health_monitoring(vm_name, enable).await
+    }
+    
+    pub async fn configure_vm_recovery_policy(&mut self, vm_name: String, policy: blixard_core::vm_auto_recovery::RecoveryPolicy) -> BlixardResult<blixard_core::iroh_types::ConfigureVmRecoveryPolicyResponse> {
+        self.client.configure_vm_recovery_policy(vm_name, policy).await
+    }
 }
 
 // For backward compatibility, export as UnifiedClient
