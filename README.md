@@ -209,9 +209,9 @@ Nodes can be configured with:
 - `--data-dir`: Directory for persistent storage
 - `--tailscale`: Enable Tailscale discovery
 
-## gRPC API
+## P2P API
 
-Blixard exposes two gRPC services for programmatic access:
+Blixard exposes P2P services via Iroh for programmatic access:
 
 ### BlixardService
 - `GetRaftStatus`: Query the current Raft consensus state
@@ -227,14 +227,11 @@ Blixard exposes two gRPC services for programmatic access:
 - VM operations: `CreateVm`, `StartVm`, `StopVm`, `ListVms`, `GetVmStatus`
 - `HealthCheck`: Node health status
 
-Example client usage:
-```bash
-# Run the example gRPC client
-cargo run --example blixard_grpc_client [server_address]
-
-# Default connects to http://127.0.0.1:7001
-cargo run --example blixard_grpc_client
-```
+Iroh provides:
+- **Built-in encryption**: All communication secured via QUIC
+- **Ed25519 node identities**: Cryptographic node authentication
+- **NAT traversal**: Direct P2P connections without port forwarding
+- **Relay fallback**: Communication guaranteed even in restrictive networks
 
 ## Development
 
@@ -242,12 +239,12 @@ The codebase is organized as:
 - `src/main.rs`: CLI entry point
 - `src/node.rs`: Node management and lifecycle
 - `src/raft_manager.rs`: Raft consensus implementation
-- `src/grpc_server.rs`: gRPC service implementations
+- `src/iroh_server.rs`: Iroh P2P service implementations
 - `src/storage.rs`: Persistent storage layer
 - `src/vm_manager.rs`: VM lifecycle management
 - `src/types.rs`: Core domain types
 - `src/error.rs`: Error handling
-- `proto/`: Protocol buffer definitions
+- `src/iroh_transport.rs`: Iroh P2P transport layer
 - `blixard-vm/`: Complete microvm.nix integration with flake generation and process management
 
 ## License

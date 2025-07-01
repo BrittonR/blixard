@@ -497,26 +497,27 @@ impl SecretsManager {
     }
 }
 
-/// Extract authentication token from gRPC request metadata
-pub fn extract_auth_token<T>(request: &tonic::Request<T>) -> Option<String> {
-    // Try Authorization header first
-    if let Some(auth_header) = request.metadata().get("authorization") {
-        if let Ok(auth_str) = auth_header.to_str() {
-            if auth_str.starts_with("Bearer ") {
-                return Some(auth_str[7..].to_string());
-            }
-        }
-    }
-    
-    // Try x-api-token header as fallback
-    if let Some(token_header) = request.metadata().get("x-api-token") {
-        if let Ok(token_str) = token_header.to_str() {
-            return Some(token_str.to_string());
-        }
-    }
-    
-    None
-}
+// Temporarily disabled: uses tonic/gRPC which we're removing
+// /// Extract authentication token from gRPC request metadata
+// pub fn extract_auth_token<T>(request: &tonic::Request<T>) -> Option<String> {
+//     // Try Authorization header first
+//     if let Some(auth_header) = request.metadata().get("authorization") {
+//         if let Ok(auth_str) = auth_header.to_str() {
+//             if auth_str.starts_with("Bearer ") {
+//                 return Some(auth_str[7..].to_string());
+//             }
+//         }
+//     }
+//     
+//     // Try x-api-token header as fallback
+//     if let Some(token_header) = request.metadata().get("x-api-token") {
+//         if let Ok(token_str) = token_header.to_str() {
+//             return Some(token_str.to_string());
+//         }
+//     }
+//     
+//     None
+// }
 
 /// Create a default security configuration for development
 pub fn default_dev_security_config() -> SecurityConfig {

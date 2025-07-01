@@ -45,11 +45,10 @@ groups:
       - record: iroh:raft:heartbeat_latency
         expr: histogram_quantile(0.99, rate(blixard_raft_heartbeat_duration_seconds_bucket{transport="iroh"}[5m]))
       
-      # Comparison with gRPC
-      - record: transport:latency_ratio:iroh_vs_grpc
+      # Transport performance metrics
+      - record: transport:latency:p99
         expr: |
-          histogram_quantile(0.99, rate(blixard_message_duration_seconds_bucket{transport="iroh"}[5m])) /
-          histogram_quantile(0.99, rate(blixard_message_duration_seconds_bucket{transport="grpc"}[5m]))
+          histogram_quantile(0.99, rate(blixard_message_duration_seconds_bucket{transport="iroh"}[5m]))
 
   - name: iroh_alerts
     interval: 30s

@@ -6,7 +6,8 @@ use crate::{
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
     transport::{
-        iroh_vm_service::{IrohVmService, VmRequest, VmResponse, VmOperationRequest, VmImageRequest},
+        iroh_vm_service::{IrohVmService, VmRequest, VmResponse, VmImageRequest},
+        services::vm::VmOperationRequest,
         iroh_service::IrohService,
         iroh_middleware::{IrohMiddleware, AuthenticatedRequest},
         iroh_protocol::{deserialize_payload, serialize_payload},

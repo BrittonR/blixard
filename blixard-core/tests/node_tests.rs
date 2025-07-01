@@ -871,54 +871,5 @@ async fn test_multiple_vm_operations() {
     cluster.shutdown().await;
 }
 
-#[tokio::test]
-async fn test_get_cluster_status_basic() {
-    use blixard_core::{
-        node_shared::SharedNodeState,
-        types::NodeConfig,
-        grpc_server::services::cluster_service::ClusterServiceImpl,
-        proto::{
-            cluster_service_server::ClusterService,
-            ClusterStatusRequest,
-        },
-    };
-    use std::sync::Arc;
-    use std::net::SocketAddr;
-    use tonic::Request;
-
-    // Create a simple node configuration
-    let config = NodeConfig {
-        id: 1,
-        data_dir: "/tmp/test-node-1".to_string(),
-        bind_addr: "127.0.0.1:7001".parse::<SocketAddr>().unwrap(),
-        join_addr: None,
-    };
-
-    // Create shared node state
-    let shared = Arc::new(SharedNodeState::new(config.clone()));
-
-    // Create cluster service
-    let service = ClusterServiceImpl::new(shared.clone(), None);
-
-    // Create request
-    let request = Request::new(ClusterStatusRequest {});
-
-    // Call get_cluster_status
-    match service.get_cluster_status(request).await {
-        Ok(response) => {
-            let resp = response.into_inner();
-            println!("GetClusterStatus succeeded!");
-            println!("Leader ID: {}", resp.leader_id);
-            println!("Term: {}", resp.term);
-            println!("Nodes: {:?}", resp.nodes);
-            
-            assert_eq!(resp.nodes.len(), 1); // Should have at least self
-            assert_eq!(resp.nodes[0].id, 1); // Should be our node ID
-            assert_eq!(resp.nodes[0].address, "127.0.0.1:7001");
-        }
-        Err(e) => {
-            eprintln!("GetClusterStatus failed: {}", e);
-            panic!("GetClusterStatus should not fail");
-        }
-    }
-}
+// Test removed: test_get_cluster_status_basic depended on grpc_server module which has been removed.
+// The functionality is now provided through the transport module with Iroh integration.

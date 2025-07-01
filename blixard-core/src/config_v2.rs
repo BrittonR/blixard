@@ -59,7 +59,7 @@ pub struct NodeConfig {
     /// Node ID (can be overridden by CLI)
     pub id: Option<u64>,
     
-    /// Bind address for gRPC server
+    /// Bind address for Iroh P2P node
     pub bind_address: String,
     
     /// Data directory for storage
@@ -269,33 +269,33 @@ pub struct BackupConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct NetworkConfig {
-    /// gRPC server settings
-    pub grpc: GrpcConfig,
+    /// Iroh transport settings
+    pub iroh: IrohTransportConfig,
     
     /// HTTP metrics server settings
     pub metrics: MetricsServerConfig,
 }
 
-/// gRPC configuration
+/// Iroh transport configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct GrpcConfig {
+pub struct IrohTransportConfig {
     /// Maximum message size
     pub max_message_size: usize,
+    
+    /// Connection timeout
+    #[serde(with = "humantime_serde")]
+    pub connection_timeout: Duration,
     
     /// Keep-alive interval
     #[serde(with = "humantime_serde")]
     pub keepalive_interval: Duration,
     
-    /// Keep-alive timeout
-    #[serde(with = "humantime_serde")]
-    pub keepalive_timeout: Duration,
+    /// Home relay URL
+    pub home_relay: String,
     
-    /// Enable TCP nodelay
-    pub tcp_nodelay: bool,
-    
-    /// Number of worker threads
-    pub worker_threads: Option<usize>,
+    /// Discovery port (0 for random)
+    pub discovery_port: u16,
 }
 
 /// Metrics server configuration
@@ -305,7 +305,7 @@ pub struct MetricsServerConfig {
     /// Enable metrics server
     pub enabled: bool,
     
-    /// Port offset from gRPC port
+    /// Port offset from main port
     pub port_offset: u16,
     
     /// Metrics path
@@ -678,20 +678,20 @@ impl Default for BackupConfig {
 impl Default for NetworkConfig {
     fn default() -> Self {
         Self {
-            grpc: GrpcConfig::default(),
+            iroh: IrohTransportConfig::default(),
             metrics: MetricsServerConfig::default(),
         }
     }
 }
 
-impl Default for GrpcConfig {
+impl Default for IrohTransportConfig {
     fn default() -> Self {
         Self {
             max_message_size: 64 * 1024 * 1024, // 64MB
+            connection_timeout: Duration::from_secs(10),
             keepalive_interval: Duration::from_secs(10),
-            keepalive_timeout: Duration::from_secs(10),
-            tcp_nodelay: true,
-            worker_threads: None,
+            home_relay: "https://relay.iroh.network".to_string(),
+            discovery_port: 0,
         }
     }
 }
@@ -1014,8 +1014,8 @@ impl Config {
             "cluster.worker.resource_update_interval" |
             "vm.scheduler.default_strategy" |
             "vm.scheduler.overcommit_ratio" |
-            "network.grpc.keepalive_interval" |
-            "network.grpc.keepalive_timeout" => true,
+            "network.iroh.keepalive_interval" |
+            "network.iroh.connection_timeout" => true,
             
             // Non-reloadable settings (require restart)
             _ => false,

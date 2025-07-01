@@ -7,6 +7,10 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::types::{NodeConfig, VmCommand, VmConfig, VmStatus};
 use crate::vm_backend::VmManager;
 use crate::raft_manager::{RaftProposal, TaskSpec, TaskResult, RaftConfChange, ConfChangeType};
+use crate::transport::{
+    iroh_vm_service::{VmRequest, VmResponse},
+    services::vm::{VmOperationRequest, VmOperationResponse},
+};
 
 /// # State Management in Blixard
 /// 
@@ -127,7 +131,7 @@ pub struct SharedNodeState {
     peers: RwLock<HashMap<u64, PeerInfo>>,
     
     // Peer connector for managing connections
-    peer_connector: RwLock<Option<Arc<crate::peer_connector::PeerConnector>>>,
+    peer_connector: RwLock<Option<Arc<crate::transport::iroh_peer_connector::IrohPeerConnector>>>,
     
     // P2P manager for peer-to-peer data transfer
     p2p_manager: RwLock<Option<Arc<crate::p2p_manager::P2pManager>>>,
@@ -292,12 +296,12 @@ impl SharedNodeState {
     }
     
     /// Set the peer connector
-    pub async fn set_peer_connector(&self, connector: Arc<crate::peer_connector::PeerConnector>) {
+    pub async fn set_peer_connector(&self, connector: Arc<crate::transport::iroh_peer_connector::IrohPeerConnector>) {
         *self.peer_connector.write().await = Some(connector);
     }
     
     /// Get the peer connector
-    pub async fn get_peer_connector(&self) -> Option<Arc<crate::peer_connector::PeerConnector>> {
+    pub async fn get_peer_connector(&self) -> Option<Arc<crate::transport::iroh_peer_connector::IrohPeerConnector>> {
         self.peer_connector.read().await.clone()
     }
     
@@ -465,7 +469,6 @@ impl SharedNodeState {
                     })?;
                 
                 // Create the request
-                use crate::transport::services::vm::VmOperationRequest;
                 let request = VmRequest::Operation(VmOperationRequest::Create {
                     name: vm_config.name.clone(),
                     config_path: vm_config.config_path.clone(),
@@ -482,7 +485,6 @@ impl SharedNodeState {
                     })?;
                 
                 // Handle response
-                use crate::transport::services::vm::VmOperationResponse;
                 match response {
                     VmResponse::Operation(VmOperationResponse::Create { success, message, .. }) => {
                         if success {

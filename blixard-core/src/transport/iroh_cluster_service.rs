@@ -230,57 +230,17 @@ impl IrohClusterService {
     }
 }
 
-#[async_trait]
-impl ServiceHandler for IrohClusterService {
-    async fn handle_rpc(
-        &self,
-        method: &str,
-        payload: Bytes,
-        _request_id: [u8; 16],
-    ) -> BlixardResult<Bytes> {
-        debug!("Handling cluster RPC method: {}", method);
-        
-        // Parse method to determine request type
-        let request = match method {
-            "join_cluster" => {
-                let req: JoinClusterRequest = deserialize_payload(&payload)?;
-                ClusterRequest::JoinCluster(req)
-            }
-            "leave_cluster" => {
-                let req: LeaveClusterRequest = deserialize_payload(&payload)?;
-                ClusterRequest::LeaveCluster(req)
-            }
-            "get_cluster_status" => {
-                let req: ClusterStatusRequest = deserialize_payload(&payload)?;
-                ClusterRequest::GetClusterStatus(req)
-            }
-            "submit_task" => {
-                let req: TaskRequest = deserialize_payload(&payload)?;
-                ClusterRequest::SubmitTask(req)
-            }
-            "get_task_status" => {
-                let req: TaskStatusRequest = deserialize_payload(&payload)?;
-                ClusterRequest::GetTaskStatus(req)
-            }
-            "propose_task" => {
-                let req: ProposeTaskRequest = deserialize_payload(&payload)?;
-                ClusterRequest::ProposeTask(req)
-            }
-            _ => {
-                return Err(BlixardError::Internal {
-                    message: format!("Unknown cluster method: {}", method),
-                });
-            }
-        };
-        
-        let response = self.handle_request(request).await?;
-        serialize_payload(&response)
-    }
-}
 
 impl IrohService for IrohClusterService {
-    fn service_name(&self) -> &'static str {
+    fn name(&self) -> &'static str {
         "cluster"
+    }
+    
+    async fn handle_call(&self, method: &str, payload: Bytes) -> BlixardResult<Bytes> {
+        // TODO: Implement method routing
+        Err(BlixardError::NotImplemented {
+            feature: format!("Cluster service method: {}", method),
+        })
     }
 }
 

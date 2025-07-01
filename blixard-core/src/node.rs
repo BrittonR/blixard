@@ -429,12 +429,13 @@ impl Node {
             tracing::info!("Sending join request to {}", join_addr);
             // Create gRPC client to join node
             let endpoint = format!("http://{}", join_addr);
-            // Create Iroh client to join node
-            let client = crate::transport::iroh_cluster_service::IrohClusterServiceClient::new_from_address(join_addr).await
-                .map_err(|e| BlixardError::ClusterJoin {
-                    reason: format!("Failed to create Iroh client: {}", e),
-                })?;
+            // TODO: Implement Iroh client for join operation
+            // For now, return error since Iroh transport is not fully implemented
+            return Err(BlixardError::NotImplemented {
+                feature: "Iroh client for join operation".to_string(),
+            });
             
+            /* Commented out until Iroh client is implemented
             let join_request = crate::iroh_types::JoinRequest {
                 node_id: self.shared.get_id(),
                 bind_address: self.shared.get_bind_addr().to_string(),
@@ -486,6 +487,7 @@ impl Node {
                     });
                 }
             }
+            */
         }
         Ok(())
     }

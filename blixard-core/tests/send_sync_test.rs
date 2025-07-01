@@ -38,23 +38,5 @@ async fn test_node_can_be_shared_via_arc() {
     handle.await.unwrap();
 }
 
-#[tokio::test] 
-async fn test_grpc_server_can_use_shared_state() {
-    use blixard_core::grpc_server::BlixardGrpcService;
-    
-    let config = NodeConfig {
-        id: 1,
-        data_dir: "/tmp/test".to_string(),
-        bind_addr: "127.0.0.1:0".parse().unwrap(),
-        join_addr: None,
-        use_tailscale: false,
-        vm_backend: "mock".to_string(),
-        transport_config: None,
-    };
-    
-    let node = Node::new(config);
-    let shared = node.shared();
-    
-    // This should work - BlixardGrpcService can now use SharedNodeState
-    let _service = BlixardGrpcService::new(shared);
-}
+// Test removed: grpc_server module has been removed
+// The SharedNodeState Send+Sync properties are still tested above

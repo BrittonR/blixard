@@ -18,13 +18,15 @@ pub mod config_hot_reload;
 pub mod backup_manager;
 pub mod transaction_log;
 pub mod audit_log;
-pub mod audit_integration;
+// Temporarily disabled: uses tonic which we're removing
+// pub mod audit_integration;
 pub mod backup_replication;
 pub mod remediation_engine;
 pub mod remediation_raft;
 pub mod metrics_otel;
 pub mod metrics_server;
-pub mod tracing_otel;
+// Temporarily disabled: uses tonic which we're removing
+// pub mod tracing_otel;
 pub mod resource_quotas;
 pub mod quota_manager;
 pub mod security;
@@ -43,14 +45,16 @@ pub mod vm_health_monitor;
 pub mod vm_auto_recovery;
 pub mod vm_network_isolation;
 pub mod abstractions;
-pub mod common;
+// Temporarily disabled: uses gRPC/tonic which we're removing
+// pub mod common;
 
 // Test helpers are exposed for integration tests
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;
 
-#[cfg(any(test, feature = "test-helpers"))]
-pub mod test_helpers_concurrent;
+// Temporarily disabled: uses gRPC which we're removing
+// #[cfg(any(test, feature = "test-helpers"))]
+// pub mod test_helpers_concurrent;
 
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_message_filter;

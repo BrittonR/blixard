@@ -10,36 +10,37 @@ Blixard is a distributed microVM orchestration platform being built in Rust. The
 
 ### Technology Stack
 - **Rust** - Core implementation language
-- **Tonic + gRPC** - Communication protocol (proto definitions ready)
+- **Iroh P2P** - Peer-to-peer networking with built-in encryption via QUIC
 - **Clap** - CLI argument parsing
 - **Raft** - Distributed consensus using [raft crate](https://crates.io/crates/raft)
 - **microvm.nix** - VM management via [microvm.nix](https://github.com/astro/microvm.nix)
 - **Comprehensive Dependencies** - Ready for distributed systems development
 
 ### Current Architecture
-- **CLI with gRPC** - Full node command with gRPC server in `src/main.rs`
+- **CLI with Iroh P2P** - Full node command with Iroh P2P server in `src/main.rs`
 - **Error Types** - Comprehensive error handling defined in `src/error.rs`
 - **Domain Types** - Core types (NodeConfig, VmConfig, VmStatus) in `src/types.rs`
-- **gRPC Protocol** - Service definitions in `proto/blixard.proto`
-- **gRPC Server** - Basic implementation in `src/grpc_server.rs`
+- **Iroh Services** - P2P service definitions with QUIC transport
+- **Iroh Server** - P2P implementation in `src/iroh_server.rs`
 - **Node Structure** - Node management and coordination in `src/node.rs`
 - **Node Shared State** - Thread-safe shared state with peer management in `src/node_shared.rs`
 - **Storage Layer** - Raft storage implementation in `src/storage.rs`
 - **VM Manager** - VM lifecycle and state management in `src/vm_manager.rs`
-- **Peer Connector** - Manages gRPC connections to cluster peers in `src/peer_connector.rs`
+- **Peer Connector** - Manages Iroh P2P connections to cluster peers in `src/peer_connector.rs`
 - **microvm.nix Integration** - Complete VM backend with Nix flake generation and process management in `blixard-vm/`
 
 ### Implementation Status
 Recent progress:
-- ✅ Node CLI command with gRPC server startup
-- ✅ Basic gRPC service implementation
+- ✅ Node CLI command with Iroh P2P server startup
+- ✅ Basic Iroh P2P service implementation
+- ✅ **Iroh Transport Migration** - Complete migration from gRPC to Iroh P2P with built-in TLS via QUIC
 - ✅ MadSim integration for deterministic testing
 - ✅ Tonic 0.12 upgrade for compatibility
 - ✅ Raft consensus implementation (complete with state machine)
 - ✅ Distributed storage (redb integrated)
 - ✅ Task scheduling with resource requirements
 - ✅ Worker management and health monitoring
-- ✅ Multi-node cluster formation (JoinCluster/LeaveCluster RPCs)
+- ✅ Multi-node cluster formation (JoinCluster/LeaveCluster P2P messages)
 - ✅ Peer management and dynamic configuration changes
 - ✅ Peer connection management with automatic reconnection
 - ✅ Single-node cluster bootstrap with proper Raft initialization
@@ -167,7 +168,7 @@ Second wave (12 files):
 - `network_partition_storage_tests.rs` - Network partition scenarios
 - `storage_performance_benchmarks.rs` - Distributed storage benchmarks
 - `cli_cluster_commands_test.rs` - Cluster CLI command testing
-- `grpc_service_tests.rs` - gRPC service interactions
+- `iroh_service_tests.rs` - Iroh P2P service interactions
 - `snapshot_tests.rs` - Raft snapshot functionality
 - `raft_state_machine_tests.rs` - Raft state machine testing
 - `port_allocation_stress_test.rs` - Concurrent port allocation
@@ -212,10 +213,10 @@ These tests benefit from:
 
 ### CLI Structure
 ```bash
-# Node management (implemented with gRPC server)
+# Node management (implemented with Iroh P2P server)
 cargo run -- node --id 1 --bind 127.0.0.1:7001 --data-dir ./data
 
-# VM management (fully functional via gRPC and systemd)
+# VM management (fully functional via Iroh P2P and systemd)
 cargo run -- vm create --name my-vm
 cargo run -- vm start --name my-vm
 cargo run -- vm list
@@ -341,10 +342,10 @@ ssh root@10.0.0.12
 - `src/error.rs` - Error type definitions
 - `src/types.rs` - Domain types and data structures
 - `src/node.rs` - Node lifecycle and coordination
-- `src/grpc_server.rs` - gRPC service implementation
+- `src/iroh_server.rs` - Iroh P2P service implementation
 - `src/storage.rs` - Raft storage backend
 - `src/vm_manager.rs` - VM state management
-- `proto/blixard.proto` - gRPC service definitions
+- `src/iroh_transport.rs` - Iroh P2P transport layer
 
 ### microvm.nix Integration (`blixard-vm/`)
 - `src/microvm_backend.rs` - Main VM backend implementation using microvm.nix
@@ -366,7 +367,7 @@ ssh root@10.0.0.12
 ### Core Rules
 1. Follow existing error handling patterns in `src/error.rs`
 2. Use structured types from `src/types.rs`
-3. Implement gRPC services according to `proto/blixard.proto`
+3. Implement Iroh P2P services with proper message handling
 4. Maintain CLI consistency with the patterns in `src/main.rs`
 
 ### Architecture Principles
@@ -473,7 +474,7 @@ The project includes dependencies for:
 - **Consensus**: raft, raft-proto
 - **Storage**: redb, serde
 - **Testing**: proptest, stateright, fail (fault injection), madsim (deterministic simulation)
-- **Networking**: tonic, prost, hyper, madsim-tonic
+- **Networking**: iroh, iroh-net (QUIC transport), postcard (message serialization)
 - **Observability**: tracing, metrics
 
 ### Testing Infrastructure
@@ -649,8 +650,8 @@ When working on tests:
    - ✅ HTTP /metrics endpoint (metrics_server.rs)
    - ✅ Prometheus metrics exposition format
    - ✅ Distributed tracing with OpenTelemetry spans (tracing_otel.rs)
-   - ✅ gRPC trace context propagation
-   - ✅ Components instrumented: RaftManager, PeerConnector, Storage, gRPC, VM operations
+   - ✅ P2P trace context propagation
+   - ✅ Components instrumented: RaftManager, PeerConnector, Storage, Iroh P2P, VM operations
    - ✅ Grafana dashboards with 60+ panels (monitoring/grafana/dashboards/blixard-comprehensive.json)
    - ✅ Production alerting rules for Prometheus (monitoring/prometheus/alerts/blixard-alerts.yml)
    - ✅ OTLP export configuration for cloud vendors (AWS, GCP, Azure, Datadog)
@@ -658,25 +659,25 @@ When working on tests:
    - ✅ Operational runbooks for critical alerts (docs/runbooks/)
 
 2. **Security & Authentication**
-   - ✅ Mutual TLS (mTLS) for secure gRPC node-to-node communication
+   - ✅ Built-in encryption via Iroh's QUIC transport (Ed25519 node keys)
    - ✅ Token-based authentication with SHA256 hashing
-   - ✅ Role-Based Access Control (RBAC) with granular permissions
+   - ✅ AWS Cedar Policy Engine for authorization (replaces RBAC)
+   - ✅ Certificate-based enrollment for secure node onboarding
    - ✅ Authentication interceptor for automatic request validation
    - ✅ Secure secrets management with AES-256-GCM encryption
-   - ✅ Integration with dual service runner for both gRPC and Iroh transports
    - ✅ Comprehensive security documentation (docs/security/)
 
 ### 📋 Future Implementation Areas
 
 1. **Production Hardening**
    - ✅ Configuration management (TOML-based with hot-reload support)
-   - ✅ Security: TLS for gRPC, authentication/authorization
+   - ✅ Security: Built-in QUIC encryption, Cedar authorization
    - Resource limits and quotas per tenant
    - Backup and disaster recovery procedures
    - Additional operational runbooks for non-critical alerts
 
 2. **Performance Optimization**
-   - Connection pooling for gRPC clients
+   - Connection pooling for Iroh P2P clients
    - Batch processing for Raft proposals
    - Caching layer for frequently accessed data
    - Profiling and optimization of hot paths
@@ -708,13 +709,13 @@ When working on tests:
 ### What to Build On
 - Use existing error types from `src/error.rs`
 - Follow CLI patterns from `src/main.rs`
-- Implement gRPC services per `proto/blixard.proto`
+- Implement Iroh P2P services with proper message handling
 - Use domain types from `src/types.rs`
 - Extend storage functionality in `src/storage.rs`
 - Add VM operations to `src/vm_manager.rs`
 
 ### What AI Must NEVER Do
-- Change the gRPC protocol without approval
+- Change the Iroh P2P protocol without approval
 - Remove existing error handling patterns
 - Alter the CLI structure without discussion
 - Commit secrets or configuration files with sensitive data
@@ -741,7 +742,8 @@ When working with external libraries and debugging issues:
 4. **Common External References for This Project**
    - Raft: https://docs.rs/raft/latest/raft/
    - Raft Examples: https://github.com/tikv/raft-rs/tree/master/examples
-   - Tonic/gRPC: https://docs.rs/tonic/
+   - Iroh: https://docs.rs/iroh/
+   - Iroh-net: https://docs.rs/iroh-net/
    - MadSim: https://docs.rs/madsim/latest/madsim/
 
 ### Error Handling Pattern

@@ -132,8 +132,8 @@ impl ClusterOperations for ClusterOperationsAdapter {
         let task_spec = crate::raft_manager::TaskSpec {
             command: task.command,
             args: task.args,
-            resources: crate::raft_manager::TaskRequirements {
-                cpu_cores: task.cpu_cores as u8,
+            resources: crate::raft_manager::ResourceRequirements {
+                cpu_cores: task.cpu_cores,
                 memory_mb: task.memory_mb,
                 disk_gb: task.disk_gb,
                 required_features: task.required_features,
@@ -191,8 +191,8 @@ impl ClusterOperations for ClusterOperationsAdapter {
         let task_spec = crate::raft_manager::TaskSpec {
             command: task.command,
             args: task.args,
-            resources: crate::raft_manager::TaskRequirements {
-                cpu_cores: task.cpu_cores as u8,
+            resources: crate::raft_manager::ResourceRequirements {
+                cpu_cores: task.cpu_cores,
                 memory_mb: task.memory_mb,
                 disk_gb: 0, // Not included in the simple Task type
                 required_features: vec![], // Not included in the simple Task type

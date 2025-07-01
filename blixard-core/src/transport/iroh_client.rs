@@ -13,14 +13,8 @@ use crate::transport::iroh_cluster_service::{
     TaskRequest, TaskResponse, TaskStatusRequest, TaskStatusResponse,
     ProposeTaskRequest, ProposeTaskResponse,
 };
-use crate::transport::iroh_vm_service::{
-    VmRequest, VmResponse, CreateVmRequest as IrohCreateVmRequest, CreateVmResponse as IrohCreateVmResponse,
-    StartVmRequest as IrohStartVmRequest, StartVmResponse as IrohStartVmResponse,
-    StopVmRequest as IrohStopVmRequest, StopVmResponse as IrohStopVmResponse,
-    DeleteVmRequest as IrohDeleteVmRequest, DeleteVmResponse as IrohDeleteVmResponse,
-    GetVmStatusRequest as IrohGetVmStatusRequest, GetVmStatusResponse as IrohGetVmStatusResponse,
-    ListVmsRequest as IrohListVmsRequest, ListVmsResponse as IrohListVmsResponse,
-};
+use crate::transport::iroh_vm_service::{VmRequest, VmResponse};
+use crate::transport::services::vm::{VmOperationRequest, VmOperationResponse};
 use bytes::Bytes;
 use std::sync::Arc;
 use std::time::Duration;
@@ -204,100 +198,107 @@ impl IrohClient {
     
     // VM operations
     
-    pub async fn create_vm(&self, name: String, config_path: String, vcpus: u32, memory_mb: u32) -> BlixardResult<IrohCreateVmResponse> {
-        let request = VmRequest::CreateVm(IrohCreateVmRequest {
-            name: name.clone(),
-            config: crate::types::VmConfig {
+    pub async fn create_vm(&self, name: String, config_path: String, vcpus: u32, memory_mb: u32) -> BlixardResult<crate::iroh_types::CreateVmResponse> {
+        let request = VmRequest::Operation(
+            crate::transport::services::vm::VmOperationRequest::Create {
                 name,
                 config_path,
                 vcpus,
-                memory: memory_mb,
-                disk_size: 10, // Default disk size
-                network: crate::types::NetworkConfig::default(),
-                kernel: None,
-                initrd: None,
-                kernel_cmdline: None,
-                tap_device: None,
-                mac_address: None,
-                socket_path: None,
-                metrics_socket_path: None,
-                log_level: None,
-                jailer_cfg: None,
-                boot_args: None,
-                tags: std::collections::HashMap::new(),
-            },
-            node_id: None,
-        });
+                memory_mb,
+            }
+        );
         
         let response: VmResponse = self.call_service("vm", "create_vm", request).await?;
         
         match response {
-            VmResponse::CreateVm(resp) => Ok(resp),
+            VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::Create { success, message, vm_id }) => {
+                Ok(crate::iroh_types::CreateVmResponse { success, message, vm_id })
+            }
             _ => Err(BlixardError::Internal {
                 message: "Unexpected response type".to_string(),
             }),
         }
     }
     
-    pub async fn start_vm(&self, name: String) -> BlixardResult<IrohStartVmResponse> {
-        let request = VmRequest::StartVm(IrohStartVmRequest { name });
+    pub async fn start_vm(&self, name: String) -> BlixardResult<crate::iroh_types::StartVmResponse> {
+        let request = VmRequest::Operation(
+            crate::transport::services::vm::VmOperationRequest::Start { name }
+        );
         
         let response: VmResponse = self.call_service("vm", "start_vm", request).await?;
         
         match response {
-            VmResponse::StartVm(resp) => Ok(resp),
+            VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::Start { success, message }) => {
+                Ok(crate::iroh_types::StartVmResponse { success, message })
+            }
             _ => Err(BlixardError::Internal {
                 message: "Unexpected response type".to_string(),
             }),
         }
     }
     
-    pub async fn stop_vm(&self, name: String) -> BlixardResult<IrohStopVmResponse> {
-        let request = VmRequest::StopVm(IrohStopVmRequest { name });
+    pub async fn stop_vm(&self, name: String) -> BlixardResult<crate::iroh_types::StopVmResponse> {
+        let request = VmRequest::Operation(
+            crate::transport::services::vm::VmOperationRequest::Stop { name }
+        );
         
         let response: VmResponse = self.call_service("vm", "stop_vm", request).await?;
         
         match response {
-            VmResponse::StopVm(resp) => Ok(resp),
+            VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::Stop { success, message }) => {
+                Ok(crate::iroh_types::StopVmResponse { success, message })
+            }
             _ => Err(BlixardError::Internal {
                 message: "Unexpected response type".to_string(),
             }),
         }
     }
     
-    pub async fn delete_vm(&self, name: String) -> BlixardResult<IrohDeleteVmResponse> {
-        let request = VmRequest::DeleteVm(IrohDeleteVmRequest { name });
+    pub async fn delete_vm(&self, name: String) -> BlixardResult<crate::iroh_types::DeleteVmResponse> {
+        let request = VmRequest::Operation(
+            crate::transport::services::vm::VmOperationRequest::Delete { name }
+        );
         
         let response: VmResponse = self.call_service("vm", "delete_vm", request).await?;
         
         match response {
-            VmResponse::DeleteVm(resp) => Ok(resp),
+            VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::Delete { success, message }) => {
+                Ok(crate::iroh_types::DeleteVmResponse { success, message })
+            }
             _ => Err(BlixardError::Internal {
                 message: "Unexpected response type".to_string(),
             }),
         }
     }
     
-    pub async fn get_vm_status(&self, name: String) -> BlixardResult<IrohGetVmStatusResponse> {
-        let request = VmRequest::GetVmStatus(IrohGetVmStatusRequest { name });
+    pub async fn get_vm_status(&self, name: String) -> BlixardResult<crate::iroh_types::GetVmStatusResponse> {
+        let request = VmRequest::Operation(
+            crate::transport::services::vm::VmOperationRequest::GetStatus { name }
+        );
         
         let response: VmResponse = self.call_service("vm", "get_vm_status", request).await?;
         
         match response {
-            VmResponse::GetVmStatus(resp) => Ok(resp),
+            VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::GetStatus { found, vm_info }) => {
+                Ok(crate::iroh_types::GetVmStatusResponse { found, vm_info })
+            }
             _ => Err(BlixardError::Internal {
                 message: "Unexpected response type".to_string(),
             }),
         }
     }
     
-    pub async fn list_vms(&self) -> BlixardResult<IrohListVmsResponse> {
-        let request = VmRequest::ListVms(IrohListVmsRequest {});
+    pub async fn list_vms(&self) -> BlixardResult<crate::iroh_types::ListVmsResponse> {
+        let request = VmRequest::Operation(
+            crate::transport::services::vm::VmOperationRequest::List
+        );
         
         let response: VmResponse = self.call_service("vm", "list_vms", request).await?;
         
         match response {
-            VmResponse::ListVms(resp) => Ok(resp),
+            VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::List { vms }) => {
+                Ok(crate::iroh_types::ListVmsResponse { vms })
+            }
             _ => Err(BlixardError::Internal {
                 message: "Unexpected response type".to_string(),
             }),
@@ -318,7 +319,7 @@ impl IrohClusterServiceClient {
     }
     
     /// Join a cluster
-    pub async fn join_cluster(&self, node_id: u64, bind_address: String) -> BlixardResult<(bool, String, Vec<crate::types::NodeInfo>, Vec<u64>)> {
+    pub async fn join_cluster(&self, node_id: u64, bind_address: String) -> BlixardResult<(bool, String, Vec<crate::iroh_types::NodeInfo>, Vec<u64>)> {
         let response = self.client.join_cluster(node_id, bind_address).await?;
         Ok((response.success, response.message, response.peers, response.voters))
     }
@@ -330,7 +331,7 @@ impl IrohClusterServiceClient {
     }
     
     /// Get cluster status
-    pub async fn get_cluster_status(&self) -> BlixardResult<(u64, Vec<crate::types::NodeInfo>, u64)> {
+    pub async fn get_cluster_status(&self) -> BlixardResult<(u64, Vec<crate::iroh_types::NodeInfo>, u64)> {
         let response = self.client.get_cluster_status().await?;
         Ok((response.leader_id, response.nodes, response.term))
     }
@@ -362,7 +363,7 @@ impl IrohClusterServiceClient {
     }
     
     /// Get VM status
-    pub async fn get_vm_status(&self, name: String) -> BlixardResult<Option<crate::types::VmInfo>> {
+    pub async fn get_vm_status(&self, name: String) -> BlixardResult<Option<crate::iroh_types::VmInfo>> {
         let response = self.client.get_vm_status(name).await?;
         if response.found {
             Ok(response.vm_info)
@@ -372,7 +373,7 @@ impl IrohClusterServiceClient {
     }
     
     /// List VMs
-    pub async fn list_vms(&self) -> BlixardResult<Vec<crate::types::VmInfo>> {
+    pub async fn list_vms(&self) -> BlixardResult<Vec<crate::iroh_types::VmInfo>> {
         let response = self.client.list_vms().await?;
         Ok(response.vms)
     }

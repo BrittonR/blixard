@@ -7,13 +7,13 @@
     "panels": [
       {
         "id": 1,
-        "title": "Transport Comparison Overview",
+        "title": "Iroh Transport Overview",
         "type": "row",
         "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
       },
       {
         "id": 2,
-        "title": "Message Latency Comparison",
+        "title": "Iroh Message Latency",
         "type": "graph",
         "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
         "targets": [
@@ -22,8 +22,12 @@
             "legendFormat": "Iroh P99"
           },
           {
-            "expr": "histogram_quantile(0.99, rate(blixard_message_duration_seconds_bucket{transport=\"grpc\"}[5m]))",
-            "legendFormat": "gRPC P99"
+            "expr": "histogram_quantile(0.95, rate(blixard_message_duration_seconds_bucket{transport=\"iroh\"}[5m]))",
+            "legendFormat": "Iroh P95"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(blixard_message_duration_seconds_bucket{transport=\"iroh\"}[5m]))",
+            "legendFormat": "Iroh P50"
           }
         ],
         "yaxes": [
@@ -35,7 +39,7 @@
       },
       {
         "id": 3,
-        "title": "Throughput Comparison",
+        "title": "Iroh Throughput",
         "type": "graph",
         "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
         "targets": [
@@ -44,8 +48,8 @@
             "legendFormat": "Iroh msg/s"
           },
           {
-            "expr": "sum(rate(blixard_messages_total{transport=\"grpc\"}[1m]))",
-            "legendFormat": "gRPC msg/s"
+            "expr": "sum(rate(blixard_bytes_total{transport=\"iroh\"}[1m]))",
+            "legendFormat": "Iroh bytes/s"
           }
         ],
         "yaxes": [

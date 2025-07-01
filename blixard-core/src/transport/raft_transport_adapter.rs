@@ -9,6 +9,7 @@ use raft::prelude::Message;
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::node_shared::SharedNodeState;
+use crate::transport::config::TransportConfig;
 use crate::transport::iroh_peer_connector::IrohPeerConnector;
 use crate::transport::iroh_raft_transport::IrohRaftTransport;
 

@@ -9,7 +9,8 @@ use crate::error::{BlixardResult, BlixardError};
 use crate::types::{VmConfig, VmStatus, VmCommand};
 use crate::vm_scheduler::{VmScheduler, PlacementStrategy, PlacementDecision};
 use crate::metrics_otel::{metrics, Timer, attributes};
-use crate::tracing_otel;
+// Temporarily disabled: tracing_otel uses tonic
+// use crate::tracing_otel;
 
 /// Abstract interface for VM backend implementations
 /// 
@@ -89,11 +90,12 @@ impl VmManager {
         // before this command was forwarded to us. We only execute the actual VM operation.
         match command {
             VmCommand::Create { config, node_id } => {
-                tracing_otel::add_attributes(&[
-                    ("vm.name", &config.name),
-                    ("vm.operation", &"create"),
-                    ("node.id", &node_id),
-                ]);
+                // Temporarily disabled: tracing_otel uses tonic
+                // tracing_otel::add_attributes(&[
+                //     ("vm.name", &config.name),
+                //     ("vm.operation", &"create"),
+                //     ("node.id", &node_id),
+                // ]);
                 
                 let _timer = Timer::with_attributes(
                     metrics.vm_create_duration.clone(),

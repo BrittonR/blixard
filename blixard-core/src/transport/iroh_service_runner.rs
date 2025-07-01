@@ -16,7 +16,8 @@ use crate::transport::{
     BLIXARD_ALPN,
 };
 // VM operations are handled through SharedNodeState
-use iroh::Endpoint;
+use bytes::Bytes;
+use iroh::{Endpoint, discovery::dns::DnsDiscovery};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -54,8 +55,7 @@ impl IrohServiceRunner {
         self.register_service(status_service)?;
 
         // Register VM service
-        let vm_operations: Arc<dyn VmOperations> = Arc::new(self.shared_state.clone());
-        let vm_service = Arc::new(IrohVmService::new(vm_operations));
+        let vm_service = Arc::new(IrohVmService::new(self.shared_state.clone()));
         self.register_service(vm_service)?;
 
         // Register cluster service
@@ -211,7 +211,7 @@ pub async fn start_iroh_services(
     } else {
         // Create a new Iroh endpoint if P2P manager isn't available
         let endpoint = Endpoint::builder()
-            .discovery(Box::new(iroh::dns::DnsDiscovery::n0_dns()))
+            .discovery(Box::new(DnsDiscovery::n0_dns()))
             .bind(0)
             .await
             .map_err(|e| BlixardError::Internal {

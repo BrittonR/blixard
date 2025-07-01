@@ -5,7 +5,8 @@ use slog::o;
 use crate::error::{BlixardError, BlixardResult};
 use crate::raft_codec;
 use crate::metrics_otel::{metrics, Timer, attributes};
-use crate::tracing_otel;
+// Temporarily disabled: tracing_otel uses tonic
+// use crate::tracing_otel;
 use serde::{Serialize, Deserialize};
 
 /// Snapshot data structure containing all state machine data
@@ -56,8 +57,9 @@ pub struct RedbRaftStorage {
 
 impl raft::Storage for RedbRaftStorage {
     fn initial_state(&self) -> raft::Result<raft::RaftState> {
-        let span = tracing_otel::storage_span("initial_state", "raft_state");
-        let _enter = span.enter();
+        // Temporarily disabled: tracing_otel uses tonic
+        // let span = tracing_otel::storage_span("initial_state", "raft_state");
+        // let _enter = span.enter();
         
         let metrics = metrics();
         let _timer = Timer::with_attributes(
@@ -112,13 +114,14 @@ impl raft::Storage for RedbRaftStorage {
     }
 
     fn entries(&self, low: u64, high: u64, max_size: impl Into<Option<u64>>, _context: GetEntriesContext) -> raft::Result<Vec<raft::prelude::Entry>> {
-        let span = tracing_otel::storage_span("entries", "raft_log");
-        let _enter = span.enter();
-        
-        tracing_otel::add_attributes(&[
-            ("range.low", &low),
-            ("range.high", &high),
-        ]);
+        // Temporarily disabled: tracing_otel uses tonic
+        // let span = tracing_otel::storage_span("entries", "raft_log");
+        // let _enter = span.enter();
+        // 
+        // tracing_otel::add_attributes(&[
+        //     ("range.low", &low),
+        //     ("range.high", &high),
+        // ]);
         
         let max_size = max_size.into();
         let read_txn = self.database.begin_read()

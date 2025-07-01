@@ -7,12 +7,12 @@ use std::sync::Arc;
 use crate::{
     abstractions::{
         VmRepository, TaskRepository, NodeRepository,
-        FileSystem, ProcessExecutor, ConfigProvider, NetworkClient, Clock,
+        FileSystem, ProcessExecutor, ConfigProvider, Clock,
         storage::{RedbVmRepository, MockVmRepository},
         filesystem::{TokioFileSystem, MockFileSystem},
         process::{TokioProcessExecutor, MockProcessExecutor},
         config::{GlobalConfigProvider, MockConfigProvider},
-        network::{TonicNetworkClient, MockNetworkClient},
+        // network::{TonicNetworkClient, MockNetworkClient},
         time::{SystemClock, MockClock},
     },
     error::BlixardResult,
@@ -33,8 +33,8 @@ pub struct ServiceContainer {
     pub process_executor: Arc<dyn ProcessExecutor>,
     /// Configuration provider
     pub config_provider: Arc<dyn ConfigProvider>,
-    /// Network client
-    pub network_client: Arc<dyn NetworkClient>,
+    // /// Network client
+    // pub network_client: Arc<dyn NetworkClient>,
     /// Clock abstraction
     pub clock: Arc<dyn Clock>,
 }
@@ -44,12 +44,14 @@ impl ServiceContainer {
     pub fn new_production(database: Arc<redb::Database>) -> Self {
         Self {
             vm_repo: Arc::new(RedbVmRepository::new(database.clone())),
-            task_repo: Arc::new(RedbTaskRepository::new(database.clone())),
-            node_repo: Arc::new(RedbNodeRepository::new(database)),
+            // TODO: Implement RedbTaskRepository
+            task_repo: Arc::new(MockTaskRepository::new()),
+            // TODO: Implement RedbNodeRepository
+            node_repo: Arc::new(MockNodeRepository::new()),
             filesystem: Arc::new(TokioFileSystem::new()),
             process_executor: Arc::new(TokioProcessExecutor::new()),
             config_provider: Arc::new(GlobalConfigProvider::new()),
-            network_client: Arc::new(TonicNetworkClient::new()),
+            // network_client: Arc::new(TonicNetworkClient::new()),
             clock: Arc::new(SystemClock::new()),
         }
     }
@@ -63,7 +65,7 @@ impl ServiceContainer {
             filesystem: Arc::new(MockFileSystem::new()),
             process_executor: Arc::new(MockProcessExecutor::new()),
             config_provider: Arc::new(MockConfigProvider::new()),
-            network_client: Arc::new(MockNetworkClient::new()),
+            // network_client: Arc::new(MockNetworkClient::new()),
             clock: Arc::new(MockClock::new()),
         }
     }
@@ -77,7 +79,7 @@ impl ServiceContainer {
             filesystem: Arc::new(MockFileSystem::new()),
             process_executor: Arc::new(MockProcessExecutor::new()),
             config_provider: Arc::new(MockConfigProvider::with_config(config)),
-            network_client: Arc::new(MockNetworkClient::new()),
+            // network_client: Arc::new(MockNetworkClient::new()),
             clock: Arc::new(MockClock::new()),
         }
     }
