@@ -1,12 +1,10 @@
 use crate::error::{BlixardError, BlixardResult};
 use crate::p2p_monitor::{ConnectionQuality, P2pMonitor};
+use crate::iroh_types::{HealthCheckRequest, HealthCheckResponse};
 use async_trait::async_trait;
-use redb::proto::cluster_service_client::ClusterServiceClient;
-use redb::proto::{HealthCheckRequest, HealthCheckResponse};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
-use tonic::transport::Channel;
 use tracing::{debug, error, warn};
 
 /// P2P health check service for measuring connection quality
@@ -27,20 +25,14 @@ impl P2pHealthChecker {
     pub async fn check_peer_health(
         &self,
         peer_id: &str,
-        channel: Channel,
+        _client: Arc<crate::transport::iroh_client::IrohClusterServiceClient>,
     ) -> BlixardResult<f64> {
         let start = Instant::now();
         
-        // Create gRPC client
-        let mut client = ClusterServiceClient::new(channel);
+        // Send health check request using Iroh client
+        let request = HealthCheckRequest {};
         
-        // Send health check request
-        let request = tonic::Request::new(HealthCheckRequest {
-            timestamp: chrono::Utc::now().timestamp_millis(),
-            echo_data: format!("ping-{}", peer_id),
-        });
-        
-        match timeout(self.timeout_duration, client.health_check(request)).await {
+        match timeout(self.timeout_duration, _client.health_check(request)).await {
             Ok(Ok(response)) => {
                 let rtt_ms = start.elapsed().as_secs_f64() * 1000.0;
                 let response = response.into_inner();
@@ -54,13 +46,12 @@ impl P2pHealthChecker {
                 // Record RTT measurement
                 self.monitor.record_rtt(peer_id, rtt_ms).await;
                 
-                // Verify echo data matches
-                if response.echo_data != format!("ping-{}", peer_id) {
+                // Verify response indicates health
+                if !response.healthy {
                     warn!(
                         peer_id = peer_id,
-                        expected = format!("ping-{}", peer_id),
-                        actual = response.echo_data,
-                        "Health check echo data mismatch"
+                        message = response.message,
+                        "Health check indicates unhealthy peer"
                     );
                 }
                 
@@ -83,10 +74,10 @@ impl P2pHealthChecker {
                     timeout_secs = self.timeout_duration.as_secs(),
                     "Health check timeout"
                 );
-                Err(BlixardError::Timeout {
-                    operation: format!("health check for peer {}", peer_id),
-                    duration: self.timeout_duration,
-                })
+                Err(BlixardError::NetworkError(format!(
+                    "Health check timeout for peer {} after {:?}",
+                    peer_id, self.timeout_duration
+                )))
             }
         }
     }

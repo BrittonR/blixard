@@ -14,7 +14,7 @@ use tokio::sync::{RwLock, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use iroh::{Endpoint, SecretKey, NodeAddr};
 use iroh_blobs::Hash;
-use tracing::{info, debug};
+use tracing::{info, debug, error};
 
 /// Types of data channels used in Blixard
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -430,7 +430,14 @@ impl IrohTransportV2 {
                         match incoming.await {
                             Ok(conn) => {
                                 // Extract peer ID from connection
-                                let peer_id = conn.remote_address().node_id.to_string();
+                                let peer_node_id = match conn.remote_node_id() {
+                                    Ok(id) => id,
+                                    Err(e) => {
+                                        error!("Failed to get remote node ID: {:?}", e);
+                                        return;
+                                    }
+                                };
+                                let peer_id = peer_node_id.to_string();
                                 let alpn = conn.alpn();
                                 let doc_type = match alpn.as_deref() {
                                     Some(b"cluster-config") => DocumentType::ClusterConfig,
@@ -595,7 +602,14 @@ impl IrohTransportV2 {
                     tokio::spawn(async move {
                         match incoming.await {
                             Ok(conn) => {
-                                let peer_id = conn.remote_address().node_id.to_string();
+                                let peer_node_id = match conn.remote_node_id() {
+                                    Ok(id) => id,
+                                    Err(e) => {
+                                        error!("Failed to get remote node ID: {:?}", e);
+                                        return;
+                                    }
+                                };
+                                let peer_id = peer_node_id.to_string();
                                 let alpn = conn.alpn();
                                 
                                 // Only handle health-check ALPN

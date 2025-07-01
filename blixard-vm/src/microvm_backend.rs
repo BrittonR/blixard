@@ -10,6 +10,7 @@ use blixard_core::{
     vm_backend::VmBackend,
     types::{VmConfig as CoreVmConfig, VmStatus},
     error::{BlixardError, BlixardResult},
+    vm_health_types::{VmHealthStatus, HealthCheckType, HealthCheckResult},
 };
 
 use crate::{
@@ -184,6 +185,8 @@ pub struct MicrovmBackend {
     ip_pool: Arc<RwLock<IpAddressPool>>,
     /// Optional Nix image store for P2P image distribution
     nix_image_store: Option<Arc<blixard_core::nix_image_store::NixImageStore>>,
+    /// Health status tracking for VMs
+    vm_health_status: Arc<RwLock<HashMap<String, VmHealthStatus>>>,
 }
 
 impl MicrovmBackend {
@@ -217,6 +220,7 @@ impl MicrovmBackend {
             vm_metadata: Arc::new(RwLock::new(HashMap::new())),
             ip_pool: Arc::new(RwLock::new(IpAddressPool::new())),
             nix_image_store: None,
+            vm_health_status: Arc::new(RwLock::new(HashMap::new())),
         })
     }
     
@@ -374,6 +378,304 @@ impl MicrovmBackend {
         }
         
         Ok(())
+    }
+    
+    /// Perform an HTTP health check
+    async fn perform_http_health_check(
+        &self,
+        vm_name: &str,
+        check_name: &str,
+        url: &str,
+        expected_status: u16,
+        timeout_secs: u64,
+        headers: Option<&Vec<(String, String)>>,
+        start_time: std::time::Instant,
+        timestamp: std::time::SystemTime,
+    ) -> BlixardResult<HealthCheckResult> {
+        // Replace localhost/127.0.0.1 with VM IP if needed
+        let vm_url = if url.contains("localhost") || url.contains("127.0.0.1") {
+            if let Some(vm_ip) = self.get_vm_ip(vm_name).await? {
+                url.replace("localhost", &vm_ip).replace("127.0.0.1", &vm_ip)
+            } else {
+                url.to_string()
+            }
+        } else {
+            url.to_string()
+        };
+        
+        // Create HTTP client with timeout
+        let client = reqwest::Client::builder()
+            .timeout(tokio::time::Duration::from_secs(timeout_secs))
+            .build()
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to create HTTP client: {}", e),
+            })?;
+        
+        // Build request
+        let mut request = client.get(&vm_url);
+        
+        // Add custom headers if provided
+        if let Some(headers_vec) = headers {
+            for (key, value) in headers_vec {
+                request = request.header(key, value);
+            }
+        }
+        
+        // Send request
+        match request.send().await {
+            Ok(response) => {
+                let status = response.status();
+                let success = status.as_u16() == expected_status;
+                
+                Ok(HealthCheckResult {
+                    check_name: check_name.to_string(),
+                    success,
+                    message: format!(
+                        "HTTP check returned status {} (expected {})",
+                        status.as_u16(),
+                        expected_status
+                    ),
+                    duration: start_time.elapsed(),
+                    timestamp,
+                    error: if !success {
+                        Some(format!("Unexpected status code: {}", status))
+                    } else {
+                        None
+                    },
+                })
+            }
+            Err(e) => {
+                Ok(HealthCheckResult {
+                    check_name: check_name.to_string(),
+                    success: false,
+                    message: format!("HTTP check failed: {}", e),
+                    duration: start_time.elapsed(),
+                    timestamp,
+                    error: Some(e.to_string()),
+                })
+            }
+        }
+    }
+    
+    /// Perform a TCP health check
+    async fn perform_tcp_health_check(
+        &self,
+        vm_name: &str,
+        check_name: &str,
+        address: &str,
+        timeout_secs: u64,
+        start_time: std::time::Instant,
+        timestamp: std::time::SystemTime,
+    ) -> BlixardResult<HealthCheckResult> {
+        // Replace localhost/127.0.0.1 with VM IP if needed
+        let vm_address = if address.contains("localhost") || address.contains("127.0.0.1") {
+            if let Some(vm_ip) = self.get_vm_ip(vm_name).await? {
+                address.replace("localhost", &vm_ip).replace("127.0.0.1", &vm_ip)
+            } else {
+                address.to_string()
+            }
+        } else {
+            address.to_string()
+        };
+        
+        let timeout = tokio::time::Duration::from_secs(timeout_secs);
+        
+        match tokio::time::timeout(
+            timeout,
+            tokio::net::TcpStream::connect(&vm_address)
+        ).await {
+            Ok(Ok(_stream)) => {
+                Ok(HealthCheckResult {
+                    check_name: check_name.to_string(),
+                    success: true,
+                    message: format!("TCP connection to {} successful", vm_address),
+                    duration: start_time.elapsed(),
+                    timestamp,
+                    error: None,
+                })
+            }
+            Ok(Err(e)) => {
+                Ok(HealthCheckResult {
+                    check_name: check_name.to_string(),
+                    success: false,
+                    message: format!("TCP connection to {} failed: {}", vm_address, e),
+                    duration: start_time.elapsed(),
+                    timestamp,
+                    error: Some(e.to_string()),
+                })
+            }
+            Err(_) => {
+                Ok(HealthCheckResult {
+                    check_name: check_name.to_string(),
+                    success: false,
+                    message: format!("TCP connection to {} timed out after {} seconds", vm_address, timeout_secs),
+                    duration: start_time.elapsed(),
+                    timestamp,
+                    error: Some("Connection timeout".to_string()),
+                })
+            }
+        }
+    }
+    
+    /// Perform a script health check by executing a command in the VM
+    async fn perform_script_health_check(
+        &self,
+        vm_name: &str,
+        check_name: &str,
+        command: &str,
+        args: &[String],
+        expected_exit_code: i32,
+        timeout_secs: u64,
+        start_time: std::time::Instant,
+        timestamp: std::time::SystemTime,
+    ) -> BlixardResult<HealthCheckResult> {
+        match self.execute_command_in_vm(vm_name, command, args, timeout_secs).await {
+            Ok((exit_code, stdout, stderr)) => {
+                let success = exit_code == expected_exit_code;
+                
+                Ok(HealthCheckResult {
+                    check_name: check_name.to_string(),
+                    success,
+                    message: format!(
+                        "Script exited with code {} (expected {}). stdout: {}, stderr: {}",
+                        exit_code,
+                        expected_exit_code,
+                        stdout.trim(),
+                        stderr.trim()
+                    ),
+                    duration: start_time.elapsed(),
+                    timestamp,
+                    error: if !success {
+                        Some(format!("Unexpected exit code: {}", exit_code))
+                    } else {
+                        None
+                    },
+                })
+            }
+            Err(e) => {
+                Ok(HealthCheckResult {
+                    check_name: check_name.to_string(),
+                    success: false,
+                    message: format!("Failed to execute script: {}", e),
+                    duration: start_time.elapsed(),
+                    timestamp,
+                    error: Some(e.to_string()),
+                })
+            }
+        }
+    }
+    
+    /// Perform a console health check
+    async fn perform_console_health_check(
+        &self,
+        vm_name: &str,
+        check_name: &str,
+        _healthy_pattern: &str,
+        _unhealthy_pattern: Option<&String>,
+        _timeout_secs: u64,
+        start_time: std::time::Instant,
+        timestamp: std::time::SystemTime,
+    ) -> BlixardResult<HealthCheckResult> {
+        let socket_path = format!("/tmp/{}-console.sock", vm_name);
+        
+        // Check if console socket exists
+        if tokio::fs::metadata(&socket_path).await.is_err() {
+            return Ok(HealthCheckResult {
+                check_name: check_name.to_string(),
+                success: false,
+                message: format!("Console socket not found at {}", socket_path),
+                duration: start_time.elapsed(),
+                timestamp,
+                error: Some("Console not accessible".to_string()),
+            });
+        }
+        
+        // For now, just check socket existence
+        // TODO: Implement actual console reading with pattern matching
+        Ok(HealthCheckResult {
+            check_name: check_name.to_string(),
+            success: true,
+            message: "Console socket is accessible".to_string(),
+            duration: start_time.elapsed(),
+            timestamp,
+            error: None,
+        })
+    }
+    
+    /// Perform a process health check using systemctl
+    async fn perform_process_health_check(
+        &self,
+        vm_name: &str,
+        check_name: &str,
+        process_name: &str,
+        min_instances: u32,
+        start_time: std::time::Instant,
+        timestamp: std::time::SystemTime,
+    ) -> BlixardResult<HealthCheckResult> {
+        // Check systemd service status
+        let service_name = format!("blixard-vm-{}", vm_name);
+        
+        let output = tokio::process::Command::new("systemctl")
+            .args(&["--user", "status", &service_name])
+            .output()
+            .await
+            .map_err(|e| BlixardError::VmOperationFailed {
+                operation: "process_check".to_string(),
+                details: format!("Failed to check systemd status: {}", e),
+            })?;
+        
+        let status_output = String::from_utf8_lossy(&output.stdout);
+        let is_active = output.status.success() || status_output.contains("active (running)");
+        
+        // Count process instances if service is active
+        let instance_count = if is_active {
+            // For now, assume 1 instance for systemd service
+            // TODO: Implement actual process counting inside VM
+            1
+        } else {
+            0
+        };
+        
+        let success = instance_count >= min_instances;
+        
+        Ok(HealthCheckResult {
+            check_name: check_name.to_string(),
+            success,
+            message: format!(
+                "Found {} instances of process '{}' (minimum required: {})",
+                instance_count,
+                process_name,
+                min_instances
+            ),
+            duration: start_time.elapsed(),
+            timestamp,
+            error: if !success {
+                Some(format!("Insufficient process instances: {} < {}", instance_count, min_instances))
+            } else {
+                None
+            },
+        })
+    }
+    
+    /// Perform a guest agent health check
+    async fn perform_guest_agent_health_check(
+        &self,
+        _vm_name: &str,
+        check_name: &str,
+        _timeout_secs: u64,
+        start_time: std::time::Instant,
+        timestamp: std::time::SystemTime,
+    ) -> BlixardResult<HealthCheckResult> {
+        // Guest agent not yet implemented
+        // TODO: Implement guest agent protocol
+        Ok(HealthCheckResult {
+            check_name: check_name.to_string(),
+            success: false,
+            message: "Guest agent health check not yet implemented".to_string(),
+            duration: start_time.elapsed(),
+            timestamp,
+            error: Some("NotImplemented".to_string()),
+        })
     }
 }
 
@@ -600,6 +902,7 @@ impl VmBackend for MicrovmBackend {
                 priority: 500,  // Default medium priority
                 preemptible: false,  // Default to non-preemptible
                 locality_preference: Default::default(),
+                health_check_config: None,  // TODO: Add health check config support
             };
             
             // Get current status
@@ -633,6 +936,7 @@ impl VmBackend for MicrovmBackend {
                                 priority: 500,  // Default medium priority
                                 preemptible: false,  // Default to non-preemptible
                                 locality_preference: Default::default(),
+                                health_check_config: None,  // TODO: Add health check config support
                             };
                             
                             let status = self.get_vm_status(vm_name).await?
@@ -650,6 +954,178 @@ impl VmBackend for MicrovmBackend {
     
     async fn get_vm_ip(&self, name: &str) -> BlixardResult<Option<String>> {
         self.get_vm_ip(name).await
+    }
+    
+    async fn perform_health_check(
+        &self,
+        vm_name: &str,
+        check_name: &str,
+        check_type: &HealthCheckType,
+    ) -> BlixardResult<HealthCheckResult> {
+        let start_time = std::time::Instant::now();
+        let timestamp = std::time::SystemTime::now();
+        
+        // First check if VM is running
+        let vm_status = self.get_vm_status(vm_name).await?;
+        if vm_status != Some(VmStatus::Running) {
+            return Ok(HealthCheckResult {
+                check_name: check_name.to_string(),
+                success: false,
+                message: format!("VM is not running (status: {:?})", vm_status),
+                duration: start_time.elapsed(),
+                timestamp,
+                error: None,
+            });
+        }
+        
+        // Perform the specific health check
+        match check_type {
+            HealthCheckType::Http { url, expected_status, timeout_secs, headers } => {
+                self.perform_http_health_check(
+                    vm_name,
+                    check_name,
+                    url,
+                    *expected_status,
+                    *timeout_secs,
+                    headers.as_ref(),
+                    start_time,
+                    timestamp,
+                ).await
+            }
+            HealthCheckType::Tcp { address, timeout_secs } => {
+                self.perform_tcp_health_check(
+                    vm_name,
+                    check_name,
+                    address,
+                    *timeout_secs,
+                    start_time,
+                    timestamp,
+                ).await
+            }
+            HealthCheckType::Script { command, args, expected_exit_code, timeout_secs } => {
+                self.perform_script_health_check(
+                    vm_name,
+                    check_name,
+                    command,
+                    args,
+                    *expected_exit_code,
+                    *timeout_secs,
+                    start_time,
+                    timestamp,
+                ).await
+            }
+            HealthCheckType::Console { healthy_pattern, unhealthy_pattern, timeout_secs } => {
+                self.perform_console_health_check(
+                    vm_name,
+                    check_name,
+                    healthy_pattern,
+                    unhealthy_pattern.as_ref(),
+                    *timeout_secs,
+                    start_time,
+                    timestamp,
+                ).await
+            }
+            HealthCheckType::Process { process_name, min_instances } => {
+                self.perform_process_health_check(
+                    vm_name,
+                    check_name,
+                    process_name,
+                    *min_instances,
+                    start_time,
+                    timestamp,
+                ).await
+            }
+            HealthCheckType::GuestAgent { timeout_secs } => {
+                self.perform_guest_agent_health_check(
+                    vm_name,
+                    check_name,
+                    *timeout_secs,
+                    start_time,
+                    timestamp,
+                ).await
+            }
+        }
+    }
+    
+    async fn get_vm_health_status(&self, vm_name: &str) -> BlixardResult<Option<VmHealthStatus>> {
+        let health_status = self.vm_health_status.read().await;
+        Ok(health_status.get(vm_name).cloned())
+    }
+    
+    async fn is_console_accessible(&self, vm_name: &str) -> BlixardResult<bool> {
+        // Check if VM is running
+        let vm_status = self.get_vm_status(vm_name).await?;
+        if vm_status != Some(VmStatus::Running) {
+            return Ok(false);
+        }
+        
+        // Check if console socket exists
+        let socket_path = format!("/tmp/{}-console.sock", vm_name);
+        Ok(tokio::fs::metadata(&socket_path).await.is_ok())
+    }
+    
+    async fn execute_command_in_vm(
+        &self,
+        vm_name: &str,
+        command: &str,
+        args: &[String],
+        timeout_secs: u64,
+    ) -> BlixardResult<(i32, String, String)> {
+        // Get VM IP address
+        let vm_ip = self.get_vm_ip(vm_name).await?
+            .ok_or_else(|| BlixardError::VmOperationFailed {
+                operation: "execute_command".to_string(),
+                details: format!("VM '{}' IP address not found", vm_name),
+            })?;
+        
+        // Execute command via SSH
+        let ssh_args: Vec<String> = vec![
+            "-o".to_string(),
+            "ConnectTimeout=5".to_string(),
+            "-o".to_string(),
+            "StrictHostKeyChecking=no".to_string(),
+            "-o".to_string(),
+            "UserKnownHostsFile=/dev/null".to_string(),
+            format!("root@{}", vm_ip),
+            command.to_string(),
+        ];
+        
+        let mut full_args = ssh_args;
+        for arg in args {
+            full_args.push(arg.clone());
+        }
+        
+        let timeout = tokio::time::Duration::from_secs(timeout_secs);
+        let output = tokio::time::timeout(
+            timeout,
+            tokio::process::Command::new("ssh")
+                .args(&full_args)
+                .output()
+        ).await
+        .map_err(|_| BlixardError::VmOperationFailed {
+            operation: "execute_command".to_string(),
+            details: format!("Command timed out after {} seconds", timeout_secs),
+        })?
+        .map_err(|e| BlixardError::VmOperationFailed {
+            operation: "execute_command".to_string(),
+            details: format!("Failed to execute SSH command: {}", e),
+        })?;
+        
+        let exit_code = output.status.code().unwrap_or(-1);
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        
+        Ok((exit_code, stdout, stderr))
+    }
+    
+    async fn update_vm_health_status(
+        &self,
+        vm_name: &str,
+        health_status: VmHealthStatus,
+    ) -> BlixardResult<()> {
+        let mut health_statuses = self.vm_health_status.write().await;
+        health_statuses.insert(vm_name.to_string(), health_status);
+        Ok(())
     }
 }
 

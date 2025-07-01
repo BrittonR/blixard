@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use crate::anti_affinity::AntiAffinityRules;
+use crate::vm_health_types::VmHealthCheckConfig;
 
 /// Node topology information for multi-datacenter awareness
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -31,7 +32,6 @@ pub struct NodeConfig {
     pub join_addr: Option<String>,
     pub use_tailscale: bool,
     pub vm_backend: String, // Backend type: "mock", "microvm", "docker", etc.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub transport_config: Option<crate::transport::config::TransportConfig>,
     #[serde(default)]
     pub topology: NodeTopology, // Datacenter/zone/rack topology information
@@ -45,11 +45,8 @@ pub struct VmConfig {
     pub memory: u32, // MB
     #[serde(default = "default_tenant")]
     pub tenant_id: String, // Tenant identifier for multi-tenancy
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ip_address: Option<String>, // VM IP address for network isolation
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<std::collections::HashMap<String, String>>, // Metadata for Nix images, etc.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub anti_affinity: Option<AntiAffinityRules>, // Anti-affinity rules for placement
     #[serde(default = "default_priority")]
     pub priority: u32, // Priority level (0-1000, higher is more important)
@@ -57,6 +54,7 @@ pub struct VmConfig {
     pub preemptible: bool, // Whether this VM can be preempted
     #[serde(default)]
     pub locality_preference: LocalityPreference, // Datacenter locality preferences
+    pub health_check_config: Option<VmHealthCheckConfig>, // Health check configuration
 }
 
 impl Default for VmConfig {
@@ -73,6 +71,7 @@ impl Default for VmConfig {
             priority: default_priority(),
             preemptible: default_preemptible(),
             locality_preference: LocalityPreference::default(),
+            health_check_config: None,
         }
     }
 }

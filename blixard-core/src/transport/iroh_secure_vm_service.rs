@@ -131,6 +131,24 @@ impl SecureIrohVmService {
                     vm_name,
                 ).await?
             }
+            VmOperationRequest::CreateWithScheduling { .. } => {
+                // Creating VMs with scheduling requires createVM permission
+                self.middleware.authorize_cedar(
+                    auth_context,
+                    "createVM",
+                    "Cluster",
+                    "default",
+                ).await?
+            }
+            VmOperationRequest::SchedulePlacement { .. } => {
+                // Scheduling placement requires readVM permission
+                self.middleware.authorize_cedar(
+                    auth_context,
+                    "readVM",
+                    "Cluster",
+                    "default",
+                ).await?
+            }
         };
         
         if !authorized {

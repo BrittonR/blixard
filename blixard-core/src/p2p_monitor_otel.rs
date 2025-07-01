@@ -286,7 +286,7 @@ impl P2pMonitor for OtelP2pMonitor {
             self.metrics.p2p_bytes_transferred.add(bytes, &attributes);
             self.metrics.p2p_transfer_duration.record(duration_ms / 1000.0, &attributes);
         } else {
-            self.metrics.p2p_downloads_failed.add(1, &attributes);
+            self.metrics.p2p_image_downloads_failed.add(1, &attributes);
         }
     }
 }

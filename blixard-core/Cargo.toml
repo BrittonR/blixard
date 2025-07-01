@@ -6,6 +6,10 @@ rust-version = "1.75"
 description = "Distributed consensus and state management for Blixard"
 authors = ["Blixard Contributors"]
 
+[[example]]
+name = "test_vm_scheduler"
+path = "examples/test_vm_scheduler.rs"
+
 [dependencies]
 # Consensus
 raft = { version = "0.7", default-features = false, features = ["prost-codec"] }

@@ -8,6 +8,7 @@ use uuid;
 use crate::error::{BlixardResult, BlixardError};
 use crate::types::{VmConfig, VmStatus, VmCommand};
 use crate::vm_scheduler::{VmScheduler, PlacementStrategy, PlacementDecision};
+use crate::vm_health_types::{VmHealthStatus, HealthCheckType, HealthCheckResult};
 use crate::metrics_otel::{metrics, Timer, attributes};
 // Temporarily disabled: tracing_otel uses tonic
 // use crate::tracing_otel;
@@ -51,6 +52,67 @@ pub trait VmBackend: Send + Sync {
             feature: "VM migration".to_string(),
         })
     }
+    
+    /// Perform a health check on a VM
+    /// 
+    /// This method executes the specified health check against the VM and returns
+    /// the result. The backend is responsible for implementing the actual health
+    /// check logic based on the check type.
+    async fn perform_health_check(
+        &self,
+        vm_name: &str,
+        check_name: &str,
+        check_type: &HealthCheckType,
+    ) -> BlixardResult<HealthCheckResult> {
+        // Default implementation returns not implemented
+        Err(BlixardError::NotImplemented {
+            feature: format!("Health check type {:?}", check_type),
+        })
+    }
+    
+    /// Get the current health status of a VM
+    /// 
+    /// This returns the last known health status without performing new checks.
+    async fn get_vm_health_status(&self, vm_name: &str) -> BlixardResult<Option<VmHealthStatus>> {
+        // Default implementation returns None
+        Ok(None)
+    }
+    
+    /// Check if the VM's console is accessible
+    /// 
+    /// This is used for console-based health checks and debugging.
+    async fn is_console_accessible(&self, vm_name: &str) -> BlixardResult<bool> {
+        // Default implementation returns false
+        Ok(false)
+    }
+    
+    /// Execute a command inside the VM (for script-based health checks)
+    /// 
+    /// This requires guest agent support or SSH access to the VM.
+    async fn execute_command_in_vm(
+        &self,
+        vm_name: &str,
+        command: &str,
+        args: &[String],
+        timeout_secs: u64,
+    ) -> BlixardResult<(i32, String, String)> {
+        // Returns (exit_code, stdout, stderr)
+        Err(BlixardError::NotImplemented {
+            feature: "VM command execution".to_string(),
+        })
+    }
+    
+    /// Update the health status of a VM
+    /// 
+    /// This stores the latest health check results for the VM.
+    async fn update_vm_health_status(
+        &self,
+        vm_name: &str,
+        health_status: VmHealthStatus,
+    ) -> BlixardResult<()> {
+        // Default implementation does nothing
+        Ok(())
+    }
 }
 
 /// VM Manager that coordinates between Raft consensus and VM backend
@@ -72,6 +134,11 @@ impl VmManager {
             backend,
             node_state,
         }
+    }
+    
+    /// Get a reference to the backend
+    pub fn backend(&self) -> &Arc<dyn VmBackend> {
+        &self.backend
     }
     
     /// Process a VM command after Raft consensus

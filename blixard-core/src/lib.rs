@@ -45,6 +45,7 @@ pub mod p2p_monitor_otel;
 pub mod p2p_health_check;
 pub mod cluster_state;
 pub mod transport;
+pub mod vm_health_types;
 pub mod vm_health_monitor;
 pub mod vm_auto_recovery;
 pub mod vm_network_isolation;

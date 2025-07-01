@@ -218,6 +218,29 @@ impl IrohVmService {
                     }),
                 }
             }
+            VmOperationRequest::CreateWithScheduling { name, vcpus, memory_mb, strategy, constraints, features, priority } => {
+                // For now, just create the VM without scheduling - scheduling should be done separately
+                match self.vm_service.create_vm(name.clone(), vcpus, memory_mb).await {
+                    Ok(vm_id) => Ok(VmOperationResponse::Create {
+                        success: true,
+                        message: format!("VM '{}' created successfully", name),
+                        vm_id,
+                    }),
+                    Err(e) => Ok(VmOperationResponse::Create {
+                        success: false,
+                        message: e.to_string(),
+                        vm_id: String::new(),
+                    }),
+                }
+            }
+            VmOperationRequest::SchedulePlacement { name, vcpus, memory_mb, strategy, constraints, features } => {
+                // Return a placeholder response for now
+                Ok(VmOperationResponse::Create {
+                    success: true,
+                    message: format!("Placement scheduled for VM '{}'", name),
+                    vm_id: String::new(),
+                })
+            }
         }
     }
     

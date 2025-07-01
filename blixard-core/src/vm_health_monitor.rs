@@ -10,6 +10,7 @@ use crate::{
     vm_backend::VmManager,
     vm_auto_recovery::{VmAutoRecovery, RecoveryPolicy},
     types::VmStatus,
+    vm_health_types::{VmHealthStatus, HealthState, HealthCheckResult},
     metrics_otel::{metrics, attributes},
 };
 
@@ -90,7 +91,7 @@ impl VmHealthMonitor {
             loop {
                 interval.tick().await;
                 
-                if let Err(e) = Self::run_health_checks(&node_state, &vm_manager, &auto_recovery).await {
+                if let Err(e) = Self::run_health_checks_v2(&node_state, &vm_manager, &auto_recovery).await {
                     error!("Health check cycle failed: {}", e);
                 }
             }
@@ -215,6 +216,185 @@ impl VmHealthMonitor {
         }
     }
     
+    /// Perform health checks for a specific VM
+    async fn perform_vm_health_checks(
+        vm_manager: &Arc<VmManager>,
+        vm_name: &str,
+        vm_config: &crate::types::VmConfig,
+    ) -> BlixardResult<VmHealthStatus> {
+        let mut health_status = VmHealthStatus::default();
+        
+        // If no health check config, return unknown state
+        let health_config = match &vm_config.health_check_config {
+            Some(config) => config,
+            None => {
+                health_status.state = HealthState::Unknown;
+                return Ok(health_status);
+            }
+        };
+        
+        // Perform each configured health check
+        for check in &health_config.checks {
+            let start_time = std::time::Instant::now();
+            
+            let result = match vm_manager.backend().perform_health_check(
+                vm_name,
+                &check.name,
+                &check.check_type,
+            ).await {
+                Ok(result) => result,
+                Err(e) => {
+                    // Create a failed result for the check
+                    HealthCheckResult {
+                        check_name: check.name.clone(),
+                        success: false,
+                        message: format!("Health check failed: {}", e),
+                        duration: start_time.elapsed(),
+                        timestamp: std::time::SystemTime::now(),
+                        error: Some(e.to_string()),
+                    }
+                }
+            };
+            
+            health_status.check_results.push(result);
+        }
+        
+        // Calculate overall health score and state
+        health_status.calculate_score();
+        health_status.update_state(health_config);
+        
+        Ok(health_status)
+    }
+    
+    /// Update the run_health_checks to perform actual health checks
+    async fn run_health_checks_v2(
+        node_state: &Arc<SharedNodeState>,
+        vm_manager: &Arc<VmManager>,
+        auto_recovery: &Arc<VmAutoRecovery>,
+    ) -> BlixardResult<()> {
+        let metrics = metrics();
+        let node_id = node_state.get_id();
+        
+        // Get all VMs from the database (source of truth)
+        let vms = vm_manager.list_vms().await?;
+        
+        let mut checked_count = 0;
+        let mut unhealthy_count = 0;
+        
+        for (vm_config, stored_status) in vms {
+            // Only check VMs that are assigned to this node
+            let vm_node_id = match Self::get_vm_node_id(node_state, &vm_config.name).await {
+                Ok(Some(id)) => id,
+                Ok(None) => continue,
+                Err(e) => {
+                    warn!("Failed to get node ID for VM '{}': {}", vm_config.name, e);
+                    continue;
+                }
+            };
+            
+            if vm_node_id != node_id {
+                continue;
+            }
+            
+            checked_count += 1;
+            
+            // First check if VM process is running
+            let process_status = match vm_manager.get_vm_status(&vm_config.name).await? {
+                Some((_, status)) => status,
+                None => {
+                    warn!("VM '{}' not found in backend during health check", vm_config.name);
+                    VmStatus::Failed
+                }
+            };
+            
+            // If process is not running, skip health checks
+            if process_status != VmStatus::Running {
+                if stored_status == VmStatus::Running {
+                    // VM has stopped unexpectedly
+                    info!("VM '{}' process is no longer running", vm_config.name);
+                    
+                    // Update status through Raft
+                    if let Err(e) = node_state.update_vm_status_through_raft(
+                        vm_config.name.clone(),
+                        process_status,
+                        node_id
+                    ).await {
+                        error!("Failed to update VM '{}' status: {}", vm_config.name, e);
+                    }
+                    
+                    // Trigger auto-recovery
+                    if let Err(e) = auto_recovery.trigger_recovery(&vm_config.name, &vm_config).await {
+                        error!("Auto-recovery failed for VM '{}': {}", vm_config.name, e);
+                    }
+                }
+                continue;
+            }
+            
+            // Perform actual health checks
+            match Self::perform_vm_health_checks(vm_manager, &vm_config.name, &vm_config).await {
+                Ok(health_status) => {
+                    // Record metrics based on health state
+                    match health_status.state {
+                        HealthState::Healthy => {
+                            metrics.vm_health_state.add(1, &[
+                                attributes::vm_name(&vm_config.name),
+                                attributes::health_state("healthy"),
+                            ]);
+                        }
+                        HealthState::Degraded => {
+                            metrics.vm_health_state.add(1, &[
+                                attributes::vm_name(&vm_config.name),
+                                attributes::health_state("degraded"),
+                            ]);
+                        }
+                        HealthState::Unhealthy | HealthState::Unresponsive => {
+                            unhealthy_count += 1;
+                            metrics.vm_health_state.add(1, &[
+                                attributes::vm_name(&vm_config.name),
+                                attributes::health_state("unhealthy"),
+                            ]);
+                            
+                            // Trigger auto-recovery for unhealthy VMs
+                            if health_status.consecutive_failures >= 3 {
+                                info!("VM '{}' is unhealthy, triggering recovery", vm_config.name);
+                                if let Err(e) = auto_recovery.trigger_recovery(&vm_config.name, &vm_config).await {
+                                    error!("Auto-recovery failed for VM '{}': {}", vm_config.name, e);
+                                }
+                            }
+                        }
+                        HealthState::Unknown => {
+                            // No health checks configured
+                        }
+                    }
+                    
+                    // Store health status in backend
+                    if let Err(e) = vm_manager.backend().update_vm_health_status(&vm_config.name, health_status).await {
+                        warn!("Failed to update health status for VM '{}': {}", vm_config.name, e);
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to perform health checks for VM '{}': {}", vm_config.name, e);
+                    metrics.vm_health_check_failed.add(1, &[
+                        attributes::vm_name(&vm_config.name),
+                        attributes::error(true),
+                    ]);
+                }
+            }
+        }
+        
+        // Record overall metrics
+        metrics.vm_health_checks_total.add(checked_count, &[
+            attributes::node_id(node_id),
+        ]);
+        
+        if unhealthy_count > 0 {
+            metrics.vm_unhealthy_total.add(unhealthy_count, &[
+                attributes::node_id(node_id),
+            ]);
+        }
+        
+        Ok(())
+    }
 }
 
 impl Drop for VmHealthMonitor {

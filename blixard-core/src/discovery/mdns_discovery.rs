@@ -350,6 +350,7 @@ impl Clone for MdnsDiscoveryProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::IpAddr;
     
     #[test]
     fn test_mdns_discovery_creation() {

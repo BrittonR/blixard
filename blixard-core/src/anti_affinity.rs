@@ -33,7 +33,6 @@ pub struct AntiAffinityRule {
     #[serde(default = "default_max_per_node")]
     pub max_per_node: usize,
     /// Optional scope to limit anti-affinity (e.g., "rack", "zone", "datacenter")
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
 }
 

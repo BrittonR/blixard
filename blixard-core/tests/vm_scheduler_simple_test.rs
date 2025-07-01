@@ -68,6 +68,11 @@ fn add_vm(
             memory,
             tenant_id: "default".to_string(),
             ip_address: None,
+            metadata: None,
+            anti_affinity: None,
+            priority: 500,
+            preemptible: true,
+            locality_preference: Default::default(),
         };
         
         let vm_state = VmState {
@@ -116,6 +121,11 @@ async fn test_scheduler_basic_placement() {
         memory: 2048,
         tenant_id: "default".to_string(),
         ip_address: None,
+        metadata: None,
+        anti_affinity: None,
+        priority: 500,
+        preemptible: true,
+        locality_preference: Default::default(),
     };
     
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::MostAvailable).await;
@@ -152,6 +162,11 @@ async fn test_scheduler_resource_constraints() {
         memory: 2048,
         tenant_id: "default".to_string(),
         ip_address: None,
+        metadata: None,
+        anti_affinity: None,
+        priority: 500,
+        preemptible: true,
+        locality_preference: Default::default(),
     };
     
     let result = scheduler.schedule_vm_placement(&small_vm, PlacementStrategy::MostAvailable).await;
@@ -165,6 +180,11 @@ async fn test_scheduler_resource_constraints() {
         memory: 16384,
         tenant_id: "default".to_string(),
         ip_address: None,
+        metadata: None,
+        anti_affinity: None,
+        priority: 500,
+        preemptible: true,
+        locality_preference: Default::default(),
     };
     
     let result = scheduler.schedule_vm_placement(&large_vm, PlacementStrategy::MostAvailable).await;
@@ -202,6 +222,11 @@ async fn test_scheduler_round_robin() {
         memory: 1024,
         tenant_id: "default".to_string(),
         ip_address: None,
+        metadata: None,
+        anti_affinity: None,
+        priority: 500,
+        preemptible: true,
+        locality_preference: Default::default(),
     };
     
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::RoundRobin).await;
@@ -235,6 +260,11 @@ async fn test_scheduler_manual_placement() {
         memory: 2048,
         tenant_id: "default".to_string(),
         ip_address: None,
+        metadata: None,
+        anti_affinity: None,
+        priority: 500,
+        preemptible: true,
+        locality_preference: Default::default(),
     };
     
     // Test valid manual placement
@@ -280,6 +310,11 @@ async fn test_scheduler_feature_requirements() {
         memory: 2048,
         tenant_id: "default".to_string(),
         ip_address: None,
+        metadata: None,
+        anti_affinity: None,
+        priority: 500,
+        preemptible: true,
+        locality_preference: Default::default(),
     };
     
     // Note: VmResourceRequirements::from() always adds "microvm" feature
@@ -359,6 +394,11 @@ async fn test_scheduler_bin_packing() {
         memory: 2048,
         tenant_id: "default".to_string(),
         ip_address: None,
+        metadata: None,
+        anti_affinity: None,
+        priority: 500,
+        preemptible: true,
+        locality_preference: Default::default(),
     };
     
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::LeastAvailable).await;

@@ -6,15 +6,7 @@ use crate::{
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
     types::{VmCommand, VmConfig, VmStatus as InternalVmStatus},
-    iroh_types::{
-        CreateVmRequest, CreateVmResponse, DeleteVmRequest, DeleteVmResponse,
-        GetVmStatusRequest, GetVmStatusResponse, ListVmsRequest, ListVmsResponse,
-        StartVmRequest, StartVmResponse, StopVmRequest, StopVmResponse,
-        VmInfo, VmState, MigrateVmRequest, MigrateVmResponse,
-        CreateVmWithSchedulingRequest, CreateVmWithSchedulingResponse,
-        ScheduleVmPlacementRequest, ScheduleVmPlacementResponse,
-    },
-    metrics_otel::{metrics, Timer, attributes},
+    iroh_types::VmState,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -29,6 +21,23 @@ pub enum VmOperationRequest {
         config_path: String,
         vcpus: u32,
         memory_mb: u32,
+    },
+    CreateWithScheduling {
+        name: String,
+        vcpus: u32,
+        memory_mb: u32,
+        strategy: Option<String>,
+        constraints: Option<Vec<String>>,
+        features: Option<Vec<String>>,
+        priority: Option<u32>,
+    },
+    SchedulePlacement {
+        name: String,
+        vcpus: u32,
+        memory_mb: u32,
+        strategy: Option<String>,
+        constraints: Option<Vec<String>>,
+        features: Option<Vec<String>>,
     },
     Start {
         name: String,
@@ -58,6 +67,20 @@ pub enum VmOperationResponse {
         success: bool,
         message: String,
         vm_id: String,
+    },
+    CreateWithScheduling {
+        success: bool,
+        message: String,
+        vm_id: String,
+        assigned_node_id: u64,
+        placement_decision: String,
+    },
+    SchedulePlacement {
+        success: bool,
+        assigned_node_id: u64,
+        placement_score: f32,
+        placement_reason: String,
+        alternative_nodes: Vec<u64>,
     },
     Start {
         success: bool,
@@ -105,6 +128,29 @@ pub trait VmService: Send + Sync {
     /// Create a new VM
     async fn create_vm(&self, name: String, vcpus: u32, memory_mb: u32) -> BlixardResult<String>;
     
+    /// Create a new VM with automatic scheduling
+    async fn create_vm_with_scheduling(
+        &self,
+        name: String,
+        vcpus: u32,
+        memory_mb: u32,
+        strategy: Option<String>,
+        constraints: Option<Vec<String>>,
+        features: Option<Vec<String>>,
+        priority: Option<u32>,
+    ) -> BlixardResult<(String, u64, String)>; // Returns (vm_id, node_id, placement_decision)
+    
+    /// Schedule VM placement without creating
+    async fn schedule_vm_placement(
+        &self,
+        name: &str,
+        vcpus: u32,
+        memory_mb: u32,
+        strategy: Option<String>,
+        constraints: Option<Vec<String>>,
+        features: Option<Vec<String>>,
+    ) -> BlixardResult<(u64, f32, String, Vec<u64>)>; // Returns (node_id, score, reason, alternatives)
+    
     /// Start a VM
     async fn start_vm(&self, name: &str) -> BlixardResult<()>;
     
@@ -151,6 +197,18 @@ impl VmServiceImpl {
             InternalVmStatus::Stopping => VmState::VmStateStopping,
             InternalVmStatus::Stopped => VmState::VmStateStopped,
             InternalVmStatus::Failed => VmState::VmStateFailed,
+        }
+    }
+    
+    /// Parse placement strategy from string
+    fn parse_strategy(strategy_str: Option<String>) -> crate::vm_scheduler::PlacementStrategy {
+        use crate::vm_scheduler::PlacementStrategy;
+        
+        match strategy_str.as_deref() {
+            Some("most-available") => PlacementStrategy::MostAvailable,
+            Some("least-available") => PlacementStrategy::LeastAvailable,
+            Some("round-robin") => PlacementStrategy::RoundRobin,
+            _ => PlacementStrategy::MostAvailable, // Default
         }
     }
 }
@@ -203,6 +261,116 @@ impl VmService for VmServiceImpl {
     
     async fn get_vm_status(&self, name: &str) -> BlixardResult<Option<(VmConfig, InternalVmStatus)>> {
         self.node.get_vm_status(name).await
+    }
+    
+    async fn create_vm_with_scheduling(
+        &self,
+        name: String,
+        vcpus: u32,
+        memory_mb: u32,
+        strategy: Option<String>,
+        constraints: Option<Vec<String>>,
+        features: Option<Vec<String>>,
+        priority: Option<u32>,
+    ) -> BlixardResult<(String, u64, String)> {
+        use crate::anti_affinity::{AntiAffinityRules, AntiAffinityRule};
+        
+        let mut vm_config = VmConfig {
+            name: name.clone(),
+            config_path: format!("/etc/blixard/vms/{}.yaml", name),
+            vcpus,
+            memory: memory_mb,
+            tenant_id: "default".to_string(),
+            ip_address: None,
+            metadata: None,
+            anti_affinity: None,
+            priority: priority.unwrap_or(100),
+            ..Default::default()
+        };
+        
+        // Convert constraints to anti-affinity rules
+        if let Some(constraints) = constraints {
+            let rules: Vec<AntiAffinityRule> = constraints
+                .into_iter()
+                .map(|group| AntiAffinityRule::hard(group))
+                .collect();
+            if !rules.is_empty() {
+                vm_config.anti_affinity = Some(AntiAffinityRules { rules });
+            }
+        }
+        
+        // Add required features
+        if let Some(features) = features {
+            vm_config.metadata = Some(
+                vec![("required_features".to_string(), features.join(","))]
+                    .into_iter()
+                    .collect()
+            );
+        }
+        
+        let strategy = Self::parse_strategy(strategy);
+        
+        // Use the scheduling method from SharedNodeState
+        let decision = self.node.create_vm_with_scheduling(vm_config, strategy).await?;
+        
+        Ok((name, decision.selected_node_id, decision.reason))
+    }
+    
+    async fn schedule_vm_placement(
+        &self,
+        name: &str,
+        vcpus: u32,
+        memory_mb: u32,
+        strategy: Option<String>,
+        constraints: Option<Vec<String>>,
+        features: Option<Vec<String>>,
+    ) -> BlixardResult<(u64, f32, String, Vec<u64>)> {
+        use crate::anti_affinity::{AntiAffinityRules, AntiAffinityRule};
+        
+        let mut vm_config = VmConfig {
+            name: name.to_string(),
+            config_path: format!("/etc/blixard/vms/{}.yaml", name),
+            vcpus,
+            memory: memory_mb,
+            tenant_id: "default".to_string(),
+            ip_address: None,
+            metadata: None,
+            anti_affinity: None,
+            ..Default::default()
+        };
+        
+        // Convert constraints to anti-affinity rules
+        if let Some(constraints) = constraints {
+            let rules: Vec<AntiAffinityRule> = constraints
+                .into_iter()
+                .map(|group| AntiAffinityRule::hard(group))
+                .collect();
+            if !rules.is_empty() {
+                vm_config.anti_affinity = Some(AntiAffinityRules { rules });
+            }
+        }
+        
+        // Add required features
+        if let Some(features) = features {
+            vm_config.metadata = Some(
+                vec![("required_features".to_string(), features.join(","))]
+                    .into_iter()
+                    .collect()
+            );
+        }
+        
+        let strategy = Self::parse_strategy(strategy);
+        
+        // Use the scheduling method from SharedNodeState
+        let decision = self.node.schedule_vm_placement(&vm_config, strategy).await?;
+        
+        // For now, return a default score since PlacementDecision doesn't have a score field
+        Ok((
+            decision.selected_node_id,
+            1.0, // Default score
+            decision.reason,
+            decision.alternative_nodes,
+        ))
     }
     
     async fn migrate_vm(
@@ -361,6 +529,42 @@ impl VmProtocolHandler {
                         target_node_id: 0,
                         status: 5, // MIGRATION_STATUS_FAILED
                         duration_ms: 0,
+                    }),
+                }
+            }
+            VmOperationRequest::CreateWithScheduling { name, vcpus, memory_mb, strategy, constraints, features, priority } => {
+                match self.service.create_vm_with_scheduling(name.clone(), vcpus, memory_mb, strategy, constraints, features, priority).await {
+                    Ok((vm_id, node_id, reason)) => Ok(VmOperationResponse::CreateWithScheduling {
+                        success: true,
+                        message: format!("VM '{}' created successfully on node {}", name, node_id),
+                        vm_id,
+                        assigned_node_id: node_id,
+                        placement_decision: reason,
+                    }),
+                    Err(e) => Ok(VmOperationResponse::CreateWithScheduling {
+                        success: false,
+                        message: e.to_string(),
+                        vm_id: String::new(),
+                        assigned_node_id: 0,
+                        placement_decision: String::new(),
+                    }),
+                }
+            }
+            VmOperationRequest::SchedulePlacement { name, vcpus, memory_mb, strategy, constraints, features } => {
+                match self.service.schedule_vm_placement(&name, vcpus, memory_mb, strategy, constraints, features).await {
+                    Ok((node_id, score, reason, alternatives)) => Ok(VmOperationResponse::SchedulePlacement {
+                        success: true,
+                        assigned_node_id: node_id,
+                        placement_score: score,
+                        placement_reason: reason,
+                        alternative_nodes: alternatives,
+                    }),
+                    Err(e) => Ok(VmOperationResponse::SchedulePlacement {
+                        success: false,
+                        assigned_node_id: 0,
+                        placement_score: 0.0,
+                        placement_reason: e.to_string(),
+                        alternative_nodes: vec![],
                     }),
                 }
             }

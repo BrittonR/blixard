@@ -47,6 +47,8 @@ pub struct Metrics {
     pub vm_delete_failed: Counter<u64>,
     pub vm_health_checks_total: Counter<u64>,
     pub vm_health_check_failed: Counter<u64>,
+    pub vm_health_state: Counter<u64>,
+    pub vm_unhealthy_total: Counter<u64>,
     pub vm_status_changes: Counter<u64>,
     pub vm_recovery_success: Counter<u64>,
     pub vm_recovery_failed: Counter<u64>,
@@ -210,6 +212,14 @@ impl Metrics {
             vm_health_check_failed: meter
                 .u64_counter("vm.health_check.failed")
                 .with_description("Number of failed VM health checks")
+                .init(),
+            vm_health_state: meter
+                .u64_counter("vm.health_state")
+                .with_description("VM health state (labeled by state: healthy, degraded, unhealthy)")
+                .init(),
+            vm_unhealthy_total: meter
+                .u64_counter("vm.unhealthy.total")
+                .with_description("Total number of unhealthy VMs detected")
                 .init(),
             vm_status_changes: meter
                 .u64_counter("vm.status_changes.total")
@@ -680,6 +690,10 @@ pub mod attributes {
     
     pub fn vm_name(name: &str) -> KeyValue {
         KeyValue::new("vm.name", name.to_string())
+    }
+    
+    pub fn health_state(state: &str) -> KeyValue {
+        KeyValue::new("health.state", state.to_string())
     }
     
     pub fn table(name: &str) -> KeyValue {

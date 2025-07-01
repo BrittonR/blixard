@@ -235,10 +235,12 @@ impl Node {
         // Store transport in node
         self.raft_transport = Some(raft_transport.clone());
         
-        // Create Iroh peer connector
+        // Create Iroh peer connector with NoOp monitor for now
+        let p2p_monitor: Arc<dyn crate::p2p_monitor::P2pMonitor> = Arc::new(crate::p2p_monitor::NoOpMonitor);
         let peer_connector = Arc::new(IrohPeerConnector::new(
             raft_transport.endpoint().as_ref().clone(),
             self.shared.clone(),
+            p2p_monitor,
         ));
         self.shared.set_peer_connector(peer_connector.clone()).await;
         

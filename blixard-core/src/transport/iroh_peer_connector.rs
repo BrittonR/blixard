@@ -369,7 +369,7 @@ impl IrohPeerConnector {
                 
                 // Determine error type
                 let error_type = match &e {
-                    BlixardError::Timeout(_) => P2pErrorType::Timeout,
+                    BlixardError::NetworkError(msg) if msg.contains("timeout") => P2pErrorType::Timeout,
                     BlixardError::ClusterError(msg) if msg.contains("refused") => P2pErrorType::ConnectionRefused,
                     BlixardError::ClusterError(msg) if msg.contains("reset") => P2pErrorType::ConnectionReset,
                     _ => P2pErrorType::Unknown,
