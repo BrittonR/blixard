@@ -225,9 +225,26 @@ impl IrohTransportV2 {
     /// Get the node's address for sharing with peers
     pub async fn node_addr(&self) -> BlixardResult<NodeAddr> {
         let node_id = self.endpoint.node_id();
-        // TODO: Get direct addresses when API is stable
-        // For now, just return NodeAddr with node_id
-        Ok(NodeAddr::new(node_id))
+        
+        // Get direct addresses from bound sockets
+        let direct_addresses = self.endpoint.bound_sockets();
+        
+        // Create NodeAddr with both node ID and direct addresses
+        let mut node_addr = NodeAddr::new(node_id)
+            .with_direct_addresses(direct_addresses);
+        
+        // Add relay URL if available (using default relay)
+        // In production, this could be configured
+        if let Ok(relay_url) = "https://relay.iroh.network/".parse() {
+            node_addr = node_addr.with_relay_url(relay_url);
+        }
+        
+        info!("Node address created: ID={}, direct_addresses={:?}, relay_url={:?}", 
+               node_id, 
+               node_addr.direct_addresses().collect::<Vec<_>>(),
+               node_addr.relay_url());
+        
+        Ok(node_addr)
     }
     
     /// Get the underlying Iroh endpoint and node ID (for Raft transport)
@@ -693,7 +710,17 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let transport = IrohTransportV2::new(1, temp_dir.path()).await.unwrap();
         let addr = transport.node_addr().await.unwrap();
+        
+        // Verify node ID exists
         assert!(!addr.node_id.to_string().is_empty());
+        
+        // Verify direct addresses are populated
+        let direct_addrs: Vec<_> = addr.direct_addresses().collect();
+        assert!(!direct_addrs.is_empty(), "Node should have at least one direct address");
+        
+        // Verify relay URL is set
+        assert!(addr.relay_url().is_some(), "Node should have a relay URL configured");
+        
         transport.shutdown().await.unwrap();
     }
 
