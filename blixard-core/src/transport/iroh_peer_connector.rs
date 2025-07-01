@@ -15,6 +15,7 @@ use crate::{
     node_shared::{SharedNodeState, PeerInfo},
     metrics_otel::{metrics, Timer, attributes},
     config_global,
+    p2p_monitor::{P2pMonitor, ConnectionState, Direction, P2pErrorType, DiscoveryMethod, ConnectionQuality},
 };
 use iroh::{Endpoint, NodeAddr, NodeId};
 
@@ -136,10 +137,12 @@ pub struct IrohClient {
     node_addr: NodeAddr,
     connection_info: Arc<RwLock<ConnectionInfo>>,
     rpc_client: Arc<crate::transport::iroh_service::IrohRpcClient>,
+    p2p_monitor: Option<Arc<dyn P2pMonitor>>,
+    peer_id: u64,
 }
 
 impl IrohClient {
-    async fn new(endpoint: Endpoint, node_addr: NodeAddr) -> BlixardResult<Self> {
+    async fn new(endpoint: Endpoint, node_addr: NodeAddr, peer_id: u64, p2p_monitor: Option<Arc<dyn P2pMonitor>>) -> BlixardResult<Self> {
         let connection_info = Arc::new(RwLock::new(ConnectionInfo {
             node_addr: node_addr.clone(),
             established_at: Instant::now(),
@@ -156,17 +159,44 @@ impl IrohClient {
             node_addr,
             connection_info,
             rpc_client,
+            p2p_monitor,
+            peer_id,
         })
     }
     
     // VM operation proxy methods
     pub async fn create_vm(&self, name: String, config_path: String, vcpus: u32, memory_mb: u32) -> BlixardResult<crate::iroh_types::CreateVmResponse> {
+        let start = Instant::now();
+        
         // Create the actual Iroh RPC client
         let client = crate::transport::iroh_client::IrohClient::new(
             Arc::new(self.endpoint.clone()),
             self.node_addr.clone(),
         );
-        client.create_vm(name, config_path, vcpus, memory_mb).await
+        
+        // Estimate request size (rough approximation)
+        let request_size = name.len() + config_path.len() + 8; // + vcpus + memory
+        
+        let result = client.create_vm(name, config_path, vcpus, memory_mb).await;
+        
+        // Update stats and monitoring
+        if let Ok(ref response) = result {
+            let response_size = 100; // Approximate response size
+            self.update_stats(request_size as u64, response_size).await;
+            
+            if let Some(ref monitor) = self.p2p_monitor {
+                monitor.record_bytes_transferred(&self.peer_id.to_string(), Direction::Outbound, request_size as u64).await;
+                monitor.record_bytes_transferred(&self.peer_id.to_string(), Direction::Inbound, response_size).await;
+                monitor.record_message(
+                    &self.peer_id.to_string(), 
+                    "create_vm", 
+                    request_size,
+                    Some(start.elapsed().as_secs_f64() * 1000.0)
+                ).await;
+            }
+        }
+        
+        result
     }
     
     pub async fn start_vm(&self, name: String) -> BlixardResult<crate::iroh_types::StartVmResponse> {
@@ -227,11 +257,12 @@ pub struct IrohPeerConnector {
     shutdown_tx: watch::Sender<bool>,
     shutdown_rx: watch::Receiver<bool>,
     background_tasks: Mutex<Vec<JoinHandle<()>>>,
+    p2p_monitor: Arc<dyn P2pMonitor>,
 }
 
 impl IrohPeerConnector {
     /// Create a new Iroh peer connector
-    pub fn new(endpoint: Endpoint, node: Arc<SharedNodeState>) -> Self {
+    pub fn new(endpoint: Endpoint, node: Arc<SharedNodeState>, p2p_monitor: Arc<dyn P2pMonitor>) -> Self {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         
         Self {
@@ -246,6 +277,7 @@ impl IrohPeerConnector {
             shutdown_tx,
             shutdown_rx,
             background_tasks: Mutex::new(Vec::new()),
+            p2p_monitor,
         }
     }
     
@@ -279,14 +311,23 @@ impl IrohPeerConnector {
         );
         metrics.peer_reconnect_attempts.add(1, &peer_attrs);
         
+        let peer_id_str = peer_id.to_string();
+        
         // Check if already connected
         if self.connections.contains_key(&peer_id) {
             tracing::debug!("Already connected to peer {}", peer_id);
             return Ok(());
         }
         
+        // Record connection state change to connecting
+        self.p2p_monitor.record_connection_state_change(
+            &peer_id_str,
+            ConnectionState::Disconnected,
+            ConnectionState::Connecting
+        ).await;
+        
         // Attempt connection
-        match IrohClient::new(self.endpoint.clone(), node_addr.clone()).await {
+        match IrohClient::new(self.endpoint.clone(), node_addr.clone(), peer_id, Some(self.p2p_monitor.clone())).await {
             Ok(client) => {
                 // Store connection
                 self.connections.insert(peer_id, client);
@@ -300,6 +341,14 @@ impl IrohPeerConnector {
                 // Update peer status
                 self.node.update_peer_connection(peer_id, true).await?;
                 
+                // Record successful connection
+                self.p2p_monitor.record_connection_attempt(&peer_id_str, true).await;
+                self.p2p_monitor.record_connection_state_change(
+                    &peer_id_str,
+                    ConnectionState::Connecting,
+                    ConnectionState::Connected
+                ).await;
+                
                 // Process buffered messages
                 self.send_buffered_messages(peer_id).await;
                 
@@ -309,6 +358,24 @@ impl IrohPeerConnector {
             Err(e) => {
                 // Update peer status
                 self.node.update_peer_connection(peer_id, false).await?;
+                
+                // Record failed connection
+                self.p2p_monitor.record_connection_attempt(&peer_id_str, false).await;
+                self.p2p_monitor.record_connection_state_change(
+                    &peer_id_str,
+                    ConnectionState::Connecting,
+                    ConnectionState::Failed
+                ).await;
+                
+                // Determine error type
+                let error_type = match &e {
+                    BlixardError::Timeout(_) => P2pErrorType::Timeout,
+                    BlixardError::ClusterError(msg) if msg.contains("refused") => P2pErrorType::ConnectionRefused,
+                    BlixardError::ClusterError(msg) if msg.contains("reset") => P2pErrorType::ConnectionReset,
+                    _ => P2pErrorType::Unknown,
+                };
+                self.p2p_monitor.record_error(&peer_id_str, error_type).await;
+                
                 Err(e)
             }
         }
@@ -350,6 +417,7 @@ impl IrohPeerConnector {
             ));
         
         if !breaker.should_allow_request() {
+            self.p2p_monitor.record_error(&peer_id.to_string(), P2pErrorType::ConnectionRefused).await;
             return Err(BlixardError::ClusterError(
                 format!("Circuit breaker open for peer {}", peer_id)
             ));
@@ -371,7 +439,7 @@ impl IrohPeerConnector {
         let node_addr = self.peer_info_to_node_addr(&peer_info)?;
         
         // Attempt connection
-        match IrohClient::new(self.endpoint.clone(), node_addr).await {
+        match IrohClient::new(self.endpoint.clone(), node_addr, peer_id, Some(self.p2p_monitor.clone())).await {
             Ok(client) => {
                 // Store connection
                 self.connections.insert(peer_id, client.clone());
@@ -469,6 +537,8 @@ impl IrohPeerConnector {
         data: Vec<u8>,
         message_type: MessageType,
     ) -> BlixardResult<()> {
+        let data_size = data.len();
+        
         let mut buffer = self.message_buffer.lock().await;
         let queue = buffer.entry(peer_id).or_insert_with(VecDeque::new);
         
@@ -484,6 +554,16 @@ impl IrohPeerConnector {
             timestamp: Instant::now(),
             attempts: 0,
         });
+        
+        // Calculate total buffered bytes for this peer
+        let total_bytes: usize = queue.iter().map(|msg| msg.data.len()).sum();
+        
+        // Record buffered messages metrics
+        self.p2p_monitor.record_buffered_messages(
+            &peer_id.to_string(),
+            queue.len(),
+            total_bytes
+        ).await;
         
         Ok(())
     }
@@ -520,6 +600,19 @@ impl IrohPeerConnector {
             // Update peer status
             self.node.update_peer_connection(peer_id, false).await?;
             
+            // Record disconnection
+            self.p2p_monitor.record_connection_state_change(
+                &peer_id.to_string(),
+                ConnectionState::Connected,
+                ConnectionState::Disconnecting
+            ).await;
+            
+            self.p2p_monitor.record_connection_state_change(
+                &peer_id.to_string(),
+                ConnectionState::Disconnecting,
+                ConnectionState::Disconnected
+            ).await;
+            
             tracing::info!("Disconnected from peer {}", peer_id);
         }
         
@@ -551,6 +644,7 @@ impl IrohPeerConnector {
     fn start_health_check_task(&self) -> JoinHandle<()> {
         let connections = self.connections.clone();
         let node = self.node.clone();
+        let p2p_monitor = self.p2p_monitor.clone();
         let mut shutdown_rx = self.shutdown_rx.clone();
         
         tokio::spawn(async move {
@@ -563,12 +657,30 @@ impl IrohPeerConnector {
                         for entry in connections.iter() {
                             let peer_id = *entry.key();
                             let client = entry.value();
+                            let peer_id_str = peer_id.to_string();
                             
-                            // TODO: Implement actual health check
-                            tracing::debug!("Health check for peer {}", peer_id);
+                            // Perform health check with RTT measurement
+                            let start = std::time::Instant::now();
                             
-                            // For now, just update last used time
+                            // TODO: Implement actual health check RPC call
+                            // For now, simulate with a simple touch
                             client.touch().await;
+                            
+                            let rtt_ms = start.elapsed().as_secs_f64() * 1000.0;
+                            
+                            // Record RTT measurement
+                            p2p_monitor.record_rtt(&peer_id_str, rtt_ms).await;
+                            
+                            // Update connection quality
+                            let quality = ConnectionQuality {
+                                success_rate: 1.0, // TODO: Track actual success rate
+                                avg_rtt: rtt_ms,
+                                packet_loss: 0.0, // TODO: Get from QUIC stats
+                                bandwidth: 0.0, // TODO: Calculate from transfer stats
+                            };
+                            p2p_monitor.update_connection_quality(&peer_id_str, quality).await;
+                            
+                            tracing::debug!("Health check for peer {} - RTT: {:.2}ms", peer_id, rtt_ms);
                         }
                     }
                     _ = shutdown_rx.changed() => {
@@ -628,6 +740,7 @@ impl IrohPeerConnector {
     /// Start connection cleanup background task
     fn start_connection_cleanup_task(&self) -> JoinHandle<()> {
         let connections = self.connections.clone();
+        let p2p_monitor = self.p2p_monitor.clone();
         let mut shutdown_rx = self.shutdown_rx.clone();
         
         tokio::spawn(async move {
@@ -638,6 +751,8 @@ impl IrohPeerConnector {
                     _ = interval.tick() => {
                         // Clean up idle connections
                         let mut to_remove = Vec::new();
+                        let mut active_count = 0;
+                        let mut idle_count = 0;
                         
                         for entry in connections.iter() {
                             let peer_id = *entry.key();
@@ -647,13 +762,28 @@ impl IrohPeerConnector {
                             let info = client.connection_info.read().await;
                             if info.last_used.elapsed() > Duration::from_secs(300) {
                                 to_remove.push(peer_id);
+                                idle_count += 1;
+                            } else {
+                                active_count += 1;
                             }
                         }
+                        
+                        let total_count = active_count + idle_count;
+                        
+                        // Record pool metrics before cleanup
+                        p2p_monitor.record_pool_metrics(total_count, active_count, idle_count).await;
                         
                         // Remove idle connections
                         for peer_id in to_remove {
                             connections.remove(&peer_id);
                             tracing::debug!("Removed idle connection to peer {}", peer_id);
+                            
+                            // Record disconnection
+                            p2p_monitor.record_connection_state_change(
+                                &peer_id.to_string(),
+                                ConnectionState::Connected,
+                                ConnectionState::Disconnected
+                            ).await;
                         }
                     }
                     _ = shutdown_rx.changed() => {

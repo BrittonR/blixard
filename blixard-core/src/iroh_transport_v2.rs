@@ -5,10 +5,13 @@
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::discovery::{DiscoveryManager, create_combined_discovery, IrohDiscoveryBridge};
-use std::collections::HashMap;
+use crate::p2p_monitor::{P2pMonitor, Direction, ConnectionState, NoOpMonitor};
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::time::{Instant, Duration};
+use tokio::sync::{RwLock, Mutex};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use iroh::{Endpoint, SecretKey, NodeAddr};
 use iroh_blobs::Hash;
 use tracing::{info, debug};
@@ -49,6 +52,78 @@ struct DocumentEntry {
     timestamp: std::time::SystemTime,
 }
 
+/// Bandwidth tracking entry
+#[derive(Debug, Clone)]
+struct BandwidthEntry {
+    timestamp: Instant,
+    bytes: u64,
+    direction: Direction,
+}
+
+/// Time-windowed bandwidth tracker
+#[derive(Debug)]
+struct BandwidthTracker {
+    /// Rolling window of bandwidth entries
+    entries: VecDeque<BandwidthEntry>,
+    /// Window duration
+    window: Duration,
+    /// Total bytes in current window
+    total_bytes_in: u64,
+    total_bytes_out: u64,
+}
+
+impl BandwidthTracker {
+    fn new(window: Duration) -> Self {
+        Self {
+            entries: VecDeque::new(),
+            window,
+            total_bytes_in: 0,
+            total_bytes_out: 0,
+        }
+    }
+    
+    fn add_entry(&mut self, bytes: u64, direction: Direction) {
+        let now = Instant::now();
+        self.cleanup_old_entries(now);
+        
+        self.entries.push_back(BandwidthEntry {
+            timestamp: now,
+            bytes,
+            direction,
+        });
+        
+        match direction {
+            Direction::Inbound => self.total_bytes_in += bytes,
+            Direction::Outbound => self.total_bytes_out += bytes,
+        }
+    }
+    
+    fn cleanup_old_entries(&mut self, now: Instant) {
+        while let Some(front) = self.entries.front() {
+            if now.duration_since(front.timestamp) > self.window {
+                let entry = self.entries.pop_front().unwrap();
+                match entry.direction {
+                    Direction::Inbound => self.total_bytes_in -= entry.bytes,
+                    Direction::Outbound => self.total_bytes_out -= entry.bytes,
+                }
+            } else {
+                break;
+            }
+        }
+    }
+    
+    fn get_bandwidth(&mut self) -> (f64, f64) {
+        let now = Instant::now();
+        self.cleanup_old_entries(now);
+        
+        let window_secs = self.window.as_secs_f64();
+        let bytes_per_sec_in = self.total_bytes_in as f64 / window_secs;
+        let bytes_per_sec_out = self.total_bytes_out as f64 / window_secs;
+        
+        (bytes_per_sec_in, bytes_per_sec_out)
+    }
+}
+
 /// P2P transport using Iroh for node-to-node communication
 pub struct IrohTransportV2 {
     /// The Iroh endpoint for connections
@@ -61,6 +136,10 @@ pub struct IrohTransportV2 {
     data_dir: PathBuf,
     /// Discovery bridge (if discovery is enabled)
     discovery_bridge: Option<Arc<IrohDiscoveryBridge>>,
+    /// P2P monitor for tracking metrics
+    monitor: Arc<dyn P2pMonitor>,
+    /// Bandwidth trackers per peer
+    bandwidth_trackers: Arc<Mutex<HashMap<String, BandwidthTracker>>>,
 }
 
 impl IrohTransportV2 {
@@ -74,6 +153,16 @@ impl IrohTransportV2 {
         node_id: u64, 
         data_dir: &Path,
         discovery_manager: Option<Arc<DiscoveryManager>>
+    ) -> BlixardResult<Self> {
+        Self::new_with_monitor(node_id, data_dir, discovery_manager, Arc::new(NoOpMonitor)).await
+    }
+    
+    /// Create a new Iroh transport instance with discovery and monitor
+    pub async fn new_with_monitor(
+        node_id: u64, 
+        data_dir: &Path,
+        discovery_manager: Option<Arc<DiscoveryManager>>,
+        monitor: Arc<dyn P2pMonitor>
     ) -> BlixardResult<Self> {
         let iroh_data_dir = data_dir.join("iroh");
         std::fs::create_dir_all(&iroh_data_dir)?;
@@ -128,6 +217,8 @@ impl IrohTransportV2 {
             node_id,
             data_dir: data_dir.to_path_buf(),
             discovery_bridge,
+            monitor,
+            bandwidth_trackers: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -261,11 +352,26 @@ impl IrohTransportV2 {
         doc_type: DocumentType,
         data: &[u8],
     ) -> BlixardResult<()> {
+        let peer_id = peer_addr.node_id.to_string();
+        let start_time = Instant::now();
+        let data_size = data.len();
+        
+        // Record connection attempt
+        self.monitor.record_connection_attempt(&peer_id, true).await;
+        
         let conn = self.endpoint
             .connect(peer_addr.clone(), doc_type.as_str().as_bytes())
             .await
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Failed to connect to peer: {}", e),
+            .map_err(|e| {
+                // Record failed connection
+                let monitor = self.monitor.clone();
+                let peer_id = peer_id.clone();
+                tokio::spawn(async move {
+                    monitor.record_connection_attempt(&peer_id, false).await;
+                });
+                BlixardError::Internal {
+                    message: format!("Failed to connect to peer: {}", e),
+                }
             })?;
         
         let mut stream = conn.open_uni().await
@@ -283,6 +389,24 @@ impl IrohTransportV2 {
                 message: format!("Failed to finish stream: {}", e),
             })?;
         
+        // Record successful transfer metrics
+        let latency_ms = start_time.elapsed().as_secs_f64() * 1000.0;
+        self.monitor.record_bytes_transferred(&peer_id, Direction::Outbound, data_size as u64).await;
+        self.monitor.record_message(&peer_id, doc_type.as_str(), data_size, Some(latency_ms)).await;
+        
+        // Update bandwidth tracker
+        {
+            let mut trackers = self.bandwidth_trackers.lock().await;
+            let tracker = trackers.entry(peer_id.clone())
+                .or_insert_with(|| BandwidthTracker::new(Duration::from_secs(60)));
+            tracker.add_entry(data_size as u64, Direction::Outbound);
+        }
+        
+        debug!(
+            "Sent {} bytes to peer {} for {:?} in {:.2}ms",
+            data_size, peer_id, doc_type, latency_ms
+        );
+        
         Ok(())
     }
 
@@ -292,15 +416,21 @@ impl IrohTransportV2 {
         F: Fn(DocumentType, Vec<u8>) + Send + Sync + 'static,
     {
         let handler = Arc::new(handler);
+        let monitor = self.monitor.clone();
+        let bandwidth_trackers = self.bandwidth_trackers.clone();
         
         loop {
             match self.endpoint.accept().await {
                 Some(incoming) => {
                     let handler = handler.clone();
+                    let monitor = monitor.clone();
+                    let bandwidth_trackers = bandwidth_trackers.clone();
                     
                     tokio::spawn(async move {
                         match incoming.await {
                             Ok(conn) => {
+                                // Extract peer ID from connection
+                                let peer_id = conn.remote_address().node_id.to_string();
                                 let alpn = conn.alpn();
                                 let doc_type = match alpn.as_deref() {
                                     Some(b"cluster-config") => DocumentType::ClusterConfig,
@@ -308,19 +438,207 @@ impl IrohTransportV2 {
                                     Some(b"logs") => DocumentType::Logs,
                                     Some(b"metrics") => DocumentType::Metrics,
                                     Some(b"file-transfer") => DocumentType::FileTransfer,
+                                    Some(b"health-check") => DocumentType::ClusterConfig, // Health checks use cluster-config type
                                     _ => return,
                                 };
                                 
+                                // Record connection state change
+                                monitor.record_connection_state_change(&peer_id, ConnectionState::Connecting, ConnectionState::Connected).await;
+                                
                                 // Accept unidirectional streams
                                 while let Ok(mut recv_stream) = conn.accept_uni().await {
+                                    let start_time = Instant::now();
                                     let mut data = Vec::new();
+                                    
                                     if let Ok(_) = tokio::io::AsyncReadExt::read_to_end(&mut recv_stream, &mut data).await {
+                                        let data_size = data.len();
+                                        
+                                        // Record incoming transfer metrics
+                                        monitor.record_bytes_transferred(&peer_id, Direction::Inbound, data_size as u64).await;
+                                        let latency_ms = start_time.elapsed().as_secs_f64() * 1000.0;
+                                        monitor.record_message(&peer_id, doc_type.as_str(), data_size, Some(latency_ms)).await;
+                                        
+                                        // Update bandwidth tracker
+                                        {
+                                            let mut trackers = bandwidth_trackers.lock().await;
+                                            let tracker = trackers.entry(peer_id.clone())
+                                                .or_insert_with(|| BandwidthTracker::new(Duration::from_secs(60)));
+                                            tracker.add_entry(data_size as u64, Direction::Inbound);
+                                        }
+                                        
+                                        debug!(
+                                            "Received {} bytes from peer {} for {:?} in {:.2}ms",
+                                            data_size, peer_id, doc_type, latency_ms
+                                        );
+                                        
                                         handler(doc_type, data);
+                                    }
+                                }
+                                
+                                // Record disconnection
+                                monitor.record_connection_state_change(&peer_id, ConnectionState::Connected, ConnectionState::Disconnected).await;
+                            }
+                            Err(e) => {
+                                debug!("Failed to accept connection: {}", e);
+                            }
+                        }
+                    });
+                }
+                None => {
+                    // Endpoint closed
+                    break;
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
+    /// Handle health check requests by echoing back the data
+    pub async fn handle_health_check(
+        &self,
+        peer_addr: &NodeAddr,
+        echo_data: &[u8],
+    ) -> BlixardResult<()> {
+        // For health checks, we just echo back the data
+        self.send_to_peer(peer_addr, DocumentType::ClusterConfig, echo_data).await
+    }
+    
+    /// Perform a health check to measure RTT using bidirectional stream
+    pub async fn perform_health_check(
+        &self,
+        peer_addr: &NodeAddr,
+    ) -> BlixardResult<f64> {
+        let start_time = Instant::now();
+        let peer_id = peer_addr.node_id.to_string();
+        
+        // Connect with health-check ALPN
+        let conn = self.endpoint
+            .connect(peer_addr.clone(), b"health-check")
+            .await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to connect for health check: {}", e),
+            })?;
+        
+        // Open bidirectional stream
+        let (mut send_stream, mut recv_stream) = conn.open_bi().await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to open bidirectional stream: {}", e),
+            })?;
+        
+        // Create health check payload
+        let echo_data = format!("health-check-{}-{}", self.node_id, start_time.elapsed().as_nanos());
+        let data = echo_data.as_bytes();
+        
+        // Send data
+        send_stream.write_all(data).await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to write health check data: {}", e),
+            })?;
+        
+        send_stream.finish()
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to finish send stream: {}", e),
+            })?;
+        
+        // Read echo response
+        let mut response = Vec::new();
+        tokio::io::AsyncReadExt::read_to_end(&mut recv_stream, &mut response).await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to read health check response: {}", e),
+            })?;
+        
+        // Verify we got the same data back
+        if response != data {
+            return Err(BlixardError::Internal {
+                message: "Health check echo mismatch".to_string(),
+            });
+        }
+        
+        // Calculate RTT
+        let rtt_ms = start_time.elapsed().as_secs_f64() * 1000.0;
+        
+        // Record RTT measurement
+        self.monitor.record_rtt(&peer_id, rtt_ms).await;
+        
+        Ok(rtt_ms)
+    }
+    
+    /// Get bandwidth statistics for a peer over a time window
+    pub async fn get_bandwidth_stats(&self, peer_id: &str, _window_secs: u64) -> (f64, f64) {
+        let mut trackers = self.bandwidth_trackers.lock().await;
+        if let Some(tracker) = trackers.get_mut(peer_id) {
+            tracker.get_bandwidth()
+        } else {
+            (0.0, 0.0) // No data for this peer
+        }
+    }
+    
+    /// Get message volume statistics
+    pub async fn get_message_stats(&self) -> HashMap<String, (u64, u64)> {
+        // This would typically be tracked in a more sophisticated way
+        // For now, return empty map - could be extended to track per message type
+        HashMap::new()
+    }
+    
+    /// Accept bidirectional connections for health checks
+    pub async fn accept_health_check_connections(&self) -> BlixardResult<()> {
+        let monitor = self.monitor.clone();
+        let bandwidth_trackers = self.bandwidth_trackers.clone();
+        
+        loop {
+            match self.endpoint.accept().await {
+                Some(incoming) => {
+                    let monitor = monitor.clone();
+                    let bandwidth_trackers = bandwidth_trackers.clone();
+                    
+                    tokio::spawn(async move {
+                        match incoming.await {
+                            Ok(conn) => {
+                                let peer_id = conn.remote_address().node_id.to_string();
+                                let alpn = conn.alpn();
+                                
+                                // Only handle health-check ALPN
+                                if alpn.as_deref() != Some(b"health-check") {
+                                    return;
+                                }
+                                
+                                // Accept bidirectional streams for health checks
+                                while let Ok((mut send_stream, mut recv_stream)) = conn.accept_bi().await {
+                                    let start_time = Instant::now();
+                                    let mut data = Vec::new();
+                                    
+                                    if let Ok(_) = tokio::io::AsyncReadExt::read_to_end(&mut recv_stream, &mut data).await {
+                                        let data_size = data.len();
+                                        
+                                        // Echo the data back
+                                        if let Ok(_) = tokio::io::AsyncWriteExt::write_all(&mut send_stream, &data).await {
+                                            let _ = send_stream.finish();
+                                            
+                                            // Record RTT (round-trip time)
+                                            let rtt_ms = start_time.elapsed().as_secs_f64() * 1000.0;
+                                            monitor.record_rtt(&peer_id, rtt_ms).await;
+                                            
+                                            // Record bandwidth for both directions
+                                            monitor.record_bytes_transferred(&peer_id, Direction::Inbound, data_size as u64).await;
+                                            monitor.record_bytes_transferred(&peer_id, Direction::Outbound, data_size as u64).await;
+                                            
+                                            // Update bandwidth tracker
+                                            {
+                                                let mut trackers = bandwidth_trackers.lock().await;
+                                                let tracker = trackers.entry(peer_id.clone())
+                                                    .or_insert_with(|| BandwidthTracker::new(Duration::from_secs(60)));
+                                                tracker.add_entry(data_size as u64, Direction::Inbound);
+                                                tracker.add_entry(data_size as u64, Direction::Outbound);
+                                            }
+                                            
+                                            debug!("Health check echo: {} bytes, RTT: {:.2}ms", data_size, rtt_ms);
+                                        }
                                     }
                                 }
                             }
                             Err(e) => {
-                                debug!("Failed to accept connection: {}", e);
+                                debug!("Failed to accept health check connection: {}", e);
                             }
                         }
                     });

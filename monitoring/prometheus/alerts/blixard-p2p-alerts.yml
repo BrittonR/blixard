@@ -1,0 +1,201 @@
+groups:
+  - name: blixard_p2p_critical
+    interval: 30s
+    rules:
+      # Connection health alerts
+      - alert: P2pHighConnectionFailureRate
+        expr: |
+          (
+            sum(rate(p2p_connection_attempts_total{result="failed"}[5m]))
+            /
+            sum(rate(p2p_connection_attempts_total[5m]))
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: critical
+          component: p2p
+          team: platform
+        annotations:
+          summary: "High P2P connection failure rate"
+          description: "P2P connection failure rate is {{ $value | humanizePercentage }} over the last 5 minutes"
+          runbook_url: "https://docs.blixard.io/runbooks/p2p-connection-failures"
+
+      - alert: P2pClusterDisconnected
+        expr: |
+          sum(p2p_connections_active{state="connected"}) < 2
+        for: 5m
+        labels:
+          severity: critical
+          component: p2p
+          team: platform
+        annotations:
+          summary: "Cluster has insufficient P2P connections"
+          description: "Node has only {{ $value }} connected peers, minimum 2 required for cluster operation"
+          runbook_url: "https://docs.blixard.io/runbooks/p2p-cluster-disconnected"
+
+      - alert: P2pCircuitBreakerOpen
+        expr: |
+          p2p_circuit_breaker_state{state="open"} == 1
+        for: 2m
+        labels:
+          severity: critical
+          component: p2p
+          team: platform
+        annotations:
+          summary: "P2P circuit breaker open for peer"
+          description: "Circuit breaker is open for peer {{ $labels.peer_id }}, preventing connections"
+          runbook_url: "https://docs.blixard.io/runbooks/p2p-circuit-breaker"
+
+      - alert: P2pAllConnectionsFailed
+        expr: |
+          sum(p2p_connections_active{state="connected"}) == 0
+          and
+          sum(rate(p2p_connection_attempts_total[5m])) > 0
+        for: 2m
+        labels:
+          severity: critical
+          component: p2p
+          team: platform
+        annotations:
+          summary: "All P2P connections have failed"
+          description: "Node has no active P2P connections despite ongoing connection attempts"
+          runbook_url: "https://docs.blixard.io/runbooks/p2p-total-isolation"
+
+  - name: blixard_p2p_warning
+    interval: 60s
+    rules:
+      # Performance alerts
+      - alert: P2pHighLatency
+        expr: |
+          histogram_quantile(0.95, 
+            sum by (instance, peer_id, le) (
+              rate(p2p_rtt_milliseconds_bucket[5m])
+            )
+          ) > 100
+        for: 10m
+        labels:
+          severity: warning
+          component: p2p
+          team: platform
+        annotations:
+          summary: "High P2P latency detected"
+          description: "P95 RTT to peer {{ $labels.peer_id }} is {{ $value }}ms (threshold: 100ms)"
+          runbook_url: "https://docs.blixard.io/runbooks/p2p-high-latency"
+
+      - alert: P2pMessageBufferHigh
+        expr: |
+          p2p_buffered_messages_total > 1000
+        for: 5m
+        labels:
+          severity: warning
+          component: p2p
+          team: platform
+        annotations:
+          summary: "High P2P message buffer"
+          description: "{{ $value }} messages buffered for peer {{ $labels.peer_id }}"
+          runbook_url: "https://docs.blixard.io/runbooks/p2p-message-buffer"
+
+      - alert: P2pConnectionPoolExhausted
+        expr: |
+          (
+            connection_pool_active
+            /
+            connection_pool_total
+          ) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          component: p2p
+          team: platform
+        annotations:
+          summary: "P2P connection pool near capacity"
+          description: "Connection pool is {{ $value | humanizePercentage }} utilized"
+          runbook_url: "https://docs.blixard.io/runbooks/p2p-connection-pool"
+
+      - alert: P2pHighErrorRate
+        expr: |
+          sum(rate(p2p_connection_errors_total[5m])) by (error_type) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          component: p2p
+          team: platform
+        annotations:
+          summary: "High P2P error rate"
+          description: "P2P {{ $labels.error_type }} errors occurring at {{ $value | humanize }} per second"
+          runbook_url: "https://docs.blixard.io/runbooks/p2p-errors"
+
+      - alert: P2pPeerChurn
+        expr: |
+          (
+            sum(rate(p2p_connection_state_transitions_total{to_state="disconnected"}[10m]))
+            +
+            sum(rate(p2p_connection_state_transitions_total{from_state="disconnected"}[10m]))
+          ) > 0.5
+        for: 15m
+        labels:
+          severity: warning
+          component: p2p
+          team: platform
+        annotations:
+          summary: "High P2P peer churn rate"
+          description: "Peers connecting/disconnecting at {{ $value | humanize }} per second"
+          runbook_url: "https://docs.blixard.io/runbooks/p2p-peer-churn"
+
+      - alert: P2pDiscoveryFailures
+        expr: |
+          (
+            sum(rate(p2p_discovery_failures_total[5m]))
+            /
+            sum(rate(p2p_discovered_peers_total[5m]))
+          ) > 0.25
+        for: 10m
+        labels:
+          severity: warning
+          component: p2p
+          team: platform
+        annotations:
+          summary: "High P2P discovery failure rate"
+          description: "{{ $value | humanizePercentage }} of discovery attempts are failing"
+          runbook_url: "https://docs.blixard.io/runbooks/p2p-discovery"
+
+  - name: blixard_p2p_info
+    interval: 120s
+    rules:
+      # Informational alerts
+      - alert: P2pNewPeerDiscovered
+        expr: |
+          increase(p2p_discovered_peers_total[1m]) > 0
+        labels:
+          severity: info
+          component: p2p
+          team: platform
+        annotations:
+          summary: "New P2P peer discovered"
+          description: "Discovered {{ $value }} new peer(s) via {{ $labels.discovery_method }}"
+
+      - alert: P2pConnectionQualityDegraded
+        expr: |
+          # Placeholder for connection quality score when implemented
+          # p2p_connection_quality_score < 0.7
+          0
+        for: 10m
+        labels:
+          severity: info
+          component: p2p
+          team: platform
+        annotations:
+          summary: "P2P connection quality degraded"
+          description: "Connection quality to peer {{ $labels.peer_id }} is {{ $value }}"
+
+      - alert: P2pBandwidthHigh
+        expr: |
+          sum(rate(p2p_bytes_transferred_total[5m])) by (peer_id, direction) > 10485760  # 10 MB/s
+        for: 5m
+        labels:
+          severity: info
+          component: p2p
+          team: platform
+        annotations:
+          summary: "High P2P bandwidth usage"
+          description: "{{ $labels.direction }} bandwidth to {{ $labels.peer_id }} is {{ $value | humanize }}B/s"

@@ -127,10 +127,14 @@ message GetVmStatusResponse {
   VmInfo vm_info = 2;
 }
 
-// Health check
-message HealthCheckRequest {}
+// Health check messages for P2P monitoring
+message HealthCheckRequest {
+  int64 timestamp = 1;
+  string echo_data = 2;
+}
 
 message HealthCheckResponse {
-  bool healthy = 1;
-  string message = 2;
+  int64 timestamp = 1;
+  string echo_data = 2;
+  string status = 3;
 }
