@@ -7,7 +7,7 @@
 //! - Transfer queue management
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::iroh_transport::{IrohTransport, DocumentType};
+use crate::iroh_transport_v2::{IrohTransportV2, DocumentType};
 use crate::p2p_image_store::P2pImageStore;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
@@ -121,7 +121,7 @@ pub enum P2pEvent {
 /// Enhanced P2P Manager
 pub struct P2pManager {
     node_id: u64,
-    transport: Arc<IrohTransport>,
+    transport: Arc<IrohTransportV2>,
     image_store: Arc<P2pImageStore>,
     peers: Arc<RwLock<HashMap<String, PeerInfo>>>,
     transfer_queue: Arc<RwLock<VecDeque<TransferRequest>>>,
@@ -162,7 +162,7 @@ impl P2pManager {
         data_dir: &Path,
         config: P2pConfig,
     ) -> BlixardResult<Self> {
-        let transport = Arc::new(IrohTransport::new(node_id, data_dir).await?);
+        let transport = Arc::new(IrohTransportV2::new(node_id, data_dir).await?);
         let image_store = Arc::new(P2pImageStore::new(node_id, data_dir).await?);
         
         let (event_tx, event_rx) = mpsc::channel(1000);

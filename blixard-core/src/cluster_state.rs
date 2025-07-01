@@ -4,7 +4,7 @@
 //! including node configurations, VM definitions, and metadata.
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::iroh_transport::{IrohTransport, DocumentType};
+use crate::iroh_transport_v2::{IrohTransportV2, DocumentType};
 use crate::types::{NodeConfig, VmConfig};
 use crate::storage::Storage;
 use serde::{Deserialize, Serialize};
@@ -89,12 +89,12 @@ impl Default for ExportOptions {
 pub struct ClusterStateManager {
     node_id: u64,
     storage: Arc<dyn Storage>,
-    transport: Option<Arc<IrohTransport>>,
+    transport: Option<Arc<IrohTransportV2>>,
 }
 
 impl ClusterStateManager {
     /// Create a new cluster state manager
-    pub fn new(node_id: u64, storage: Arc<dyn Storage>, transport: Option<Arc<IrohTransport>>) -> Self {
+    pub fn new(node_id: u64, storage: Arc<dyn Storage>, transport: Option<Arc<IrohTransportV2>>) -> Self {
         Self {
             node_id,
             storage,

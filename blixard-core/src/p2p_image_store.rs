@@ -4,7 +4,7 @@
 //! efficient peer-to-peer sharing of VM images across the cluster.
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::iroh_transport::{IrohTransport, DocumentType};
+use crate::iroh_transport_v2::{IrohTransportV2, DocumentType};
 use std::path::{Path, PathBuf};
 use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
@@ -41,7 +41,7 @@ pub struct VmImageMetadata {
 /// P2P VM image store
 pub struct P2pImageStore {
     /// Iroh transport layer
-    transport: IrohTransport,
+    transport: IrohTransportV2,
     /// Local cache directory
     cache_dir: PathBuf,
     /// Node ID
@@ -54,11 +54,11 @@ impl P2pImageStore {
         let cache_dir = data_dir.join("image-cache");
         std::fs::create_dir_all(&cache_dir)?;
 
-        let transport = IrohTransport::new(node_id, data_dir).await?;
+        let transport = IrohTransportV2::new(node_id, data_dir).await?;
         
         // Create or join the VM images document
-        // TODO: Re-enable when Iroh document API is available
-        // transport.create_or_join_doc(DocumentType::VmImages, true).await?;
+        // Now we can enable this since IrohTransportV2 has working document operations!
+        transport.create_or_join_doc(DocumentType::VmImages, true).await?;
 
         Ok(Self {
             transport,

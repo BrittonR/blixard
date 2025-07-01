@@ -57,10 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Try to connect to ourselves
     println!("\n🔄 Testing self-connection...");
-    let our_addr = NodeAddr {
-        node_id: endpoint.node_id(),
-        info: addrs.into(),
-    };
+    let our_addr = NodeAddr::from_parts(endpoint.node_id(), addrs);
     
     match endpoint.connect(our_addr, b"test/1").await {
         Ok(connection) => {

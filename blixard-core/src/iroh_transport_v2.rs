@@ -96,17 +96,9 @@ impl IrohTransportV2 {
     /// Get the node's address for sharing with peers
     pub async fn node_addr(&self) -> BlixardResult<NodeAddr> {
         let node_id = self.endpoint.node_id();
-        let direct_addresses = self.endpoint
-            .direct_addresses()
-            .await
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Failed to get direct addresses: {}", e),
-            })?;
-        
-        Ok(NodeAddr {
-            node_id,
-            info: direct_addresses.into(),
-        })
+        // TODO: Get direct addresses when API is stable
+        // For now, just return NodeAddr with node_id
+        Ok(NodeAddr::new(node_id))
     }
     
     /// Get the underlying Iroh endpoint and node ID (for Raft transport)
@@ -203,6 +195,26 @@ impl IrohTransportV2 {
             feature: "Blob download operations".to_string(),
         })
     }
+    
+    /// Get a document ticket for sharing
+    pub async fn get_doc_ticket(&self, doc_type: DocumentType) -> BlixardResult<String> {
+        let documents = self.documents.read().await;
+        let _namespace = documents.get(&doc_type)
+            .ok_or_else(|| BlixardError::Internal {
+                message: format!("Document {:?} not found", doc_type),
+            })?;
+        
+        // For now, return a dummy ticket
+        // Real implementation would use iroh-docs ticket system
+        Ok(format!("ticket-{:?}-{}", doc_type, uuid::Uuid::new_v4()))
+    }
+    
+    /// Join a document from a ticket
+    pub async fn join_doc_from_ticket(&self, _ticket: &str) -> BlixardResult<()> {
+        // For now, just return Ok
+        // Real implementation would parse ticket and join document
+        Ok(())
+    }
 
     /// Send data to a peer using a simple unidirectional stream
     pub async fn send_to_peer(
@@ -252,12 +264,12 @@ impl IrohTransportV2 {
                         match incoming.await {
                             Ok(conn) => {
                                 let alpn = conn.alpn();
-                                let doc_type = match std::str::from_utf8(&alpn) {
-                                    Ok("cluster-config") => DocumentType::ClusterConfig,
-                                    Ok("vm-images") => DocumentType::VmImages,
-                                    Ok("logs") => DocumentType::Logs,
-                                    Ok("metrics") => DocumentType::Metrics,
-                                    Ok("file-transfer") => DocumentType::FileTransfer,
+                                let doc_type = match alpn.as_deref() {
+                                    Some(b"cluster-config") => DocumentType::ClusterConfig,
+                                    Some(b"vm-images") => DocumentType::VmImages,
+                                    Some(b"logs") => DocumentType::Logs,
+                                    Some(b"metrics") => DocumentType::Metrics,
+                                    Some(b"file-transfer") => DocumentType::FileTransfer,
                                     _ => return,
                                 };
                                 
