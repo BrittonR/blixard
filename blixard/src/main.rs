@@ -435,6 +435,7 @@ async fn main() -> BlixardResult<()> {
                 use_tailscale: false,
                 vm_backend: config.node.vm_backend.clone(),
                 transport_config: config.transport.clone(),
+                topology: Default::default(),
             };
             
             // Create orchestrator configuration
@@ -625,19 +626,16 @@ async fn handle_vm_logs(vm_name: &str, follow: bool, lines: u32) -> BlixardResul
 
 #[cfg(not(madsim))]
 async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
-    use blixard_core::proto::{
+    use blixard_core::iroh_types::{
         CreateVmRequest, StartVmRequest, StopVmRequest, DeleteVmRequest, GetVmStatusRequest, ListVmsRequest,
     };
-    use crate::client::{UnifiedClient, get_transport_config};
+    use crate::client::UnifiedClient;
     
     // Default to connecting to local node
     let local_addr = "127.0.0.1:7001";
     
-    // Get transport configuration
-    let transport_config = get_transport_config();
-    
     // Connect to the local node using unified client
-    let mut client = UnifiedClient::new(local_addr, transport_config.as_ref())
+    let mut client = UnifiedClient::new(local_addr)
         .await
         .map_err(|e| BlixardError::Internal { 
             message: format!("Failed to connect to local node at {}: {}", local_addr, e)
@@ -810,17 +808,19 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
 
 #[cfg(not(madsim))]
 async fn handle_vm_health_command(command: VmHealthCommands, client: &mut crate::client::UnifiedClient) -> BlixardResult<()> {
-    use blixard_core::vm_health_types::{HealthCheckType, VmHealthCheck};
+    use blixard_core::vm_health_types::{HealthCheckType, VmHealthCheckConfig};
     
     match command {
         VmHealthCommands::Status { name } => {
-            match client.get_vm_health_status(&name).await {
-                Ok(health_status) => {
-                    if let Some(status) = health_status {
+            match client.get_vm_health_status(name.clone()).await {
+                Ok(response) => {
+                    if let Some(status) = response.health_status {
                         println!("VM '{}' Health Status:", name);
                         println!("  State: {:?}", status.state);
                         println!("  Score: {:.1}%", status.score);
-                        println!("  Last Check: {:?}", status.last_check_time.elapsed().unwrap_or_default());
+                        if let Some(last_healthy) = status.last_healthy_at {
+                            println!("  Last Healthy: {:?}", last_healthy.elapsed().unwrap_or_default());
+                        }
                         if status.consecutive_failures > 0 {
                             println!("  Consecutive Failures: {}", status.consecutive_failures);
                         }
@@ -857,19 +857,21 @@ async fn handle_vm_health_command(command: VmHealthCommands, client: &mut crate:
                 }
             };
             
-            let health_check = VmHealthCheck {
+            use blixard_core::vm_health_types::HealthCheck;
+            
+            let health_check = HealthCheck {
                 name: check_name.clone(),
                 check_type: health_check_type,
                 weight: weight.unwrap_or(1.0),
                 critical,
             };
             
-            match client.add_vm_health_check(&vm_name, health_check).await {
-                Ok(success) => {
-                    if success {
+            match client.add_vm_health_check(vm_name.clone(), health_check).await {
+                Ok(response) => {
+                    if response.success {
                         println!("Successfully added health check '{}' to VM '{}'", check_name, vm_name);
                     } else {
-                        eprintln!("Failed to add health check");
+                        eprintln!("Failed to add health check: {}", response.message);
                         std::process::exit(1);
                     }
                 }
@@ -880,13 +882,13 @@ async fn handle_vm_health_command(command: VmHealthCommands, client: &mut crate:
             }
         }
         VmHealthCommands::List { name } => {
-            match client.list_vm_health_checks(&name).await {
-                Ok(checks) => {
-                    if checks.is_empty() {
+            match client.list_vm_health_checks(name.clone()).await {
+                Ok(response) => {
+                    if response.health_checks.is_empty() {
                         println!("No health checks configured for VM '{}'", name);
                     } else {
                         println!("Health checks for VM '{}':", name);
-                        for check in checks {
+                        for check in &response.health_checks {
                             println!("  - {} ({})", check.name, match &check.check_type {
                                 HealthCheckType::Http { .. } => "HTTP",
                                 HealthCheckType::Tcp { .. } => "TCP",
@@ -906,12 +908,12 @@ async fn handle_vm_health_command(command: VmHealthCommands, client: &mut crate:
             }
         }
         VmHealthCommands::Remove { vm_name, check_name } => {
-            match client.remove_vm_health_check(&vm_name, &check_name).await {
-                Ok(success) => {
-                    if success {
+            match client.remove_vm_health_check(vm_name.clone(), check_name.clone()).await {
+                Ok(response) => {
+                    if response.success {
                         println!("Successfully removed health check '{}' from VM '{}'", check_name, vm_name);
                     } else {
-                        eprintln!("Failed to remove health check");
+                        eprintln!("Failed to remove health check: {}", response.message);
                         std::process::exit(1);
                     }
                 }
@@ -922,13 +924,13 @@ async fn handle_vm_health_command(command: VmHealthCommands, client: &mut crate:
             }
         }
         VmHealthCommands::Toggle { name, enable } => {
-            match client.toggle_vm_health_monitoring(&name, enable).await {
-                Ok(success) => {
-                    if success {
+            match client.toggle_vm_health_monitoring(name.clone(), enable).await {
+                Ok(response) => {
+                    if response.success {
                         let action = if enable { "enabled" } else { "disabled" };
                         println!("Successfully {} health monitoring for VM '{}'", action, name);
                     } else {
-                        eprintln!("Failed to toggle health monitoring");
+                        eprintln!("Failed to toggle health monitoring: {}", response.message);
                         std::process::exit(1);
                     }
                 }
@@ -938,27 +940,35 @@ async fn handle_vm_health_command(command: VmHealthCommands, client: &mut crate:
                 }
             }
         }
-        VmHealthCommands::Recovery { name, enable, max_retries, retry_delay_secs, failure_threshold } => {
+        VmHealthCommands::Recovery { name, enable, max_retries, retry_delay_secs, failure_threshold: _ } => {
             use blixard_core::vm_auto_recovery::RecoveryPolicy;
             use std::time::Duration;
             
+            let max_restart_attempts = max_retries.unwrap_or(3);
+            let restart_delay_secs = retry_delay_secs.unwrap_or(30);
+            let enable_migration = enable.unwrap_or(true);
+            let backoff_multiplier = 2.0;
+            let max_backoff_delay_secs = 300;
+            
             let policy = RecoveryPolicy {
-                enabled: enable.unwrap_or(true),
-                max_retries: max_retries.unwrap_or(3),
-                retry_delay: Duration::from_secs(retry_delay_secs.unwrap_or(30)),
-                failure_threshold: failure_threshold.unwrap_or(2),
+                max_restart_attempts,
+                restart_delay: Duration::from_secs(restart_delay_secs),
+                enable_migration,
+                backoff_multiplier,
+                max_backoff_delay: Duration::from_secs(max_backoff_delay_secs),
             };
             
-            match client.configure_vm_recovery_policy(&name, policy).await {
-                Ok(success) => {
-                    if success {
+            match client.configure_vm_recovery_policy(name.clone(), policy).await {
+                Ok(response) => {
+                    if response.success {
                         println!("Successfully configured recovery policy for VM '{}'", name);
-                        println!("  Enabled: {}", policy.enabled);
-                        println!("  Max Retries: {}", policy.max_retries);
-                        println!("  Retry Delay: {}s", policy.retry_delay.as_secs());
-                        println!("  Failure Threshold: {}", policy.failure_threshold);
+                        println!("  Max Restart Attempts: {}", max_restart_attempts);
+                        println!("  Restart Delay: {}s", restart_delay_secs);
+                        println!("  Enable Migration: {}", enable_migration);
+                        println!("  Backoff Multiplier: {}", backoff_multiplier);
+                        println!("  Max Backoff Delay: {}s", max_backoff_delay_secs);
                     } else {
-                        eprintln!("Failed to configure recovery policy");
+                        eprintln!("Failed to configure recovery policy: {}", response.message);
                         std::process::exit(1);
                     }
                 }
@@ -973,7 +983,7 @@ async fn handle_vm_health_command(command: VmHealthCommands, client: &mut crate:
     Ok(())
 }
 
-fn parse_health_check_type(check_type: &str, config: &str) -> Result<HealthCheckType, String> {
+fn parse_health_check_type(check_type: &str, config: &str) -> Result<blixard_core::vm_health_types::HealthCheckType, String> {
     use blixard_core::vm_health_types::HealthCheckType;
     
     let config_value: serde_json::Value = serde_json::from_str(config)
@@ -1091,18 +1101,15 @@ async fn handle_vm_command(_command: VmCommands) -> BlixardResult<()> {
 
 #[cfg(not(madsim))]
 async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
-    use blixard_core::proto::{
+    use blixard_core::iroh_types::{
         JoinRequest, LeaveRequest, ClusterStatusRequest,
     };
-    use crate::client::{UnifiedClient, get_transport_config};
+    use crate::client::UnifiedClient;
     
     match command {
         ClusterCommands::Join { peer, local_addr } => {
-            // Get transport configuration
-            let transport_config = get_transport_config();
-            
             // Connect to the local node
-            let mut client = UnifiedClient::new(&local_addr, transport_config.as_ref())
+            let mut client = UnifiedClient::new(&local_addr)
                 .await
                 .map_err(|e| BlixardError::Internal { 
                     message: format!("Failed to connect to local node: {}", e)
@@ -1138,6 +1145,7 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
             let request = JoinRequest {
                 node_id,
                 bind_address,
+                p2p_node_addr: None,
             };
             
             match client.join_cluster(request).await {
@@ -1157,11 +1165,8 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
             }
         }
         ClusterCommands::Leave { node_id, local_addr } => {
-            // Get transport configuration
-            let transport_config = get_transport_config();
-            
             // Connect to the local node
-            let mut client = UnifiedClient::new(&local_addr, transport_config.as_ref())
+            let mut client = UnifiedClient::new(&local_addr)
                 .await
                 .map_err(|e| BlixardError::Internal { 
                     message: format!("Failed to connect to local node: {}", e)
@@ -1189,11 +1194,8 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
             }
         }
         ClusterCommands::Status { addr } => {
-            // Get transport configuration
-            let transport_config = get_transport_config();
-            
             // Connect to the node
-            let mut client = UnifiedClient::new(&addr, transport_config.as_ref())
+            let mut client = UnifiedClient::new(&addr)
                 .await
                 .map_err(|e| BlixardError::Internal { 
                     message: format!("Failed to connect to node: {}", e)
@@ -1238,7 +1240,7 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
         } => {
             use blixard_core::cluster_state::{ClusterStateManager, ExportOptions};
             use blixard_core::storage::RedbRaftStorage;
-            use blixard_core::iroh_transport::IrohTransport;
+            use blixard_core::iroh_transport_v2::IrohTransportV2;
             use std::sync::Arc;
             
             // Initialize storage
@@ -1248,7 +1250,7 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
             
             // Initialize P2P transport if needed
             let transport = if p2p_share {
-                Some(Arc::new(IrohTransport::new(node_id, std::path::Path::new(&data_dir)).await?))
+                Some(Arc::new(IrohTransportV2::new(node_id, std::path::Path::new(&data_dir)).await?))
             } else {
                 None
             };
@@ -1294,7 +1296,7 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
         } => {
             use blixard_core::cluster_state::ClusterStateManager;
             use blixard_core::storage::RedbRaftStorage;
-            use blixard_core::iroh_transport::IrohTransport;
+            use blixard_core::iroh_transport_v2::IrohTransportV2;
             use std::sync::Arc;
             
             // Initialize storage
@@ -1304,7 +1306,7 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
             
             // Initialize P2P transport if needed
             let transport = if p2p {
-                Some(Arc::new(IrohTransport::new(node_id, std::path::Path::new(&data_dir)).await?))
+                Some(Arc::new(IrohTransportV2::new(node_id, std::path::Path::new(&data_dir)).await?))
             } else {
                 None
             };
@@ -1556,7 +1558,7 @@ async fn handle_security_command(command: SecurityCommands) -> BlixardResult<()>
             nodes, 
             clients, 
             output_dir, 
-            validity_days,
+            validity_days: _,
             key_algorithm,
         } => {
             println!("🔐 Generating certificates for cluster: {}", cluster_name);
@@ -1579,7 +1581,7 @@ async fn handle_security_command(command: SecurityCommands) -> BlixardResult<()>
                 .collect();
             
             // Parse key algorithm
-            let key_algo = match key_algorithm.as_str() {
+            let _key_algo = match key_algorithm.as_str() {
                 "rsa2048" => KeyAlgorithm::Rsa2048,
                 "rsa4096" => KeyAlgorithm::Rsa4096,
                 "ecdsa-p256" => KeyAlgorithm::EcdsaP256,
@@ -1638,7 +1640,7 @@ async fn handle_security_command(command: SecurityCommands) -> BlixardResult<()>
                 }
             }
         }
-        SecurityCommands::GenToken { user, permissions, validity_days, addr } => {
+        SecurityCommands::GenToken { user, permissions, validity_days, addr: _ } => {
             // Parse permissions
             let perm_strings: Vec<&str> = permissions.split(',')
                 .map(|s| s.trim())

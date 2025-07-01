@@ -452,7 +452,7 @@ pub struct NodeResourceSummary {
     pub capabilities: Option<NodeCapabilities>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NodeCapabilities {
     pub cpu_cores: u32,
     pub memory_mb: u64,

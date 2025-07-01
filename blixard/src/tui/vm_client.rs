@@ -1,4 +1,4 @@
-use crate::{BlixardResult, client::{UnifiedClient, get_transport_config}};
+use crate::{BlixardResult, client::UnifiedClient};
 use super::app::{VmInfo, PlacementStrategy, ClusterInfo, ClusterResourceInfo, NodeResourceInfo, ClusterNodeInfo};
 use blixard_core::{
     iroh_types::{
@@ -51,12 +51,10 @@ impl VmClient {
     }
     
     pub async fn new_with_config(addr: &str, retry_config: RetryConfig) -> BlixardResult<Self> {
-        let transport_config = get_transport_config();
-        
         // Try to connect with retries
         let client = Self::retry_operation(
             || async {
-                UnifiedClient::new(addr, transport_config.as_ref())
+                UnifiedClient::new(addr)
                     .await
                     .map_err(|e| crate::BlixardError::Internal {
                         message: format!("Failed to connect to blixard node: {}", e),
@@ -465,6 +463,7 @@ impl VmClient {
         let request = JoinRequest {
             node_id,
             bind_address: bind_address.to_string(),
+            p2p_node_addr: None,
         };
         
         let resp = self.client.join_cluster(request).await

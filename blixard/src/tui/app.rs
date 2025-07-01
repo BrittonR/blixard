@@ -4865,7 +4865,7 @@ impl App {
         }
         
         // Check if P2P store is available
-        if let Some(store_arc) = &self.p2p_store {
+        if let Some(_store_arc) = &self.p2p_store {
             let vm_config_path = std::path::PathBuf::from(format!("/var/lib/blixard/vms/{}/config.json", vm_name));
             
             // Check if VM image exists

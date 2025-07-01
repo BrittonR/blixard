@@ -279,7 +279,17 @@ impl DiscoveryManager {
             }
         };
         
-        let iroh_node_id = match iroh::NodeId::from_bytes(&node_id_bytes) {
+        // Convert Vec<u8> to [u8; 32]
+        let bytes_len = node_id_bytes.len();
+        let node_id_array: [u8; 32] = match node_id_bytes.try_into() {
+            Ok(arr) => arr,
+            Err(_) => {
+                error!("Invalid Iroh node ID length for peer {}: expected 32 bytes, got {}", peer.node_id, bytes_len);
+                return;
+            }
+        };
+        
+        let iroh_node_id = match iroh::NodeId::from_bytes(&node_id_array) {
             Ok(id) => id,
             Err(e) => {
                 error!("Invalid Iroh node ID for peer {}: {}", peer.node_id, e);
@@ -293,7 +303,7 @@ impl DiscoveryManager {
         // Add direct addresses
         for addr in &peer.direct_addresses {
             if let Ok(socket_addr) = addr.parse() {
-                builder = builder.with_direct_addr(socket_addr);
+                builder = builder.with_direct_addresses([socket_addr]);
             }
         }
         
@@ -304,7 +314,7 @@ impl DiscoveryManager {
             }
         }
         
-        let node_addr = builder.build();
+        let node_addr = builder;
         
         // Attempt connection
         info!("Auto-connecting to discovered peer {} at {}", peer.node_id, iroh_node_id);

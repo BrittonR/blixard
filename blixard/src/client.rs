@@ -43,8 +43,8 @@ impl IrohClient {
         
         // Create Iroh endpoint for client
         let endpoint = iroh::Endpoint::builder()
-            .discovery(Box::new(iroh::dns::DnsDiscovery::n0_dns()))
-            .bind(0)
+            .discovery_n0()
+            .bind()
             .await
             .map_err(|e| BlixardError::Internal {
                 message: format!("Failed to create Iroh endpoint: {}", e),
@@ -59,60 +59,44 @@ impl IrohClient {
     // VM operations
 
     pub async fn create_vm(&mut self, request: CreateVmRequest) -> BlixardResult<CreateVmResponse> {
-        let (success, message, vm_id) = self.client.create_vm(
-            request.name.clone(),
-            request.config_path,
-            request.vcpus,
-            request.memory_mb,
-        ).await?;
+        let vm_config = blixard_core::iroh_types::VmConfig {
+            name: request.name.clone(),
+            cpu_cores: request.vcpus,
+            memory_mb: request.memory_mb,
+            disk_gb: 10, // Default disk size
+            owner: String::new(),
+            metadata: std::collections::HashMap::new(),
+        };
         
-        Ok(CreateVmResponse {
-            success,
-            message,
-            vm_id,
-        })
+        let response = self.client.create_vm(vm_config).await?;
+        Ok(response.into_inner())
     }
 
     pub async fn start_vm(&mut self, request: StartVmRequest) -> BlixardResult<StartVmResponse> {
-        let (success, message) = self.client.start_vm(request.name).await?;
-        Ok(StartVmResponse { success, message })
+        let response = self.client.start_vm(request).await?;
+        Ok(response.into_inner())
     }
 
     pub async fn stop_vm(&mut self, request: StopVmRequest) -> BlixardResult<StopVmResponse> {
-        let (success, message) = self.client.stop_vm(request.name).await?;
-        Ok(StopVmResponse { success, message })
+        let response = self.client.stop_vm(request).await?;
+        Ok(response.into_inner())
     }
 
     pub async fn delete_vm(&mut self, request: DeleteVmRequest) -> BlixardResult<DeleteVmResponse> {
-        let (success, message) = self.client.delete_vm(request.name).await?;
-        Ok(DeleteVmResponse { success, message })
+        let response = self.client.delete_vm(request).await?;
+        Ok(response.into_inner())
     }
 
     pub async fn get_vm_status(&mut self, request: GetVmStatusRequest) -> BlixardResult<GetVmStatusResponse> {
         let vm_info = self.client.get_vm_status(request.name).await?;
         Ok(GetVmStatusResponse {
             found: vm_info.is_some(),
-            vm_info: vm_info.map(|info| blixard_core::iroh_types::VmInfo {
-                name: info.name,
-                state: info.state as i32,
-                node_id: info.node_id,
-                vcpus: info.vcpus,
-                memory_mb: info.memory_mb,
-                ip_address: info.ip_address.unwrap_or_default(),
-            }),
+            vm_info,
         })
     }
 
     pub async fn list_vms(&mut self, _request: ListVmsRequest) -> BlixardResult<ListVmsResponse> {
         let vms = self.client.list_vms().await?;
-        let vms = vms.into_iter().map(|info| blixard_core::iroh_types::VmInfo {
-            name: info.name,
-            state: info.state as i32,
-            node_id: info.node_id,
-            vcpus: info.vcpus,
-            memory_mb: info.memory_mb,
-            ip_address: info.ip_address.unwrap_or_default(),
-        }).collect();
         Ok(ListVmsResponse { vms })
     }
 
@@ -120,22 +104,6 @@ impl IrohClient {
 
     pub async fn get_cluster_status(&mut self, _request: ClusterStatusRequest) -> BlixardResult<ClusterStatusResponse> {
         let (leader_id, nodes, term) = self.client.get_cluster_status().await?;
-        
-        // Convert to response format
-        let nodes = nodes.into_iter().map(|n| blixard_core::iroh_types::NodeInfo {
-            id: n.id,
-            address: n.address,
-            state: match n.state {
-                blixard_core::types::NodeState::Unknown => 0,
-                blixard_core::types::NodeState::Follower => 1,
-                blixard_core::types::NodeState::Candidate => 2,
-                blixard_core::types::NodeState::Leader => 3,
-            },
-            p2p_node_id: n.p2p_node_id,
-            p2p_addresses: n.p2p_addresses,
-            p2p_relay_url: n.p2p_relay_url,
-        }).collect();
-        
         Ok(ClusterStatusResponse {
             leader_id,
             nodes,
@@ -144,24 +112,23 @@ impl IrohClient {
     }
 
     pub async fn join_cluster(&mut self, request: JoinRequest) -> BlixardResult<JoinResponse> {
+        // Extract P2P info if available
+        let (p2p_node_id, p2p_addresses, p2p_relay_url) = if let Some(node_addr) = request.p2p_node_addr {
+            let node_id_str = node_addr.node_id.to_string();
+            let addresses: Vec<String> = node_addr.direct_addresses()
+                .map(|addr| addr.to_string())
+                .collect();
+            let relay_url = node_addr.relay_url.map(|url| url.to_string());
+            (Some(node_id_str), addresses, relay_url)
+        } else {
+            (None, Vec::new(), None)
+        };
+        
         let (success, message, peers, voters) = self.client
-            .join_cluster(request.node_id, request.bind_address)
+            .join_cluster(request.node_id, request.bind_address, p2p_node_id, p2p_addresses, p2p_relay_url)
             .await?;
         
-        // Convert to response format
-        let peers = peers.into_iter().map(|p| blixard_core::iroh_types::NodeInfo {
-            id: p.id,
-            address: p.address,
-            state: match p.state {
-                blixard_core::types::NodeState::Unknown => 0,
-                blixard_core::types::NodeState::Follower => 1,
-                blixard_core::types::NodeState::Candidate => 2,
-                blixard_core::types::NodeState::Leader => 3,
-            },
-            p2p_node_id: p.p2p_node_id,
-            p2p_addresses: p.p2p_addresses,
-            p2p_relay_url: p.p2p_relay_url,
-        }).collect();
+        // Peers are already in the right format
         
         Ok(JoinResponse {
             success,
@@ -172,8 +139,8 @@ impl IrohClient {
     }
 
     pub async fn leave_cluster(&mut self, request: LeaveRequest) -> BlixardResult<LeaveResponse> {
-        let (success, message) = self.client.leave_cluster(request.node_id).await?;
-        Ok(LeaveResponse { success, message })
+        let response = self.client.leave_cluster(request).await?;
+        Ok(response.into_inner())
     }
 
     // Advanced VM operations (not implemented in Iroh yet)

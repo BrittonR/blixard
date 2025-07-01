@@ -55,6 +55,12 @@ rand = "0.8"
 # Database for cluster state
 redb = "2.0"
 
+# P2P networking
+iroh = "0.90"
+
+# Encoding
+base64 = "0.22"
+
 [features]
 default = []
 test-helpers = ["blixard-core/test-helpers"]

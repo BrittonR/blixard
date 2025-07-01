@@ -1,3 +1,4 @@
+pub mod client;
 pub mod orchestrator;
 pub mod tui;
 pub mod node_discovery;

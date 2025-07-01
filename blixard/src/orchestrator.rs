@@ -8,7 +8,7 @@ use blixard_core::{
     node::Node,
     metrics_otel,
     metrics_server,
-    tracing_otel,
+    // tracing_otel, // Temporarily disabled: uses tonic which we're removing
     config_v2::Config,
     config_global,
 };
@@ -153,7 +153,7 @@ impl BlixardOrchestrator {
         self.node.stop().await?;
         
         // Shutdown tracing to flush any pending spans
-        tracing_otel::shutdown();
+        // tracing_otel::shutdown(); // Temporarily disabled: tracing_otel uses tonic which we're removing
         
         tracing::info!("Blixard orchestrator stopped");
         Ok(())

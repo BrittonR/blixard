@@ -99,7 +99,13 @@ impl NodeDiscovery {
                 message: format!("Failed to decode Iroh node ID: {}", e),
             })?;
 
-        let node_id = iroh::NodeId::from_bytes(&node_id_bytes)
+        // Convert Vec<u8> to [u8; 32]
+        let node_id_array: [u8; 32] = node_id_bytes.try_into()
+            .map_err(|bytes: Vec<u8>| BlixardError::Internal {
+                message: format!("Invalid Iroh node ID length: expected 32 bytes, got {}", bytes.len()),
+            })?;
+
+        let node_id = iroh::NodeId::from_bytes(&node_id_array)
             .map_err(|e| BlixardError::Internal {
                 message: format!("Invalid Iroh node ID: {}", e),
             })?;
@@ -114,8 +120,8 @@ impl NodeDiscovery {
         let mut builder = iroh::NodeAddr::new(node_id);
         
         // Add direct addresses
-        for addr in direct_addrs {
-            builder = builder.with_direct_addr(addr);
+        if !direct_addrs.is_empty() {
+            builder = builder.with_direct_addresses(direct_addrs);
         }
 
         // Add relay URL if available
@@ -125,7 +131,7 @@ impl NodeDiscovery {
             }
         }
 
-        Ok(builder.build())
+        Ok(builder)
     }
 }
 
