@@ -40,6 +40,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ip_address: Some("10.0.1.10".to_string()),
         metadata: None,
         anti_affinity: Some(web_anti_affinity.clone()),
+        priority: 700,
+        preemptible: false,
+        locality_preference: Default::default(),
+        health_check_config: None,
     };
     
     info!("VM: {} with hard anti-affinity group 'web-frontend'", web_vm1.name);
@@ -62,6 +66,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ip_address: Some("10.0.2.10".to_string()),
         metadata: None,
         anti_affinity: Some(cache_anti_affinity),
+        priority: 500,
+        preemptible: true,
+        locality_preference: Default::default(),
+        health_check_config: None,
     };
     
     info!("VM: {} with soft anti-affinity (weight=0.8)", cache_vm.name);
@@ -87,6 +95,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ip_address: Some("10.0.3.10".to_string()),
         metadata: None,
         anti_affinity: Some(db_anti_affinity),
+        priority: 900,
+        preemptible: false,
+        locality_preference: Default::default(),
+        health_check_config: None,
     };
     
     info!("VM: {} with max 2 instances per node", db_vm.name);
@@ -114,6 +126,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ip_address: Some("10.0.4.10".to_string()),
         metadata: None,
         anti_affinity: Some(multi_anti_affinity),
+        priority: 600,
+        preemptible: false,
+        locality_preference: Default::default(),
+        health_check_config: None,
     };
     
     info!("VM: {} with multiple constraints:", app_vm.name);
@@ -155,6 +171,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         metadata: None,
         anti_affinity: Some(AntiAffinityRules::new()
             .add_rule(AntiAffinityRule::soft("optional-spread", 0.5))),
+        priority: 500,
+        preemptible: true,
+        locality_preference: Default::default(),
+        health_check_config: None,
     };
     
     let optional_vm_without_rules = VmConfig {
@@ -166,6 +186,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ip_address: None,
         metadata: None,
         anti_affinity: None, // No anti-affinity rules
+        priority: 500,
+        preemptible: true,
+        locality_preference: Default::default(),
+        health_check_config: None,
     };
     
     info!("VM '{}': Has optional soft anti-affinity", optional_vm_with_rules.name);
@@ -193,6 +217,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ip_address: None,
         metadata: Some(metadata),
         anti_affinity: Some(versioned_anti_affinity),
+        priority: 600,
+        preemptible: false,
+        locality_preference: Default::default(),
+        health_check_config: None,
     };
     
     info!("VM: {} with version-specific anti-affinity", versioned_vm.name);

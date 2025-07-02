@@ -13,7 +13,7 @@ use crate::vopr::operation_generator::{Operation, ClientOp, ByzantineBehavior};
 use crate::vopr::state_tracker::{StateSnapshot, NodeState, NodeRole, VmState, VmStatus, NetworkPartition, ResourceUsage};
 use crate::vopr::fuzzer_engine::Coverage;
 use crate::test_helpers::{TestNode, TestCluster};
-use crate::types::{VmCommand, VmConfig, Hypervisor, NetworkMode, VmStatus as BlixardVmStatus};
+use crate::types::{VmCommand, VmConfig, VmStatus as BlixardVmStatus};
 use crate::raft_manager::{RaftMessage, RaftProposal, ProposalData};
 use crate::error::BlixardResult;
 
@@ -163,27 +163,23 @@ impl TestHarness {
                 ClientOp::CreateVm { vm_id, cpu, memory } => {
                     let config = VmConfig {
                         name: vm_id.clone(),
-                        hypervisor: Hypervisor::CloudHypervisor,
+                        config_path: "/tmp/test.nix".to_string(),
                         vcpus: *cpu,
                         memory: *memory,
-                        kernel: None,
-                        kernel_cmdline: None,
-                        disks: vec![],
-                        tap_devices: vec![],
-                        network: NetworkMode::UserMode,
-                        kernel_params: None,
-                        rootfs: None,
-                        init_command: None,
-                        host_node: None,
-                        affinity: None,
-                        priority: None,
-                        user_data: None,
+                        tenant_id: "default".to_string(),
+                        ip_address: None,
+                        metadata: None,
+                        anti_affinity: None,
+                        priority: 500,
+                        preemptible: true,
+                        locality_preference: Default::default(),
+                        health_check_config: None,
                     };
                     
                     // Send proposal through Raft
                     let proposal = RaftProposal {
                         id: uuid::Uuid::new_v4().as_bytes().to_vec(),
-                        data: ProposalData::CreateVm(VmCommand::Create(config)),
+                        data: ProposalData::CreateVm(VmCommand::Create { config, node_id: 1 }),
                         response_tx: None,
                     };
                     

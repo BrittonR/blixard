@@ -272,6 +272,10 @@ async fn demo_vm_placement_with_overcommit(
             ip_address: None,
             metadata: None,
             anti_affinity: None,
+            priority: 500,
+            preemptible: true,
+            locality_preference: Default::default(),
+            health_check_config: None,
         };
         
         match scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::MostAvailable).await {

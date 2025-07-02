@@ -103,13 +103,17 @@ async fn run_test(data_dir: std::path::PathBuf) -> Result<Duration, Box<dyn std:
         let handle = tokio::spawn(async move {
             let vm_config = VmConfig {
                 name: format!("test-vm-{}", i),
+                config_path: "/tmp/test.nix".to_string(),
                 vcpus: 1,
-                memory_mb: 512,
-                disk_gb: 10,
-                image: "test-image".to_string(),
-                network: vec![],
-                user_data: None,
-                metadata: Default::default(),
+                memory: 512,
+                tenant_id: "default".to_string(),
+                ip_address: None,
+                metadata: None,
+                anti_affinity: None,
+                priority: 500,
+                preemptible: true,
+                locality_preference: Default::default(),
+                health_check_config: None,
             };
             
             let command = VmCommand::Create {

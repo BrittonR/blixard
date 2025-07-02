@@ -83,13 +83,12 @@ async fn test_committed_entries_never_lost() {
     
     for i in 0..10 {
         let vm_name = format!("test-vm-{}", i);
-        let mut config = common::test_vm_config(&vm_name);
-        config.memory = 1024;
-        config.vcpus = 1;
         
         let result = leader_client.create_vm(CreateVmRequest {
             name: vm_name.clone(),
-            config,
+            config_path: "/tmp/test.nix".to_string(),
+            vcpus: 1,
+            memory_mb: 1024,
         }).await;
         
         if result.is_ok() {
@@ -143,13 +142,11 @@ async fn test_log_consistency() {
     
     for i in 0..5 {
         let vm_name = format!("vm-{}", i);
-        let mut config = common::test_vm_config(&vm_name);
-        config.memory = 1024;
-        config.vcpus = 1;
-        
         leader_client.create_vm(CreateVmRequest {
             name: vm_name,
-            config,
+            config_path: "/tmp/test.nix".to_string(),
+            vcpus: 1,
+            memory_mb: 1024,
         }).await.ok();
     }
     
@@ -195,13 +192,17 @@ async fn test_split_brain_prevention() {
     // Minority partition (should fail)
     let minority_result = clients[0].create_vm(CreateVmRequest {
         name: "minority-vm".to_string(),
-        config: common::test_vm_config(&"minority-vm".to_string()),
+        config_path: "/tmp/test.nix".to_string(),
+        vcpus: 1,
+        memory_mb: 512,
     }).await;
     
     // Majority partition (should succeed)
     let majority_result = clients[2].create_vm(CreateVmRequest {
         name: "majority-vm".to_string(),
-        config: common::test_vm_config(&"majority-vm".to_string()),
+        config_path: "/tmp/test.nix".to_string(),
+        vcpus: 1,
+        memory_mb: 512,
     }).await;
     
     // Verify minority couldn't commit
@@ -258,7 +259,9 @@ async fn test_leader_completeness() {
         let vm_name = format!("committed-vm-{}", i);
         let result = leader_client.create_vm(CreateVmRequest {
             name: vm_name.clone(),
-            config: common::test_vm_config(&vm_name),
+            config_path: "/tmp/test.nix".to_string(),
+            vcpus: 1,
+            memory_mb: 512,
         }).await;
         
         if result.is_ok() {
@@ -311,7 +314,9 @@ async fn test_follower_log_consistency_check() {
         let vm_name = format!("initial-vm-{}", i);
         leader_client.create_vm(CreateVmRequest {
             name: vm_name.clone(),
-            config: common::test_vm_config(&vm_name),
+            config_path: "/tmp/test.nix".to_string(),
+            vcpus: 1,
+            memory_mb: 512,
         }).await.ok();
     }
     
@@ -329,7 +334,9 @@ async fn test_follower_log_consistency_check() {
         let vm_name = format!("partition-vm-{}", i);
         leader_client.create_vm(CreateVmRequest {
             name: vm_name.clone(),
-            config: common::test_vm_config(&vm_name),
+            config_path: "/tmp/test.nix".to_string(),
+            vcpus: 1,
+            memory_mb: 512,
         }).await.ok();
     }
     
@@ -384,7 +391,9 @@ async fn test_election_restriction() {
         let vm_name = format!("restricted-vm-{}", i);
         leader_client.create_vm(CreateVmRequest {
             name: vm_name.clone(),
-            config: common::test_vm_config(&vm_name),
+            config_path: "/tmp/test.nix".to_string(),
+            vcpus: 1,
+            memory_mb: 512,
         }).await.ok();
     }
     

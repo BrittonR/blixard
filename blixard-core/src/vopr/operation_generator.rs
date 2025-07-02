@@ -4,7 +4,7 @@
 //! including normal operations, fault injections, and Byzantine behaviors.
 
 use std::time::Duration;
-use rand::{Rng, SeedableRng};
+use rand::{Rng, SeedableRng, seq::SliceRandom};
 use rand_chacha::ChaCha8Rng;
 use crate::vopr::fuzzer_engine::OperationWeights;
 

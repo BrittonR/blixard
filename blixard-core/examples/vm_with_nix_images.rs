@@ -159,9 +159,9 @@ async fn import_nix_image(
 fn create_vm_config_from_nix(image_id: String) -> VmConfig {
     VmConfig {
         name: "nix-demo-vm".to_string(),
-        cpu_cores: 2,
-        memory_mb: 1024,
-        disk_size_gb: 10,
+        config_path: "/tmp/nix-demo.nix".to_string(),
+        vcpus: 2,
+        memory: 1024,
         ip_address: Some("10.0.0.100".to_string()),
         tenant_id: "demo-tenant".to_string(),
         // Store image ID in metadata
@@ -169,6 +169,11 @@ fn create_vm_config_from_nix(image_id: String) -> VmConfig {
             ("nix_image_id".to_string(), image_id),
             ("hypervisor".to_string(), "cloud-hypervisor".to_string()),
         ])),
+        anti_affinity: None,
+        priority: 500,
+        preemptible: false,
+        locality_preference: Default::default(),
+        health_check_config: None,
     }
 }
 

@@ -69,6 +69,12 @@ async fn main() -> BlixardResult<()> {
         memory: 8192, // 8GB
         tenant_id: "startup-a".to_string(),
         ip_address: None,
+        metadata: None,
+        anti_affinity: None,
+        priority: 500,
+        preemptible: false,
+        locality_preference: Default::default(),
+        health_check_config: None,
     };
     
     // Check quota before allocation
@@ -126,6 +132,12 @@ async fn main() -> BlixardResult<()> {
             memory,
             tenant_id: "startup-a".to_string(),
             ip_address: None,
+            metadata: None,
+            anti_affinity: None,
+            priority: 500,
+            preemptible: false,
+            locality_preference: Default::default(),
+            health_check_config: None,
         };
         
         let check_result = quota_manager.check_quota("startup-a", &vm_config).await?;
@@ -227,6 +239,12 @@ async fn main() -> BlixardResult<()> {
         memory: 65536, // 64GB
         tenant_id: "startup-a".to_string(),
         ip_address: None,
+        metadata: None,
+        anti_affinity: None,
+        priority: 700,
+        preemptible: false,
+        locality_preference: Default::default(),
+        health_check_config: None,
     };
     
     let check_result = quota_manager.check_quota("startup-a", &big_vm).await?;

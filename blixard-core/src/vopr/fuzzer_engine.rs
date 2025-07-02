@@ -86,18 +86,18 @@ impl Default for OperationWeights {
 
 /// Coverage information for guided fuzzing
 #[derive(Debug, Default)]
-struct Coverage {
+pub struct Coverage {
     /// Set of basic blocks hit
-    basic_blocks: HashSet<u64>,
+    pub basic_blocks: HashSet<u64>,
     
     /// Edge coverage (from_bb -> to_bb)
-    edges: HashSet<(u64, u64)>,
+    pub edges: HashSet<(u64, u64)>,
     
     /// State space coverage
-    states_seen: HashSet<u64>,
+    pub states_seen: HashSet<u64>,
     
     /// Interesting values seen
-    interesting_values: HashMap<String, HashSet<u64>>,
+    pub interesting_values: HashMap<String, HashSet<u64>>,
 }
 
 impl Coverage {
