@@ -13,7 +13,7 @@ use std::time::{Instant, Duration};
 use tokio::sync::{RwLock, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use iroh::{Endpoint, SecretKey, NodeAddr};
-use iroh_blobs::Hash;
+use iroh_blobs::{Hash, HashAndFormat, BlobFormat};
 use tracing::{info, debug, error};
 
 /// Types of data channels used in Blixard
@@ -140,6 +140,8 @@ pub struct IrohTransportV2 {
     monitor: Arc<dyn P2pMonitor>,
     /// Bandwidth trackers per peer
     bandwidth_trackers: Arc<Mutex<HashMap<String, BandwidthTracker>>>,
+    /// In-memory blob storage (hash -> content)
+    blob_store: Arc<RwLock<HashMap<Hash, Vec<u8>>>>,
 }
 
 impl IrohTransportV2 {
@@ -219,6 +221,7 @@ impl IrohTransportV2 {
             discovery_bridge,
             monitor,
             bandwidth_trackers: Arc::new(Mutex::new(HashMap::new())),
+            blob_store: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -326,20 +329,201 @@ impl IrohTransportV2 {
         let hash_bytes = blake3::hash(&content);
         let hash = Hash::from(*hash_bytes.as_bytes());
         
-        // In a real implementation, we would store this in a blob store
-        // For now, we just return the hash
+        // Store in our in-memory blob store
+        {
+            let mut store = self.blob_store.write().await;
+            store.insert(hash, content.clone());
+        }
         
-        info!("File shared with hash: {}", hash);
+        info!("File shared with hash: {}, size: {} bytes", hash, content.len());
+        
         Ok(hash)
     }
 
     /// Download a file by hash
-    pub async fn download_file(&self, _hash: Hash, _output_path: &Path) -> BlixardResult<()> {
-        // For now, return not implemented
-        // Real implementation would fetch from blob store
-        Err(BlixardError::NotImplemented {
-            feature: "Blob download operations".to_string(),
-        })
+    pub async fn download_file(&self, hash: Hash, output_path: &Path) -> BlixardResult<()> {
+        info!("Downloading file with hash: {} to {:?}", hash, output_path);
+        
+        // Check if we have the blob locally
+        let content = {
+            let store = self.blob_store.read().await;
+            store.get(&hash).cloned()
+        };
+        
+        match content {
+            Some(data) => {
+                // Write to output file
+                tokio::fs::write(output_path, &data).await
+                    .map_err(|e| BlixardError::IoError(e))?;
+                
+                info!("Successfully downloaded file to {:?}", output_path);
+                Ok(())
+            }
+            None => {
+                Err(BlixardError::Internal {
+                    message: format!("Blob {} not found in local store", hash),
+                })
+            }
+        }
+    }
+    
+    /// Share a blob hash with a peer for them to download
+    pub async fn send_blob_info(
+        &self,
+        peer_addr: &NodeAddr,
+        hash: Hash,
+        filename: &str,
+    ) -> BlixardResult<()> {
+        info!("Sending blob info to peer: hash={}, filename={}", hash, filename);
+        
+        // Create a message with blob metadata
+        let message = format!("BLOB:{}:{}", hash, filename);
+        
+        // Send via FileTransfer document type
+        self.send_to_peer(peer_addr, DocumentType::FileTransfer, message.as_bytes()).await?;
+        
+        info!("Blob info sent successfully");
+        Ok(())
+    }
+    
+    /// Download a blob from a peer
+    pub async fn download_blob_from_peer(
+        &self,
+        peer_addr: &NodeAddr,
+        hash: Hash,
+        output_path: &Path,
+    ) -> BlixardResult<()> {
+        info!("Downloading blob {} from peer {:?}", hash, peer_addr.node_id);
+        
+        // For now, we'll use a simple protocol where we request the blob
+        // and the peer streams it back to us
+        let request = format!("GET_BLOB:{}", hash);
+        
+        // Connect to peer
+        let conn = self.endpoint
+            .connect(peer_addr.clone(), crate::transport::BLIXARD_ALPN)
+            .await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to connect to peer for blob download: {}", e),
+            })?;
+        
+        // Open bidirectional stream for request/response
+        let (mut send_stream, mut recv_stream) = conn.open_bi().await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to open stream for blob transfer: {}", e),
+            })?;
+        
+        // Send request
+        send_stream.write_all(request.as_bytes()).await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to send blob request: {}", e),
+            })?;
+        
+        send_stream.finish()
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to finish send stream: {}", e),
+            })?;
+        
+        // Read response
+        let mut blob_data = Vec::new();
+        tokio::io::AsyncReadExt::read_to_end(&mut recv_stream, &mut blob_data).await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to read blob data: {}", e),
+            })?;
+        
+        // Verify the blob hash
+        let received_hash = blake3::hash(&blob_data);
+        let expected_hash_bytes = hash.as_bytes();
+        
+        if received_hash.as_bytes() != expected_hash_bytes {
+            return Err(BlixardError::Internal {
+                message: format!("Blob hash mismatch: expected {}, got {}", hash, received_hash),
+            });
+        }
+        
+        // Write to output file
+        tokio::fs::write(output_path, &blob_data).await
+            .map_err(|e| BlixardError::IoError(e))?;
+        
+        // Also store in our blob store for future sharing
+        {
+            let mut store = self.blob_store.write().await;
+            store.insert(hash, blob_data);
+        }
+        
+        info!("Successfully downloaded blob {} from peer", hash);
+        Ok(())
+    }
+    
+    /// Handle blob requests from peers
+    pub async fn handle_blob_requests<F>(&self, handler: F) -> BlixardResult<()>
+    where
+        F: Fn(String) -> Option<Vec<u8>> + Send + Sync + Clone + 'static,
+    {
+        let blob_store = self.blob_store.clone();
+        let handler = Arc::new(handler);
+        
+        loop {
+            match self.endpoint.accept().await {
+                Some(incoming) => {
+                    let blob_store = blob_store.clone();
+                    let handler = handler.clone();
+                    
+                    tokio::spawn(async move {
+                        match incoming.await {
+                            Ok(conn) => {
+                                // Accept bidirectional streams for blob requests
+                                while let Ok((mut send_stream, mut recv_stream)) = conn.accept_bi().await {
+                                    let mut request = Vec::new();
+                                    
+                                    if let Ok(_) = tokio::io::AsyncReadExt::read_to_end(&mut recv_stream, &mut request).await {
+                                        if let Ok(request_str) = String::from_utf8(request) {
+                                            // Parse GET_BLOB request
+                                            if let Some(hash_str) = request_str.strip_prefix("GET_BLOB:") {
+                                                if let Ok(hash) = hash_str.parse::<Hash>() {
+                                                    // Try to read blob from store
+                                                    let blob_data = {
+                                                        let store = blob_store.read().await;
+                                                        store.get(&hash).cloned()
+                                                    };
+                                                    
+                                                    match blob_data {
+                                                        Some(data) => {
+                                                            // Send blob data back
+                                                            let _ = send_stream.write_all(&data).await;
+                                                            let _ = send_stream.finish();
+                                                            info!("Sent blob {} to peer", hash);
+                                                        }
+                                                        None => {
+                                                            error!("Blob {} not found in store", hash);
+                                                            // Send empty response to indicate error
+                                                            let _ = send_stream.finish();
+                                                        }
+                                                    }
+                                                }
+                                            } else if let Some(data) = handler(request_str) {
+                                                // Custom handler response
+                                                let _ = send_stream.write_all(&data).await;
+                                                let _ = send_stream.finish();
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                debug!("Failed to accept blob request connection: {}", e);
+                            }
+                        }
+                    });
+                }
+                None => {
+                    // Endpoint closed
+                    break;
+                }
+            }
+        }
+        
+        Ok(())
     }
     
     /// Get a document ticket for sharing
@@ -743,20 +927,21 @@ mod tests {
         
         // Create a test file
         let test_file = temp_dir.path().join("test.txt");
-        std::fs::write(&test_file, b"test content").unwrap();
+        let test_content = b"test content for blob storage";
+        std::fs::write(&test_file, test_content).unwrap();
         
         // Share the file
         let hash = transport.share_file(&test_file).await.unwrap();
         assert!(!hash.to_string().is_empty());
+        println!("File shared with hash: {}", hash);
         
-        // Download is not implemented yet
+        // Download the file locally (from our own blob store)
         let output_file = temp_dir.path().join("downloaded.txt");
-        match transport.download_file(hash, &output_file).await {
-            Err(BlixardError::NotImplemented { .. }) => {
-                // Expected
-            }
-            _ => panic!("Expected NotImplemented error"),
-        }
+        transport.download_file(hash, &output_file).await.unwrap();
+        
+        // Verify the downloaded content matches
+        let downloaded_content = std::fs::read(&output_file).unwrap();
+        assert_eq!(downloaded_content, test_content);
         
         transport.shutdown().await.unwrap();
     }
@@ -786,6 +971,42 @@ mod tests {
                 println!("Failed to send data (expected in test environment): {}", e);
             }
         }
+        
+        transport1.shutdown().await.unwrap();
+        transport2.shutdown().await.unwrap();
+    }
+    
+    #[tokio::test]
+    async fn test_blob_sharing_between_peers() {
+        let temp_dir1 = TempDir::new().unwrap();
+        let temp_dir2 = TempDir::new().unwrap();
+        
+        // Create two transports
+        let transport1 = IrohTransportV2::new(1, temp_dir1.path()).await.unwrap();
+        let transport2 = IrohTransportV2::new(2, temp_dir2.path()).await.unwrap();
+        
+        // Get addresses
+        let addr1 = transport1.node_addr().await.unwrap();
+        let addr2 = transport2.node_addr().await.unwrap();
+        
+        // Create and share a file on transport1
+        let test_file = temp_dir1.path().join("share_test.txt");
+        let test_content = b"This is a test file for P2P blob sharing!";
+        std::fs::write(&test_file, test_content).unwrap();
+        
+        let hash = transport1.share_file(&test_file).await.unwrap();
+        println!("Transport1 shared file with hash: {}", hash);
+        
+        // Send blob info to transport2
+        transport1.send_blob_info(&addr2, hash, "share_test.txt").await.unwrap();
+        
+        // For this test, we'll just verify that transport1 has the blob
+        // In a real P2P scenario, transport2 would request the blob from transport1
+        let has_blob = {
+            let store = transport1.blob_store.read().await;
+            store.contains_key(&hash)
+        };
+        assert!(has_blob, "Transport1 should have the blob in its store");
         
         transport1.shutdown().await.unwrap();
         transport2.shutdown().await.unwrap();

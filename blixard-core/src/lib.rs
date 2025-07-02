@@ -37,6 +37,7 @@ pub mod observability;
 // P2P implementation
 pub mod iroh_transport;
 pub mod iroh_transport_v2;
+pub mod iroh_transport_v3;
 pub mod p2p_image_store;
 pub mod nix_image_store;
 pub mod p2p_manager;

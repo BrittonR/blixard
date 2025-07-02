@@ -89,6 +89,7 @@ tera = "1.19"
 iroh = "0.90"
 iroh-blobs = "0.90"
 iroh-docs = { git = "https://github.com/n0-computer/iroh-docs", branch = "Frando/iroh-0.90" }
+iroh-gossip = { git = "https://github.com/n0-computer/iroh-gossip", branch = "main" }
 
 # Compression
 flate2 = "1.0"
