@@ -818,7 +818,8 @@ async fn handle_vm_health_command(command: VmHealthCommands, client: &mut crate:
                         println!("VM '{}' Health Status:", name);
                         println!("  State: {:?}", status.state);
                         println!("  Score: {:.1}%", status.score);
-                        if let Some(last_healthy) = status.last_healthy_at {
+                        if let Some(last_healthy_secs) = status.last_healthy_at_secs {
+                            let last_healthy = std::time::UNIX_EPOCH + std::time::Duration::from_secs(last_healthy_secs as u64);
                             println!("  Last Healthy: {:?}", last_healthy.elapsed().unwrap_or_default());
                         }
                         if status.consecutive_failures > 0 {
@@ -833,7 +834,7 @@ async fn handle_vm_health_command(command: VmHealthCommands, client: &mut crate:
                                     status_icon,
                                     result.check_name,
                                     result.message,
-                                    result.duration.as_millis()
+                                    result.duration_ms
                                 );
                             }
                         }

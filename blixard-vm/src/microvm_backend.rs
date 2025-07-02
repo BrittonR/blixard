@@ -435,8 +435,11 @@ impl MicrovmBackend {
                         status.as_u16(),
                         expected_status
                     ),
-                    duration: start_time.elapsed(),
-                    timestamp,
+                    duration_ms: start_time.elapsed().as_millis() as u64,
+                    timestamp_secs: timestamp
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64,
                     error: if !success {
                         Some(format!("Unexpected status code: {}", status))
                     } else {
@@ -449,8 +452,11 @@ impl MicrovmBackend {
                     check_name: check_name.to_string(),
                     success: false,
                     message: format!("HTTP check failed: {}", e),
-                    duration: start_time.elapsed(),
-                    timestamp,
+                    duration_ms: start_time.elapsed().as_millis() as u64,
+                    timestamp_secs: timestamp
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64,
                     error: Some(e.to_string()),
                 })
             }
@@ -489,8 +495,11 @@ impl MicrovmBackend {
                     check_name: check_name.to_string(),
                     success: true,
                     message: format!("TCP connection to {} successful", vm_address),
-                    duration: start_time.elapsed(),
-                    timestamp,
+                    duration_ms: start_time.elapsed().as_millis() as u64,
+                    timestamp_secs: timestamp
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64,
                     error: None,
                 })
             }
@@ -499,8 +508,11 @@ impl MicrovmBackend {
                     check_name: check_name.to_string(),
                     success: false,
                     message: format!("TCP connection to {} failed: {}", vm_address, e),
-                    duration: start_time.elapsed(),
-                    timestamp,
+                    duration_ms: start_time.elapsed().as_millis() as u64,
+                    timestamp_secs: timestamp
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64,
                     error: Some(e.to_string()),
                 })
             }
@@ -509,8 +521,11 @@ impl MicrovmBackend {
                     check_name: check_name.to_string(),
                     success: false,
                     message: format!("TCP connection to {} timed out after {} seconds", vm_address, timeout_secs),
-                    duration: start_time.elapsed(),
-                    timestamp,
+                    duration_ms: start_time.elapsed().as_millis() as u64,
+                    timestamp_secs: timestamp
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64,
                     error: Some("Connection timeout".to_string()),
                 })
             }
@@ -543,8 +558,11 @@ impl MicrovmBackend {
                         stdout.trim(),
                         stderr.trim()
                     ),
-                    duration: start_time.elapsed(),
-                    timestamp,
+                    duration_ms: start_time.elapsed().as_millis() as u64,
+                    timestamp_secs: timestamp
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64,
                     error: if !success {
                         Some(format!("Unexpected exit code: {}", exit_code))
                     } else {
@@ -557,8 +575,11 @@ impl MicrovmBackend {
                     check_name: check_name.to_string(),
                     success: false,
                     message: format!("Failed to execute script: {}", e),
-                    duration: start_time.elapsed(),
-                    timestamp,
+                    duration_ms: start_time.elapsed().as_millis() as u64,
+                    timestamp_secs: timestamp
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64,
                     error: Some(e.to_string()),
                 })
             }
@@ -584,8 +605,11 @@ impl MicrovmBackend {
                 check_name: check_name.to_string(),
                 success: false,
                 message: format!("Console socket not found at {}", socket_path),
-                duration: start_time.elapsed(),
-                timestamp,
+                duration_ms: start_time.elapsed().as_millis() as u64,
+                timestamp_secs: timestamp
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64,
                 error: Some("Console not accessible".to_string()),
             });
         }
@@ -596,8 +620,11 @@ impl MicrovmBackend {
             check_name: check_name.to_string(),
             success: true,
             message: "Console socket is accessible".to_string(),
-            duration: start_time.elapsed(),
-            timestamp,
+            duration_ms: start_time.elapsed().as_millis() as u64,
+            timestamp_secs: timestamp
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64,
             error: None,
         })
     }
@@ -647,8 +674,11 @@ impl MicrovmBackend {
                 process_name,
                 min_instances
             ),
-            duration: start_time.elapsed(),
-            timestamp,
+            duration_ms: start_time.elapsed().as_millis() as u64,
+            timestamp_secs: timestamp
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64,
             error: if !success {
                 Some(format!("Insufficient process instances: {} < {}", instance_count, min_instances))
             } else {
@@ -672,8 +702,11 @@ impl MicrovmBackend {
             check_name: check_name.to_string(),
             success: false,
             message: "Guest agent health check not yet implemented".to_string(),
-            duration: start_time.elapsed(),
-            timestamp,
+            duration_ms: start_time.elapsed().as_millis() as u64,
+            timestamp_secs: timestamp
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64,
             error: Some("NotImplemented".to_string()),
         })
     }
@@ -972,8 +1005,11 @@ impl VmBackend for MicrovmBackend {
                 check_name: check_name.to_string(),
                 success: false,
                 message: format!("VM is not running (status: {:?})", vm_status),
-                duration: start_time.elapsed(),
-                timestamp,
+                duration_ms: start_time.elapsed().as_millis() as u64,
+                timestamp_secs: timestamp
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64,
                 error: None,
             });
         }

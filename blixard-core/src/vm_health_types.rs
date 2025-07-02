@@ -131,8 +131,8 @@ pub struct VmHealthStatus {
     /// Individual check results
     pub check_results: Vec<HealthCheckResult>,
     
-    /// Last successful check timestamp
-    pub last_healthy_at: Option<std::time::SystemTime>,
+    /// Last successful check timestamp (Unix timestamp in seconds)
+    pub last_healthy_at_secs: Option<i64>,
     
     /// Consecutive failure count
     pub consecutive_failures: u32,
@@ -172,11 +172,11 @@ pub struct HealthCheckResult {
     /// Detailed message about the check result
     pub message: String,
     
-    /// How long the check took
-    pub duration: Duration,
+    /// How long the check took (in milliseconds)
+    pub duration_ms: u64,
     
-    /// When the check was performed
-    pub timestamp: std::time::SystemTime,
+    /// When the check was performed (Unix timestamp in seconds)
+    pub timestamp_secs: i64,
     
     /// Error if the check failed
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -201,7 +201,7 @@ impl Default for VmHealthStatus {
             state: HealthState::Unknown,
             score: 0.0,
             check_results: vec![],
-            last_healthy_at: None,
+            last_healthy_at_secs: None,
             consecutive_failures: 0,
             consecutive_successes: 0,
         }
@@ -271,7 +271,12 @@ impl VmHealthStatus {
         if self.state == HealthState::Healthy {
             self.consecutive_successes += 1;
             self.consecutive_failures = 0;
-            self.last_healthy_at = Some(std::time::SystemTime::now());
+            self.last_healthy_at_secs = Some(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64
+            );
         } else {
             self.consecutive_failures += 1;
             self.consecutive_successes = 0;

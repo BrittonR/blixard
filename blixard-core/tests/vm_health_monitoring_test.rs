@@ -67,8 +67,11 @@ async fn test_health_check_result_scoring() {
         check_name: "http_check".to_string(),
         success: true,
         message: "HTTP check passed".to_string(),
-        duration: Duration::from_millis(100),
-        timestamp: std::time::SystemTime::now(),
+        duration_ms: 100,
+        timestamp_secs: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64,
         error: None,
     });
     
@@ -76,8 +79,11 @@ async fn test_health_check_result_scoring() {
         check_name: "tcp_check".to_string(),
         success: true,
         message: "TCP check passed".to_string(),
-        duration: Duration::from_millis(50),
-        timestamp: std::time::SystemTime::now(),
+        duration_ms: 50,
+        timestamp_secs: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64,
         error: None,
     });
     
@@ -92,8 +98,11 @@ async fn test_health_check_result_scoring() {
         check_name: "process_check".to_string(),
         success: false,
         message: "Process not found".to_string(),
-        duration: Duration::from_millis(10),
-        timestamp: std::time::SystemTime::now(),
+        duration_ms: 10,
+        timestamp_secs: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64,
         error: Some("Process not running".to_string()),
     });
     
@@ -131,8 +140,11 @@ async fn test_health_state_determination() {
         check_name: "critical_check".to_string(),
         success: false,
         message: "Critical process not running".to_string(),
-        duration: Duration::from_millis(10),
-        timestamp: std::time::SystemTime::now(),
+        duration_ms: 10,
+        timestamp_secs: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64,
         error: Some("Process not found".to_string()),
     });
     
@@ -145,8 +157,11 @@ async fn test_health_state_determination() {
         check_name: "critical_check".to_string(),
         success: true,
         message: "Process running".to_string(),
-        duration: Duration::from_millis(10),
-        timestamp: std::time::SystemTime::now(),
+        duration_ms: 10,
+        timestamp_secs: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64,
         error: None,
     });
     

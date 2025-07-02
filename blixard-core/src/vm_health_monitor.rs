@@ -263,8 +263,11 @@ impl VmHealthMonitor {
                         check_name: check.name.clone(),
                         success: false,
                         message: format!("Health check failed: {}", e),
-                        duration: start_time.elapsed(),
-                        timestamp: std::time::SystemTime::now(),
+                        duration_ms: start_time.elapsed().as_millis() as u64,
+                        timestamp_secs: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs() as i64,
                         error: Some(e.to_string()),
                     }
                 }

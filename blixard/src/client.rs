@@ -68,6 +68,8 @@ impl IrohClient {
             metadata: std::collections::HashMap::new(),
         };
         
+        tracing::debug!("Creating VM with config: {:?}", vm_config);
+        
         let response = self.client.create_vm(vm_config).await?;
         Ok(response.into_inner())
     }

@@ -7,9 +7,7 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::types::{NodeConfig, VmCommand, VmConfig, VmStatus};
 use crate::vm_backend::VmManager;
 use crate::raft_manager::{RaftProposal, TaskSpec, TaskResult, RaftConfChange, ConfChangeType};
-use crate::transport::{
-    iroh_vm_service::{VmRequest, VmResponse},
-};
+// Removed unused imports - VmRequest and VmResponse are no longer used directly
 
 #[cfg(feature = "failpoints")]
 use crate::fail_point;

@@ -203,13 +203,13 @@ impl IrohClient {
     
     // VM operations
     
-    pub async fn create_vm(&self, name: String, config_path: String, vcpus: u32, memory_mb: u32) -> BlixardResult<crate::iroh_types::CreateVmResponse> {
+    pub async fn create_vm(&self, config: crate::iroh_types::VmConfig) -> BlixardResult<Response<crate::iroh_types::CreateVmResponse>> {
         let request = VmRequest::Operation(
             crate::transport::services::vm::VmOperationRequest::Create {
-                name,
-                config_path,
-                vcpus,
-                memory_mb,
+                name: config.name,
+                config_path: String::new(), // Not used in current implementation
+                vcpus: config.cpu_cores,
+                memory_mb: config.memory_mb,
             }
         );
         
@@ -217,7 +217,7 @@ impl IrohClient {
         
         match response {
             VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::Create { success, message, vm_id }) => {
-                Ok(crate::iroh_types::CreateVmResponse { success, message, vm_id })
+                Ok(Response::new(crate::iroh_types::CreateVmResponse { success, message, vm_id }))
             }
             _ => Err(BlixardError::Internal {
                 message: "Unexpected response type".to_string(),
@@ -225,16 +225,16 @@ impl IrohClient {
         }
     }
     
-    pub async fn start_vm(&self, name: String) -> BlixardResult<crate::iroh_types::StartVmResponse> {
-        let request = VmRequest::Operation(
-            crate::transport::services::vm::VmOperationRequest::Start { name }
+    pub async fn start_vm(&self, request: crate::iroh_types::StartVmRequest) -> BlixardResult<Response<crate::iroh_types::StartVmResponse>> {
+        let vm_request = VmRequest::Operation(
+            crate::transport::services::vm::VmOperationRequest::Start { name: request.name }
         );
         
-        let response: VmResponse = self.call_service("vm", "start", request).await?;
+        let response: VmResponse = self.call_service("vm", "start", vm_request).await?;
         
         match response {
             VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::Start { success, message }) => {
-                Ok(crate::iroh_types::StartVmResponse { success, message })
+                Ok(Response::new(crate::iroh_types::StartVmResponse { success, message }))
             }
             _ => Err(BlixardError::Internal {
                 message: "Unexpected response type".to_string(),
@@ -242,16 +242,16 @@ impl IrohClient {
         }
     }
     
-    pub async fn stop_vm(&self, name: String) -> BlixardResult<crate::iroh_types::StopVmResponse> {
-        let request = VmRequest::Operation(
-            crate::transport::services::vm::VmOperationRequest::Stop { name }
+    pub async fn stop_vm(&self, request: crate::iroh_types::StopVmRequest) -> BlixardResult<Response<crate::iroh_types::StopVmResponse>> {
+        let vm_request = VmRequest::Operation(
+            crate::transport::services::vm::VmOperationRequest::Stop { name: request.name }
         );
         
-        let response: VmResponse = self.call_service("vm", "stop", request).await?;
+        let response: VmResponse = self.call_service("vm", "stop", vm_request).await?;
         
         match response {
             VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::Stop { success, message }) => {
-                Ok(crate::iroh_types::StopVmResponse { success, message })
+                Ok(Response::new(crate::iroh_types::StopVmResponse { success, message }))
             }
             _ => Err(BlixardError::Internal {
                 message: "Unexpected response type".to_string(),
@@ -259,16 +259,16 @@ impl IrohClient {
         }
     }
     
-    pub async fn delete_vm(&self, name: String) -> BlixardResult<crate::iroh_types::DeleteVmResponse> {
-        let request = VmRequest::Operation(
-            crate::transport::services::vm::VmOperationRequest::Delete { name }
+    pub async fn delete_vm(&self, request: crate::iroh_types::DeleteVmRequest) -> BlixardResult<Response<crate::iroh_types::DeleteVmResponse>> {
+        let vm_request = VmRequest::Operation(
+            crate::transport::services::vm::VmOperationRequest::Delete { name: request.name }
         );
         
-        let response: VmResponse = self.call_service("vm", "delete", request).await?;
+        let response: VmResponse = self.call_service("vm", "delete", vm_request).await?;
         
         match response {
             VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::Delete { success, message }) => {
-                Ok(crate::iroh_types::DeleteVmResponse { success, message })
+                Ok(Response::new(crate::iroh_types::DeleteVmResponse { success, message }))
             }
             _ => Err(BlixardError::Internal {
                 message: "Unexpected response type".to_string(),
@@ -276,7 +276,7 @@ impl IrohClient {
         }
     }
     
-    pub async fn get_vm_status(&self, name: String) -> BlixardResult<crate::iroh_types::GetVmStatusResponse> {
+    pub async fn get_vm_status(&self, name: String) -> BlixardResult<Option<crate::iroh_types::VmInfo>> {
         let request = VmRequest::Operation(
             crate::transport::services::vm::VmOperationRequest::GetStatus { name }
         );
@@ -301,7 +301,7 @@ impl IrohClient {
                     memory_mb: data.memory_mb,
                     ip_address: data.ip_address,
                 });
-                Ok(crate::iroh_types::GetVmStatusResponse { found, vm_info })
+                Ok(vm_info)
             }
             _ => Err(BlixardError::Internal {
                 message: "Unexpected response type".to_string(),
@@ -309,7 +309,7 @@ impl IrohClient {
         }
     }
     
-    pub async fn list_vms(&self) -> BlixardResult<crate::iroh_types::ListVmsResponse> {
+    pub async fn list_vms(&self) -> BlixardResult<Vec<crate::iroh_types::VmInfo>> {
         let request = VmRequest::Operation(
             crate::transport::services::vm::VmOperationRequest::List
         );
@@ -334,7 +334,7 @@ impl IrohClient {
                     memory_mb: data.memory_mb,
                     ip_address: data.ip_address,
                 }).collect();
-                Ok(crate::iroh_types::ListVmsResponse { vms })
+                Ok(vms)
             }
             _ => Err(BlixardError::Internal {
                 message: "Unexpected response type".to_string(),

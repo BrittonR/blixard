@@ -12,10 +12,9 @@ use crate::{
 };
 use async_trait::async_trait;
 use std::sync::Arc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info};
 use serde::{Serialize, Deserialize};
-use iroh_blobs::Hash;
-use std::str::FromStr;
+// Removed unused imports - Hash and FromStr
 use bytes::Bytes;
 use futures::TryStreamExt;
 use std::collections::HashMap;
@@ -219,27 +218,40 @@ impl IrohVmService {
                 }
             }
             VmOperationRequest::CreateWithScheduling { name, vcpus, memory_mb, strategy, constraints, features, priority } => {
-                // For now, just create the VM without scheduling - scheduling should be done separately
-                match self.vm_service.create_vm(name.clone(), vcpus, memory_mb).await {
-                    Ok(vm_id) => Ok(VmOperationResponse::Create {
+                match self.vm_service.create_vm_with_scheduling(name.clone(), vcpus, memory_mb, strategy, constraints, features, priority).await {
+                    Ok((vm_id, node_id, reason)) => Ok(VmOperationResponse::CreateWithScheduling {
                         success: true,
-                        message: format!("VM '{}' created successfully", name),
+                        message: format!("VM '{}' created successfully on node {}", name, node_id),
                         vm_id,
+                        assigned_node_id: node_id,
+                        placement_decision: reason,
                     }),
-                    Err(e) => Ok(VmOperationResponse::Create {
+                    Err(e) => Ok(VmOperationResponse::CreateWithScheduling {
                         success: false,
                         message: e.to_string(),
                         vm_id: String::new(),
+                        assigned_node_id: 0,
+                        placement_decision: String::new(),
                     }),
                 }
             }
             VmOperationRequest::SchedulePlacement { name, vcpus, memory_mb, strategy, constraints, features } => {
-                // Return a placeholder response for now
-                Ok(VmOperationResponse::Create {
-                    success: true,
-                    message: format!("Placement scheduled for VM '{}'", name),
-                    vm_id: String::new(),
-                })
+                match self.vm_service.schedule_vm_placement(&name, vcpus, memory_mb, strategy, constraints, features).await {
+                    Ok((node_id, score, reason, alternatives)) => Ok(VmOperationResponse::SchedulePlacement {
+                        success: true,
+                        assigned_node_id: node_id,
+                        placement_score: score,
+                        placement_reason: reason,
+                        alternative_nodes: alternatives,
+                    }),
+                    Err(e) => Ok(VmOperationResponse::SchedulePlacement {
+                        success: false,
+                        assigned_node_id: 0,
+                        placement_score: 0.0,
+                        placement_reason: e.to_string(),
+                        alternative_nodes: vec![],
+                    }),
+                }
             }
         }
     }

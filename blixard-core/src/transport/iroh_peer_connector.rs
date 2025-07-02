@@ -165,7 +165,7 @@ impl IrohClient {
     }
     
     // VM operation proxy methods
-    pub async fn create_vm(&self, name: String, config_path: String, vcpus: u32, memory_mb: u32) -> BlixardResult<crate::iroh_types::CreateVmResponse> {
+    pub async fn create_vm(&self, config: crate::iroh_types::VmConfig) -> BlixardResult<crate::iroh_types::CreateVmResponse> {
         let start = Instant::now();
         
         // Create the actual Iroh RPC client
@@ -175,9 +175,9 @@ impl IrohClient {
         );
         
         // Estimate request size (rough approximation)
-        let request_size = name.len() + config_path.len() + 8; // + vcpus + memory
+        let request_size = config.name.len() + 32; // + other fields
         
-        let result = client.create_vm(name, config_path, vcpus, memory_mb).await;
+        let result = client.create_vm(config).await;
         
         // Update stats and monitoring
         if let Ok(ref response) = result {
@@ -196,7 +196,7 @@ impl IrohClient {
             }
         }
         
-        result
+        result.map(|r| r.into_inner())
     }
     
     pub async fn start_vm(&self, name: String) -> BlixardResult<crate::iroh_types::StartVmResponse> {
@@ -204,7 +204,9 @@ impl IrohClient {
             Arc::new(self.endpoint.clone()),
             self.node_addr.clone(),
         );
-        client.start_vm(name).await
+        let request = crate::iroh_types::StartVmRequest { name };
+        let result = client.start_vm(request).await;
+        result.map(|r| r.into_inner())
     }
     
     pub async fn stop_vm(&self, name: String) -> BlixardResult<crate::iroh_types::StopVmResponse> {
@@ -212,7 +214,9 @@ impl IrohClient {
             Arc::new(self.endpoint.clone()),
             self.node_addr.clone(),
         );
-        client.stop_vm(name).await
+        let request = crate::iroh_types::StopVmRequest { name };
+        let result = client.stop_vm(request).await;
+        result.map(|r| r.into_inner())
     }
     
     /// Get the RPC client
