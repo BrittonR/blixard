@@ -1,6 +1,8 @@
 //! Edge case tests for multi-node clustering
 #![cfg(feature = "test-helpers")]
 
+mod common;
+
 use blixard_core::test_helpers::{TestCluster, timing};
 use std::time::Duration;
 
@@ -97,14 +99,7 @@ async fn test_join_during_high_load() {
     println!("Generating load with VM operations...");
     for i in 0..5 {
         let vm_name = format!("load-test-vm-{}", i);
-        let vm_config = blixard_core::types::VmConfig {
-            name: vm_name.clone(),
-            config_path: format!("/tmp/{}.nix", vm_name),
-            vcpus: 1,
-            memory: 512,
-            tenant_id: "default".to_string(),
-            ip_address: None,
-        };
+        let vm_config = common::test_vm_config(&vm_name);
         let vm_command = blixard_core::types::VmCommand::Create { 
             config: vm_config, 
             node_id: leader_id 

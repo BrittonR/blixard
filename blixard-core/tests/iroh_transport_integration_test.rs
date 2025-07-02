@@ -10,7 +10,7 @@ use std::time::Duration;
 use blixard_core::error::BlixardResult;
 use blixard_core::node_shared::SharedNodeState;
 use blixard_core::types::NodeConfig;
-use blixard_core::transport::config::{TransportConfig, IrohConfig, MigrationStrategy};
+use blixard_core::transport::config::{TransportConfig, IrohConfig};
 use blixard_core::transport::iroh_protocol::{
     MessageType, generate_request_id, write_message, read_message,
 };

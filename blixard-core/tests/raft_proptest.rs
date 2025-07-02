@@ -1,3 +1,5 @@
+mod common;
+
 use proptest::prelude::*;
 use std::sync::Arc;
 use std::collections::{HashMap, HashSet};
@@ -243,14 +245,7 @@ proptest! {
                             // Create VM
                             vm_states.insert(vm_name.clone(), "created");
                             VmCommand::Create {
-                                config: VmConfig {
-                                    name: vm_name.clone(),
-                                    config_path: "/test/path".to_string(),
-                                    vcpus: 2,
-                                    memory: 1024,
-                                    tenant_id: "default".to_string(),
-                                    ip_address: None,
-                                },
+                                config: common::test_vm_config(vm_name),
                                 node_id: 1,
                             }
                         }

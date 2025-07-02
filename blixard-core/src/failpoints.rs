@@ -77,9 +77,8 @@ pub mod scenarios {
     /// Configure a failpoint to fail with a specific error
     pub fn fail_with_error(name: &str, error: BlixardError) {
         fail::cfg(name, "return").ok();
-        fail::cfg_callback(name, move || {
-            Err(error.clone())
-        }).ok();
+        // Note: We can't use cfg_callback with BlixardError because it doesn't implement Clone
+        // This function is provided for API compatibility but has limited functionality
     }
     
     /// Configure a failpoint to fail with a percentage chance
@@ -93,7 +92,6 @@ pub mod scenarios {
         fail::cfg(name, "pause").ok();
         fail::cfg_callback(name, move || {
             std::thread::sleep(duration);
-            Ok(())
         }).ok();
     }
     
@@ -143,14 +141,14 @@ where
 {
     // Enable all failpoints
     for (name, config) in failpoints {
-        fail::cfg(name, config).unwrap();
+        fail::cfg(*name, *config).unwrap();
     }
     
     let result = f.await;
     
     // Disable all failpoints
     for (name, _) in failpoints {
-        fail::cfg(name, "off").unwrap();
+        fail::cfg(*name, "off").unwrap();
     }
     
     result

@@ -11,7 +11,8 @@
 use std::time::Duration;
 use blixard_core::error::BlixardResult;
 use blixard_core::test_helpers::TestCluster;
-use blixard_core::types::{VmConfig, VmTask, PlacementStrategy};
+use blixard_core::types::VmConfig;
+use blixard_core::vm_scheduler::PlacementStrategy;
 
 mod common;
 

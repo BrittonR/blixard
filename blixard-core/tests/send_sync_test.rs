@@ -22,6 +22,7 @@ async fn test_node_can_be_shared_via_arc() {
         use_tailscale: false,
         vm_backend: "mock".to_string(),
         transport_config: None,
+        topology: Default::default(),
     };
     
     let node = Node::new(config);

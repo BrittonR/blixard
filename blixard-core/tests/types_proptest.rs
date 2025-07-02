@@ -69,14 +69,11 @@ proptest! {
             None 
         };
         
-        let config = NodeConfig {
-            id,
-            data_dir: data_dir.clone(),
-            bind_addr,
-            join_addr,
-            use_tailscale,
-            vm_backend: "mock".to_string(),
-        };
+        let mut config = common::test_node_config(id, bind_addr.port());
+        config.data_dir = data_dir.clone();
+        config.bind_addr = bind_addr;
+        config.join_addr = join_addr;
+        config.use_tailscale = use_tailscale;
         
         // Test JSON serialization roundtrip (NodeConfig doesn't derive Serialize, so we test properties)
         prop_assert_eq!(config.id, id);
@@ -99,14 +96,10 @@ proptest! {
         vcpus in vcpu_strategy(),
         memory in memory_strategy()
     ) {
-        let config = VmConfig {
-            name: name.clone(),
-            config_path: config_path.clone(),
-            vcpus,
-            memory,
-            tenant_id: "default".to_string(),
-            ip_address: None,
-        };
+        let mut config = common::test_vm_config(&name);
+        config.config_path = config_path.clone();
+        config.vcpus = vcpus;
+        config.memory = memory;
         
         // Test JSON serialization roundtrip
         let json = serde_json::to_string(&config).unwrap();
@@ -176,14 +169,10 @@ proptest! {
             VmStatus::Failed,
         ])
     ) {
-        let config = VmConfig {
-            name: name.clone(),
-            config_path,
-            vcpus,
-            memory,
-            tenant_id: "default".to_string(),
-            ip_address: None,
-        };
+        let mut config = common::test_vm_config(&name);
+        config.config_path = config_path;
+        config.vcpus = vcpus;
+        config.memory = memory;
         
         let now = chrono::Utc::now();
         let state = VmState {
@@ -238,14 +227,10 @@ proptest! {
         ]),
         command_type in 0u8..5u8
     ) {
-        let config = VmConfig {
-            name: name.clone(),
-            config_path,
-            vcpus,
-            memory,
-            tenant_id: "default".to_string(),
-            ip_address: None,
-        };
+        let mut config = common::test_vm_config(&name);
+        config.config_path = config_path;
+        config.vcpus = vcpus;
+        config.memory = memory;
         
         let command = match command_type {
             0 => VmCommand::Create { config: config.clone(), node_id },
@@ -306,14 +291,9 @@ proptest! {
         vcpus in 1u32..=64u32,
         memory in 64u32..=65536u32
     ) {
-        let config = VmConfig {
-            name: name.clone(),
-            config_path: "/tmp/test.nix".to_string(),
-            vcpus,
-            memory,
-            tenant_id: "default".to_string(),
-            ip_address: None,
-        };
+        let mut config = common::test_vm_config(&name);
+        config.vcpus = vcpus;
+        config.memory = memory;
         
         // Basic constraints that should always hold
         prop_assert!(config.vcpus >= 1);
@@ -353,14 +333,8 @@ proptest! {
         prop_assert_eq!(parsed_addr.ip().to_string(), ip);
         
         // Test that the address can be used in NodeConfig
-        let config = NodeConfig {
-            id: 1,
-            data_dir: "/tmp/test".to_string(),
-            bind_addr: parsed_addr,
-            join_addr: None,
-            use_tailscale: false,
-            vm_backend: "mock".to_string(),
-        };
+        let mut config = common::test_node_config(1, parsed_addr.port());
+        config.bind_addr = parsed_addr;
         
         prop_assert_eq!(config.bind_addr.port(), port);
     }

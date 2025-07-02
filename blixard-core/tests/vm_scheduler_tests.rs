@@ -286,20 +286,7 @@ async fn test_scheduler_most_available_strategy() {
     add_vm(&database, "vm1", 1, 4, 4096, VmStatus::Running).unwrap();
     add_vm(&database, "vm2", 1, 2, 2048, VmStatus::Running).unwrap();
     
-    let vm_config = VmConfig {
-        name: "new-vm".to_string(),
-        config_path: "".to_string(),
-        vcpus: 1,
-        memory: 1024,
-        tenant_id: "test".to_string(),
-        ip_address: None,
-        metadata: None,
-        anti_affinity: None,
-        priority: 500,
-        preemptible: true,
-        locality_preference: Default::default(),
-        health_check_config: None,
-    };
+    let vm_config = common::test_vm_config("new-vm");
     
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::MostAvailable).await;
     assert!(result.is_ok());
@@ -335,20 +322,7 @@ async fn test_scheduler_least_available_strategy() {
     // Add some VMs to node 1 to increase its used resources
     add_vm(&database, "vm1", 1, 4, 4096, VmStatus::Running).unwrap();
     
-    let vm_config = VmConfig {
-        name: "new-vm".to_string(),
-        config_path: "".to_string(),
-        vcpus: 1,
-        memory: 1024,
-        tenant_id: "test".to_string(),
-        ip_address: None,
-        metadata: None,
-        anti_affinity: None,
-        priority: 500,
-        preemptible: true,
-        locality_preference: Default::default(),
-        health_check_config: None,
-    };
+    let vm_config = common::test_vm_config("new-vm");
     
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::LeastAvailable).await;
     assert!(result.is_ok());
@@ -380,20 +354,7 @@ async fn test_scheduler_round_robin_strategy() {
     add_vm(&database, "vm2", 1, 1, 1024, VmStatus::Running).unwrap();
     add_vm(&database, "vm3", 2, 1, 1024, VmStatus::Running).unwrap();
     
-    let vm_config = VmConfig {
-        name: "new-vm".to_string(),
-        config_path: "".to_string(),
-        vcpus: 1,
-        memory: 1024,
-        tenant_id: "test".to_string(),
-        ip_address: None,
-        metadata: None,
-        anti_affinity: None,
-        priority: 500,
-        preemptible: true,
-        locality_preference: Default::default(),
-        health_check_config: None,
-    };
+    let vm_config = common::test_vm_config("new-vm");
     
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::RoundRobin).await;
     assert!(result.is_ok());
@@ -418,20 +379,9 @@ async fn test_scheduler_manual_strategy() {
     };
     add_worker(&database, 1, capabilities, true).unwrap();
     
-    let vm_config = VmConfig {
-        name: "manual-vm".to_string(),
-        config_path: "".to_string(),
-        vcpus: 2,
-        memory: 2048,
-        tenant_id: "test".to_string(),
-        ip_address: None,
-        metadata: None,
-        anti_affinity: None,
-        priority: 500,
-        preemptible: true,
-        locality_preference: Default::default(),
-        health_check_config: None,
-    };
+    let mut vm_config = common::test_vm_config("manual-vm");
+    vm_config.vcpus = 2;
+    vm_config.memory = 2048;
     
     // Test valid manual placement
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::Manual { node_id: 1 }).await;
@@ -463,14 +413,7 @@ async fn test_scheduler_offline_workers_ignored() {
     add_worker(&database, 1, capabilities.clone(), true).unwrap(); // Online
     add_worker(&database, 2, capabilities, false).unwrap(); // Offline
     
-    let vm_config = VmConfig {
-        name: "test-vm".to_string(),
-        config_path: "".to_string(),
-        vcpus: 1,
-        memory: 1024,
-            ip_address: None,
-            tenant_id: "test".to_string(),
-    };
+    let vm_config = common::test_vm_config("test-vm");
     
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::MostAvailable).await;
     assert!(result.is_ok());
@@ -585,14 +528,7 @@ async fn test_feature_requirements() {
     add_worker(&database, 2, basic_capabilities, true).unwrap();
     
     // Create a VM config that will require GPU features
-    let vm_config = VmConfig {
-        name: "gpu-vm".to_string(),
-        config_path: "".to_string(),
-        vcpus: 1,
-        memory: 1024,
-            ip_address: None,
-            tenant_id: "test".to_string(),
-    };
+    let vm_config = common::test_vm_config("gpu-vm");
     
     // Manually create requirements with GPU feature
     let gpu_requirements = VmResourceRequirements {

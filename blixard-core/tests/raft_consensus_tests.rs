@@ -12,7 +12,8 @@ use tokio::time::sleep;
 
 use blixard_core::{
     test_helpers::{TestCluster, timing},
-    types::{VmConfig, CreateVmRequest},
+    types::VmConfig,
+    iroh_types::CreateVmRequest,
     error::BlixardResult,
 };
 
