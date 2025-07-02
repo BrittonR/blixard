@@ -1,6 +1,8 @@
 // Property-based testing for node functionality
 #![cfg(feature = "test-helpers")]
 
+mod common;
+
 use proptest::prelude::*;
 use tokio::time::Duration;
 use tempfile::TempDir;
@@ -144,14 +146,9 @@ proptest! {
             let (mut node, _temp_dir) = create_test_node_with_config(temp_config).await;
             node.initialize().await.unwrap();
             
-            let vm_config = VmConfig {
-                name: vm_name.clone(),
-                config_path: "/tmp/test.nix".to_string(),
-                vcpus,
-                memory,
-                tenant_id: "default".to_string(),
-                ip_address: None,
-            };
+            let mut vm_config = common::test_vm_config(&vm_name);
+            vm_config.vcpus = vcpus;
+            vm_config.memory = memory;
             
             let command = match command_type {
                 0 => VmCommand::Create { config: vm_config, node_id },

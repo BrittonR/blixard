@@ -1,6 +1,8 @@
 //! Tests that require concurrent access to the test cluster
 #![cfg(feature = "test-helpers")]
 
+mod common;
+
 use blixard_core::test_helpers_concurrent::{ConcurrentTestCluster, ConcurrentTestClusterBuilder};
 use std::time::Duration;
 
@@ -53,14 +55,10 @@ async fn test_leader_change_during_join() {
     let cluster_for_load = cluster.clone();
     let load_handle = tokio::spawn(async move {
         for i in 0..10 {
-            let vm_config = blixard_core::types::VmConfig {
-                name: format!("disruption-vm-{}", i),
-                config_path: format!("/tmp/disruption-vm-{}.nix", i),
-                vcpus: 1,
-                memory: 512,
-                tenant_id: "default".to_string(),
-                ip_address: None,
-            };
+            let mut vm_config = common::test_vm_config(&format!("disruption-vm-{}", i));
+            vm_config.config_path = format!("/tmp/disruption-vm-{}.nix", i);
+            vm_config.vcpus = 1;
+            vm_config.memory = 512;
             let vm_command = blixard_core::types::VmCommand::Create {
                 config: vm_config,
                 node_id: initial_leader_id,
@@ -141,14 +139,10 @@ async fn test_concurrent_operations_on_different_nodes() {
             
             for j in 0..5 {
                 let vm_name = format!("node{}-vm{}", node_id, j);
-                let vm_config = blixard_core::types::VmConfig {
-                    name: vm_name.clone(),
-                    config_path: format!("/tmp/{}.nix", vm_name),
-                    vcpus: 1,
-                    memory: 256,
-                    tenant_id: "default".to_string(),
-                    ip_address: None,
-                };
+                let mut vm_config = common::test_vm_config(&vm_name);
+                vm_config.config_path = format!("/tmp/{}.nix", vm_name);
+                vm_config.vcpus = 1;
+                vm_config.memory = 256;
                 let vm_command = blixard_core::types::VmCommand::Create {
                     config: vm_config,
                     node_id,

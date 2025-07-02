@@ -5,6 +5,8 @@
 
 #![cfg(feature = "test-helpers")]
 
+mod common;
+
 use blixard_core::{
     error::BlixardResult,
     test_helpers::TestCluster,
@@ -33,12 +35,9 @@ async fn test_vm_create_through_raft() -> BlixardResult<()> {
     info!("Leader elected: node {}", leader_id);
     
     // Create a VM through the leader
-    let vm_config = VmConfig {
-        name: "test-vm".to_string(),
-        cpu_cores: 2,
-        memory_mb: 1024,
-        disk_gb: 10,
-    };
+    let mut vm_config = common::test_vm_config("test-vm");
+    vm_config.vcpus = 2;
+    vm_config.memory = 1024;
     
     // Send VM create command through client
     let client = cluster.leader_client().await?;
@@ -81,14 +80,10 @@ async fn test_vm_operations_require_leader() -> BlixardResult<()> {
     info!("Leader: node {}, Follower: node {}", leader_id, follower_id);
     
     // Try to create VM through follower
-    let vm_config = VmConfig {
-        name: "follower-vm".to_string(),
-        config_path: "/etc/blixard/vms/follower-vm.yaml".to_string(),
-        vcpus: 1,
-        memory: 512,
-        tenant_id: "test-tenant".to_string(),
-        ..Default::default()
-    };
+    let mut vm_config = common::test_vm_config("follower-vm");
+    vm_config.config_path = "/etc/blixard/vms/follower-vm.yaml".to_string();
+    vm_config.vcpus = 1;
+    vm_config.memory = 512;
     
     let command = VmCommand::Create {
         config: vm_config,
@@ -127,14 +122,10 @@ async fn test_vm_lifecycle_with_raft() -> BlixardResult<()> {
     let vm_name = "lifecycle-vm";
     
     // 1. Create VM
-    let vm_config = VmConfig {
-        name: vm_name.to_string(),
-        config_path: format!("/etc/blixard/vms/{}.yaml", vm_name),
-        vcpus: 2,
-        memory: 1024,
-        tenant_id: "test-tenant".to_string(),
-        ..Default::default()
-    };
+    let mut vm_config = common::test_vm_config(&vm_name);
+    vm_config.config_path = format!("/etc/blixard/vms/{}.yaml", vm_name);
+    vm_config.vcpus = 2;
+    vm_config.memory = 1024;
     
     leader_node.send_vm_command(VmCommand::Create {
         config: vm_config,
@@ -210,14 +201,10 @@ async fn test_vm_state_persistence() -> BlixardResult<()> {
     let leader_node = cluster.get_node(leader_id)?;
     
     // Create a VM
-    let vm_config = VmConfig {
-        name: "persistent-vm".to_string(),
-        config_path: "/etc/blixard/vms/persistent-vm.yaml".to_string(),
-        vcpus: 4,
-        memory: 2048,
-        tenant_id: "test-tenant".to_string(),
-        ..Default::default()
-    };
+    let mut vm_config = common::test_vm_config("persistent-vm");
+    vm_config.config_path = "/etc/blixard/vms/persistent-vm.yaml".to_string();
+    vm_config.vcpus = 4;
+    vm_config.memory = 2048;
     
     leader_node.send_vm_command(VmCommand::Create {
         config: vm_config.clone(),
@@ -234,14 +221,10 @@ async fn test_vm_state_persistence() -> BlixardResult<()> {
     debug!("Stopped node {}", follower_id);
     
     // Create another VM while the follower is down
-    let vm_config2 = VmConfig {
-        name: "vm-during-outage".to_string(),
-        config_path: "/etc/blixard/vms/vm-during-outage.yaml".to_string(),
-        vcpus: 1,
-        memory: 512,
-        tenant_id: "test-tenant".to_string(),
-        ..Default::default()
-    };
+    let mut vm_config2 = common::test_vm_config("vm-during-outage");
+    vm_config2.config_path = "/etc/blixard/vms/vm-during-outage.yaml".to_string();
+    vm_config2.vcpus = 1;
+    vm_config2.memory = 512;
     
     leader_node.send_vm_command(VmCommand::Create {
         config: vm_config2,
@@ -289,14 +272,10 @@ async fn test_concurrent_vm_operations() -> BlixardResult<()> {
         let node = leader_node.clone();
         let node_id = leader_id;
         let handle = tokio::spawn(async move {
-            let vm_config = VmConfig {
-                name: format!("concurrent-vm-{}", i),
-                config_path: format!("/etc/blixard/vms/concurrent-vm-{}.yaml", i),
-                vcpus: 1,
-                memory: 256,
-                tenant_id: "test-tenant".to_string(),
-                ..Default::default()
-            };
+            let mut vm_config = common::test_vm_config(&format!("concurrent-vm-{}", i));
+            vm_config.config_path = format!("/etc/blixard/vms/concurrent-vm-{}.yaml", i);
+            vm_config.vcpus = 1;
+            vm_config.memory = 256;
             
             node.send_vm_command(VmCommand::Create {
                 config: vm_config,
