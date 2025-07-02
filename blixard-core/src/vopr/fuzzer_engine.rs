@@ -85,7 +85,7 @@ impl Default for OperationWeights {
 }
 
 /// Coverage information for guided fuzzing
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Coverage {
     /// Set of basic blocks hit
     pub basic_blocks: HashSet<u64>,

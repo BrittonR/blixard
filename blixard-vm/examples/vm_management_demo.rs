@@ -31,6 +31,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config_path: "".to_string(), // Will be set by backend
         vcpus: 1,
         memory: 512,
+        tenant_id: "default".to_string(),
+        ip_address: None,
+        metadata: None,
+        anti_affinity: None,
+        priority: 500,
+        preemptible: true,
+        locality_preference: Default::default(),
+        health_check_config: None,
     };
     
     println!("\n📦 Creating VM '{}'...", vm_config.name);

@@ -23,6 +23,12 @@ mod tests {
             memory: 1024,
             tenant_id: "test-tenant".to_string(),
             ip_address: Some("10.0.0.10".to_string()),
+            metadata: None,
+            anti_affinity: None,
+            priority: 500,
+            preemptible: true,
+            locality_preference: Default::default(),
+            health_check_config: None,
         };
         
         backend.create_vm(&vm_config, 1).await.unwrap();
@@ -60,6 +66,12 @@ mod tests {
             memory: 512,
             tenant_id: "test-tenant".to_string(),
             ip_address: Some("10.0.0.11".to_string()),
+            metadata: None,
+            anti_affinity: None,
+            priority: 500,
+            preemptible: true,
+            locality_preference: Default::default(),
+            health_check_config: None,
         };
         
         backend.create_vm(&vm_config, 1).await.unwrap();

@@ -30,6 +30,12 @@ mod error_scenario_tests {
             memory: 512,
             ip_address: None,
             tenant_id: "test".to_string(),
+            metadata: None,
+            anti_affinity: None,
+            priority: 500,
+            preemptible: true,
+            locality_preference: Default::default(),
+            health_check_config: None,
         };
         
         let result = backend.create_vm(&invalid_config, 1).await;
@@ -43,6 +49,12 @@ mod error_scenario_tests {
             memory: 512,
             ip_address: None,
             tenant_id: "test".to_string(),
+            metadata: None,
+            anti_affinity: None,
+            priority: 500,
+            preemptible: true,
+            locality_preference: Default::default(),
+            health_check_config: None,
         };
         
         let result = backend.create_vm(&invalid_config, 1).await;
@@ -56,6 +68,12 @@ mod error_scenario_tests {
             memory: 0, // Invalid: zero memory
             tenant_id: "test".to_string(),
             ip_address: None,
+            metadata: None,
+            anti_affinity: None,
+            priority: 500,
+            preemptible: true,
+            locality_preference: Default::default(),
+            health_check_config: None,
         };
         
         let result = backend.create_vm(&invalid_config, 1).await;
@@ -69,6 +87,12 @@ mod error_scenario_tests {
             memory: u32::MAX,    // Invalid: too much memory
             tenant_id: "test".to_string(),
             ip_address: None,
+            metadata: None,
+            anti_affinity: None,
+            priority: 500,
+            preemptible: true,
+            locality_preference: Default::default(),
+            health_check_config: None,
         };
         
         let result = backend.create_vm(&invalid_config, 1).await;
@@ -95,6 +119,12 @@ mod error_scenario_tests {
             memory: 512,
             ip_address: None,
             tenant_id: "test".to_string(),
+            metadata: None,
+            anti_affinity: None,
+            priority: 500,
+            preemptible: true,
+            locality_preference: Default::default(),
+            health_check_config: None,
         };
         
         // Create VM first time - should succeed
@@ -164,8 +194,14 @@ mod error_scenario_tests {
                     config_path: "".to_string(),
                     vcpus: 1,
                     memory: 512,
-            ip_address: None,
-            tenant_id: "test".to_string(),
+                    ip_address: None,
+                    tenant_id: "test".to_string(),
+                    metadata: None,
+                    anti_affinity: None,
+                    priority: 500,
+                    preemptible: true,
+                    locality_preference: Default::default(),
+                    health_check_config: None,
                 };
                 
                 let result = backend.create_vm(&vm_config, 1).await;
@@ -200,6 +236,12 @@ mod error_scenario_tests {
             memory: 512,
             ip_address: None,
             tenant_id: "test".to_string(),
+            metadata: None,
+            anti_affinity: None,
+            priority: 500,
+            preemptible: true,
+            locality_preference: Default::default(),
+            health_check_config: None,
         };
         
         // This should succeed as we're just generating flakes

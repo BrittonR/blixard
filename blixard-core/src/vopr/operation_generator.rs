@@ -9,7 +9,7 @@ use rand_chacha::ChaCha8Rng;
 use crate::vopr::fuzzer_engine::OperationWeights;
 
 /// An operation that can be performed on the system
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Operation {
     // Node lifecycle operations
     StartNode { node_id: u64 },

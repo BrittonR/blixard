@@ -30,6 +30,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         memory: 512, // Smaller for faster startup
         tenant_id: "default".to_string(),
         ip_address: Some("10.0.0.100".to_string()),
+        metadata: None,
+        anti_affinity: None,
+        priority: 500,
+        preemptible: true,
+        locality_preference: Default::default(),
+        health_check_config: None,
     };
     
     println!("📦 Creating VM '{}'...", vm_config.name);

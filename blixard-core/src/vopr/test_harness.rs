@@ -115,7 +115,7 @@ impl TestHarness {
         
         // For now, we'll need to recreate the cluster with the new node
         // This is a limitation of the current TestCluster API
-        let current_size = cluster_guard.as_ref().unwrap().get_node_ids().len();
+        let current_size = cluster_guard.as_ref().unwrap().nodes().len();
         if node_id as usize > current_size {
             // Create a new cluster with more nodes
             *cluster_guard = Some(TestCluster::new(node_id as usize).await?);
@@ -183,7 +183,7 @@ impl TestHarness {
                         response_tx: None,
                     };
                     
-                    if let Some(leader_id) = cluster.get_leader().await {
+                    if let Ok(leader_id) = cluster.get_leader_id().await {
                         // Send to leader node - in real implementation would use Raft message passing
                     }
                 }
@@ -324,9 +324,10 @@ impl TestHarness {
         
         if let Some(cluster) = cluster_guard.as_ref() {
             // Collect node states
-            for node_id in cluster.get_node_ids() {
+            let node_ids: Vec<u64> = cluster.nodes().keys().copied().collect();
+            for node_id in node_ids {
                 // For now, create mock state - would integrate with real cluster state
-                let role = if cluster.get_leader().await == Some(node_id) {
+                let role = if cluster.get_leader_id().await.ok() == Some(node_id) {
                     NodeRole::Leader
                 } else {
                     NodeRole::Follower
@@ -336,7 +337,7 @@ impl TestHarness {
                     id: node_id,
                     role,
                     is_running: true, // Would track stopped nodes
-                    last_heartbeat: self.time.now(node_id).nanos,
+                    last_heartbeat: self.time.now(node_id).duration_since_epoch().as_nanos(),
                     log_length: 0, // Would get from Raft
                     applied_index: 0, // Would get from Raft
                     clock_skew_ms: 0, // Would calculate from time accelerator
@@ -352,7 +353,7 @@ impl TestHarness {
         }
         
         StateSnapshot {
-            timestamp: self.time.now(1).nanos, // Use node 1's time as reference
+            timestamp: self.time.now(1).duration_since_epoch().as_nanos(), // Use node 1's time as reference
             nodes,
             views,
             commit_points,

@@ -10,7 +10,7 @@
 use blixard_core::{
     error::BlixardResult,
     node::Node,
-    types::{NodeConfig, VmConfig, VmCommand},
+    types::{NodeConfig, VmConfig, VmCommand, LocalityPreference},
     vm_backend::{VmBackend, VmBackendRegistry},
     nix_image_store::NixImageStore,
     p2p_manager::{P2pManager, P2pConfig},
@@ -67,6 +67,11 @@ async fn main() -> BlixardResult<()> {
             ("nix_system".to_string(), "x86_64-linux".to_string()),
             ("build_host".to_string(), "node1".to_string()),
         ])),
+        anti_affinity: None,
+        priority: 500,
+        preemptible: true,
+        locality_preference: LocalityPreference::default(),
+        health_check_config: None,
     };
     
     node1.send_vm_command(VmCommand::Create { 
