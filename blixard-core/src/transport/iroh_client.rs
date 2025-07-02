@@ -48,7 +48,11 @@ impl IrohClient {
         debug!("Calling {}.{} on node {}", service, method, self.node_addr.node_id);
         
         // Serialize request
-        let payload = serialize_payload(&request)?;
+        let payload = serialize_payload(&request)
+            .map_err(|e| {
+                error!("Failed to serialize request: {:?}", e);
+                e
+            })?;
         
         // Create RPC request
         let rpc_request = RpcRequest {
@@ -204,6 +208,8 @@ impl IrohClient {
     // VM operations
     
     pub async fn create_vm(&self, config: crate::iroh_types::VmConfig) -> BlixardResult<Response<crate::iroh_types::CreateVmResponse>> {
+        debug!("IrohClient::create_vm called with config: {:?}", config);
+        
         let request = VmRequest::Operation(
             crate::transport::services::vm::VmOperationRequest::Create {
                 name: config.name,
@@ -213,7 +219,15 @@ impl IrohClient {
             }
         );
         
-        let response: VmResponse = self.call_service("vm", "create", request).await?;
+        debug!("Sending VmRequest: {:?}", request);
+        
+        let response: VmResponse = self.call_service("vm", "create", request).await
+            .map_err(|e| {
+                error!("call_service failed: {:?}", e);
+                e
+            })?;
+        
+        debug!("Received VmResponse: {:?}", response);
         
         match response {
             VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::Create { success, message, vm_id }) => {

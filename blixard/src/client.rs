@@ -70,7 +70,11 @@ impl IrohClient {
         
         tracing::debug!("Creating VM with config: {:?}", vm_config);
         
-        let response = self.client.create_vm(vm_config).await?;
+        let response = self.client.create_vm(vm_config).await
+            .map_err(|e| {
+                tracing::error!("Failed to create VM: {:?}", e);
+                e
+            })?;
         Ok(response.into_inner())
     }
 
