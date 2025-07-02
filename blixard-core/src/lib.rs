@@ -47,6 +47,7 @@ pub mod p2p_health_check;
 pub mod cluster_state;
 pub mod transport;
 pub mod linearizability;
+pub mod linearizability_framework;
 pub mod vm_health_types;
 pub mod vm_health_monitor;
 pub mod vm_auto_recovery;
@@ -73,3 +74,7 @@ pub mod iroh_types;
 // Failpoint support for fault injection
 #[cfg(feature = "failpoints")]
 pub mod failpoints;
+
+// VOPR fuzzer for deterministic testing
+#[cfg(any(test, feature = "vopr"))]
+pub mod vopr;

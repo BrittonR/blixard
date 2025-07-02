@@ -9,6 +9,9 @@ use crate::metrics_otel::{metrics, Timer, attributes};
 // use crate::tracing_otel;
 use serde::{Serialize, Deserialize};
 
+#[cfg(feature = "failpoints")]
+use crate::fail_point;
+
 /// Snapshot data structure containing all state machine data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotData {
@@ -252,6 +255,9 @@ impl raft::Storage for RedbRaftStorage {
 impl RedbRaftStorage {
     /// Append entries to the log
     pub fn append(&self, entries: &[raft::prelude::Entry]) -> BlixardResult<()> {
+        #[cfg(feature = "failpoints")]
+        fail_point!("storage::append_entries");
+        
         let metrics = metrics();
         let _timer = Timer::with_attributes(
             metrics.storage_write_duration.clone(),
@@ -272,6 +278,9 @@ impl RedbRaftStorage {
                 metrics.storage_writes.add(1, &[attributes::table("raft_log")]);
             }
         }
+        
+        #[cfg(feature = "failpoints")]
+        fail_point!("storage::commit_transaction");
         
         write_txn.commit()?;
         Ok(())
@@ -296,6 +305,9 @@ impl RedbRaftStorage {
             table.insert("hard_state", data.as_slice())?;
             metrics.storage_writes.add(1, &[attributes::table("raft_hard_state")]);
         }
+        
+        #[cfg(feature = "failpoints")]
+        fail_point!("storage::commit_transaction");
         
         write_txn.commit()?;
         Ok(())
@@ -389,6 +401,9 @@ impl RedbRaftStorage {
     
     /// Create a snapshot of all state machine data
     pub fn create_snapshot_data(&self) -> BlixardResult<SnapshotData> {
+        #[cfg(feature = "failpoints")]
+        fail_point!("storage::create_snapshot");
+        
         let read_txn = self.database.begin_read()?;
         
         let mut snapshot_data = SnapshotData {
@@ -660,6 +675,9 @@ impl RedbRaftStorage {
                 })?;
             table.insert(quota.tenant_id.as_str(), serialized.as_slice())?;
         }
+        #[cfg(feature = "failpoints")]
+        fail_point!("storage::commit_transaction");
+        
         write_txn.commit()?;
         Ok(())
     }
@@ -710,6 +728,9 @@ impl RedbRaftStorage {
             let mut table = write_txn.open_table(TENANT_QUOTA_TABLE)?;
             table.remove(tenant_id)?;
         }
+        #[cfg(feature = "failpoints")]
+        fail_point!("storage::commit_transaction");
+        
         write_txn.commit()?;
         Ok(())
     }
@@ -726,6 +747,9 @@ impl RedbRaftStorage {
                 })?;
             table.insert(node_id.to_le_bytes().as_slice(), serialized.as_slice())?;
         }
+        #[cfg(feature = "failpoints")]
+        fail_point!("storage::commit_transaction");
+        
         write_txn.commit()?;
         Ok(())
     }

@@ -13,9 +13,7 @@ use madsim::{task, time::*};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tracing::{debug, info, warn, error};
-
-use blixard_simulation::*;
+use tracing::{debug, info, error};
 
 /// A test node that tracks all Raft state for safety verification
 #[derive(Clone)]
@@ -617,7 +615,6 @@ where
 {
     // Initialize tracing for debugging
     let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
     
     info!("Starting Raft safety test: {}", test_name);

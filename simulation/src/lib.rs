@@ -7,8 +7,7 @@ use std::collections::HashMap;
 
 // Include the generated proto code
 pub mod proto {
-    // Since we output to sim/ directory in build.rs
-    tonic::include_proto!("sim/blixard");
+    tonic::include_proto!("blixard");
 }
 
 // Re-export commonly used types for tests

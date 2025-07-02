@@ -11,6 +11,9 @@ use crate::transport::{
     iroh_vm_service::{VmRequest, VmResponse},
 };
 
+#[cfg(feature = "failpoints")]
+use crate::fail_point;
+
 /// # State Management in Blixard
 /// 
 /// ## Distributed State (Authoritative - MUST go through Raft)
@@ -1302,6 +1305,9 @@ impl SharedNodeState {
         capabilities: crate::raft_manager::WorkerCapabilities,
         topology: crate::types::NodeTopology,
     ) -> BlixardResult<()> {
+        #[cfg(feature = "failpoints")]
+        fail_point!("worker::register");
+        
         use crate::raft_manager::{ProposalData, RaftProposal};
         use tokio::sync::oneshot;
         

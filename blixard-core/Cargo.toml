@@ -51,6 +51,7 @@ hyper = { version = "0.14", features = ["server", "http1", "tcp"] }
 # Utilities
 uuid = { version = "1.6", features = ["v4", "serde"] }
 rand = "0.8"
+rand_chacha = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 tempfile = "3.8"
 bytes = "1.5"
@@ -156,6 +157,7 @@ pcap = "1.1"
 default = []
 failpoints = ["fail/failpoints"]
 test-helpers = []
+vopr = ["test-helpers"]
 
 [[bench]]
 name = "raft_transport_bench"

@@ -6,6 +6,9 @@
 use crate::error::{BlixardError, BlixardResult};
 use crate::discovery::{DiscoveryManager, create_combined_discovery, IrohDiscoveryBridge};
 use crate::p2p_monitor::{P2pMonitor, Direction, ConnectionState, NoOpMonitor};
+
+#[cfg(feature = "failpoints")]
+use crate::fail_point;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -561,6 +564,9 @@ impl IrohTransportV2 {
         doc_type: DocumentType,
         data: &[u8],
     ) -> BlixardResult<()> {
+        #[cfg(feature = "failpoints")]
+        fail_point!("network::send_message");
+        
         let peer_id = peer_addr.node_id.to_string();
         let start_time = Instant::now();
         let data_size = data.len();

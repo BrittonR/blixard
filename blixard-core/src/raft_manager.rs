@@ -17,6 +17,9 @@ use crate::types::{VmCommand, VmStatus};
 use crate::metrics_otel::{metrics, Timer, attributes};
 use crate::config_global;
 
+#[cfg(feature = "failpoints")]
+use crate::fail_point;
+
 // Raft message types for cluster communication
 #[derive(Debug)]
 pub enum RaftMessage {
@@ -141,6 +144,9 @@ impl RaftStateMachine {
     }
 
     pub async fn apply_entry(&self, entry: &Entry) -> BlixardResult<()> {
+        #[cfg(feature = "failpoints")]
+        fail_point!("raft::apply_entry");
+        
         if entry.data.is_empty() {
             return Ok(());
         }
@@ -2512,6 +2518,9 @@ impl RaftManager {
     }
 
     pub async fn propose(&self, data: ProposalData) -> BlixardResult<()> {
+        #[cfg(feature = "failpoints")]
+        fail_point!("raft::propose");
+        
         let (tx, rx) = oneshot::channel();
         let proposal = RaftProposal {
             id: uuid::Uuid::new_v4().as_bytes().to_vec(),

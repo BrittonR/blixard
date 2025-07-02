@@ -13,6 +13,9 @@ use crate::metrics_otel::{metrics, Timer, attributes};
 // Temporarily disabled: tracing_otel uses tonic
 // use crate::tracing_otel;
 
+#[cfg(feature = "failpoints")]
+use crate::fail_point;
+
 /// Abstract interface for VM backend implementations
 /// 
 /// This trait defines the contract that all VM backends must implement,
@@ -473,6 +476,9 @@ impl MockVmBackend {
 #[async_trait]
 impl VmBackend for MockVmBackend {
     async fn create_vm(&self, config: &VmConfig, node_id: u64) -> BlixardResult<()> {
+        #[cfg(feature = "failpoints")]
+        fail_point!("vm::create");
+        
         tracing::info!("Mock: Creating VM '{}' on node {}", config.name, node_id);
         
         // Simulate VM creation with status transition
@@ -489,6 +495,9 @@ impl VmBackend for MockVmBackend {
     }
     
     async fn start_vm(&self, name: &str) -> BlixardResult<()> {
+        #[cfg(feature = "failpoints")]
+        fail_point!("vm::start");
+        
         tracing::info!("Mock: Starting VM '{}'", name);
         
         // Simulate VM start with status transition to Running
@@ -504,6 +513,9 @@ impl VmBackend for MockVmBackend {
     }
     
     async fn stop_vm(&self, name: &str) -> BlixardResult<()> {
+        #[cfg(feature = "failpoints")]
+        fail_point!("vm::stop");
+        
         tracing::info!("Mock: Stopping VM '{}'", name);
         
         // Simulate VM stop with status transition to Stopped
