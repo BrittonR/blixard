@@ -376,8 +376,9 @@ impl IrohTransportV2 {
         // Record connection attempt
         self.monitor.record_connection_attempt(&peer_id, true).await;
         
+        // Always use BLIXARD_ALPN for all connections
         let conn = self.endpoint
-            .connect(peer_addr.clone(), doc_type.as_str().as_bytes())
+            .connect(peer_addr.clone(), crate::transport::BLIXARD_ALPN)
             .await
             .map_err(|e| {
                 // Record failed connection
@@ -455,16 +456,9 @@ impl IrohTransportV2 {
                                     }
                                 };
                                 let peer_id = peer_node_id.to_string();
-                                let alpn = conn.alpn();
-                                let doc_type = match alpn.as_deref() {
-                                    Some(b"cluster-config") => DocumentType::ClusterConfig,
-                                    Some(b"vm-images") => DocumentType::VmImages,
-                                    Some(b"logs") => DocumentType::Logs,
-                                    Some(b"metrics") => DocumentType::Metrics,
-                                    Some(b"file-transfer") => DocumentType::FileTransfer,
-                                    Some(b"health-check") => DocumentType::ClusterConfig, // Health checks use cluster-config type
-                                    _ => return,
-                                };
+                                // All connections use standard BLIXARD_ALPN
+                                // Document type can be encoded in the message payload if needed
+                                let doc_type = DocumentType::ClusterConfig; // Default for now
                                 
                                 // Record connection state change
                                 monitor.record_connection_state_change(&peer_id, ConnectionState::Connecting, ConnectionState::Connected).await;
@@ -536,9 +530,9 @@ impl IrohTransportV2 {
         let start_time = Instant::now();
         let peer_id = peer_addr.node_id.to_string();
         
-        // Connect with health-check ALPN
+        // Connect with standard BLIXARD_ALPN
         let conn = self.endpoint
-            .connect(peer_addr.clone(), b"health-check")
+            .connect(peer_addr.clone(), crate::transport::BLIXARD_ALPN)
             .await
             .map_err(|e| BlixardError::Internal {
                 message: format!("Failed to connect for health check: {}", e),
@@ -629,10 +623,8 @@ impl IrohTransportV2 {
                                 let peer_id = peer_node_id.to_string();
                                 let alpn = conn.alpn();
                                 
-                                // Only handle health-check ALPN
-                                if alpn.as_deref() != Some(b"health-check") {
-                                    return;
-                                }
+                                // All connections use standard BLIXARD_ALPN
+                                // Message type is determined by payload content
                                 
                                 // Accept bidirectional streams for health checks
                                 while let Ok((mut send_stream, mut recv_stream)) = conn.accept_bi().await {

@@ -159,8 +159,6 @@ pub struct IrohRaftTransport {
 }
 
 impl IrohRaftTransport {
-    /// ALPN protocol for Raft messages
-    const RAFT_ALPN: &'static [u8] = b"/blixard/raft/1";
     
     /// Create a new Iroh Raft transport
     pub fn new(
@@ -325,9 +323,9 @@ impl IrohRaftTransport {
                 message: format!("Invalid Iroh node ID: {}", e),
             })?;
         
-        // Connect to peer
+        // Connect to peer using standard BLIXARD_ALPN
         let connection = self.endpoint
-            .connect(iroh_node_id, Self::RAFT_ALPN)
+            .connect(iroh_node_id, crate::transport::BLIXARD_ALPN)
             .await
             .map_err(|e| BlixardError::Internal { message: format!("Connection error: {}", e) })?;
         
@@ -731,7 +729,7 @@ async fn create_connection_for_peer(
         })?;
     
     let connection = endpoint
-        .connect(iroh_node_id, IrohRaftTransport::RAFT_ALPN)
+        .connect(iroh_node_id, super::BLIXARD_ALPN)
         .await
         .map_err(|e| BlixardError::Internal { message: format!("Failed to open uni stream: {}", e) })?;
     
