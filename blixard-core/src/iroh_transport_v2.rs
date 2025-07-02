@@ -29,6 +29,10 @@ pub enum DocumentType {
     Metrics,
     /// Temporary documents for file transfers
     FileTransfer,
+    /// General metadata storage
+    Metadata,
+    /// Node state information
+    NodeState,
 }
 
 impl DocumentType {
@@ -39,6 +43,8 @@ impl DocumentType {
             DocumentType::Logs => "logs",
             DocumentType::Metrics => "metrics",
             DocumentType::FileTransfer => "file-transfer",
+            DocumentType::Metadata => "metadata",
+            DocumentType::NodeState => "node-state",
         }
     }
 }

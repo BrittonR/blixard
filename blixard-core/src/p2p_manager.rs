@@ -10,8 +10,10 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::iroh_transport_v2::{IrohTransportV2, DocumentType};
 use crate::p2p_image_store::P2pImageStore;
 use crate::discovery::DiscoveryManager;
+use iroh::NodeAddr;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::{interval, Duration};
@@ -375,26 +377,93 @@ impl P2pManager {
     
     /// Store metadata
     pub async fn store_metadata(&self, key: &str, value: &[u8]) -> BlixardResult<()> {
-        // TODO: Implement metadata storage
         debug!("Storing metadata for key: {}", key);
-        Ok(())
+        
+        // Use the document operations from IrohTransportV2 to write metadata
+        // Metadata is stored in the Metadata document type
+        self.transport.write_to_doc(DocumentType::Metadata, key, value).await
     }
     
     /// Get metadata
     pub async fn get_metadata(&self, key: &str) -> BlixardResult<Vec<u8>> {
-        // TODO: Implement metadata retrieval
         debug!("Getting metadata for key: {}", key);
-        Err(BlixardError::NotImplemented {
-            feature: "metadata retrieval".to_string(),
-        })
+        
+        // Use the document operations from IrohTransportV2 to read metadata
+        // Metadata is stored in the Metadata document type
+        self.transport.read_from_doc(DocumentType::Metadata, key).await
     }
     
     /// Download data from P2P network
     pub async fn download_data(&self, hash: &iroh_blobs::Hash) -> BlixardResult<Vec<u8>> {
-        // TODO: Implement P2P download
-        warn!("P2P download not implemented for hash: {}", hash);
-        Err(BlixardError::NotImplemented {
-            feature: "P2P download".to_string(),
+        debug!("Downloading data for hash: {}", hash);
+        
+        // First, check if we have the blob locally in the transport's blob store
+        // This requires accessing the blob store through the transport
+        // For now, we'll use a temporary file as an intermediary
+        let temp_path = std::env::temp_dir().join(format!("blixard_blob_{}", hash));
+        
+        // Try to download from local store first
+        match self.transport.download_file(*hash, &temp_path).await {
+            Ok(_) => {
+                // Read the file content
+                let data = tokio::fs::read(&temp_path).await
+                    .map_err(|e| BlixardError::IoError(e))?;
+                
+                // Clean up temp file
+                let _ = tokio::fs::remove_file(&temp_path).await;
+                
+                debug!("Successfully downloaded {} bytes from local store", data.len());
+                return Ok(data);
+            }
+            Err(_) => {
+                debug!("Blob not found locally, need to download from peers");
+            }
+        }
+        
+        // If not found locally, try to download from connected peers
+        let peers = self.peers.read().await;
+        for (peer_id, peer_info) in peers.iter() {
+            // Check if this peer has the resource
+            let has_resource = peer_info.shared_resources.values()
+                .any(|r| r.hash == hash.to_string());
+            
+            if !has_resource {
+                continue;
+            }
+            
+            debug!("Attempting to download from peer: {}", peer_id);
+            
+            // Parse peer address
+            let node_addr = match self.parse_peer_address(&peer_info.address).await {
+                Ok(addr) => addr,
+                Err(e) => {
+                    warn!("Failed to parse peer address: {}", e);
+                    continue;
+                }
+            };
+            
+            // Try to download from this peer
+            match self.transport.download_blob_from_peer(&node_addr, *hash, &temp_path).await {
+                Ok(_) => {
+                    // Read the downloaded file
+                    let data = tokio::fs::read(&temp_path).await
+                        .map_err(|e| BlixardError::IoError(e))?;
+                    
+                    // Clean up temp file
+                    let _ = tokio::fs::remove_file(&temp_path).await;
+                    
+                    info!("Successfully downloaded {} bytes from peer {}", data.len(), peer_id);
+                    return Ok(data);
+                }
+                Err(e) => {
+                    warn!("Failed to download from peer {}: {}", peer_id, e);
+                    continue;
+                }
+            }
+        }
+        
+        Err(BlixardError::Internal {
+            message: format!("Failed to download blob {} from any source", hash),
         })
     }
     
@@ -544,6 +613,41 @@ impl P2pManager {
             }
         });
     }
+    
+    /// Parse peer address into NodeAddr
+    async fn parse_peer_address(&self, address: &str) -> BlixardResult<NodeAddr> {
+        // Expected format: "node_id@ip:port" or just "ip:port"
+        let parts: Vec<&str> = address.split('@').collect();
+        
+        let (node_id_str, addr_str) = if parts.len() == 2 {
+            // Format: node_id@ip:port
+            (Some(parts[0]), parts[1])
+        } else {
+            // Format: ip:port (no node_id)
+            (None, address)
+        };
+        
+        // Parse socket address
+        let socket_addr = addr_str.parse()
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to parse socket address '{}': {}", addr_str, e),
+            })?;
+        
+        // If we have a node_id string, parse it
+        if let Some(node_id_str) = node_id_str {
+            let node_id = iroh::NodeId::from_str(node_id_str)
+                .map_err(|e| BlixardError::Internal {
+                    message: format!("Failed to parse node ID '{}': {}", node_id_str, e),
+                })?;
+            
+            Ok(NodeAddr::new(node_id).with_direct_addresses([socket_addr]))
+        } else {
+            // Without a node ID, we can't create a proper NodeAddr
+            Err(BlixardError::Internal {
+                message: format!("Peer address '{}' missing node ID", address),
+            })
+        }
+    }
 }
 
 /// Format bytes to human readable string
@@ -556,5 +660,73 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
     } else {
         format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+    
+    #[tokio::test]
+    async fn test_metadata_operations() {
+        // Create a temporary directory for test data
+        let temp_dir = TempDir::new().unwrap();
+        
+        // Create P2P manager with default config
+        let p2p_manager = P2pManager::new(1, temp_dir.path(), Default::default())
+            .await
+            .unwrap();
+        
+        // Test storing and retrieving metadata
+        let key = "test-key";
+        let value = b"test-value-data";
+        
+        // Store metadata
+        p2p_manager.store_metadata(key, value).await.unwrap();
+        
+        // Retrieve metadata
+        let retrieved = p2p_manager.get_metadata(key).await.unwrap();
+        assert_eq!(retrieved, value);
+        
+        // Test with different key-value pairs
+        let key2 = "config/node/settings";
+        let value2 = b"{\"max_vms\": 10, \"memory_gb\": 32}";
+        
+        p2p_manager.store_metadata(key2, value2).await.unwrap();
+        let retrieved2 = p2p_manager.get_metadata(key2).await.unwrap();
+        assert_eq!(retrieved2, value2);
+    }
+    
+    #[tokio::test]
+    async fn test_blob_download_from_local_store() {
+        let temp_dir = TempDir::new().unwrap();
+        let p2p_manager = P2pManager::new(1, temp_dir.path(), Default::default())
+            .await
+            .unwrap();
+        
+        // Create a test file
+        let test_data = b"This is test blob data";
+        let test_file = temp_dir.path().join("test.dat");
+        tokio::fs::write(&test_file, test_data).await.unwrap();
+        
+        // Share the file (this adds it to local blob store)
+        let hash = p2p_manager.share_data(&test_file, "test-blob").await.unwrap();
+        
+        // Download using the hash (should retrieve from local store)
+        let downloaded = p2p_manager.download_data(&hash).await.unwrap();
+        assert_eq!(downloaded, test_data);
+    }
+    
+    #[tokio::test]
+    async fn test_metadata_not_found() {
+        let temp_dir = TempDir::new().unwrap();
+        let p2p_manager = P2pManager::new(1, temp_dir.path(), Default::default())
+            .await
+            .unwrap();
+        
+        // Try to get non-existent metadata
+        let result = p2p_manager.get_metadata("non-existent-key").await;
+        assert!(result.is_err());
     }
 }
