@@ -34,6 +34,7 @@ async fn test_grpc_only_mode() -> BlixardResult<()> {
         use_tailscale: false,
         vm_backend: "mock".to_string(),
         transport_config: None,
+        topology: Default::default(),
     };
     let node = Arc::new(SharedNodeState::new(config));
     
@@ -98,6 +99,7 @@ async fn test_iroh_only_mode() -> BlixardResult<()> {
         use_tailscale: false,
         vm_backend: "mock".to_string(),
         transport_config: None,
+        topology: Default::default(),
     };
     let node = Arc::new(SharedNodeState::new(config));
     
@@ -176,6 +178,7 @@ async fn test_dual_mode_migration() -> BlixardResult<()> {
         use_tailscale: false,
         vm_backend: "mock".to_string(),
         transport_config: None,
+        topology: Default::default(),
     };
     let node = Arc::new(SharedNodeState::new(config));
     

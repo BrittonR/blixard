@@ -159,6 +159,7 @@ mod tests {
             use_tailscale: false,
             vm_backend: "mock".to_string(),
             transport_config: None,
+            topology: Default::default(),
         };
         let node = Arc::new(SharedNodeState::new(config));
         let service = IrohStatusService::new(node);

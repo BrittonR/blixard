@@ -18,14 +18,11 @@ async fn create_test_database() -> (Database, TempDir) {
 }
 
 fn create_test_vm_state(name: &str, node_id: u64) -> VmState {
-    let config = VmConfig {
-        name: name.to_string(),
-        config_path: "/tmp/test.nix".to_string(),
-        vcpus: 2,
-        memory: 1024,
-        tenant_id: "default".to_string(),
-        ip_address: None,
-    };
+    let mut config = VmConfig::default();
+    config.name = name.to_string();
+    config.config_path = "/tmp/test.nix".to_string();
+    config.vcpus = 2;
+    config.memory = 1024;
     
     let now = chrono::Utc::now();
     VmState {

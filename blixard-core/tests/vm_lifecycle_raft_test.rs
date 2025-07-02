@@ -8,7 +8,8 @@
 use blixard_core::{
     error::BlixardResult,
     test_helpers::TestCluster,
-    types::{VmCommand, VmConfig, VmStatus},
+    types::VmStatus,
+    iroh_types::{VmConfig, CreateVmRequest},
 };
 use std::time::Duration;
 use tracing::{info, debug};
@@ -34,20 +35,14 @@ async fn test_vm_create_through_raft() -> BlixardResult<()> {
     // Create a VM through the leader
     let vm_config = VmConfig {
         name: "test-vm".to_string(),
-        config_path: "/etc/blixard/vms/test-vm.yaml".to_string(),
-        vcpus: 2,
-        memory: 1024,
-        tenant_id: "test-tenant".to_string(),
-        ..Default::default()
+        cpu_cores: 2,
+        memory_mb: 1024,
+        disk_gb: 10,
     };
     
-    let command = VmCommand::Create {
-        config: vm_config.clone(),
-        node_id: leader_id,
-    };
-    
-    // Send VM create command
-    leader_node.send_vm_command(command).await?;
+    // Send VM create command through client
+    let client = cluster.leader_client().await?;
+    client.create_vm(vm_config).await?;
     
     // Wait for replication
     tokio::time::sleep(Duration::from_secs(1)).await;

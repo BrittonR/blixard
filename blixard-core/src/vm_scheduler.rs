@@ -1307,6 +1307,7 @@ mod tests {
             used_memory_mb: 8192,
             used_disk_gb: 50,
             running_vms: 2,
+            topology: Default::default(),
         };
         
         // Most available should favor less utilized nodes
@@ -1357,6 +1358,7 @@ mod tests {
             used_memory_mb: 8192,
             used_disk_gb: 50,
             running_vms: 2,
+            topology: Default::default(),
         };
         
         let small_requirements = VmResourceRequirements {

@@ -8,6 +8,8 @@ use blixard_core::{
 use std::time::Duration;
 use tokio::time::sleep;
 
+mod common;
+
 /// Test basic VM lifecycle through distributed consensus
 #[tokio::test]
 async fn test_distributed_vm_lifecycle() {
@@ -25,14 +27,9 @@ async fn test_distributed_vm_lifecycle() {
     let node = cluster.get_node(1).expect("Failed to get node 1");
     
     // Create a VM using Raft consensus
-    let vm_config = VmConfig {
-        name: "test-vm-1".to_string(),
-        config_path: "/tmp/test-vm.nix".to_string(),
-        vcpus: 2,
-        memory: 1024,
-            ip_address: None,
-            tenant_id: "test".to_string(),
-    };
+    let mut vm_config = common::test_vm_config("test-vm-1");
+    vm_config.vcpus = 2;
+    vm_config.memory = 1024;
     
     let command = VmCommand::Create {
         config: vm_config.clone(),
@@ -114,14 +111,9 @@ async fn test_distributed_vm_scheduling() {
     let mut placement_decisions = Vec::new();
     
     for i in 1..=5 {
-        let vm_config = VmConfig {
-            name: format!("scheduled-vm-{}", i),
-            config_path: "/tmp/test-vm.nix".to_string(),
-            vcpus: 1,
-            memory: 512,
-            ip_address: None,
-            tenant_id: "test".to_string(),
-        };
+        let mut vm_config = common::test_vm_config(&format!("scheduled-vm-{}", i));
+        vm_config.vcpus = 1;
+        vm_config.memory = 512;
         
         // Use the scheduler to determine placement
         let placement = vm_manager.create_vm_with_scheduling(
@@ -179,14 +171,9 @@ async fn test_concurrent_vm_operations() {
         let shared_state = node.shared_state.clone();
         
         let handle = tokio::spawn(async move {
-            let vm_config = VmConfig {
-                name: format!("concurrent-vm-{}", i),
-                config_path: "/tmp/test-vm.nix".to_string(),
-                vcpus: 1,
-                memory: 512,
-            ip_address: None,
-            tenant_id: "test".to_string(),
-            };
+            let mut vm_config = common::test_vm_config(&format!("concurrent-vm-{}", i));
+            vm_config.vcpus = 1;
+            vm_config.memory = 512;
             
             let command = VmCommand::Create {
                 config: vm_config,

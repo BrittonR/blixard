@@ -3,7 +3,7 @@
 use std::time::Duration;
 use blixard_core::{
     error::{BlixardError, Result as BlixardResult},
-    types::{NodeConfig, VmConfig}
+    types::{NodeConfig, VmConfig, NodeTopology, LocalityPreference}
 };
 
 // Re-export timing utilities for easier access
@@ -26,6 +26,7 @@ pub fn test_node_config(id: u64, port: u16) -> NodeConfig {
         use_tailscale: false,
         vm_backend: "mock".to_string(),
         transport_config: None,
+        topology: NodeTopology::default(),
     }
 }
 
@@ -40,6 +41,10 @@ pub fn test_vm_config(name: &str) -> VmConfig {
         ip_address: None,
         metadata: None,
         anti_affinity: None,
+        priority: 500,
+        preemptible: true,
+        locality_preference: LocalityPreference::default(),
+        health_check_config: None,
     }
 }
 

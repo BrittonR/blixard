@@ -14,7 +14,7 @@ use std::{
 use tonic::{transport::Server, Request, Response, Status};
 
 // Use the simulation crate's proto definitions
-use blixard_simulation::{
+use blixard_simulation::proto::{
     cluster_service_client::ClusterServiceClient,
     cluster_service_server::{ClusterService, ClusterServiceServer},
     CreateVmRequest, CreateVmResponse,

@@ -1,6 +1,6 @@
 // Type serialization and validation tests
 
-use blixard_core::types::{NodeConfig, VmConfig, VmStatus, VmState, VmCommand};
+use blixard_core::types::{NodeConfig, VmConfig, VmStatus, VmState, VmCommand, NodeTopology};
 use serde_json;
 use std::net::SocketAddr;
 
@@ -15,6 +15,8 @@ fn test_node_config_creation() {
         join_addr: Some("127.0.0.1:7000".parse().unwrap()),
         use_tailscale: true,
         vm_backend: "mock".to_string(),
+        transport_config: None,
+        topology: NodeTopology::default(),
     };
     
     assert_eq!(config.id, 1);
@@ -25,14 +27,11 @@ fn test_node_config_creation() {
 
 #[test]
 fn test_vm_config_serialization() {
-    let config = VmConfig {
-        name: "test-vm".to_string(),
-        config_path: "/path/to/config.nix".to_string(),
-        vcpus: 2,
-        memory: 1024,
-        tenant_id: "default".to_string(),
-        ip_address: None,
-    };
+    let mut config = VmConfig::default();
+    config.name = "test-vm".to_string();
+    config.config_path = "/path/to/config.nix".to_string();
+    config.vcpus = 2;
+    config.memory = 1024;
     
     // Test JSON serialization
     let json = serde_json::to_string(&config).unwrap();
@@ -87,14 +86,11 @@ fn test_vm_status_ordering() {
 
 #[test]
 fn test_vm_state_full_lifecycle() {
-    let config = VmConfig {
-        name: "lifecycle-vm".to_string(),
-        config_path: "/tmp/lifecycle.nix".to_string(),
-        vcpus: 1,
-        memory: 512,
-        tenant_id: "default".to_string(),
-        ip_address: None,
-    };
+    let mut config = VmConfig::default();
+    config.name = "lifecycle-vm".to_string();
+    config.config_path = "/tmp/lifecycle.nix".to_string();
+    config.vcpus = 1;
+    config.memory = 512;
     
     let now = chrono::Utc::now();
     let state = VmState {
@@ -122,14 +118,11 @@ fn test_vm_state_full_lifecycle() {
 
 #[test]
 fn test_vm_command_variants() {
-    let config = VmConfig {
-        name: "cmd-vm".to_string(),
-        config_path: "/tmp/cmd.nix".to_string(),
-        vcpus: 1,
-        memory: 256,
-        tenant_id: "default".to_string(),
-        ip_address: None,
-    };
+    let mut config = VmConfig::default();
+    config.name = "cmd-vm".to_string();
+    config.config_path = "/tmp/cmd.nix".to_string();
+    config.vcpus = 1;
+    config.memory = 256;
     
     let commands = vec![
         VmCommand::Create { config: config.clone(), node_id: 1 },
@@ -178,26 +171,20 @@ fn test_socket_addr_parsing() {
 #[test]
 fn test_vm_config_validation_constraints() {
     // Test memory constraints
-    let config = VmConfig {
-        name: "mem-test".to_string(),
-        config_path: "/tmp/test.nix".to_string(),
-        vcpus: 1,
-        memory: 64, // Very low memory
-        tenant_id: "default".to_string(),
-        ip_address: None,
-    };
+    let mut config = VmConfig::default();
+    config.name = "mem-test".to_string();
+    config.config_path = "/tmp/test.nix".to_string();
+    config.vcpus = 1;
+    config.memory = 64; // Very low memory
     
     assert!(config.memory > 0);
     
     // Test vcpu constraints
-    let config = VmConfig {
-        name: "cpu-test".to_string(),
-        config_path: "/tmp/test.nix".to_string(),
-        vcpus: 0, // Invalid CPU count
-        memory: 512,
-        tenant_id: "default".to_string(),
-        ip_address: None,
-    };
+    let mut config = VmConfig::default();
+    config.name = "cpu-test".to_string();
+    config.config_path = "/tmp/test.nix".to_string();
+    config.vcpus = 0; // Invalid CPU count
+    config.memory = 512;
     
     // Should serialize even with invalid values (validation happens elsewhere)
     let json = serde_json::to_string(&config).unwrap();
@@ -216,14 +203,11 @@ fn test_vm_name_edge_cases() {
     ];
     
     for name in edge_cases {
-        let config = VmConfig {
-            name: name.to_string(),
-            config_path: "/tmp/test.nix".to_string(),
-            vcpus: 1,
-            memory: 512,
-            tenant_id: "default".to_string(),
-            ip_address: None,
-        };
+        let mut config = VmConfig::default();
+        config.name = name.to_string();
+        config.config_path = "/tmp/test.nix".to_string();
+        config.vcpus = 1;
+        config.memory = 512;
         
         // Should serialize regardless of validation
         let json = serde_json::to_string(&config).unwrap();
@@ -239,13 +223,13 @@ fn test_timestamp_handling() {
     
     let state = VmState {
         name: "time-test".to_string(),
-        config: VmConfig {
-            name: "time-test".to_string(),
-            config_path: "/tmp/test.nix".to_string(),
-            vcpus: 1,
-            memory: 512,
-            tenant_id: "default".to_string(),
-            ip_address: None,
+        config: {
+            let mut cfg = VmConfig::default();
+            cfg.name = "time-test".to_string();
+            cfg.config_path = "/tmp/test.nix".to_string();
+            cfg.vcpus = 1;
+            cfg.memory = 512;
+            cfg
         },
         status: VmStatus::Running,
         node_id: 1,
@@ -264,14 +248,11 @@ fn test_timestamp_handling() {
 
 #[test]
 fn test_bincode_serialization() {
-    let config = VmConfig {
-        name: "bincode-test".to_string(),
-        config_path: "/tmp/bincode.nix".to_string(),
-        vcpus: 4,
-        memory: 2048,
-        tenant_id: "default".to_string(),
-        ip_address: None,
-    };
+    let mut config = VmConfig::default();
+    config.name = "bincode-test".to_string();
+    config.config_path = "/tmp/bincode.nix".to_string();
+    config.vcpus = 4;
+    config.memory = 2048;
     
     // Test bincode serialization (used for database storage)
     let encoded = bincode::serialize(&config).unwrap();

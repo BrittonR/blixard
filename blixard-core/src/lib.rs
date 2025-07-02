@@ -46,6 +46,7 @@ pub mod p2p_monitor_otel;
 pub mod p2p_health_check;
 pub mod cluster_state;
 pub mod transport;
+pub mod linearizability;
 pub mod vm_health_types;
 pub mod vm_health_monitor;
 pub mod vm_auto_recovery;
@@ -68,3 +69,7 @@ pub mod test_message_filter;
 
 // Native Rust types for Iroh transport
 pub mod iroh_types;
+
+// Failpoint support for fault injection
+#[cfg(feature = "failpoints")]
+pub mod failpoints;

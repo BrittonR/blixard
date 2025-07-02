@@ -77,14 +77,7 @@ async fn test_vm_command_send() {
     // Initialize node to set up channels
     node.initialize().await.unwrap();
     
-    let vm_config = VmConfig {
-        name: "test-vm".to_string(),
-        config_path: "/tmp/test.nix".to_string(),
-        memory: 512,
-        vcpus: 1,
-        tenant_id: "default".to_string(),
-        ip_address: None,
-    };
+    let vm_config = common::test_vm_config("test-vm");
     
     let command = VmCommand::Create {
         config: vm_config,
@@ -100,14 +93,7 @@ async fn test_vm_command_send() {
 async fn test_vm_command_send_without_initialization() {
     let (node, _temp_dir) = create_test_node(1).await;
     
-    let vm_config = VmConfig {
-        name: "test-vm".to_string(),
-        config_path: "/tmp/test.nix".to_string(),
-        memory: 512,
-        vcpus: 1,
-        tenant_id: "default".to_string(),
-        ip_address: None,
-    };
+    let vm_config = common::test_vm_config("test-vm");
     
     let command = VmCommand::Create {
         config: vm_config,
@@ -287,14 +273,9 @@ async fn test_database_persistence_across_restarts() {
         node.initialize().await.unwrap();
         
         // Create a VM
-        let _vm_config = VmConfig {
-            name: "persist-test-vm".to_string(),
-            config_path: "/tmp/test.nix".to_string(),
-            memory: 1024,
-            vcpus: 2,
-            tenant_id: "default".to_string(),
-            ip_address: None,
-        };
+        let mut _vm_config = common::test_vm_config("persist-test-vm");
+        _vm_config.memory = 1024;
+        _vm_config.vcpus = 2;
         
         // Note: After our changes, VMs created through send_vm_command won't persist
         // because VM persistence now requires Raft consensus. This test should be

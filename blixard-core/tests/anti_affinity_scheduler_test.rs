@@ -1,5 +1,7 @@
 //! Integration tests for anti-affinity scheduling
 
+mod common;
+
 use blixard_core::{
     anti_affinity::{AntiAffinityRule, AntiAffinityRules},
     types::{VmConfig, VmState, VmStatus},
@@ -26,6 +28,7 @@ async fn create_test_scheduler() -> (VmScheduler, Arc<Database>, TempDir) {
     let _ = write_txn.open_table(WORKER_TABLE).unwrap();
     let _ = write_txn.open_table(WORKER_STATUS_TABLE).unwrap();
     let _ = write_txn.open_table(VM_STATE_TABLE).unwrap();
+    let _ = write_txn.open_table(blixard_core::storage::NODE_TOPOLOGY_TABLE).unwrap();
     write_txn.commit().unwrap();
     
     let scheduler = VmScheduler::new(database.clone());
@@ -77,15 +80,10 @@ async fn add_vm(
         
         let vm_state = VmState {
             name: vm_name.to_string(),
-            config: VmConfig {
-                name: vm_name.to_string(),
-                config_path: "".to_string(),
-                vcpus: 2,
-                memory: 1024,
-                tenant_id: "default".to_string(),
-                ip_address: None,
-                metadata: None,
-                anti_affinity: anti_affinity_rules,
+            config: {
+                let mut config = common::test_vm_config(vm_name);
+                config.anti_affinity = anti_affinity_rules;
+                config
             },
             status: VmStatus::Running,
             node_id,
@@ -116,15 +114,10 @@ async fn test_hard_anti_affinity_constraint() {
     add_vm(&database, "web2", 2, Some(web_rules.clone())).await;
     
     // Try to schedule a third VM with the same anti-affinity group
-    let new_vm_config = VmConfig {
-        name: "web3".to_string(),
-        config_path: "".to_string(),
-        vcpus: 2,
-        memory: 1024,
-        tenant_id: "default".to_string(),
-        ip_address: None,
-        metadata: None,
-        anti_affinity: Some(web_rules),
+    let new_vm_config = {
+        let mut config = common::test_vm_config("web3");
+        config.anti_affinity = Some(web_rules);
+        config
     };
     
     // Should place on node 3 (only available node)
@@ -152,15 +145,12 @@ async fn test_soft_anti_affinity_preference() {
     add_vm(&database, "cache1", 1, Some(cache_rules.clone())).await;
     
     // Schedule another VM with same soft anti-affinity
-    let new_vm_config = VmConfig {
-        name: "cache2".to_string(),
-        config_path: "".to_string(),
-        vcpus: 2,
-        memory: 1024,
-        tenant_id: "default".to_string(),
-        ip_address: None,
-        metadata: None,
-        anti_affinity: Some(cache_rules),
+    let new_vm_config = {
+        let mut config = common::test_vm_config("cache2");
+        config.vcpus = 2;
+        config.memory = 1024;
+        config.anti_affinity = Some(cache_rules);
+        config
     };
     
     // Should prefer node 2 due to soft anti-affinity
@@ -189,15 +179,12 @@ async fn test_anti_affinity_with_max_per_node() {
     add_vm(&database, "db2", 1, Some(db_rules.clone())).await;
     
     // Third VM should still be allowed on node 2
-    let new_vm_config = VmConfig {
-        name: "db3".to_string(),
-        config_path: "".to_string(),
-        vcpus: 2,
-        memory: 1024,
-        tenant_id: "default".to_string(),
-        ip_address: None,
-        metadata: None,
-        anti_affinity: Some(db_rules.clone()),
+    let new_vm_config = {
+        let mut config = common::test_vm_config("db3");
+        config.vcpus = 2;
+        config.memory = 1024;
+        config.anti_affinity = Some(db_rules.clone());
+        config
     };
     
     let decision = scheduler
@@ -213,15 +200,12 @@ async fn test_anti_affinity_with_max_per_node() {
     add_vm(&database, "db4", 2, Some(db_rules.clone())).await;
     
     // Now both nodes are at capacity for this anti-affinity group
-    let full_vm_config = VmConfig {
-        name: "db5".to_string(),
-        config_path: "".to_string(),
-        vcpus: 2,
-        memory: 1024,
-        tenant_id: "default".to_string(),
-        ip_address: None,
-        metadata: None,
-        anti_affinity: Some(db_rules),
+    let full_vm_config = {
+        let mut config = common::test_vm_config("db5");
+        config.vcpus = 2;
+        config.memory = 1024;
+        config.anti_affinity = Some(db_rules);
+        config
     };
     
     // Should fail - both nodes at max capacity
@@ -249,15 +233,12 @@ async fn test_manual_placement_with_anti_affinity() {
     add_vm(&database, "api1", 1, Some(api_rules.clone())).await;
     
     // Try manual placement on node 1 (should fail)
-    let new_vm_config = VmConfig {
-        name: "api2".to_string(),
-        config_path: "".to_string(),
-        vcpus: 2,
-        memory: 1024,
-        tenant_id: "default".to_string(),
-        ip_address: None,
-        metadata: None,
-        anti_affinity: Some(api_rules.clone()),
+    let new_vm_config = {
+        let mut config = common::test_vm_config("api2");
+        config.vcpus = 2;
+        config.memory = 1024;
+        config.anti_affinity = Some(api_rules.clone());
+        config
     };
     
     let result = scheduler
@@ -286,15 +267,12 @@ async fn test_no_anti_affinity_rules() {
     add_worker_node(&database, 2, 8, 16384).await;
     
     // VM without anti-affinity rules
-    let vm_config = VmConfig {
-        name: "regular-vm".to_string(),
-        config_path: "".to_string(),
-        vcpus: 2,
-        memory: 1024,
-        tenant_id: "default".to_string(),
-        ip_address: None,
-        metadata: None,
-        anti_affinity: None, // No anti-affinity rules
+    let vm_config = {
+        let mut config = common::test_vm_config("regular-vm");
+        config.vcpus = 2;
+        config.memory = 1024;
+        config.anti_affinity = None; // No anti-affinity rules
+        config
     };
     
     // Should schedule normally without anti-affinity considerations

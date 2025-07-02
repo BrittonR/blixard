@@ -248,7 +248,7 @@ mod tests {
         // Download is not implemented yet
         let output_file = temp_dir.path().join("downloaded.txt");
         match transport.download_file(hash, &output_file).await {
-            Err(BlixardError::NotImplemented { .. }) => {
+            Err(crate::error::BlixardError::NotImplemented { .. }) => {
                 // Expected
             }
             _ => panic!("Expected NotImplemented error"),

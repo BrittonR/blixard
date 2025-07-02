@@ -73,6 +73,7 @@ fn add_vm(
             priority: 500,
             preemptible: true,
             locality_preference: Default::default(),
+            health_check_config: None,
         };
         
         let vm_state = VmState {
@@ -126,6 +127,7 @@ async fn test_scheduler_basic_placement() {
         priority: 500,
         preemptible: true,
         locality_preference: Default::default(),
+        health_check_config: None,
     };
     
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::MostAvailable).await;
@@ -167,6 +169,7 @@ async fn test_scheduler_resource_constraints() {
         priority: 500,
         preemptible: true,
         locality_preference: Default::default(),
+        health_check_config: None,
     };
     
     let result = scheduler.schedule_vm_placement(&small_vm, PlacementStrategy::MostAvailable).await;
@@ -185,6 +188,7 @@ async fn test_scheduler_resource_constraints() {
         priority: 500,
         preemptible: true,
         locality_preference: Default::default(),
+        health_check_config: None,
     };
     
     let result = scheduler.schedule_vm_placement(&large_vm, PlacementStrategy::MostAvailable).await;
@@ -227,6 +231,7 @@ async fn test_scheduler_round_robin() {
         priority: 500,
         preemptible: true,
         locality_preference: Default::default(),
+        health_check_config: None,
     };
     
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::RoundRobin).await;
@@ -265,6 +270,7 @@ async fn test_scheduler_manual_placement() {
         priority: 500,
         preemptible: true,
         locality_preference: Default::default(),
+        health_check_config: None,
     };
     
     // Test valid manual placement
@@ -315,6 +321,7 @@ async fn test_scheduler_feature_requirements() {
         priority: 500,
         preemptible: true,
         locality_preference: Default::default(),
+        health_check_config: None,
     };
     
     // Note: VmResourceRequirements::from() always adds "microvm" feature
@@ -399,6 +406,7 @@ async fn test_scheduler_bin_packing() {
         priority: 500,
         preemptible: true,
         locality_preference: Default::default(),
+        health_check_config: None,
     };
     
     let result = scheduler.schedule_vm_placement(&vm_config, PlacementStrategy::LeastAvailable).await;

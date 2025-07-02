@@ -1,0 +1,293 @@
+syntax = "proto3";
+
+package blixard;
+
+// This proto file contains all message types needed for simulation testing.
+// It includes both the current production messages and additional types
+// that were removed during the gRPC to Iroh P2P migration but are still
+// needed for MadSim deterministic testing.
+
+// ===== Base Messages (from current blixard.proto) =====
+
+// Node management messages
+message JoinRequest {
+  uint64 node_id = 1;
+  string bind_address = 2;
+}
+
+message JoinResponse {
+  bool success = 1;
+  string message = 2;
+  repeated NodeInfo peers = 3;
+  repeated uint64 voters = 4;
+}
+
+message LeaveRequest {
+  uint64 node_id = 1;
+}
+
+message LeaveResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ClusterStatusRequest {}
+
+message ClusterStatusResponse {
+  uint64 leader_id = 1;
+  repeated NodeInfo nodes = 2;
+  uint64 term = 3;
+}
+
+message NodeInfo {
+  uint64 id = 1;
+  string address = 2;
+  NodeState state = 3;
+}
+
+enum NodeState {
+  NODE_STATE_UNKNOWN = 0;
+  NODE_STATE_FOLLOWER = 1;
+  NODE_STATE_CANDIDATE = 2;
+  NODE_STATE_LEADER = 3;
+}
+
+// VM management messages
+message CreateVmRequest {
+  string name = 1;
+  string config_path = 2;
+  uint32 vcpus = 3;
+  uint32 memory_mb = 4;
+}
+
+message CreateVmResponse {
+  bool success = 1;
+  string message = 2;
+  string vm_id = 3;
+}
+
+message StartVmRequest {
+  string name = 1;
+}
+
+message StartVmResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message StopVmRequest {
+  string name = 1;
+}
+
+message StopVmResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ListVmsRequest {}
+
+message ListVmsResponse {
+  repeated VmInfo vms = 1;
+}
+
+message VmInfo {
+  string name = 1;
+  VmState state = 2;
+  uint64 node_id = 3;
+  uint32 vcpus = 4;
+  uint32 memory_mb = 5;
+  string ip_address = 6;
+}
+
+enum VmState {
+  VM_STATE_UNKNOWN = 0;
+  VM_STATE_CREATED = 1;
+  VM_STATE_STARTING = 2;
+  VM_STATE_RUNNING = 3;
+  VM_STATE_STOPPING = 4;
+  VM_STATE_STOPPED = 5;
+  VM_STATE_FAILED = 6;
+}
+
+message GetVmStatusRequest {
+  string name = 1;
+}
+
+message GetVmStatusResponse {
+  bool found = 1;
+  VmInfo vm_info = 2;
+}
+
+// Health check messages - using old format for test compatibility
+message HealthCheckRequest {
+  // Empty for test compatibility
+}
+
+message HealthCheckResponse {
+  bool healthy = 1;
+  string message = 2;
+}
+
+// ===== Additional Messages for Simulation Testing =====
+
+// Raft messages for simulation testing
+message RaftMessageRequest {
+  bytes raft_data = 1; // Serialized raft::prelude::Message
+}
+
+message RaftMessageResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+// Task management for simulation testing
+message TaskRequest {
+  string task_id = 1;
+  string command = 2;
+  repeated string args = 3;
+  uint32 cpu_cores = 4;
+  uint32 memory_mb = 5;
+  uint32 disk_gb = 6;
+  repeated string required_features = 7;
+  uint32 timeout_secs = 8;
+}
+
+message TaskResponse {
+  bool accepted = 1;
+  string message = 2;
+  uint64 assigned_node = 3;
+}
+
+message TaskStatusRequest {
+  string task_id = 1;
+}
+
+message TaskStatusResponse {
+  bool found = 1;
+  int32 status = 2; // TaskStatus enum value
+  string output = 3;
+  string error = 4;
+  uint64 execution_time_ms = 5;
+}
+
+enum TaskStatus {
+  TASK_STATUS_UNKNOWN = 0;
+  TASK_STATUS_PENDING = 1;
+  TASK_STATUS_RUNNING = 2;
+  TASK_STATUS_COMPLETED = 3;
+  TASK_STATUS_FAILED = 4;
+}
+
+// Additional VM operations for testing
+message DeleteVmRequest {
+  string name = 1;
+}
+
+message DeleteVmResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// VM scheduling for testing
+message CreateVmWithSchedulingRequest {
+  CreateVmRequest vm_request = 1;
+  SchedulingStrategy strategy = 2;
+}
+
+message CreateVmWithSchedulingResponse {
+  bool success = 1;
+  string message = 2;
+  string vm_id = 3;
+  uint64 assigned_node = 4;
+}
+
+message ScheduleVmPlacementRequest {
+  string vm_id = 1;
+  SchedulingStrategy strategy = 2;
+}
+
+message ScheduleVmPlacementResponse {
+  bool success = 1;
+  string message = 2;
+  uint64 assigned_node = 3;
+}
+
+enum SchedulingStrategy {
+  SCHEDULING_STRATEGY_UNKNOWN = 0;
+  SCHEDULING_STRATEGY_LEAST_LOADED = 1;
+  SCHEDULING_STRATEGY_ROUND_ROBIN = 2;
+  SCHEDULING_STRATEGY_MANUAL = 3;
+}
+
+message ClusterResourceSummaryRequest {}
+
+message ClusterResourceSummaryResponse {
+  repeated NodeResourceInfo nodes = 1;
+}
+
+message NodeResourceInfo {
+  uint64 node_id = 1;
+  uint32 total_vcpus = 2;
+  uint32 used_vcpus = 3;
+  uint64 total_memory_mb = 4;
+  uint64 used_memory_mb = 5;
+  uint32 vm_count = 6;
+}
+
+// Service definition for simulation tests
+service ClusterService {
+  // Base methods
+  rpc JoinCluster(JoinRequest) returns (JoinResponse);
+  rpc LeaveCluster(LeaveRequest) returns (LeaveResponse);
+  rpc GetClusterStatus(ClusterStatusRequest) returns (ClusterStatusResponse);
+  rpc CreateVm(CreateVmRequest) returns (CreateVmResponse);
+  rpc StartVm(StartVmRequest) returns (StartVmResponse);
+  rpc StopVm(StopVmRequest) returns (StopVmResponse);
+  rpc ListVms(ListVmsRequest) returns (ListVmsResponse);
+  rpc GetVmStatus(GetVmStatusRequest) returns (GetVmStatusResponse);
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+  
+  // Additional methods for simulation testing
+  rpc SendRaftMessage(RaftMessageRequest) returns (RaftMessageResponse);
+  rpc SubmitTask(TaskRequest) returns (TaskResponse);
+  rpc GetTaskStatus(TaskStatusRequest) returns (TaskStatusResponse);
+  rpc DeleteVm(DeleteVmRequest) returns (DeleteVmResponse);
+  rpc CreateVmWithScheduling(CreateVmWithSchedulingRequest) returns (CreateVmWithSchedulingResponse);
+  rpc ScheduleVmPlacement(ScheduleVmPlacementRequest) returns (ScheduleVmPlacementResponse);
+  rpc GetClusterResourceSummary(ClusterResourceSummaryRequest) returns (ClusterResourceSummaryResponse);
+}
+
+// BlixardService for simulation testing
+service BlixardService {
+  rpc GetRaftStatus(GetRaftStatusRequest) returns (GetRaftStatusResponse);
+  rpc ProposeTask(ProposeTaskRequest) returns (ProposeTaskResponse);
+}
+
+message GetRaftStatusRequest {}
+
+message GetRaftStatusResponse {
+  bool is_leader = 1;
+  uint64 node_id = 2;
+  uint64 leader_id = 3;
+  uint64 term = 4;
+  string state = 5;
+  uint64 commit_index = 6;
+  uint64 applied_index = 7;
+  repeated uint64 peer_ids = 8;
+}
+
+message ProposeTaskRequest {
+  Task task = 1;
+}
+
+message ProposeTaskResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
+message Task {
+  string id = 1;
+  string task_type = 2;
+  bytes payload = 3;
+  uint64 created_at = 4;
+}

@@ -42,7 +42,7 @@ impl ClusterService for MockClusterService {
             nodes: vec![blixard_simulation::proto::NodeInfo {
                 id: self.node_id,
                 address: "127.0.0.1:7000".to_string(),
-                state: blixard_simulation::proto::NodeState::Leader.into(),
+                state: blixard_simulation::proto::NodeState::Leader as i32,
             }],
             term: 1,
         }))

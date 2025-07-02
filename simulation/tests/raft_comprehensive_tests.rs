@@ -22,7 +22,7 @@ use tonic::{transport::Server, Request, Response, Status};
 use tracing::{info, debug};
 use serde::{Serialize, Deserialize};
 
-use blixard_simulation::{
+use blixard_simulation::proto::{
     cluster_service_server::{ClusterService, ClusterServiceServer},
     cluster_service_client::ClusterServiceClient,
     HealthCheckRequest, HealthCheckResponse,

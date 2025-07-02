@@ -151,6 +151,7 @@ async fn setup_transport(
         vm_backend: "test".to_string(),
         join_address: None,
         bootstrap: true,
+        topology: Default::default(),
     };
     
     let node = Arc::new(SharedNodeState::new(config));

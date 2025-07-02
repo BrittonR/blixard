@@ -13,7 +13,7 @@ use madsim::{runtime::Handle, time::sleep};
 use tonic::{transport::Server, Request, Response, Status};
 
 // Import the generated proto types
-use blixard_simulation::{
+use blixard_simulation::proto::{
     cluster_service_client::ClusterServiceClient,
     cluster_service_server::{ClusterService, ClusterServiceServer},
     CreateVmRequest, CreateVmResponse,
@@ -26,9 +26,14 @@ use blixard_simulation::{
     StopVmRequest, StopVmResponse,
     GetVmStatusRequest, GetVmStatusResponse,
     NodeInfo, NodeState,
+    // Additional types for simulation testing
     RaftMessageRequest, RaftMessageResponse,
     TaskRequest, TaskResponse,
     TaskStatusRequest, TaskStatusResponse, TaskStatus,
+    DeleteVmRequest, DeleteVmResponse,
+    CreateVmWithSchedulingRequest, CreateVmWithSchedulingResponse,
+    ScheduleVmPlacementRequest, ScheduleVmPlacementResponse,
+    ClusterResourceSummaryRequest, ClusterResourceSummaryResponse,
 };
 
 /// A minimal implementation of ClusterService for testing
@@ -166,30 +171,44 @@ impl ClusterService for TestClusterService {
 
     async fn delete_vm(
         &self,
-        _request: Request<blixard_simulation::proto::DeleteVmRequest>,
-    ) -> Result<Response<blixard_simulation::proto::DeleteVmResponse>, Status> {
-        Err(Status::unimplemented("Not implemented in mock"))
+        _request: Request<DeleteVmRequest>,
+    ) -> Result<Response<DeleteVmResponse>, Status> {
+        Ok(Response::new(DeleteVmResponse {
+            success: true,
+            message: "VM deleted".to_string(),
+        }))
     }
 
     async fn create_vm_with_scheduling(
         &self,
-        _request: Request<blixard_simulation::proto::CreateVmWithSchedulingRequest>,
-    ) -> Result<Response<blixard_simulation::proto::CreateVmWithSchedulingResponse>, Status> {
-        Err(Status::unimplemented("Not implemented in mock"))
+        _request: Request<CreateVmWithSchedulingRequest>,
+    ) -> Result<Response<CreateVmWithSchedulingResponse>, Status> {
+        Ok(Response::new(CreateVmWithSchedulingResponse {
+            success: true,
+            message: "VM created with scheduling".to_string(),
+            vm_id: "test-vm".to_string(),
+            assigned_node: self.node_id,
+        }))
     }
 
     async fn schedule_vm_placement(
         &self,
-        _request: Request<blixard_simulation::proto::ScheduleVmPlacementRequest>,
-    ) -> Result<Response<blixard_simulation::proto::ScheduleVmPlacementResponse>, Status> {
-        Err(Status::unimplemented("Not implemented in mock"))
+        _request: Request<ScheduleVmPlacementRequest>,
+    ) -> Result<Response<ScheduleVmPlacementResponse>, Status> {
+        Ok(Response::new(ScheduleVmPlacementResponse {
+            success: true,
+            message: "VM scheduled".to_string(),
+            assigned_node: self.node_id,
+        }))
     }
 
     async fn get_cluster_resource_summary(
         &self,
-        _request: Request<blixard_simulation::proto::ClusterResourceSummaryRequest>,
-    ) -> Result<Response<blixard_simulation::proto::ClusterResourceSummaryResponse>, Status> {
-        Err(Status::unimplemented("Not implemented in mock"))
+        _request: Request<ClusterResourceSummaryRequest>,
+    ) -> Result<Response<ClusterResourceSummaryResponse>, Status> {
+        Ok(Response::new(ClusterResourceSummaryResponse {
+            nodes: vec![],
+        }))
     }
 }
 
@@ -305,7 +324,9 @@ async fn test_grpc_concurrent_clients() {
                 let response = client.health_check(HealthCheckRequest {})
                     .await
                     .unwrap();
-                assert!(response.into_inner().healthy);
+                let resp = response.into_inner();
+                assert!(resp.healthy);
+                assert!(resp.message.contains("healthy"));
                 
                 let response = client.create_vm(CreateVmRequest {
                     name: format!("vm-{}-{}", i, j),

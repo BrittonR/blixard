@@ -711,7 +711,8 @@ mod tests {
         tokio::fs::write(&test_file, test_data).await.unwrap();
         
         // Share the file (this adds it to local blob store)
-        let hash = p2p_manager.share_data(&test_file, "test-blob").await.unwrap();
+        let file_data = tokio::fs::read(&test_file).await.unwrap();
+        let hash = p2p_manager.share_data(file_data, "test-blob").await.unwrap();
         
         // Download using the hash (should retrieve from local store)
         let downloaded = p2p_manager.download_data(&hash).await.unwrap();
