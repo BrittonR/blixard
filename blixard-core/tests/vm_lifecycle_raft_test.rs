@@ -8,8 +8,8 @@
 use blixard_core::{
     error::BlixardResult,
     test_helpers::TestCluster,
-    types::VmStatus,
-    iroh_types::{VmConfig, CreateVmRequest},
+    types::{VmStatus, VmConfig, VmCommand},
+    iroh_types::CreateVmRequest,
 };
 use std::time::Duration;
 use tracing::{info, debug};
