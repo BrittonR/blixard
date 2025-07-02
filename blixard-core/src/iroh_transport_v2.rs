@@ -157,6 +157,38 @@ pub struct IrohTransportV2 {
 }
 
 impl IrohTransportV2 {
+    /// Load or generate a secret key for the node
+    async fn load_or_generate_secret_key(iroh_data_dir: &Path) -> BlixardResult<SecretKey> {
+        let key_path = iroh_data_dir.join("secret_key");
+        
+        // Try to load existing key
+        if key_path.exists() {
+            let key_bytes = tokio::fs::read(&key_path).await.map_err(|e| BlixardError::Internal {
+                message: format!("Failed to read secret key: {}", e),
+            })?;
+            
+            if key_bytes.len() == 32 {
+                let mut key_array = [0u8; 32];
+                key_array.copy_from_slice(&key_bytes);
+                let secret_key = SecretKey::from_bytes(&key_array);
+                info!("Loaded existing secret key, node ID: {}", secret_key.public());
+                return Ok(secret_key);
+            }
+        }
+        
+        // Generate new key if not found or invalid
+        let secret_key = SecretKey::generate(rand::thread_rng());
+        let key_bytes = secret_key.to_bytes();
+        
+        // Save the key for future use
+        tokio::fs::write(&key_path, &key_bytes).await.map_err(|e| BlixardError::Internal {
+            message: format!("Failed to save secret key: {}", e),
+        })?;
+        
+        info!("Generated new secret key, node ID: {}", secret_key.public());
+        Ok(secret_key)
+    }
+
     /// Create a new Iroh transport instance without discovery
     pub async fn new(node_id: u64, data_dir: &Path) -> BlixardResult<Self> {
         Self::new_with_discovery(node_id, data_dir, None).await
@@ -183,8 +215,8 @@ impl IrohTransportV2 {
 
         info!("Initializing Iroh transport v2 for node {}", node_id);
 
-        // Create secret key for this node
-        let secret_key = SecretKey::generate(rand::thread_rng());
+        // Load or generate secret key for this node
+        let secret_key = Self::load_or_generate_secret_key(&iroh_data_dir).await?;
         
         // Build endpoint with discovery if provided
         let mut builder = Endpoint::builder()
