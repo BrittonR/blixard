@@ -10,7 +10,7 @@ use std::time::Duration;
 use blixard_core::error::BlixardResult;
 use blixard_core::node_shared::SharedNodeState;
 use blixard_core::types::NodeConfig;
-use blixard_core::transport::config::{TransportConfig, IrohConfig};
+use blixard_core::transport::config::{TransportConfig, IrohConfig, MigrationStrategy};
 use blixard_core::transport::iroh_protocol::{
     MessageType, generate_request_id, write_message, read_message,
 };
@@ -21,15 +21,8 @@ mod common;
 
 #[tokio::test]
 async fn test_iroh_single_node_startup() -> BlixardResult<()> {
-    let config = NodeConfig {
-        id: 1,
-        bind_addr: "127.0.0.1:0".parse().unwrap(),
-        data_dir: format!("/tmp/blixard-test-{}", 1),
-        vm_backend: "test".to_string(),
-        join_addr: None,
-        use_tailscale: false,
-        transport_config: Some(TransportConfig::Iroh(IrohConfig::default())),
-    };
+    let mut config = common::test_node_config(1, 0);
+    config.transport_config = Some(TransportConfig::Iroh(IrohConfig::default()));
     
     let node = Arc::new(SharedNodeState::new(config));
     
@@ -84,15 +77,8 @@ async fn test_iroh_transport_mode_switching() -> BlixardResult<()> {
     ];
     
     for (name, transport_config) in configs {
-        let config = NodeConfig {
-            id: 1,
-            bind_addr: "127.0.0.1:0".parse().unwrap(),
-            data_dir: format!("/tmp/blixard-test-{}", 1),
-            vm_backend: "test".to_string(),
-            join_addr: None,
-            use_tailscale: false,
-            transport_config: Some(transport_config),
-        };
+        let mut config = common::test_node_config(1, 0);
+        config.transport_config = Some(transport_config);
         
         let node = Arc::new(SharedNodeState::new(config));
         assert_eq!(node.get_id(), 1, "Failed to create node with {} transport", name);

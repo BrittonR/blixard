@@ -173,6 +173,7 @@ proptest! {
                             disk_gb: 100,
                             features: vec![],
                         },
+                        topology: blixard_core::types::NodeTopology::default(),
                     }).unwrap(),
                     index: 1,
                     term: 1,

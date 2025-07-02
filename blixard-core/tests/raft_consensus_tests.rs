@@ -1,3 +1,5 @@
+mod common;
+
 //! Raft Consensus Safety Tests
 //! 
 //! These tests verify that our actual Raft implementation maintains all safety properties
@@ -20,8 +22,9 @@ use blixard_core::{
 /// Test that only one leader can exist per term
 #[tokio::test]
 async fn test_at_most_one_leader_per_term() {
-    let cluster = TestCluster::new(5).await;
-    cluster.wait_for_leader(Duration::from_secs(10)).await.unwrap();
+    let cluster = TestCluster::new(5).await.unwrap();
+    cluster.wait_for_convergence(Duration::from_secs(10)).await.unwrap();
+    let _ = cluster.get_leader_id().await.unwrap();
     
     // Track leaders per term
     let leaders_per_term = Arc::new(Mutex::new(HashMap::<u64, HashSet<u64>>::new()));
@@ -32,11 +35,13 @@ async fn test_at_most_one_leader_per_term() {
     
     while start.elapsed() < monitor_duration {
         // Get cluster status from each node's perspective
-        for node in cluster.get_nodes() {
-            if let Ok((leader_id, _, term)) = node.get_cluster_status().await {
-                if leader_id != 0 {
-                    let mut leaders = leaders_per_term.lock().await;
-                    leaders.entry(term).or_insert_with(HashSet::new).insert(leader_id);
+        for i in 1..=5 {
+            if let Ok(node) = cluster.get_node(i) {
+                if let Ok((leader_id, _, term)) = node.shared_state.get_cluster_status().await {
+                    if leader_id != 0 {
+                        let mut leaders = leaders_per_term.lock().await;
+                        leaders.entry(term).or_insert_with(HashSet::new).insert(leader_id);
+                    }
                 }
             }
         }
@@ -78,14 +83,9 @@ async fn test_committed_entries_never_lost() {
     
     for i in 0..10 {
         let vm_name = format!("test-vm-{}", i);
-        let config = VmConfig {
-            memory: 1024 * 1024 * 1024,
-            vcpus: 1,
-            disk_size: 10 * 1024 * 1024 * 1024,
-            image: "test-image".to_string(),
-            network_interfaces: vec![],
-            metadata: HashMap::new(),
-        };
+        let mut config = common::test_vm_config(&vm_name);
+        config.memory = 1024;
+        config.vcpus = 1;
         
         let result = leader_client.create_vm(CreateVmRequest {
             name: vm_name.clone(),
@@ -103,7 +103,8 @@ async fn test_committed_entries_never_lost() {
                 cluster.kill_node(leader_id).await;
                 sleep(Duration::from_secs(2)).await;
                 cluster.restart_node(leader_id).await;
-                cluster.wait_for_leader(Duration::from_secs(10)).await.unwrap();
+                cluster.wait_for_convergence(Duration::from_secs(10)).await.unwrap();
+    let _ = cluster.get_leader_id().await.unwrap();
             }
         }
     }
@@ -114,16 +115,18 @@ async fn test_committed_entries_never_lost() {
     // Verify all committed VMs still exist on all nodes
     let committed = committed_entries.lock().await.clone();
     
-    for node in cluster.get_nodes() {
-        let vms = node.list_vms().await.unwrap();
-        let vm_names: HashSet<_> = vms.iter().map(|v| v.name.clone()).collect();
-        
-        for committed_vm in &committed {
-            assert!(
-                vm_names.contains(committed_vm),
-                "Committed VM {} missing from node {}",
-                committed_vm, node.id()
-            );
+    for i in 1..=5 {
+        if let Ok(node) = cluster.get_node(i) {
+            let vms = node.shared_state.list_vms().await.unwrap();
+            let vm_names: HashSet<_> = vms.iter().map(|(config, _)| config.name.clone()).collect();
+            
+            for committed_vm in &committed {
+                assert!(
+                    vm_names.contains(committed_vm),
+                    "Committed VM {} missing from node {}",
+                    committed_vm, i
+                );
+            }
         }
     }
 }
@@ -131,24 +134,21 @@ async fn test_committed_entries_never_lost() {
 /// Test that logs remain consistent across nodes
 #[tokio::test]
 async fn test_log_consistency() {
-    let cluster = TestCluster::new(3).await;
-    cluster.wait_for_leader(Duration::from_secs(10)).await.unwrap();
+    let cluster = TestCluster::new(3).await.unwrap();
+    cluster.wait_for_convergence(Duration::from_secs(10)).await.unwrap();
+    let _ = cluster.get_leader_id().await.unwrap();
     
     // Create some entries
     let leader_client = cluster.leader_client().await.unwrap();
     
     for i in 0..5 {
-        let config = VmConfig {
-            memory: 1024 * 1024 * 1024,
-            vcpus: 1,
-            disk_size: 10 * 1024 * 1024 * 1024,
-            image: "test-image".to_string(),
-            network_interfaces: vec![],
-            metadata: HashMap::new(),
-        };
+        let vm_name = format!("vm-{}", i);
+        let mut config = common::test_vm_config(&vm_name);
+        config.memory = 1024;
+        config.vcpus = 1;
         
         leader_client.create_vm(CreateVmRequest {
-            name: format!("vm-{}", i),
+            name: vm_name,
             config,
         }).await.ok();
     }
@@ -182,8 +182,9 @@ async fn test_log_consistency() {
 /// Test split-brain prevention
 #[tokio::test]
 async fn test_split_brain_prevention() {
-    let cluster = TestCluster::new(5).await;
-    cluster.wait_for_leader(Duration::from_secs(10)).await.unwrap();
+    let cluster = TestCluster::new(5).await.unwrap();
+    cluster.wait_for_convergence(Duration::from_secs(10)).await.unwrap();
+    let _ = cluster.get_leader_id().await.unwrap();
     
     // Create network partition: [1,2] vs [3,4,5]
     cluster.partition_network(vec![1, 2], vec![3, 4, 5]).await;
@@ -194,27 +195,13 @@ async fn test_split_brain_prevention() {
     // Minority partition (should fail)
     let minority_result = clients[0].create_vm(CreateVmRequest {
         name: "minority-vm".to_string(),
-        config: VmConfig {
-            memory: 1024 * 1024 * 1024,
-            vcpus: 1,
-            disk_size: 10 * 1024 * 1024 * 1024,
-            image: "test-image".to_string(),
-            network_interfaces: vec![],
-            metadata: HashMap::new(),
-        },
+        config: common::test_vm_config(&"minority-vm".to_string()),
     }).await;
     
     // Majority partition (should succeed)
     let majority_result = clients[2].create_vm(CreateVmRequest {
         name: "majority-vm".to_string(),
-        config: VmConfig {
-            memory: 1024 * 1024 * 1024,
-            vcpus: 1,
-            disk_size: 10 * 1024 * 1024 * 1024,
-            image: "test-image".to_string(),
-            network_interfaces: vec![],
-            metadata: HashMap::new(),
-        },
+        config: common::test_vm_config(&"majority-vm".to_string()),
     }).await;
     
     // Verify minority couldn't commit
@@ -259,8 +246,9 @@ async fn test_split_brain_prevention() {
 /// Test that new leaders have all committed entries
 #[tokio::test]
 async fn test_leader_completeness() {
-    let cluster = TestCluster::new(5).await;
-    cluster.wait_for_leader(Duration::from_secs(10)).await.unwrap();
+    let cluster = TestCluster::new(5).await.unwrap();
+    cluster.wait_for_convergence(Duration::from_secs(10)).await.unwrap();
+    let _ = cluster.get_leader_id().await.unwrap();
     
     // Create some committed entries
     let leader_client = cluster.leader_client().await.unwrap();
@@ -270,14 +258,7 @@ async fn test_leader_completeness() {
         let vm_name = format!("committed-vm-{}", i);
         let result = leader_client.create_vm(CreateVmRequest {
             name: vm_name.clone(),
-            config: VmConfig {
-                memory: 1024 * 1024 * 1024,
-                vcpus: 1,
-                disk_size: 10 * 1024 * 1024 * 1024,
-                image: "test-image".to_string(),
-                network_interfaces: vec![],
-                metadata: HashMap::new(),
-            },
+            config: common::test_vm_config(&vm_name),
         }).await;
         
         if result.is_ok() {
@@ -294,7 +275,8 @@ async fn test_leader_completeness() {
             cluster.kill_node(leader_id).await;
             
             // Wait for new leader
-            cluster.wait_for_leader(Duration::from_secs(10)).await.unwrap();
+            cluster.wait_for_convergence(Duration::from_secs(10)).await.unwrap();
+    let _ = cluster.get_leader_id().await.unwrap();
             
             // Verify new leader has all committed entries
             let new_leader = cluster.get_leader_node().await.unwrap();
@@ -318,23 +300,18 @@ async fn test_leader_completeness() {
 /// Test that followers correctly reject invalid append entries
 #[tokio::test]
 async fn test_follower_log_consistency_check() {
-    let cluster = TestCluster::new(3).await;
-    cluster.wait_for_leader(Duration::from_secs(10)).await.unwrap();
+    let cluster = TestCluster::new(3).await.unwrap();
+    cluster.wait_for_convergence(Duration::from_secs(10)).await.unwrap();
+    let _ = cluster.get_leader_id().await.unwrap();
     
     // Create initial entries
     let leader_client = cluster.leader_client().await.unwrap();
     
     for i in 0..3 {
+        let vm_name = format!("initial-vm-{}", i);
         leader_client.create_vm(CreateVmRequest {
-            name: format!("initial-vm-{}", i),
-            config: VmConfig {
-                memory: 1024 * 1024 * 1024,
-                vcpus: 1,
-                disk_size: 10 * 1024 * 1024 * 1024,
-                image: "test-image".to_string(),
-                network_interfaces: vec![],
-                metadata: HashMap::new(),
-            },
+            name: vm_name.clone(),
+            config: common::test_vm_config(&vm_name),
         }).await.ok();
     }
     
@@ -349,16 +326,10 @@ async fn test_follower_log_consistency_check() {
     
     // Create more entries while follower is partitioned
     for i in 3..6 {
+        let vm_name = format!("partition-vm-{}", i);
         leader_client.create_vm(CreateVmRequest {
-            name: format!("partition-vm-{}", i),
-            config: VmConfig {
-                memory: 1024 * 1024 * 1024,
-                vcpus: 1,
-                disk_size: 10 * 1024 * 1024 * 1024,
-                image: "test-image".to_string(),
-                network_interfaces: vec![],
-                metadata: HashMap::new(),
-            },
+            name: vm_name.clone(),
+            config: common::test_vm_config(&vm_name),
         }).await.ok();
     }
     
@@ -399,8 +370,9 @@ async fn test_follower_log_consistency_check() {
 /// Test election restriction - nodes without up-to-date logs cannot become leader
 #[tokio::test]
 async fn test_election_restriction() {
-    let cluster = TestCluster::new(5).await;
-    cluster.wait_for_leader(Duration::from_secs(10)).await.unwrap();
+    let cluster = TestCluster::new(5).await.unwrap();
+    cluster.wait_for_convergence(Duration::from_secs(10)).await.unwrap();
+    let _ = cluster.get_leader_id().await.unwrap();
     
     // Partition one node before creating entries
     cluster.partition_node(5).await;
@@ -409,16 +381,10 @@ async fn test_election_restriction() {
     let leader_client = cluster.leader_client().await.unwrap();
     
     for i in 0..5 {
+        let vm_name = format!("restricted-vm-{}", i);
         leader_client.create_vm(CreateVmRequest {
-            name: format!("restricted-vm-{}", i),
-            config: VmConfig {
-                memory: 1024 * 1024 * 1024,
-                vcpus: 1,
-                disk_size: 10 * 1024 * 1024 * 1024,
-                image: "test-image".to_string(),
-                network_interfaces: vec![],
-                metadata: HashMap::new(),
-            },
+            name: vm_name.clone(),
+            config: common::test_vm_config(&vm_name),
         }).await.ok();
     }
     

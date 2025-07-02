@@ -6,7 +6,7 @@
 //! - Handle auto-recovery for failed VMs
 
 use blixard_core::{
-    types::{VmConfig, NodeConfig},
+    types::{VmConfig, NodeConfig, NodeTopology},
     vm_health_types::{VmHealthCheckConfig, VmHealthCheck, HealthCheckType},
     node_shared::SharedNodeState,
     vm_backend::{VmManager, MockVmBackend},
@@ -42,6 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         use_tailscale: false,
         vm_backend: "mock".to_string(),
         transport_config: None,
+        topology: NodeTopology::default(),
     };
     
     // Initialize node state

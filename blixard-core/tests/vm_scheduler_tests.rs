@@ -5,7 +5,7 @@ use redb::Database;
 use blixard_core::{
     vm_scheduler::{VmScheduler, PlacementStrategy, VmResourceRequirements, NodeResourceUsage},
     raft_manager::WorkerCapabilities,
-    types::{VmConfig, VmState, VmStatus},
+    types::{VmConfig, VmState, VmStatus, NodeTopology},
     storage::{init_database_tables, WORKER_TABLE, WORKER_STATUS_TABLE, VM_STATE_TABLE},
     error::BlixardResult,
 };
@@ -132,6 +132,7 @@ async fn test_node_resource_usage_calculations() {
         used_memory_mb: 8192,
         used_disk_gb: 50,
         running_vms: 2,
+        topology: NodeTopology::default(),
     };
     
     // Test available resource calculations
@@ -184,6 +185,7 @@ async fn test_placement_strategy_scoring() {
         used_memory_mb: 8192,
         used_disk_gb: 50,
         running_vms: 2,
+        topology: NodeTopology::default(),
     };
     
     // Most available should score based on available resources (50% available = 0.5 score)

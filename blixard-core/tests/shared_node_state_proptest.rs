@@ -1,5 +1,5 @@
 use blixard_core::node_shared::{SharedNodeState, RaftStatus};
-use blixard_core::types::NodeConfig;
+use blixard_core::types::{NodeConfig, NodeTopology};
 use blixard_core::raft_manager::{TaskSpec, ResourceRequirements};
 use proptest::prelude::*;
 use std::sync::Arc;
@@ -25,6 +25,7 @@ fn arb_node_config() -> impl Strategy<Value = NodeConfig> {
                 use_tailscale,
                 vm_backend: "mock".to_string(),
                 transport_config: None,
+                topology: NodeTopology::default(),
             }
         })
 }

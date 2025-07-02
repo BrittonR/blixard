@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tempfile::TempDir;
 use redb::Database;
 use blixard_core::raft_manager::{RaftStateMachine, ProposalData, TaskSpec, ResourceRequirements, TaskResult, WorkerCapabilities, WorkerStatus};
-use blixard_core::types::{VmCommand, VmConfig, VmStatus};
+use blixard_core::types::{VmCommand, VmConfig, VmStatus, NodeTopology};
 use blixard_core::storage::{TASK_TABLE, TASK_ASSIGNMENT_TABLE, TASK_RESULT_TABLE, WORKER_TABLE, WORKER_STATUS_TABLE};
 use raft::prelude::Entry;
 
@@ -135,6 +135,7 @@ async fn test_apply_register_worker() {
             disk_gb: 100,
             features: vec!["gpu".to_string()],
         },
+        topology: NodeTopology::default(),
     };
     
     let entry = create_entry(proposal);
@@ -166,6 +167,7 @@ async fn test_apply_update_worker_status() {
             disk_gb: 50,
             features: vec![],
         },
+        topology: NodeTopology::default(),
     };
     
     let entry = create_entry(register_proposal);
@@ -319,6 +321,7 @@ async fn test_worker_registration_overwrites() {
             disk_gb: 50,
             features: vec![],
         },
+        topology: NodeTopology::default(),
     };
     
     let entry = create_entry(proposal1);
@@ -334,6 +337,7 @@ async fn test_worker_registration_overwrites() {
             disk_gb: 100,
             features: vec!["gpu".to_string()],
         },
+        topology: NodeTopology::default(),
     };
     
     let entry = create_entry(proposal2);
