@@ -14,7 +14,6 @@ use crate::transport::iroh_cluster_service::{
     TaskRequest, TaskResponse, TaskStatusRequest, TaskStatusResponse,
     ProposeTaskRequest, ProposeTaskResponse,
 };
-use crate::transport::iroh_vm_service::{VmRequest, VmResponse};
 use crate::transport::services::vm::{VmOperationRequest, VmOperationResponse};
 use bytes::Bytes;
 use std::sync::Arc;
@@ -210,27 +209,25 @@ impl IrohClient {
     pub async fn create_vm(&self, config: crate::iroh_types::VmConfig) -> BlixardResult<Response<crate::iroh_types::CreateVmResponse>> {
         debug!("IrohClient::create_vm called with config: {:?}", config);
         
-        let request = VmRequest::Operation(
-            crate::transport::services::vm::VmOperationRequest::Create {
-                name: config.name,
-                config_path: String::new(), // Not used in current implementation
-                vcpus: config.cpu_cores,
-                memory_mb: config.memory_mb,
-            }
-        );
+        let request = crate::transport::services::vm::VmOperationRequest::Create {
+            name: config.name,
+            config_path: String::new(), // Not used in current implementation
+            vcpus: config.cpu_cores,
+            memory_mb: config.memory_mb,
+        };
         
-        debug!("Sending VmRequest: {:?}", request);
+        debug!("Sending VmOperationRequest: {:?}", request);
         
-        let response: VmResponse = self.call_service("vm", "create", request).await
+        let response: VmOperationResponse = self.call_service("vm", "create", request).await
             .map_err(|e| {
                 error!("call_service failed: {:?}", e);
                 e
             })?;
         
-        debug!("Received VmResponse: {:?}", response);
+        debug!("Received VmOperationResponse: {:?}", response);
         
         match response {
-            VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::Create { success, message, vm_id }) => {
+            crate::transport::services::vm::VmOperationResponse::Create { success, message, vm_id } => {
                 Ok(Response::new(crate::iroh_types::CreateVmResponse { success, message, vm_id }))
             }
             _ => Err(BlixardError::Internal {
@@ -240,14 +237,12 @@ impl IrohClient {
     }
     
     pub async fn start_vm(&self, request: crate::iroh_types::StartVmRequest) -> BlixardResult<Response<crate::iroh_types::StartVmResponse>> {
-        let vm_request = VmRequest::Operation(
-            crate::transport::services::vm::VmOperationRequest::Start { name: request.name }
-        );
+        let vm_request = crate::transport::services::vm::VmOperationRequest::Start { name: request.name };
         
-        let response: VmResponse = self.call_service("vm", "start", vm_request).await?;
+        let response: VmOperationResponse = self.call_service("vm", "start", vm_request).await?;
         
         match response {
-            VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::Start { success, message }) => {
+            crate::transport::services::vm::VmOperationResponse::Start { success, message } => {
                 Ok(Response::new(crate::iroh_types::StartVmResponse { success, message }))
             }
             _ => Err(BlixardError::Internal {
@@ -257,14 +252,12 @@ impl IrohClient {
     }
     
     pub async fn stop_vm(&self, request: crate::iroh_types::StopVmRequest) -> BlixardResult<Response<crate::iroh_types::StopVmResponse>> {
-        let vm_request = VmRequest::Operation(
-            crate::transport::services::vm::VmOperationRequest::Stop { name: request.name }
-        );
+        let vm_request = crate::transport::services::vm::VmOperationRequest::Stop { name: request.name };
         
-        let response: VmResponse = self.call_service("vm", "stop", vm_request).await?;
+        let response: VmOperationResponse = self.call_service("vm", "stop", vm_request).await?;
         
         match response {
-            VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::Stop { success, message }) => {
+            crate::transport::services::vm::VmOperationResponse::Stop { success, message } => {
                 Ok(Response::new(crate::iroh_types::StopVmResponse { success, message }))
             }
             _ => Err(BlixardError::Internal {
@@ -274,14 +267,12 @@ impl IrohClient {
     }
     
     pub async fn delete_vm(&self, request: crate::iroh_types::DeleteVmRequest) -> BlixardResult<Response<crate::iroh_types::DeleteVmResponse>> {
-        let vm_request = VmRequest::Operation(
-            crate::transport::services::vm::VmOperationRequest::Delete { name: request.name }
-        );
+        let vm_request = crate::transport::services::vm::VmOperationRequest::Delete { name: request.name };
         
-        let response: VmResponse = self.call_service("vm", "delete", vm_request).await?;
+        let response: VmOperationResponse = self.call_service("vm", "delete", vm_request).await?;
         
         match response {
-            VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::Delete { success, message }) => {
+            crate::transport::services::vm::VmOperationResponse::Delete { success, message } => {
                 Ok(Response::new(crate::iroh_types::DeleteVmResponse { success, message }))
             }
             _ => Err(BlixardError::Internal {
@@ -291,14 +282,12 @@ impl IrohClient {
     }
     
     pub async fn get_vm_status(&self, name: String) -> BlixardResult<Option<crate::iroh_types::VmInfo>> {
-        let request = VmRequest::Operation(
-            crate::transport::services::vm::VmOperationRequest::GetStatus { name }
-        );
+        let request = crate::transport::services::vm::VmOperationRequest::GetStatus { name };
         
-        let response: VmResponse = self.call_service("vm", "get_status", request).await?;
+        let response: VmOperationResponse = self.call_service("vm", "get_status", request).await?;
         
         match response {
-            VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::GetStatus { found, vm_info }) => {
+            crate::transport::services::vm::VmOperationResponse::GetStatus { found, vm_info } => {
                 let vm_info = vm_info.map(|data| crate::iroh_types::VmInfo {
                     name: data.name,
                     state: match data.state.as_str() {
@@ -324,14 +313,12 @@ impl IrohClient {
     }
     
     pub async fn list_vms(&self) -> BlixardResult<Vec<crate::iroh_types::VmInfo>> {
-        let request = VmRequest::Operation(
-            crate::transport::services::vm::VmOperationRequest::List
-        );
+        let request = crate::transport::services::vm::VmOperationRequest::List;
         
-        let response: VmResponse = self.call_service("vm", "list", request).await?;
+        let response: VmOperationResponse = self.call_service("vm", "list", request).await?;
         
         match response {
-            VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::List { vms }) => {
+            crate::transport::services::vm::VmOperationResponse::List { vms } => {
                 let vms = vms.into_iter().map(|data| crate::iroh_types::VmInfo {
                     name: data.name,
                     state: match data.state.as_str() {
