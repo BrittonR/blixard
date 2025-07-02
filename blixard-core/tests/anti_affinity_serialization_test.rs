@@ -1,5 +1,7 @@
 //! Tests for anti-affinity rule serialization
 
+mod common;
+
 use blixard_core::{
     anti_affinity::{AntiAffinityRule, AntiAffinityRules, AntiAffinityType},
     types::VmConfig,
@@ -27,15 +29,13 @@ fn test_vm_config_with_anti_affinity_serialization() {
         .add_rule(AntiAffinityRule::hard("frontend"))
         .add_rule(AntiAffinityRule::soft("cache", 0.5));
     
-    let vm_config = VmConfig {
-        name: "test-vm".to_string(),
-        config_path: "/etc/vm.nix".to_string(),
-        vcpus: 4,
-        memory: 8192,
-        tenant_id: "test-tenant".to_string(),
-        ip_address: Some("10.0.0.1".to_string()),
-        metadata: None,
-        anti_affinity: Some(anti_affinity),
+    let vm_config = {
+        let mut config = common::test_vm_config("test-vm");
+        config.vcpus = 4;
+        config.memory = 8192;
+        config.ip_address = Some("10.0.0.1".to_string());
+        config.anti_affinity = Some(anti_affinity);
+        config
     };
     
     let json = serde_json::to_string_pretty(&vm_config).unwrap();
@@ -53,15 +53,11 @@ fn test_vm_config_with_anti_affinity_serialization() {
 
 #[test]
 fn test_vm_config_without_anti_affinity() {
-    let vm_config = VmConfig {
-        name: "simple-vm".to_string(),
-        config_path: "/etc/vm.nix".to_string(),
-        vcpus: 2,
-        memory: 4096,
-        tenant_id: "default".to_string(),
-        ip_address: None,
-        metadata: None,
-        anti_affinity: None,
+    let vm_config = {
+        let mut config = common::test_vm_config("simple-vm");
+        config.vcpus = 2;
+        config.memory = 4096;
+        config
     };
     
     let json = serde_json::to_string(&vm_config).unwrap();

@@ -1,5 +1,7 @@
 //! Tests for resource reservation and overcommit policies
 
+mod common;
+
 use blixard_core::{
     resource_management::{
         OvercommitPolicy, ResourceReservation, NodeResourceState,
@@ -82,16 +84,10 @@ async fn test_conservative_overcommit_policy() {
     scheduler.sync_resource_manager().await.unwrap();
     
     // Try to allocate exactly what's available (minus system reserve)
-    let vm1 = VmConfig {
-        name: "vm1".to_string(),
-        config_path: "/test.nix".to_string(),
-        vcpus: 7,  // 8 * 0.9 = 7.2
-        memory: 14745,  // 16384 * 0.9 = 14745
-        tenant_id: "test".to_string(),
-        ip_address: None,
-        metadata: None,
-        anti_affinity: None,
-    };
+    let mut vm1 = common::test_vm_config("vm1");
+    vm1.vcpus = 7;  // 8 * 0.9 = 7.2
+    vm1.memory = 14745;  // 16384 * 0.9 = 14745
+    vm1.tenant_id = "test".to_string();
     
     let decision = scheduler.schedule_vm_placement(&vm1, PlacementStrategy::MostAvailable)
         .await
@@ -117,16 +113,10 @@ async fn test_conservative_overcommit_policy() {
     }
     
     // Try to allocate more - should fail
-    let vm2 = VmConfig {
-        name: "vm2".to_string(),
-        config_path: "/test.nix".to_string(),
-        vcpus: 8,  // Exceeds available
-        memory: 16384,
-        tenant_id: "test".to_string(),
-        ip_address: None,
-        metadata: None,
-        anti_affinity: None,
-    };
+    let mut vm2 = common::test_vm_config("vm2");
+    vm2.vcpus = 8;  // Exceeds available
+    vm2.memory = 16384;
+    vm2.tenant_id = "test".to_string();
     
     let result = scheduler.schedule_vm_placement(&vm2, PlacementStrategy::MostAvailable).await;
     assert!(result.is_err());
@@ -150,27 +140,15 @@ async fn test_moderate_overcommit_policy() {
     //                    Disk = 100 * 1.1 * 0.85 = 93.5
     
     // Create multiple VMs that together exceed physical but fit in overcommit
-    let vm1 = VmConfig {
-        name: "vm1".to_string(),
-        config_path: "/test.nix".to_string(),
-        vcpus: 6,
-        memory: 8192,
-        tenant_id: "test".to_string(),
-        ip_address: None,
-        metadata: None,
-        anti_affinity: None,
-    };
+    let mut vm1 = common::test_vm_config("vm1");
+    vm1.vcpus = 6;
+    vm1.memory = 8192;
+    vm1.tenant_id = "test".to_string();
     
-    let vm2 = VmConfig {
-        name: "vm2".to_string(),
-        config_path: "/test.nix".to_string(),
-        vcpus: 6,  // Total 12 CPUs (exceeds physical 8, but within overcommit)
-        memory: 8192,
-        tenant_id: "test".to_string(),
-        ip_address: None,
-        metadata: None,
-        anti_affinity: None,
-    };
+    let mut vm2 = common::test_vm_config("vm2");
+    vm2.vcpus = 6;  // Total 12 CPUs (exceeds physical 8, but within overcommit)
+    vm2.memory = 8192;
+    vm2.tenant_id = "test".to_string();
     
     // Both should succeed with overcommit
     let decision1 = scheduler.schedule_vm_placement(&vm1, PlacementStrategy::MostAvailable)
@@ -202,16 +180,10 @@ async fn test_resource_reservations() {
     ).await.unwrap();
     
     // Try to allocate resources - should consider reservation
-    let vm = VmConfig {
-        name: "vm1".to_string(),
-        config_path: "/test.nix".to_string(),
-        vcpus: 7,  // 10 * 0.9 - 2 (reserved) = 7
-        memory: 10649,  // 16384 * 0.9 - 4096 (reserved) = 10649
-        tenant_id: "test".to_string(),
-        ip_address: None,
-        metadata: None,
-        anti_affinity: None,
-    };
+    let mut vm = common::test_vm_config("vm1");
+    vm.vcpus = 7;  // 10 * 0.9 - 2 (reserved) = 7
+    vm.memory = 10649;  // 16384 * 0.9 - 4096 (reserved) = 10649
+    vm.tenant_id = "test".to_string();
     
     let decision = scheduler.schedule_vm_placement(&vm, PlacementStrategy::MostAvailable)
         .await
@@ -229,16 +201,10 @@ async fn test_vm_placement_with_reservation() {
     add_worker_node(&database, 1, 8, 16384, 100).await;
     add_worker_node(&database, 2, 8, 16384, 100).await;
     
-    let vm = VmConfig {
-        name: "critical-vm".to_string(),
-        config_path: "/test.nix".to_string(),
-        vcpus: 4,
-        memory: 8192,
-        tenant_id: "test".to_string(),
-        ip_address: None,
-        metadata: None,
-        anti_affinity: None,
-    };
+    let mut vm = common::test_vm_config("critical-vm");
+    vm.vcpus = 4;
+    vm.memory = 8192;
+    vm.tenant_id = "test".to_string();
     
     // Schedule with reservation
     let decision = scheduler.schedule_vm_placement_with_reservation(
