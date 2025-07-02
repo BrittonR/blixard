@@ -31,3 +31,6 @@ panic = "abort"
 
 [profile.dev]
 debug = true
+
+[patch.crates-io]
+iroh-blobs = { git = "https://github.com/n0-computer/iroh-blobs", branch = "Frando/gc-protect" }
