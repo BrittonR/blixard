@@ -6,6 +6,7 @@
 use crate::error::{BlixardError, BlixardResult};
 use crate::discovery::{DiscoveryManager, create_combined_discovery, IrohDiscoveryBridge};
 use crate::p2p_monitor::{P2pMonitor, Direction, ConnectionState, NoOpMonitor};
+use crate::transport::BLIXARD_ALPN;
 
 #[cfg(feature = "failpoints")]
 use crate::fail_point;
@@ -187,7 +188,8 @@ impl IrohTransportV2 {
         
         // Build endpoint with discovery if provided
         let mut builder = Endpoint::builder()
-            .secret_key(secret_key);
+            .secret_key(secret_key)
+            .alpns(vec![BLIXARD_ALPN.to_vec()]);
         
         let discovery_bridge = if let Some(dm) = discovery_manager {
             info!("Configuring Iroh endpoint with Blixard discovery");

@@ -43,7 +43,7 @@ impl NodeDiscovery {
     /// 
     /// Supports formats:
     /// - File path to node registry JSON
-    /// - TODO: Support direct Iroh discovery via mDNS or other mechanisms
+    /// - Address in format host:port (will look for registry file in default locations)
     pub async fn discover_node(&mut self, address: &str) -> BlixardResult<NodeRegistryEntry> {
         // Check cache first
         if let Some(entry) = self.cache.get(address) {
@@ -55,20 +55,39 @@ impl NodeDiscovery {
             return self.load_from_file(address).await;
         }
 
-        // For now, return a dummy entry for development
-        // TODO: Implement actual Iroh node discovery
-        let entry = NodeRegistryEntry {
-            cluster_node_id: 1,
-            iroh_node_id: "dummy_node_id".to_string(),
-            direct_addresses: vec![address.to_string()],
-            relay_url: Some("https://relay.iroh.network".to_string()),
-            address: address.to_string(),
-        };
+        // Try to find registry file based on address
+        // For addresses like "127.0.0.1:7001", look for registry files in common locations
+        let registry_paths = vec![
+            "./data/node1/node-1-registry.json".to_string(),
+            "./data/node2/node-2-registry.json".to_string(),
+            "./data/node3/node-3-registry.json".to_string(),
+            format!("./data/node-1-registry.json"),
+            format!("./node-1-registry.json"),
+        ];
+        
+        for path in &registry_paths {
+            if Path::new(path).exists() {
+                match self.load_from_file(path).await {
+                    Ok(entry) => {
+                        // Check if the address matches
+                        if entry.address == address || entry.direct_addresses.contains(&address.to_string()) {
+                            self.cache.insert(address.to_string(), entry.clone());
+                            return Ok(entry);
+                        }
+                    }
+                    Err(_) => continue,
+                }
+            }
+        }
 
-        // Cache the entry
-        self.cache.insert(address.to_string(), entry.clone());
-
-        Ok(entry)
+        // If no registry file found, return error
+        Err(BlixardError::Internal {
+            message: format!(
+                "Failed to discover node at {}. No registry file found. \
+                Make sure the node is running and has written its registry file.",
+                address
+            ),
+        })
     }
 
     /// Load node registry from a file
@@ -94,7 +113,7 @@ impl NodeDiscovery {
     /// Create an Iroh NodeAddr from registry entry
     pub fn create_node_addr(&self, entry: &NodeRegistryEntry) -> BlixardResult<iroh::NodeAddr> {
         // Parse Iroh node ID from base64
-        let node_id_bytes = base64::decode(&entry.iroh_node_id)
+        let node_id_bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &entry.iroh_node_id)
             .map_err(|e| BlixardError::Internal {
                 message: format!("Failed to decode Iroh node ID: {}", e),
             })?;
@@ -110,10 +129,25 @@ impl NodeDiscovery {
                 message: format!("Invalid Iroh node ID: {}", e),
             })?;
 
-        // Parse direct addresses
+        // Parse direct addresses, converting wildcard addresses to localhost
         let direct_addrs: Vec<std::net::SocketAddr> = entry.direct_addresses
             .iter()
-            .filter_map(|addr| addr.parse().ok())
+            .filter_map(|addr| {
+                match addr.parse::<std::net::SocketAddr>() {
+                    Ok(mut socket_addr) => {
+                        // Convert 0.0.0.0 to 127.0.0.1 for local connections
+                        if socket_addr.ip().is_unspecified() {
+                            socket_addr.set_ip(if socket_addr.is_ipv4() {
+                                std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1))
+                            } else {
+                                std::net::IpAddr::V6(std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))
+                            });
+                        }
+                        Some(socket_addr)
+                    }
+                    Err(_) => None
+                }
+            })
             .collect();
 
         // Create NodeAddr

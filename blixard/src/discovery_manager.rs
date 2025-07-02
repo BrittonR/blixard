@@ -271,7 +271,7 @@ impl DiscoveryManager {
     /// Connect to a discovered peer
     async fn connect_to_peer(peer: &DiscoveredPeer, connector: &Arc<IrohPeerConnector>) {
         // Parse Iroh node ID
-        let node_id_bytes = match base64::decode(&peer.iroh_node_id) {
+        let node_id_bytes = match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &peer.iroh_node_id) {
             Ok(bytes) => bytes,
             Err(e) => {
                 error!("Failed to decode Iroh node ID for peer {}: {}", peer.node_id, e);

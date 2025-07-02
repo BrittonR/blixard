@@ -67,7 +67,7 @@
                   {%- elif volume.type == "dataDisk" %}
                   {
                     image = "{{ volume.path }}";
-                    mountPoint = "{{ volume.mountPoint | default('/data') }}";
+                    mountPoint = "{{ volume.mountPoint }}";
                     size = {{ volume.size }};
                     {%- if volume.readOnly %}
                     readOnly = true;
@@ -87,7 +87,7 @@
                 socket = "/tmp/{{ vm_name }}-console.sock";
                 
                 {%- if kernel_cmdline %}
-                kernelParams = [ {{ kernel_cmdline }} ];
+                kernelParams = {{ kernel_cmdline }};
                 {%- endif %}
               };
               
@@ -168,7 +168,7 @@
                 after = [ "network.target" ];
                 serviceConfig = {
                   Type = "oneshot";
-                  ExecStart = {{ init_command }};
+                  ExecStart = "{{ init_command }}";
                   RemainAfterExit = true;
                 };
               };

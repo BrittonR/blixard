@@ -14,6 +14,7 @@ use blixard_core::{
 };
 use blixard_vm::{MicrovmBackendFactory};
 use tokio::task::JoinHandle;
+use base64::Engine;
 
 /// Configuration for the Blixard orchestrator
 #[derive(Debug, Clone)]
@@ -56,6 +57,7 @@ pub struct OrchestratorConfig {
 pub struct BlixardOrchestrator {
     node: Node,
     metrics_handle: Option<JoinHandle<BlixardResult<()>>>,
+    node_config: NodeConfig,
 }
 
 impl BlixardOrchestrator {
@@ -64,17 +66,18 @@ impl BlixardOrchestrator {
         tracing::info!("Creating Blixard orchestrator with VM backend: {}", config.vm_backend_type);
         
         // Update node config to include VM backend type
-        let mut node_config = config.node_config;
+        let mut node_config = config.node_config.clone();
         node_config.vm_backend = config.vm_backend_type.clone();
         
         // Create the distributed consensus node
-        let node = Node::new(node_config);
+        let node = Node::new(node_config.clone());
         
         tracing::info!("Blixard orchestrator created with {} VM backend", config.vm_backend_type);
         
         Ok(Self { 
             node,
             metrics_handle: None,
+            node_config,
         })
     }
     
@@ -124,6 +127,11 @@ impl BlixardOrchestrator {
         tracing::info!("Starting Blixard node services");
         self.node.start().await?;
         
+        // Write node discovery information
+        if let Err(e) = self.write_node_registry().await {
+            tracing::warn!("Failed to write node registry: {}", e);
+        }
+        
         // Start metrics server if enabled
         let config = config_global::get();
         if config.network.metrics.enabled {
@@ -172,6 +180,49 @@ impl BlixardOrchestrator {
     /// Get the bind address of the gRPC server
     pub fn bind_address(&self) -> std::net::SocketAddr {
         *self.node.shared().get_bind_addr()
+    }
+    
+    /// Write node registry information for discovery
+    async fn write_node_registry(&self) -> BlixardResult<()> {
+        let shared = self.node.shared();
+        let node_id = shared.config.id;
+        let bind_addr = *shared.get_bind_addr();
+        
+        // Get P2P information from Iroh transport
+        let (iroh_node_id, direct_addresses, relay_url) = if let Some(node_addr) = shared.get_p2p_node_addr().await {
+            let node_id_base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, node_addr.node_id.as_bytes());
+            let addresses: Vec<String> = node_addr.direct_addresses()
+                .map(|addr| addr.to_string())
+                .collect();
+            let relay = node_addr.relay_url
+                .as_ref()
+                .map(|url| url.to_string());
+            (node_id_base64, addresses, relay)
+        } else {
+            tracing::warn!("P2P node address not available, using placeholder values");
+            ("placeholder_node_id".to_string(), vec![bind_addr.to_string()], None)
+        };
+        
+        // Create registry entry
+        let entry = crate::node_discovery::NodeRegistryEntry {
+            cluster_node_id: node_id,
+            iroh_node_id,
+            direct_addresses,
+            relay_url,
+            address: bind_addr.to_string(),
+        };
+        
+        // Write to data directory
+        let data_dir = std::path::Path::new(&self.node_config.data_dir);
+        let registry_path = data_dir.join(format!("node-{}-registry.json", node_id));
+        
+        crate::node_discovery::save_node_registry(
+            registry_path.to_str().unwrap(),
+            &entry
+        ).await?;
+        
+        tracing::info!("Node registry written to: {}", registry_path.display());
+        Ok(())
     }
 }
 
