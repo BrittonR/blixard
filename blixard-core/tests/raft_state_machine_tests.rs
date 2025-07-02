@@ -1,5 +1,7 @@
 #![cfg(feature = "test-helpers")]
 
+mod common;
+
 use std::sync::Arc;
 use tempfile::TempDir;
 use redb::Database;
@@ -190,15 +192,12 @@ async fn test_apply_vm_command_create() {
     let (_temp_dir, db) = create_test_db();
     let state_machine = RaftStateMachine::new(db.clone(), std::sync::Weak::new());
     
+    let mut vm_config = common::test_vm_config("test-vm");
+    vm_config.vcpus = 2;
+    vm_config.memory = 1024;
+    
     let proposal = ProposalData::CreateVm(VmCommand::Create {
-        config: VmConfig {
-            name: "test-vm".to_string(),
-            config_path: "/tmp/test.nix".to_string(),
-            vcpus: 2,
-            memory: 1024,
-            ip_address: None,
-            tenant_id: "test".to_string(),
-        },
+        config: vm_config,
         node_id: 1,
     });
     
@@ -404,15 +403,12 @@ async fn test_multiple_vm_operations() {
     let state_machine = RaftStateMachine::new(db.clone(), std::sync::Weak::new());
     
     // Create VM
+    let mut vm_config = common::test_vm_config("test-vm");
+    vm_config.vcpus = 2;
+    vm_config.memory = 1024;
+    
     let create = ProposalData::CreateVm(VmCommand::Create {
-        config: VmConfig {
-            name: "test-vm".to_string(),
-            config_path: "/tmp/test.nix".to_string(),
-            vcpus: 2,
-            memory: 1024,
-            ip_address: None,
-            tenant_id: "test".to_string(),
-        },
+        config: vm_config,
         node_id: 1,
     });
     

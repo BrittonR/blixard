@@ -4,6 +4,8 @@
 
 #![cfg(feature = "test-helpers")]
 
+mod common;
+
 use std::time::Duration;
 
 use blixard_core::test_helpers::{TestCluster, timing};
@@ -110,14 +112,9 @@ async fn test_scheduler_placement_decisions() {
     assert_eq!(summary.total_memory_mb, 57344); // 32768 + 16384 + 8192
     
     // Test 3: Manual placement
-    let vm2 = VmConfig {
-        name: "test-vm-2".to_string(),
-        config_path: "".to_string(),
-        vcpus: 1,
-        memory: 1024,
-        tenant_id: "default".to_string(),
-        ip_address: None,
-    };
+    let mut vm2 = common::test_vm_config("test-vm-2");
+    vm2.vcpus = 1;
+    vm2.memory = 1024;
     
     let placement2 = leader.shared_state.schedule_vm_placement(&vm2, PlacementStrategy::Manual { node_id: 2 }).await
         .expect("Should schedule VM manually");
