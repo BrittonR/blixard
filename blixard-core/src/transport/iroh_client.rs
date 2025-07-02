@@ -213,7 +213,7 @@ impl IrohClient {
             }
         );
         
-        let response: VmResponse = self.call_service("vm", "create_vm", request).await?;
+        let response: VmResponse = self.call_service("vm", "create", request).await?;
         
         match response {
             VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::Create { success, message, vm_id }) => {
@@ -230,7 +230,7 @@ impl IrohClient {
             crate::transport::services::vm::VmOperationRequest::Start { name }
         );
         
-        let response: VmResponse = self.call_service("vm", "start_vm", request).await?;
+        let response: VmResponse = self.call_service("vm", "start", request).await?;
         
         match response {
             VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::Start { success, message }) => {
@@ -247,7 +247,7 @@ impl IrohClient {
             crate::transport::services::vm::VmOperationRequest::Stop { name }
         );
         
-        let response: VmResponse = self.call_service("vm", "stop_vm", request).await?;
+        let response: VmResponse = self.call_service("vm", "stop", request).await?;
         
         match response {
             VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::Stop { success, message }) => {
@@ -264,7 +264,7 @@ impl IrohClient {
             crate::transport::services::vm::VmOperationRequest::Delete { name }
         );
         
-        let response: VmResponse = self.call_service("vm", "delete_vm", request).await?;
+        let response: VmResponse = self.call_service("vm", "delete", request).await?;
         
         match response {
             VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::Delete { success, message }) => {
@@ -281,7 +281,7 @@ impl IrohClient {
             crate::transport::services::vm::VmOperationRequest::GetStatus { name }
         );
         
-        let response: VmResponse = self.call_service("vm", "get_vm_status", request).await?;
+        let response: VmResponse = self.call_service("vm", "get_status", request).await?;
         
         match response {
             VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::GetStatus { found, vm_info }) => {
@@ -314,7 +314,7 @@ impl IrohClient {
             crate::transport::services::vm::VmOperationRequest::List
         );
         
-        let response: VmResponse = self.call_service("vm", "list_vms", request).await?;
+        let response: VmResponse = self.call_service("vm", "list", request).await?;
         
         match response {
             VmResponse::Operation(crate::transport::services::vm::VmOperationResponse::List { vms }) => {
