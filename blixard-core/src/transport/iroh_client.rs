@@ -382,47 +382,32 @@ impl IrohClusterServiceClient {
     
     /// Create a VM
     pub async fn create_vm(&self, config: crate::iroh_types::VmConfig) -> BlixardResult<Response<crate::iroh_types::CreateVmResponse>> {
-        let response = self.client.create_vm(
-            config.name,
-            String::new(), // config_path not used in VmConfig
-            config.cpu_cores,
-            config.memory_mb,
-        ).await?;
-        Ok(Response::new(response))
+        self.client.create_vm(config).await
     }
     
     /// Start a VM
     pub async fn start_vm(&self, request: crate::iroh_types::StartVmRequest) -> BlixardResult<Response<crate::iroh_types::StartVmResponse>> {
-        let response = self.client.start_vm(request.name).await?;
-        Ok(Response::new(response))
+        self.client.start_vm(request).await
     }
     
     /// Stop a VM
     pub async fn stop_vm(&self, request: crate::iroh_types::StopVmRequest) -> BlixardResult<Response<crate::iroh_types::StopVmResponse>> {
-        let response = self.client.stop_vm(request.name).await?;
-        Ok(Response::new(response))
+        self.client.stop_vm(request).await
     }
     
     /// Delete a VM
     pub async fn delete_vm(&self, request: crate::iroh_types::DeleteVmRequest) -> BlixardResult<Response<crate::iroh_types::DeleteVmResponse>> {
-        let response = self.client.delete_vm(request.name).await?;
-        Ok(Response::new(response))
+        self.client.delete_vm(request).await
     }
     
     /// Get VM status
     pub async fn get_vm_status(&self, name: String) -> BlixardResult<Option<crate::iroh_types::VmInfo>> {
-        let response = self.client.get_vm_status(name).await?;
-        if response.found {
-            Ok(response.vm_info)
-        } else {
-            Ok(None)
-        }
+        self.client.get_vm_status(name).await
     }
     
     /// List VMs
     pub async fn list_vms(&self) -> BlixardResult<Vec<crate::iroh_types::VmInfo>> {
-        let response = self.client.list_vms().await?;
-        Ok(response.vms)
+        self.client.list_vms().await
     }
     
     // VM Health Monitoring operations

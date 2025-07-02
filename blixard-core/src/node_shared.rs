@@ -580,12 +580,16 @@ impl SharedNodeState {
                     })?;
                 
                 // Make the RPC call using IrohClient's create_vm method
-                let response = iroh_client.create_vm(
-                    vm_config.name.clone(),
-                    vm_config.config_path.clone(),
-                    vm_config.vcpus,
-                    vm_config.memory,
-                ).await?;
+                // Convert types::VmConfig to iroh_types::VmConfig
+                let iroh_vm_config = crate::iroh_types::VmConfig {
+                    name: vm_config.name.clone(),
+                    cpu_cores: vm_config.vcpus,
+                    memory_mb: vm_config.memory,
+                    disk_gb: 10, // Default disk size
+                    owner: vm_config.tenant_id.clone(),
+                    metadata: vm_config.metadata.clone().unwrap_or_default(),
+                };
+                let response = iroh_client.create_vm(iroh_vm_config).await?;
                 
                 if response.success {
                     Ok(())
