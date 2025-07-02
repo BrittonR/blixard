@@ -189,19 +189,19 @@
       flake = {
         # Re-export the nixosConfiguration at the top level for compatibility
         nixosConfigurations."{{ vm_name }}" = 
-          config.perSystem.{{ system }}.nixosConfigurations."{{ vm_name }}";
+          config.perSystem."{{ system }}".nixosConfigurations."{{ vm_name }}";
           
         # Export VM runner for convenience
-        packages.{{ system }}.{{ vm_name }}-runner = 
-          config.perSystem.{{ system }}.nixosConfigurations."{{ vm_name }}"
+        packages."{{ system }}"."{{ vm_name }}-runner" = 
+          config.perSystem."{{ system }}".nixosConfigurations."{{ vm_name }}"
             .config.microvm.runner.{{ hypervisor }};
             
         # Export useful VM management apps
-        apps.{{ system }} = {
+        apps."{{ system }}" = {
           # Run the VM
           run = {
             type = "app";
-            program = "${self.packages.{{ system }}.{{ vm_name }}-runner}/bin/microvm-run";
+            program = "${self.packages."{{ system }}"."{{ vm_name }}-runner"}/bin/microvm-run";
           };
           
           # Console access
@@ -214,7 +214,7 @@
         };
         
         # Development shell with VM management tools
-        devShells.{{ system }}.default = pkgs.mkShell {
+        devShells."{{ system }}".default = pkgs.mkShell {
           buildInputs = with pkgs; [
             microvm
             socat

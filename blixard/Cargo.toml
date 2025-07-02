@@ -5,6 +5,7 @@ edition = "2021"
 rust-version = "1.75"
 description = "Distributed microVM orchestration platform"
 authors = ["Blixard Contributors"]
+default-run = "blixard"
 
 [dependencies]
 # Core functionality
