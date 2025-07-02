@@ -376,7 +376,7 @@ mod tests {
         
         // Should succeed now
         let info = provider.create_service_info().unwrap();
-        assert_eq!(info.get_properties().get("node_id").unwrap(), &node_id.to_string());
+        assert_eq!(info.get_properties().get("node_id").unwrap().to_string(), node_id.to_string());
     }
     
     #[test]

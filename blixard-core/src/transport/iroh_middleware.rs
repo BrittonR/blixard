@@ -264,7 +264,9 @@ mod tests {
         let registry = NodeIdentityRegistry::new();
         
         // Create a test node ID (normally this would be a real cryptographic ID)
-        let node_id = NodeId::new([1u8; 32]);
+        let test_bytes = [1u8; 32];
+        let public_key = iroh::PublicKey::from_bytes(&test_bytes).expect("valid public key");
+        let node_id = NodeId::from(public_key);
         
         // Register the node
         registry.register_node(
