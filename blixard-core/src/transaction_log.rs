@@ -199,9 +199,11 @@ impl TransactionLogWriter {
         let mut index = self.current_index.write().await;
         *index += 1;
         
-        let new_path = self.log_path.parent()
-            .unwrap()
-            .join(format!("txn-{:05}.log", *index));
+        let parent = self.log_path.parent()
+            .ok_or_else(|| BlixardError::Internal {
+                message: "Transaction log path has no parent directory".to_string(),
+            })?;
+        let new_path = parent.join(format!("txn-{:05}.log", *index));
         
         let new_file = OpenOptions::new()
             .create(true)

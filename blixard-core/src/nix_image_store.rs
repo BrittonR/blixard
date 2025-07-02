@@ -374,11 +374,19 @@ impl NixImageStore {
                 if target_dir.starts_with("/nix/store") {
                     PathBuf::from(path)
                 } else {
-                    target_dir.join(Path::new(path).file_name().unwrap())
+                    let file_name = Path::new(path).file_name()
+                        .ok_or_else(|| BlixardError::Internal {
+                            message: format!("Invalid store path: {}", path),
+                        })?;
+                    target_dir.join(file_name)
                 }
             }
             NixArtifactType::Closure { root_path, .. } => {
-                target_dir.join(format!("closure-{}", Path::new(root_path).file_name().unwrap().to_string_lossy()))
+                let file_name = Path::new(root_path).file_name()
+                    .ok_or_else(|| BlixardError::Internal {
+                        message: format!("Invalid closure root path: {}", root_path),
+                    })?;
+                target_dir.join(format!("closure-{}", file_name.to_string_lossy()))
             }
         };
 
@@ -633,7 +641,9 @@ impl NixImageStore {
 
     async fn store_chunk(&self, hash: &str, data: &[u8]) -> BlixardResult<()> {
         let chunk_path = self.cache_dir.join("chunks").join(hash);
-        std::fs::create_dir_all(chunk_path.parent().unwrap())?;
+        if let Some(parent) = chunk_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         tokio::fs::write(&chunk_path, data).await?;
 
         // Update index
@@ -650,7 +660,9 @@ impl NixImageStore {
         metadata: &NixImageMetadata,
         target_path: &Path,
     ) -> BlixardResult<()> {
-        std::fs::create_dir_all(target_path.parent().unwrap())?;
+        if let Some(parent) = target_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         
         let mut output = tokio::fs::File::create(target_path).await?;
         use tokio::io::AsyncWriteExt;
@@ -915,7 +927,7 @@ impl NixImageStore {
             .await;
             
         // If the above fails (due to shell pipe), try an alternative approach
-        let computed_hash = if output.is_err() || !output.as_ref().unwrap().status.success() {
+        let computed_hash = if output.as_ref().map(|o| !o.status.success()).unwrap_or(true) {
             // Alternative: use nix-store --dump and pipe to nix-hash
             let dump_output = Command::new("nix-store")
                 .args(&["--dump", &path.to_string_lossy()])
@@ -966,8 +978,12 @@ impl NixImageStore {
             
             format!("sha256:{}", String::from_utf8_lossy(&hash_result.stdout).trim())
         } else {
-            let output = output.unwrap();
-            format!("sha256:{}", String::from_utf8_lossy(&output.stdout).trim())
+            match output {
+                Ok(o) => format!("sha256:{}", String::from_utf8_lossy(&o.stdout).trim()),
+                Err(e) => return Err(BlixardError::Internal {
+                    message: format!("Failed to compute NAR hash: {}", e),
+                }),
+            }
         };
         
         // Compare the computed hash with the expected hash

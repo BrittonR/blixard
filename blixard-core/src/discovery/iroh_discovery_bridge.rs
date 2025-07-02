@@ -219,7 +219,7 @@ mod tests {
     async fn test_iroh_discovery_bridge() {
         // Create a discovery manager
         let config = DiscoveryConfig::default();
-        let manager = Arc::new(DiscoveryManager::new(1, config));
+        let manager = Arc::new(DiscoveryManager::new(config));
         
         // Create and start the bridge
         let bridge = IrohDiscoveryBridge::new(manager.clone());

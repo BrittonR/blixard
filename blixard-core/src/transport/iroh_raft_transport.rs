@@ -107,28 +107,40 @@ impl PeerConnection {
                     self.election_stream = Some(self.connection.open_uni().await
                         .map_err(|e| BlixardError::Internal { message: format!("Failed to open stream: {}", e) })?);
                 }
-                Ok(self.election_stream.as_mut().unwrap())
+                self.election_stream.as_mut()
+                    .ok_or_else(|| BlixardError::Internal { 
+                        message: "Election stream should exist after creation".to_string() 
+                    })
             }
             RaftMessagePriority::Heartbeat => {
                 if self.heartbeat_stream.is_none() {
                     self.heartbeat_stream = Some(self.connection.open_uni().await
                         .map_err(|e| BlixardError::Internal { message: format!("Failed to open stream: {}", e) })?);
                 }
-                Ok(self.heartbeat_stream.as_mut().unwrap())
+                self.heartbeat_stream.as_mut()
+                    .ok_or_else(|| BlixardError::Internal { 
+                        message: "Heartbeat stream should exist after creation".to_string() 
+                    })
             }
             RaftMessagePriority::LogAppend => {
                 if self.append_stream.is_none() {
                     self.append_stream = Some(self.connection.open_uni().await
                         .map_err(|e| BlixardError::Internal { message: format!("Failed to open stream: {}", e) })?);
                 }
-                Ok(self.append_stream.as_mut().unwrap())
+                self.append_stream.as_mut()
+                    .ok_or_else(|| BlixardError::Internal { 
+                        message: "Append stream should exist after creation".to_string() 
+                    })
             }
             RaftMessagePriority::Snapshot => {
                 if self.snapshot_stream.is_none() {
                     self.snapshot_stream = Some(self.connection.open_uni().await
                         .map_err(|e| BlixardError::Internal { message: format!("Failed to open stream: {}", e) })?);
                 }
-                Ok(self.snapshot_stream.as_mut().unwrap())
+                self.snapshot_stream.as_mut()
+                    .ok_or_else(|| BlixardError::Internal { 
+                        message: "Snapshot stream should exist after creation".to_string() 
+                    })
             }
         }
     }

@@ -62,6 +62,8 @@ pub enum ProposalData {
     RemoveWorker { node_id: u64 },
     
     // VM operations
+    // Note: CreateVm is a misnomer - it handles all VM operations (create, start, stop, delete)
+    // TODO: Rename to VmOperation(VmCommand) for clarity
     CreateVm(VmCommand),
     UpdateVmStatus { vm_name: String, status: VmStatus, node_id: u64 },
     MigrateVm { vm_name: String, from_node: u64, to_node: u64 },

@@ -407,19 +407,88 @@ impl SharedNodeState {
         }
     }
     
-    /// Send a VM command
+    /// Send a VM command through Raft consensus
     pub async fn send_vm_command(&self, command: VmCommand) -> BlixardResult<()> {
-        tracing::info!("🔥 send_vm_command called with command: {:?}", command);
-        let vm_manager = self.vm_manager.read().await;
-        if let Some(manager) = vm_manager.as_ref() {
-            tracing::info!("🔥 VM manager found, processing command");
-            let result = manager.inner.process_command(command).await;
-            tracing::info!("🔥 VM command processing result: {:?}", result);
-            result
+        tracing::info!("send_vm_command called with command: {:?}", command);
+        
+        // Check if we're the leader
+        let raft_status = self.get_raft_status().await?;
+        if !raft_status.is_leader {
+            // Forward to leader if we know who it is
+            if let Some(leader_id) = raft_status.leader_id {
+                tracing::info!("Forwarding VM command to leader node {}", leader_id);
+                
+                // Get leader address
+                let peers = self.get_peers().await;
+                let leader_addr = peers.iter()
+                    .find(|p| p.id == leader_id)
+                    .map(|p| p.address.clone())
+                    .ok_or_else(|| BlixardError::ClusterError(
+                        format!("Leader node {} address not found", leader_id)
+                    ))?;
+                
+                // TODO: Forward the request to the leader using Iroh P2P
+                // For now, return an error indicating non-leader
+                return Err(BlixardError::ClusterError(
+                    format!("Not the leader - leader is node {} at {}", leader_id, leader_addr)
+                ));
+            } else {
+                return Err(BlixardError::ClusterError("No leader elected yet".to_string()));
+            }
+        }
+        
+        // We are the leader - submit through Raft
+        let proposal_tx = self.raft_proposal_tx.lock().await;
+        if let Some(tx) = proposal_tx.as_ref() {
+            // Create the proposal - all VM commands go through CreateVm variant
+            // (this is actually a misnomer - it handles all VM operations)
+            let proposal_data = crate::raft_manager::ProposalData::CreateVm(command.clone());
+            
+            let (response_tx, response_rx) = oneshot::channel();
+            let proposal_id = uuid::Uuid::new_v4().as_bytes().to_vec();
+            
+            let proposal = RaftProposal {
+                id: proposal_id.clone(),
+                data: proposal_data,
+                response_tx: Some(response_tx),
+            };
+            
+            tracing::info!("Sending VM command proposal to Raft manager");
+            match tx.send(proposal) {
+                Ok(_) => {
+                    tracing::info!("Successfully sent VM proposal to Raft channel");
+                }
+                Err(e) => {
+                    tracing::error!("Failed to send VM proposal: {:?}", e);
+                    return Err(BlixardError::Internal {
+                        message: "Failed to send VM proposal - Raft channel closed".to_string(),
+                    });
+                }
+            }
+            
+            // Wait for response with a timeout
+            let timeout = crate::config_global::get().cluster.raft.proposal_timeout.as_secs();
+            match tokio::time::timeout(tokio::time::Duration::from_secs(timeout), response_rx).await {
+                Ok(Ok(result)) => {
+                    tracing::info!("Received VM proposal response: {:?}", result.is_ok());
+                    result
+                }
+                Ok(Err(_)) => {
+                    tracing::error!("VM proposal response channel closed");
+                    Err(BlixardError::Internal {
+                        message: "VM proposal response channel closed".to_string(),
+                    })
+                }
+                Err(_) => {
+                    tracing::error!("VM proposal timed out after {} seconds", timeout);
+                    Err(BlixardError::Internal {
+                        message: format!("VM proposal timed out after {} seconds", timeout),
+                    })
+                }
+            }
         } else {
-            tracing::error!("🔥 VM manager not initialized");
             Err(BlixardError::Internal {
-                message: "VM manager not initialized".to_string(),
+                message: "Raft proposal sender not initialized".to_string(),
             })
         }
     }

@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::convert::Infallible;
 use hyper::{Body, Request, Response, Server, StatusCode};
 use hyper::service::{make_service_fn, service_fn};
-use crate::error::BlixardResult;
+use crate::error::{BlixardResult, BlixardError};
 use crate::metrics_otel::prometheus_metrics;
 
 /// Handle HTTP requests to the metrics server
@@ -19,13 +19,23 @@ async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible
                 .status(StatusCode::OK)
                 .header("Content-Type", "text/plain; version=0.0.4")
                 .body(Body::from(metrics))
-                .unwrap()
+                .unwrap_or_else(|_| {
+                    Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from("Failed to build response"))
+                        .expect("Failed to build error response")
+                })
         }
         "/health" => {
             Response::builder()
                 .status(StatusCode::OK)
                 .body(Body::from("OK\n"))
-                .unwrap()
+                .unwrap_or_else(|_| {
+                    Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from("Failed to build response"))
+                        .expect("Failed to build error response")
+                })
         }
         "/" => {
             Response::builder()
@@ -42,13 +52,23 @@ async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible
 </ul>
 </body>
 </html>"#))
-                .unwrap()
+                .unwrap_or_else(|_| {
+                    Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from("Failed to build response"))
+                        .expect("Failed to build error response")
+                })
         }
         _ => {
             Response::builder()
                 .status(StatusCode::NOT_FOUND)
                 .body(Body::from("404 Not Found\n"))
-                .unwrap()
+                .unwrap_or_else(|_| {
+                    Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from("Failed to build response"))
+                        .expect("Failed to build error response")
+                })
         }
     };
     

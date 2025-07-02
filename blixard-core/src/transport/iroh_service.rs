@@ -88,8 +88,9 @@ impl IrohRpcServer {
     /// Register a service
     pub async fn register_service<S: IrohService>(&self, service: S) {
         let mut registry = self.registry.write().await;
+        let service_name = service.name().to_string();
         registry.register(service);
-        info!("Registered service: {}", registry.services.keys().last().unwrap());
+        info!("Registered service: {}", service_name);
     }
     
     /// Start accepting connections

@@ -57,7 +57,7 @@ impl IrohNodeInfo {
             metadata: HashMap::new(),
             last_seen: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                 .as_secs(),
         }
     }
@@ -66,7 +66,7 @@ impl IrohNodeInfo {
     pub fn update_last_seen(&mut self) {
         self.last_seen = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
             .as_secs();
     }
     
@@ -74,7 +74,7 @@ impl IrohNodeInfo {
     pub fn is_stale(&self, max_age_secs: u64) -> bool {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
             .as_secs();
         now - self.last_seen > max_age_secs
     }

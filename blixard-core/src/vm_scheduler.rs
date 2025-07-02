@@ -459,7 +459,9 @@ impl VmScheduler {
                     let (selected_node, preemption_candidates) = preemption_options
                         .into_iter()
                         .min_by_key(|(_, candidates)| candidates.len())
-                        .unwrap();
+                        .ok_or_else(|| BlixardError::Internal {
+                            message: "No preemption options available despite preemption being allowed".to_string(),
+                        })?;
                     
                     let reason = format!(
                         "Selected node {} using {:?} strategy with preemption. Will preempt {} VMs to free resources",
@@ -867,7 +869,10 @@ impl VmScheduler {
         // Sync all worker nodes
         for result in worker_table.iter()? {
             let (key, value) = result?;
-            let node_id = u64::from_le_bytes(key.value().try_into().unwrap());
+            let node_id = u64::from_le_bytes(key.value().try_into()
+                .map_err(|_| BlixardError::Internal {
+                    message: "Invalid node ID bytes in database".to_string(),
+                })?);
             
             // Check if worker is online
             if let Ok(Some(status_data)) = status_table.get(key.value()) {
@@ -1235,12 +1240,10 @@ impl VmScheduler {
         checker: Option<&AntiAffinityChecker>,
     ) -> BlixardResult<&'a NodeResourceUsage> {
         // If no anti-affinity rules, use regular selection
-        if anti_affinity_rules.is_none() || checker.is_none() {
-            return self.select_best_node(candidates, strategy);
-        }
-        
-        let rules = anti_affinity_rules.unwrap();
-        let checker = checker.unwrap();
+        let (rules, checker) = match (anti_affinity_rules, checker) {
+            (Some(r), Some(c)) => (r, c),
+            _ => return self.select_best_node(candidates, strategy),
+        };
         
         // Calculate combined scores (placement score - anti-affinity penalty)
         let scored_candidates: Vec<(&NodeResourceUsage, f64)> = candidates

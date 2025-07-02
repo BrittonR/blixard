@@ -444,21 +444,23 @@ impl RemediationEngine {
         // Update circuit breaker
         {
             let mut breakers = circuit_breakers.write().await;
-            let breaker = breakers.get_mut(&issue.issue_type).unwrap();
-            
-            if result.success {
-                // Reset on success
-                breaker.failure_count = 0;
-                breaker.state = CircuitState::Closed;
-            } else {
-                // Increment failures
-                breaker.failure_count += 1;
-                breaker.last_failure = Some(SystemTime::now());
-                
-                if breaker.failure_count >= policy.circuit_breaker_threshold {
-                    breaker.state = CircuitState::Open;
-                    error!("Circuit breaker opened for issue type {:?}", issue.issue_type);
+            if let Some(breaker) = breakers.get_mut(&issue.issue_type) {
+                if result.success {
+                    // Reset on success
+                    breaker.failure_count = 0;
+                    breaker.state = CircuitState::Closed;
+                } else {
+                    // Increment failures
+                    breaker.failure_count += 1;
+                    breaker.last_failure = Some(SystemTime::now());
+                    
+                    if breaker.failure_count >= policy.circuit_breaker_threshold {
+                        breaker.state = CircuitState::Open;
+                        error!("Circuit breaker opened for issue type {:?}", issue.issue_type);
+                    }
                 }
+            } else {
+                warn!("No circuit breaker found for issue type {:?}", issue.issue_type);
             }
         }
         

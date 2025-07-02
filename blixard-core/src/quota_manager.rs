@@ -6,11 +6,11 @@
 //! - Provides rate limiting for API operations
 //! - Manages per-tenant and per-node limits
 
-use crate::error::BlixardResult;
+use crate::error::{BlixardResult, BlixardError};
 use crate::resource_quotas::*;
 use crate::storage::Storage;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::time::{interval, Interval};
@@ -102,13 +102,45 @@ impl QuotaManager {
         Ok(manager)
     }
     
+    /// Helper to safely acquire read lock
+    fn read_quotas(&self) -> BlixardResult<RwLockReadGuard<HashMap<TenantId, TenantQuota>>> {
+        self.quotas.read()
+            .map_err(|_| BlixardError::Internal {
+                message: "Failed to acquire quota read lock - lock poisoned".to_string(),
+            })
+    }
+    
+    /// Helper to safely acquire write lock
+    fn write_quotas(&self) -> BlixardResult<RwLockWriteGuard<HashMap<TenantId, TenantQuota>>> {
+        self.quotas.write()
+            .map_err(|_| BlixardError::Internal {
+                message: "Failed to acquire quota write lock - lock poisoned".to_string(),
+            })
+    }
+    
+    /// Helper to safely acquire usage read lock
+    fn read_usage(&self) -> BlixardResult<RwLockReadGuard<HashMap<TenantId, TenantUsage>>> {
+        self.usage.read()
+            .map_err(|_| BlixardError::Internal {
+                message: "Failed to acquire usage read lock - lock poisoned".to_string(),
+            })
+    }
+    
+    /// Helper to safely acquire usage write lock
+    fn write_usage(&self) -> BlixardResult<RwLockWriteGuard<HashMap<TenantId, TenantUsage>>> {
+        self.usage.write()
+            .map_err(|_| BlixardError::Internal {
+                message: "Failed to acquire usage write lock - lock poisoned".to_string(),
+            })
+    }
+    
     /// Set quota for a tenant
     pub async fn set_tenant_quota(&self, quota: TenantQuota) -> BlixardResult<()> {
         let tenant_id = quota.tenant_id.clone();
         
         // Store in memory
         {
-            let mut quotas = self.quotas.write().unwrap();
+            let mut quotas = self.write_quotas()?;
             quotas.insert(tenant_id.clone(), quota.clone());
         }
         
@@ -124,9 +156,10 @@ impl QuotaManager {
     /// Get quota for a tenant (creates default if not exists)
     pub async fn get_tenant_quota(&self, tenant_id: &str) -> TenantQuota {
         {
-            let quotas = self.quotas.read().unwrap();
-            if let Some(quota) = quotas.get(tenant_id) {
-                return quota.clone();
+            if let Ok(quotas) = self.read_quotas() {
+                if let Some(quota) = quotas.get(tenant_id) {
+                    return quota.clone();
+                }
             }
         }
         
@@ -143,8 +176,8 @@ impl QuotaManager {
     pub async fn remove_tenant_quota(&self, tenant_id: &str) -> BlixardResult<()> {
         // Remove from memory
         {
-            let mut quotas = self.quotas.write().unwrap();
-            let mut usage = self.usage.write().unwrap();
+            let mut quotas = self.write_quotas()?;
+            let mut usage = self.write_usage()?;
             quotas.remove(tenant_id);
             usage.remove(tenant_id);
         }
@@ -332,7 +365,7 @@ impl QuotaManager {
         disk_gb: i64, 
         node_id: u64
     ) -> BlixardResult<()> {
-        let mut usage_guard = self.usage.write().unwrap();
+        let mut usage_guard = self.write_usage()?;
         let tenant_usage = usage_guard
             .entry(tenant_id.to_string())
             .or_insert_with(|| TenantUsage::new(tenant_id.to_string()));
@@ -347,27 +380,33 @@ impl QuotaManager {
     
     /// Get current tenant usage
     pub async fn get_tenant_usage(&self, tenant_id: &str) -> TenantUsage {
-        let usage = self.usage.read().unwrap();
-        usage.get(tenant_id)
-            .cloned()
-            .unwrap_or_else(|| TenantUsage::new(tenant_id.to_string()))
+        match self.read_usage() {
+            Ok(usage) => usage.get(tenant_id)
+                .cloned()
+                .unwrap_or_else(|| TenantUsage::new(tenant_id.to_string())),
+            Err(_) => TenantUsage::new(tenant_id.to_string()),
+        }
     }
     
     /// Get usage for all tenants
     pub async fn get_all_usage(&self) -> HashMap<TenantId, TenantUsage> {
-        let usage = self.usage.read().unwrap();
-        usage.clone()
+        match self.read_usage() {
+            Ok(usage) => usage.clone(),
+            Err(_) => HashMap::new(),
+        }
     }
     
     /// Get quota for all tenants
     pub async fn get_all_quotas(&self) -> HashMap<TenantId, TenantQuota> {
-        let quotas = self.quotas.read().unwrap();
-        quotas.clone()
+        match self.read_quotas() {
+            Ok(quotas) => quotas.clone(),
+            Err(_) => HashMap::new(),
+        }
     }
     
     /// Reset usage statistics (for testing or maintenance)
     pub async fn reset_tenant_usage(&self, tenant_id: &str) -> BlixardResult<()> {
-        let mut usage = self.usage.write().unwrap();
+        let mut usage = self.write_usage()?;
         usage.insert(tenant_id.to_string(), TenantUsage::new(tenant_id.to_string()));
         
         let mut rate_limits = self.rate_limits.write().await;
@@ -383,7 +422,7 @@ impl QuotaManager {
         // For now, we'll load from a "quotas" table/collection
         match self.storage.get_all_quotas().await {
             Ok(stored_quotas) => {
-                let mut quotas = self.quotas.write().unwrap();
+                let mut quotas = self.write_quotas()?;
                 for quota in stored_quotas {
                     quotas.insert(quota.tenant_id.clone(), quota);
                 }

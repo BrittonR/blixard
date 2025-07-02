@@ -107,10 +107,12 @@ impl BandwidthTracker {
     fn cleanup_old_entries(&mut self, now: Instant) {
         while let Some(front) = self.entries.front() {
             if now.duration_since(front.timestamp) > self.window {
-                let entry = self.entries.pop_front().unwrap();
-                match entry.direction {
-                    Direction::Inbound => self.total_bytes_in -= entry.bytes,
-                    Direction::Outbound => self.total_bytes_out -= entry.bytes,
+                // Safe to pop since we just checked front() exists
+                if let Some(entry) = self.entries.pop_front() {
+                    match entry.direction {
+                        Direction::Inbound => self.total_bytes_in -= entry.bytes,
+                        Direction::Outbound => self.total_bytes_out -= entry.bytes,
+                    }
                 }
             } else {
                 break;
