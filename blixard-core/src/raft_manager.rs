@@ -189,6 +189,11 @@ impl RaftStateMachine {
                 self.apply_vm_command(write_txn, &command)?;
             }
             ProposalData::Batch(proposals) => {
+                // TODO: Optimize batch processing to use a single transaction
+                // Currently each sub-proposal gets its own transaction due to
+                // the way apply_entry works. This should be refactored to pass
+                // the transaction through to allow true batch processing.
+                
                 // Commit the current transaction first
                 write_txn.commit()
                     .map_err(|e| BlixardError::Storage {
@@ -197,7 +202,6 @@ impl RaftStateMachine {
                     })?;
                 
                 // Apply each proposal in the batch sequentially
-                // Each sub-proposal gets its own transaction
                 for sub_proposal in proposals {
                     // Prevent nested batches
                     if matches!(sub_proposal, ProposalData::Batch(_)) {

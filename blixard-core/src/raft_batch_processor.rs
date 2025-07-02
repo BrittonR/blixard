@@ -11,7 +11,7 @@ use tracing::{info, warn};
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::raft_manager::{RaftProposal, ProposalData};
-// use crate::metrics_otel::{metrics, attributes};
+use crate::metrics_otel::{metrics, attributes};
 
 /// Configuration for batch processing
 #[derive(Debug, Clone)]
@@ -222,7 +222,10 @@ impl RaftBatchProcessor {
         
         // If we have only one proposal, send it directly
         if batch_size == 1 {
-            let proposal = batch.proposals.into_iter().next().unwrap();
+            let proposal = batch.proposals.into_iter().next()
+                .ok_or_else(|| BlixardError::Internal {
+                    message: "Batch size is 1 but no proposals found".to_string(),
+                })?;
             self.raft_tx.send(proposal)
                 .map_err(|e| BlixardError::Internal {
                     message: format!("Failed to send proposal: {}", e),
@@ -238,11 +241,11 @@ impl RaftBatchProcessor {
                 })?;
             
             // Record batch metrics
-            // Note: We'll need to add these metrics to metrics_otel.rs
-            // metrics.raft_batches_total.add(1, &[node_attr.clone()]);
-            // metrics.raft_batch_size.record(batch_size as f64, &[node_attr.clone()]);
-            // metrics.raft_batch_bytes.record(batch_bytes as f64, &[node_attr.clone()]);
-            // metrics.raft_batch_age_ms.record(batch_age_ms as f64, &[node_attr]);
+            let node_attr = attributes::node_id(self.node_id);
+            metrics().raft_batches_total.add(1, &[node_attr.clone()]);
+            metrics().raft_batch_size.record(batch_size as f64, &[node_attr.clone()]);
+            metrics().raft_batch_bytes.record(batch_bytes as f64, &[node_attr.clone()]);
+            metrics().raft_batch_age_ms.record(batch_age_ms as f64, &[node_attr]);
         }
         
         Ok(())

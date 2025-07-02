@@ -26,6 +26,12 @@ pub struct Metrics {
     pub raft_commit_index: UpDownCounter<i64>,
     pub raft_proposal_duration: Histogram<f64>,
     
+    // Raft batch processing metrics
+    pub raft_batches_total: Counter<u64>,
+    pub raft_batch_size: Histogram<f64>,
+    pub raft_batch_bytes: Histogram<f64>,
+    pub raft_batch_age_ms: Histogram<f64>,
+    
     // Network metrics
     pub grpc_requests_total: Counter<u64>,
     pub grpc_requests_failed: Counter<u64>,
@@ -136,6 +142,24 @@ impl Metrics {
             raft_proposal_duration: meter
                 .f64_histogram("raft.proposal.duration")
                 .with_description("Duration of Raft proposals in seconds")
+                .init(),
+            
+            // Raft batch processing metrics
+            raft_batches_total: meter
+                .u64_counter("raft.batches.total")
+                .with_description("Total number of Raft proposal batches")
+                .init(),
+            raft_batch_size: meter
+                .f64_histogram("raft.batch.size")
+                .with_description("Number of proposals in each batch")
+                .init(),
+            raft_batch_bytes: meter
+                .f64_histogram("raft.batch.bytes")
+                .with_description("Size of Raft batches in bytes")
+                .init(),
+            raft_batch_age_ms: meter
+                .f64_histogram("raft.batch.age_ms")
+                .with_description("Age of batches when flushed in milliseconds")
                 .init(),
             
             // Network metrics
