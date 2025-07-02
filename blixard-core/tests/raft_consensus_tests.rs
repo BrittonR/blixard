@@ -68,13 +68,13 @@ async fn test_at_most_one_leader_per_term() {
 /// Test that committed entries are never lost
 #[tokio::test]
 async fn test_committed_entries_never_lost() {
-    let cluster = TestCluster::new(5).await;
-    cluster.wait_for_leader(Duration::from_secs(10)).await.unwrap();
+    let cluster = TestCluster::new(5).await.unwrap();
+    cluster.wait_for_convergence(Duration::from_secs(10)).await.unwrap();
     
     let committed_entries = Arc::new(Mutex::new(Vec::<String>::new()));
     
     // Create VMs (which go through Raft)
-    let leader_client = cluster.get_leader_client().await.unwrap();
+    let leader_client = cluster.leader_client().await.unwrap();
     
     for i in 0..10 {
         let vm_name = format!("test-vm-{}", i);
@@ -135,7 +135,7 @@ async fn test_log_consistency() {
     cluster.wait_for_leader(Duration::from_secs(10)).await.unwrap();
     
     // Create some entries
-    let leader_client = cluster.get_leader_client().await.unwrap();
+    let leader_client = cluster.leader_client().await.unwrap();
     
     for i in 0..5 {
         let config = VmConfig {
@@ -263,7 +263,7 @@ async fn test_leader_completeness() {
     cluster.wait_for_leader(Duration::from_secs(10)).await.unwrap();
     
     // Create some committed entries
-    let leader_client = cluster.get_leader_client().await.unwrap();
+    let leader_client = cluster.leader_client().await.unwrap();
     let mut created_vms = Vec::new();
     
     for i in 0..5 {
@@ -322,7 +322,7 @@ async fn test_follower_log_consistency_check() {
     cluster.wait_for_leader(Duration::from_secs(10)).await.unwrap();
     
     // Create initial entries
-    let leader_client = cluster.get_leader_client().await.unwrap();
+    let leader_client = cluster.leader_client().await.unwrap();
     
     for i in 0..3 {
         leader_client.create_vm(CreateVmRequest {
@@ -406,7 +406,7 @@ async fn test_election_restriction() {
     cluster.partition_node(5).await;
     
     // Create committed entries
-    let leader_client = cluster.get_leader_client().await.unwrap();
+    let leader_client = cluster.leader_client().await.unwrap();
     
     for i in 0..5 {
         leader_client.create_vm(CreateVmRequest {
