@@ -483,16 +483,6 @@ async fn main() -> BlixardResult<()> {
                             let shared_state = orchestrator.node().shared();
                             let actual_bind_address = orchestrator.bind_address();
                             
-                            // Start metrics server
-                            let node_port = actual_bind_address.port();
-                            let metrics_port = node_port + 1080; // Use node port + 1080 for metrics
-                            let metrics_addr: SocketAddr = format!("0.0.0.0:{}", metrics_port).parse()
-                                .map_err(|e| BlixardError::ConfigError(format!("Invalid metrics address: {}", e)))?;
-                            let _metrics_handle = blixard_core::metrics_server::spawn_metrics_server(
-                                metrics_addr,
-                                shared_state.clone(),
-                            );
-                            
                             // Keep orchestrator alive while running server
                             let _orchestrator = orchestrator;
                             
@@ -523,16 +513,6 @@ async fn main() -> BlixardResult<()> {
                     // Get shared state for gRPC server
                     let shared_state = orchestrator.node().shared();
                     let actual_bind_address = orchestrator.bind_address();
-                    
-                    // Start metrics server
-                    let node_port = actual_bind_address.port();
-                    let metrics_port = node_port + 1080; // Use node port + 1080 for metrics
-                    let metrics_addr: SocketAddr = format!("0.0.0.0:{}", metrics_port).parse()
-                        .map_err(|e| BlixardError::ConfigError(format!("Invalid metrics address: {}", e)))?;
-                    let _metrics_handle = blixard_core::metrics_server::spawn_metrics_server(
-                        metrics_addr,
-                        shared_state.clone(),
-                    );
                     
                     // Keep orchestrator alive while running server
                     let _orchestrator = orchestrator;
