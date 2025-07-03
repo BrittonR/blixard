@@ -241,10 +241,67 @@ impl IrohService for IrohClusterService {
     }
     
     async fn handle_call(&self, method: &str, payload: Bytes) -> BlixardResult<Bytes> {
-        // TODO: Implement method routing
-        Err(BlixardError::NotImplemented {
-            feature: format!("Cluster service method: {}", method),
-        })
+        match method {
+            "join_cluster" => {
+                let request: ClusterRequest = deserialize_payload(&payload)?;
+                
+                let response = match request {
+                    ClusterRequest::JoinCluster(req) => {
+                        let (success, message, peers, voters) = self.operations
+                            .join_cluster(req.node_id, req.bind_address, req.p2p_node_id, req.p2p_addresses, req.p2p_relay_url)
+                            .await?;
+                        ClusterResponse::JoinCluster(JoinClusterResponse {
+                            success,
+                            message,
+                            peers,
+                            voters,
+                        })
+                    }
+                    _ => return Err(BlixardError::Internal {
+                        message: "Unexpected request type for join_cluster".to_string(),
+                    }),
+                };
+                
+                serialize_payload(&response)
+            }
+            "leave_cluster" => {
+                let request: ClusterRequest = deserialize_payload(&payload)?;
+                
+                let response = match request {
+                    ClusterRequest::LeaveCluster(req) => {
+                        let (success, message) = self.operations
+                            .leave_cluster(req.node_id)
+                            .await?;
+                        ClusterResponse::LeaveCluster(LeaveClusterResponse {
+                            success,
+                            message,
+                        })
+                    }
+                    _ => return Err(BlixardError::Internal {
+                        message: "Unexpected request type for leave_cluster".to_string(),
+                    }),
+                };
+                
+                serialize_payload(&response)
+            }
+            "get_cluster_status" => {
+                let response = {
+                    let (leader_id, nodes, term) = self.operations
+                        .get_cluster_status()
+                        .await?;
+                    ClusterResponse::GetClusterStatus(ClusterStatusResponse {
+                        leader_id,
+                        nodes,
+                        term,
+                    })
+                };
+                
+                serialize_payload(&response)
+            }
+            _ => Err(BlixardError::NotImplemented {
+                feature: format!("Cluster service method: {}", method),
+            }),
+        }
     }
 }
 
