@@ -272,13 +272,44 @@ impl Node {
         // Start transport maintenance
         raft_transport.start_maintenance().await;
         
-        // Start task to handle outgoing Raft messages
+        // Start task to handle outgoing Raft messages with recovery
         let transport_clone = raft_transport.clone();
+        let shared_weak = Arc::downgrade(&self.shared);
         let _outgoing_handle = tokio::spawn(async move {
             let mut outgoing_rx = outgoing_rx;
-            while let Some((to, msg)) = outgoing_rx.recv().await {
-                if let Err(e) = transport_clone.send_message(to, msg).await {
-                    tracing::warn!("Failed to send Raft message to {}: {}", to, e);
+            let mut consecutive_errors = 0;
+            const MAX_CONSECUTIVE_ERRORS: u32 = 100;
+            
+            loop {
+                match outgoing_rx.recv().await {
+                    Some((to, msg)) => {
+                        if let Err(e) = transport_clone.send_message(to, msg).await {
+                            tracing::warn!("Failed to send Raft message to {}: {}", to, e);
+                            consecutive_errors += 1;
+                            
+                            // If we have too many consecutive errors, something is wrong
+                            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                                tracing::error!("Too many consecutive errors ({}) sending Raft messages, checking if node is still alive", consecutive_errors);
+                                
+                                // Check if the node is still alive
+                                if shared_weak.upgrade().is_none() {
+                                    tracing::error!("Node has been dropped, exiting outgoing message handler");
+                                    break;
+                                }
+                                
+                                // Reset counter and continue
+                                consecutive_errors = 0;
+                            }
+                        } else {
+                            // Reset error counter on successful send
+                            consecutive_errors = 0;
+                        }
+                    }
+                    None => {
+                        // Channel closed - this should only happen during shutdown
+                        tracing::info!("Outgoing Raft message channel closed, exiting handler");
+                        break;
+                    }
                 }
             }
             Ok::<(), BlixardError>(())
@@ -362,13 +393,36 @@ impl Node {
                             transport_config
                         ).await {
                             Ok(new_transport) => {
-                                // Start handling outgoing messages with new transport
+                                // Start handling outgoing messages with new transport (with recovery)
                                 let transport_clone = new_transport.clone();
+                                let shared_weak_inner = Arc::downgrade(&shared);
                                 tokio::spawn(async move {
                                     let mut outgoing_rx = outgoing_rx;
-                                    while let Some((to, msg)) = outgoing_rx.recv().await {
-                                        if let Err(e) = transport_clone.send_message(to, msg).await {
-                                            tracing::warn!("Failed to send Raft message to {}: {}", to, e);
+                                    let mut consecutive_errors = 0;
+                                    const MAX_CONSECUTIVE_ERRORS: u32 = 100;
+                                    
+                                    loop {
+                                        match outgoing_rx.recv().await {
+                                            Some((to, msg)) => {
+                                                if let Err(e) = transport_clone.send_message(to, msg).await {
+                                                    tracing::warn!("Failed to send Raft message to {}: {}", to, e);
+                                                    consecutive_errors += 1;
+                                                    
+                                                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                                                        tracing::error!("Too many consecutive errors in restarted handler");
+                                                        if shared_weak_inner.upgrade().is_none() {
+                                                            break;
+                                                        }
+                                                        consecutive_errors = 0;
+                                                    }
+                                                } else {
+                                                    consecutive_errors = 0;
+                                                }
+                                            }
+                                            None => {
+                                                tracing::info!("Outgoing channel closed in restarted handler");
+                                                break;
+                                            }
                                         }
                                     }
                                 });

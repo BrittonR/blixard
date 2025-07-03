@@ -18,7 +18,7 @@ use crate::{
 use async_trait::async_trait;
 use bytes::Bytes;
 use iroh::{
-    protocol::{ProtocolHandler, AcceptError},
+    protocol::ProtocolHandler,
     endpoint::Connection,
 };
 use std::{
@@ -190,7 +190,7 @@ impl SecureRpcProtocolHandler {
 }
 
 impl ProtocolHandler for SecureRpcProtocolHandler {
-    fn accept<'a>(&'a self, connection: Connection) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AcceptError>> + Send + 'a>> {
+    fn accept<'a>(&'a self, connection: Connection) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), anyhow::Error>> + Send + 'a>> {
         Box::pin(async move {
         debug!("Accepting secure RPC connection from {:?}", connection.remote_node_id());
         
@@ -199,7 +199,7 @@ impl ProtocolHandler for SecureRpcProtocolHandler {
             Ok(streams) => streams,
             Err(e) => {
                 error!("Failed to accept bidirectional stream: {}", e);
-                return Err(AcceptError::from_err(e));
+                return Err(anyhow::anyhow!("Failed to accept bidirectional stream: {}", e));
             }
         };
         

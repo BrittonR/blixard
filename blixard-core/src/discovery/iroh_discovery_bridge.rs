@@ -11,8 +11,8 @@ use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 use iroh::{NodeAddr, NodeId};
-use iroh::discovery::{Discovery, DiscoveryItem, DiscoveryError, NodeData, NodeInfo};
-use futures::{Stream, stream};
+use iroh::discovery::{Discovery, DiscoveryItem, NodeData, NodeInfo};
+use futures::Stream;
 
 use crate::discovery::{DiscoveryEvent, DiscoveryManager, IrohNodeInfo};
 use crate::error::BlixardResult;
@@ -146,8 +146,9 @@ impl Discovery for IrohDiscoveryBridge {
     /// Resolve a node ID to its addresses
     fn resolve(
         &self,
-        node_id: NodeId,
-    ) -> Option<Pin<Box<dyn Stream<Item = Result<DiscoveryItem, DiscoveryError>> + Send + 'static>>> {
+        _endpoint: iroh::Endpoint,
+        node_id: iroh::PublicKey,
+    ) -> Option<Pin<Box<dyn Stream<Item = Result<DiscoveryItem, anyhow::Error>> + Send + 'static>>> {
         let node_cache = self.node_cache.clone();
         
         // Create a stream that will yield discovery items for this node
@@ -164,14 +165,15 @@ impl Discovery for IrohDiscoveryBridge {
                     Some(node_addr) => {
                         debug!("Found node {} in Blixard discovery cache", node_id);
                         // Create a NodeInfo from the NodeAddr
-                        let direct_addresses: BTreeSet<_> = node_addr.direct_addresses()
+                        let direct_addresses: BTreeSet<_> = node_addr.direct_addresses
+                            .iter()
                             .cloned()
                             .collect();
                         let mut node_info = NodeInfo::new(node_id)
                             .with_direct_addresses(direct_addresses);
                         
                         // Add relay URL if present
-                        if let Some(relay_url) = node_addr.relay_url() {
+                        if let Some(relay_url) = &node_addr.relay_url {
                             node_info = node_info.with_relay_url(Some(relay_url.clone()));
                         }
                         

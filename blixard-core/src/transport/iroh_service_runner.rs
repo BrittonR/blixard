@@ -18,7 +18,7 @@ use crate::transport::{
 // VM operations are handled through SharedNodeState
 use async_trait::async_trait;
 use bytes::Bytes;
-use iroh::{Endpoint, discovery::dns::DnsDiscovery, protocol::{ProtocolHandler, AcceptError, Router}, endpoint::Connection};
+use iroh::{Endpoint, discovery::dns::DnsDiscovery, protocol::{ProtocolHandler, Router}, endpoint::Connection};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -163,7 +163,7 @@ impl std::fmt::Debug for IrohProtocolHandler {
 
 #[async_trait]
 impl ProtocolHandler for IrohProtocolHandler {
-    fn accept<'a>(&'a self, connection: Connection) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AcceptError>> + Send + 'a>> {
+    fn accept<'a>(&'a self, connection: Connection) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), anyhow::Error>> + Send + 'a>> {
         Box::pin(async move {
             debug!("Accepted connection from {:?}", connection.remote_node_id());
             
@@ -202,7 +202,7 @@ pub async fn start_iroh_services(
     } else {
         // Create a new Iroh endpoint if P2P manager isn't available
         let ep = Endpoint::builder()
-            .discovery(DnsDiscovery::n0_dns())
+            .discovery(Box::new(DnsDiscovery::n0_dns()))
             .bind()
             .await
             .map_err(|e| BlixardError::Internal {
