@@ -1488,6 +1488,11 @@ impl ConfigBuilder {
         self
     }
     
+    pub fn p2p_enabled(mut self, enabled: bool) -> Self {
+        self.config.p2p.enabled = enabled;
+        self
+    }
+    
     pub fn build(self) -> BlixardResult<Config> {
         self.config.validate()?;
         Ok(self.config)

@@ -407,10 +407,15 @@ impl TestNodeBuilder {
                 .bind_address(addr.to_string())
                 .data_dir(&data_dir)
                 .vm_backend("mock")
+                .p2p_enabled(true)  // Enable P2P for tests
                 .build()
                 .unwrap();
             let _ = config_global::init(test_config); // Ignore error if already initialized
         }
+        
+        // Create transport config for Iroh P2P
+        use crate::transport::config::TransportConfig;
+        let transport_config = TransportConfig::default();
         
         let config = NodeConfig {
             id,
@@ -419,7 +424,7 @@ impl TestNodeBuilder {
             join_addr: self.join_addr.clone(),
             use_tailscale: false,
             vm_backend: "mock".to_string(), // Use mock backend for tests
-            transport_config: None, // Use default transport
+            transport_config: Some(transport_config), // Enable Iroh transport
             topology: Default::default(), // Use default topology for tests
         };
         
@@ -437,32 +442,34 @@ impl TestNodeBuilder {
         let (shutdown_tx, _shutdown_rx) = oneshot::channel();
         shared_state.set_shutdown_tx(shutdown_tx).await;
         
-        // Start gRPC server BEFORE initializing node
-        // This ensures the server is ready when join requests are sent
+        // Initialize the node first - this creates the P2P manager
+        // which is required for starting Iroh services
+        node.initialize().await?;
+        
+        // Now start Iroh services AFTER node initialization
+        // The P2P manager now exists and services can start properly
         let state_clone = shared_state.clone();
         let addr_for_spawn = addr.clone();
         let server_handle = tokio::spawn(async move {
-            if let Err(e) = start_iroh_services(state_clone, addr_for_spawn).await {
-                tracing::error!("Iroh service runner failed on {}: {}", addr_for_spawn, e);
-                // Don't panic - let the wait_for_server_ready detect the failure
+            tracing::info!("Starting Iroh services task for {}", addr_for_spawn);
+            match start_iroh_services(state_clone, addr_for_spawn).await {
+                Ok(handle) => {
+                    tracing::info!("Iroh services started successfully on {}", addr_for_spawn);
+                    // Keep the handle alive
+                    let _ = handle.await;
+                }
+                Err(e) => {
+                    tracing::error!("Iroh service runner failed on {}: {:?}", addr_for_spawn, e);
+                    // Exit the task with an error
+                    panic!("Iroh service failed: {:?}", e);
+                }
             }
         });
         
-        // Give the server task a moment to start
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        
-        // Check if the server task already failed
-        if server_handle.is_finished() {
-            return Err(BlixardError::Internal {
-                message: format!("gRPC server failed to start on {}", addr),
-            });
-        }
-        
-        // Wait for server to be ready
-        wait_for_server_ready(addr).await?;
-        
-        // Now initialize the node (which may send join request)
-        node.initialize().await?;
+        // Give the Iroh services time to start up
+        // For Iroh, we don't have a direct way to check if it's ready,
+        // so we'll just wait a bit
+        tokio::time::sleep(Duration::from_millis(200)).await;
         
         // Set running state
         shared_state.set_running(true).await;
