@@ -35,8 +35,8 @@ async fn test_simple_node_join() {
         .expect("Failed to create node 2");
     println!("Created node 2 at {} and joined cluster via {}", node2.addr, node1.addr);
     
-    // Wait for propagation
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // Wait for propagation and leader election
+    tokio::time::sleep(Duration::from_secs(5)).await;
     
     // Check the authoritative voter list from Raft
     let voters1 = node1.shared_state.get_current_voters().await

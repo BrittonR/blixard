@@ -348,9 +348,28 @@ impl IrohRaftTransport {
                 message: format!("Invalid Iroh node ID: {}", e),
             })?;
         
+        // Create NodeAddr with the peer's P2P addresses
+        let mut node_addr = iroh::NodeAddr::new(iroh_node_id);
+        
+        // Add relay URL if available
+        if let Some(ref relay_url) = peer_info.p2p_relay_url {
+            if let Ok(relay) = relay_url.parse() {
+                node_addr = node_addr.with_relay_url(relay);
+            }
+        }
+        
+        // Add direct addresses
+        let addrs: Vec<std::net::SocketAddr> = peer_info.p2p_addresses
+            .iter()
+            .filter_map(|addr_str| addr_str.parse().ok())
+            .collect();
+        if !addrs.is_empty() {
+            node_addr = node_addr.with_direct_addresses(addrs);
+        }
+        
         // Connect to peer using standard BLIXARD_ALPN
         let connection = self.endpoint
-            .connect(iroh_node_id, crate::transport::BLIXARD_ALPN)
+            .connect(node_addr, crate::transport::BLIXARD_ALPN)
             .await
             .map_err(|e| BlixardError::Internal { message: format!("Connection error: {}", e) })?;
         
