@@ -710,15 +710,21 @@ impl Node {
                                     tracing::warn!("Join response contained empty voters list!");
                                 }
                                 
-                                // Store peer information
+                                // Store peer information (skip if already exists)
                                 for peer in peers {
-                                    self.shared.add_peer_with_p2p(
-                                        peer.id,
-                                        peer.address.clone(),
-                                        Some(peer.p2p_node_id),
-                                        peer.p2p_addresses,
-                                        Some(peer.p2p_relay_url),
-                                    ).await?;
+                                    // Check if peer already exists (e.g., the bootstrap node)
+                                    let existing_peers = self.shared.get_peers().await;
+                                    if !existing_peers.iter().any(|p| p.id == peer.id) {
+                                        self.shared.add_peer_with_p2p(
+                                            peer.id,
+                                            peer.address.clone(),
+                                            Some(peer.p2p_node_id),
+                                            peer.p2p_addresses,
+                                            Some(peer.p2p_relay_url),
+                                        ).await?;
+                                    } else {
+                                        tracing::debug!("Peer {} already exists, skipping", peer.id);
+                                    }
                                 }
                                 
                                 return Ok(());
