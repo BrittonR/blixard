@@ -2,9 +2,12 @@
 #![cfg(feature = "test-helpers")]
 
 use blixard_core::test_helpers::TestCluster;
+use blixard_core::metrics_otel;
 
 #[tokio::test]
 async fn test_p2p_address_collection_fixed() {
+    // Initialize metrics
+    metrics_otel::init_noop();
     // Create a test cluster
     let cluster = TestCluster::builder()
         .with_nodes(2)

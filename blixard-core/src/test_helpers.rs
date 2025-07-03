@@ -436,7 +436,7 @@ impl TestNodeBuilder {
             topology: Default::default(), // Use default topology for tests
         };
         
-        // Create node
+        // Create node (must be mutable for join_cluster)
         let mut node = Node::new(config);
         let shared_state = node.shared();
         
@@ -484,6 +484,15 @@ impl TestNodeBuilder {
         
         // Set running state
         shared_state.set_running(true).await;
+        
+        // If join_addr is provided, actually join the cluster
+        if let Some(join_addr_str) = self.join_addr.as_ref() {
+            tracing::info!("Node {} joining cluster via {}", id, join_addr_str);
+            let join_addr: SocketAddr = join_addr_str.parse()
+                .map_err(|e| BlixardError::ConfigError(format!("Invalid join address '{}': {}", join_addr_str, e)))?;
+            node.join_cluster(Some(join_addr)).await?;
+            tracing::info!("Node {} successfully joined cluster", id);
+        }
         
         Ok(TestNode {
             id,
