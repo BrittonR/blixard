@@ -129,8 +129,9 @@ async fn get_bootstrap_info(shared_state: &SharedNodeState) -> BlixardResult<Boo
         .collect();
     
     // Get relay URL if available
-    let p2p_relay_url = endpoint.home_relay()
-        .map(|url| url.to_string());
+    // Note: home_relay() returns a Watcher, not an Option
+    // For now, we'll set it to None and could implement watching later
+    let p2p_relay_url = None;
     
     Ok(BootstrapInfo {
         node_id: shared_state.get_id(),

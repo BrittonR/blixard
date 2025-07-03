@@ -656,31 +656,42 @@ impl Node {
                     );
                     
                     // Now proceed with the join request via P2P
-                    let join_request = crate::iroh_types::JoinRequest {
-                        node_id: self.shared.get_id(),
-                        bind_address: self.shared.get_bind_addr().to_string(),
-                        p2p_node_addr: Some(self.shared.get_our_node_addr().await?),
-                    };
+                    let our_node_id = self.shared.get_id();
+                    let our_bind_address = self.shared.get_bind_addr().to_string();
+                    let (our_p2p_node_id, our_p2p_addresses, our_p2p_relay_url) = 
+                        if let Some(node_addr) = self.shared.get_p2p_node_addr().await {
+                            let p2p_id = node_addr.node_id.to_string();
+                            let p2p_addrs: Vec<String> = node_addr.direct_addresses().map(|a| a.to_string()).collect();
+                            let relay_url = node_addr.relay_url().map(|u| u.to_string());
+                            (Some(p2p_id), p2p_addrs, relay_url)
+                        } else {
+                            (None, Vec::new(), None)
+                        };
                     
-                    match transport_client.join_cluster(join_request).await {
-                        Ok(resp) => {
-                            let resp = resp.into_inner();
-                            if resp.success {
+                    match transport_client.join_cluster(
+                        our_node_id,
+                        our_bind_address,
+                        our_p2p_node_id,
+                        our_p2p_addresses,
+                        our_p2p_relay_url
+                    ).await {
+                        Ok((success, message, peers, voters)) => {
+                            if success {
                                 tracing::info!("Successfully joined cluster via P2P bootstrap");
                                 tracing::info!("Join response contains {} peers and {} voters", 
-                                    resp.peers.len(), resp.voters.len());
+                                    peers.len(), voters.len());
                                 
                                 // Update local configuration state with current cluster voters
-                                if !resp.voters.is_empty() {
-                                    tracing::info!("Updating local configuration with voters: {:?}", resp.voters);
+                                if !voters.is_empty() {
+                                    tracing::info!("Updating local configuration with voters: {:?}", voters);
                                     if let Some(db) = self.shared.get_database().await {
                                         let storage = crate::storage::RedbRaftStorage { database: db };
                                         let mut conf_state = raft::prelude::ConfState::default();
-                                        conf_state.voters = resp.voters.clone();
+                                        conf_state.voters = voters.clone();
                                         if let Err(e) = storage.save_conf_state(&conf_state) {
                                             tracing::warn!("Failed to save initial configuration state: {}", e);
                                         } else {
-                                            tracing::info!("Successfully saved initial configuration state with voters: {:?}", resp.voters);
+                                            tracing::info!("Successfully saved initial configuration state with voters: {:?}", voters);
                                         }
                                     } else {
                                         tracing::warn!("No database available to save configuration state");
@@ -690,20 +701,20 @@ impl Node {
                                 }
                                 
                                 // Store peer information
-                                for peer in resp.peers {
+                                for peer in peers {
                                     self.shared.add_peer_with_p2p(
                                         peer.id,
                                         peer.address.clone(),
-                                        peer.p2p_node_id,
+                                        Some(peer.p2p_node_id),
                                         peer.p2p_addresses,
-                                        peer.p2p_relay_url,
+                                        Some(peer.p2p_relay_url),
                                     ).await?;
                                 }
                                 
                                 return Ok(());
                             } else {
                                 return Err(BlixardError::ClusterJoin {
-                                    reason: format!("Join request failed: {}", resp.message),
+                                    reason: format!("Join request failed: {}", message),
                                 });
                             }
                         }
