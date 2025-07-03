@@ -351,6 +351,23 @@ pub struct GetP2pStatusResponse {
 }
 
 // ============================================================================
+// Bootstrap Types
+// ============================================================================
+
+/// Information needed to bootstrap P2P connection to a node
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BootstrapInfo {
+    /// Cluster node ID
+    pub node_id: u64,
+    /// Iroh P2P node ID (base64 encoded)
+    pub p2p_node_id: String,
+    /// Direct P2P addresses
+    pub p2p_addresses: Vec<String>,
+    /// Optional relay URL
+    pub p2p_relay_url: Option<String>,
+}
+
+// ============================================================================
 // Raft Message Types
 // ============================================================================
 

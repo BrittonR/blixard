@@ -1,6 +1,8 @@
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use std::sync::Arc;
+use std::time::Duration;
+use std::net::SocketAddr;
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::types::{NodeConfig, VmCommand};
@@ -571,20 +573,151 @@ impl Node {
                     }
                 }
                 
-                // If discovery didn't work, we need a bootstrap mechanism
-                // For now, we can use HTTP to get the leader's P2P info
-                tracing::warn!("Could not find leader's P2P info via discovery, need bootstrap mechanism");
+                // If discovery didn't work, use HTTP bootstrap mechanism
+                tracing::info!("Attempting HTTP bootstrap from {}", join_addr);
                 
-                // TODO: Implement HTTP bootstrap endpoint to get leader's P2P NodeAddr
-                // Alternative approaches:
-                // 1. HTTP endpoint: GET http://leader:8080/api/p2p-info
-                // 2. Initial gRPC call to exchange P2P info before switching to P2P
-                // 3. Use a well-known relay server for bootstrap
-                // 4. Include P2P info in DNS TXT records
+                // Parse join address to get HTTP bootstrap URL
+                let addr: SocketAddr = join_addr.parse()
+                    .map_err(|e| BlixardError::ConfigError(format!("Invalid join address '{}': {}", join_addr, e)))?;
                 
-                return Err(BlixardError::NotImplemented {
-                    feature: "P2P bootstrap mechanism for initial join without discovery".to_string(),
-                });
+                // Get metrics port offset from config
+                let config = crate::config_global::get();
+                let bootstrap_port = addr.port() + config.network.metrics.port_offset;
+                let bootstrap_url = format!("http://{}:{}/bootstrap", addr.ip(), bootstrap_port);
+                
+                // Fetch bootstrap info
+                tracing::debug!("Fetching bootstrap info from {}", bootstrap_url);
+                let client = reqwest::Client::new();
+                let response = match client.get(&bootstrap_url)
+                    .timeout(Duration::from_secs(5))
+                    .send()
+                    .await {
+                    Ok(resp) => resp,
+                    Err(e) => {
+                        return Err(BlixardError::NetworkError(format!(
+                            "Failed to connect to bootstrap endpoint {}: {}", 
+                            bootstrap_url, e
+                        )));
+                    }
+                };
+                
+                if !response.status().is_success() {
+                    return Err(BlixardError::ClusterJoin {
+                        reason: format!("Bootstrap endpoint returned {}: {}", 
+                            response.status(), 
+                            response.text().await.unwrap_or_default()),
+                    });
+                }
+                
+                let bootstrap_info: crate::iroh_types::BootstrapInfo = response.json().await
+                    .map_err(|e| BlixardError::NetworkError(format!("Invalid bootstrap response: {}", e)))?;
+                
+                tracing::info!("Got bootstrap info: node_id={}, p2p_node_id={}, addresses={:?}", 
+                    bootstrap_info.node_id, bootstrap_info.p2p_node_id, bootstrap_info.p2p_addresses);
+                
+                // Parse the P2P node ID
+                let p2p_node_id = bootstrap_info.p2p_node_id.parse::<iroh::NodeId>()
+                    .map_err(|e| BlixardError::ConfigError(format!("Invalid P2P node ID: {}", e)))?;
+                
+                // Create NodeAddr with the bootstrap info
+                let mut node_addr = iroh::NodeAddr::new(p2p_node_id);
+                for addr_str in &bootstrap_info.p2p_addresses {
+                    if let Ok(addr) = addr_str.parse::<SocketAddr>() {
+                        node_addr = node_addr.with_direct_addresses([addr]);
+                    }
+                }
+                
+                // Add relay URL if available
+                if let Some(relay_url) = &bootstrap_info.p2p_relay_url {
+                    if let Ok(url) = relay_url.parse() {
+                        node_addr = node_addr.with_relay_url(url);
+                    }
+                }
+                
+                // Store the leader's P2P info
+                self.shared.add_peer_with_p2p(
+                    bootstrap_info.node_id,
+                    join_addr.clone(),
+                    Some(bootstrap_info.p2p_node_id.clone()),
+                    bootstrap_info.p2p_addresses.clone(),
+                    bootstrap_info.p2p_relay_url.clone(),
+                ).await?;
+                
+                // Now connect via P2P
+                if let Some(p2p_manager) = self.shared.get_p2p_manager().await {
+                    tracing::info!("Connecting to leader via P2P at {}", node_addr.node_id);
+                    p2p_manager.connect_p2p_peer(bootstrap_info.node_id, &node_addr).await?;
+                    
+                    // Create P2P client and send join request
+                    let (endpoint, _our_node_id) = self.shared.get_iroh_endpoint().await?;
+                    let transport_client = crate::transport::iroh_client::IrohClusterServiceClient::new(
+                        Arc::new(endpoint), 
+                        node_addr
+                    );
+                    
+                    // Now proceed with the join request via P2P
+                    let join_request = crate::iroh_types::JoinRequest {
+                        node_id: self.shared.get_id(),
+                        bind_address: self.shared.get_bind_addr().to_string(),
+                        p2p_node_addr: Some(self.shared.get_our_node_addr().await?),
+                    };
+                    
+                    match transport_client.join_cluster(join_request).await {
+                        Ok(resp) => {
+                            let resp = resp.into_inner();
+                            if resp.success {
+                                tracing::info!("Successfully joined cluster via P2P bootstrap");
+                                tracing::info!("Join response contains {} peers and {} voters", 
+                                    resp.peers.len(), resp.voters.len());
+                                
+                                // Update local configuration state with current cluster voters
+                                if !resp.voters.is_empty() {
+                                    tracing::info!("Updating local configuration with voters: {:?}", resp.voters);
+                                    if let Some(db) = self.shared.get_database().await {
+                                        let storage = crate::storage::RedbRaftStorage { database: db };
+                                        let mut conf_state = raft::prelude::ConfState::default();
+                                        conf_state.voters = resp.voters.clone();
+                                        if let Err(e) = storage.save_conf_state(&conf_state) {
+                                            tracing::warn!("Failed to save initial configuration state: {}", e);
+                                        } else {
+                                            tracing::info!("Successfully saved initial configuration state with voters: {:?}", resp.voters);
+                                        }
+                                    } else {
+                                        tracing::warn!("No database available to save configuration state");
+                                    }
+                                } else {
+                                    tracing::warn!("Join response contained empty voters list!");
+                                }
+                                
+                                // Store peer information
+                                for peer in resp.peers {
+                                    self.shared.add_peer_with_p2p(
+                                        peer.id,
+                                        peer.address.clone(),
+                                        peer.p2p_node_id,
+                                        peer.p2p_addresses,
+                                        peer.p2p_relay_url,
+                                    ).await?;
+                                }
+                                
+                                return Ok(());
+                            } else {
+                                return Err(BlixardError::ClusterJoin {
+                                    reason: format!("Join request failed: {}", resp.message),
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            return Err(BlixardError::ClusterJoin {
+                                reason: format!("Failed to send join request via P2P: {}", e),
+                            });
+                        }
+                    }
+                } else {
+                    return Err(BlixardError::Internal {
+                        message: "P2P manager not available".to_string(),
+                    });
+                }
             }
             
             /* Original commented code for reference

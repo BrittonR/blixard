@@ -139,7 +139,10 @@ impl BlixardOrchestrator {
             let metrics_port = bind_addr.port() + config.network.metrics.port_offset;
             let metrics_addr = SocketAddr::new(bind_addr.ip(), metrics_port);
             
-            self.metrics_handle = Some(metrics_server::spawn_metrics_server(metrics_addr));
+            self.metrics_handle = Some(metrics_server::spawn_metrics_server(
+                metrics_addr,
+                self.node.shared().clone(),
+            ));
             tracing::info!("Metrics server started on http://{}{}", metrics_addr, config.network.metrics.path);
         } else {
             tracing::info!("Metrics server disabled by configuration");
