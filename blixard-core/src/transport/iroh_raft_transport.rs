@@ -218,6 +218,13 @@ impl IrohRaftTransport {
     
     /// Send a Raft message to a peer
     pub async fn send_message(&self, to: u64, message: Message) -> BlixardResult<()> {
+        // Check if we know about this peer first
+        if self.node.get_peer(to).await.is_none() {
+            // Peer is not in our cluster, silently drop the message
+            tracing::debug!("Dropping message to unknown peer {}", to);
+            return Ok(());
+        }
+        
         let priority = RaftMessagePriority::from_raft_message(&message);
         
         // For high-priority messages, try to send immediately
