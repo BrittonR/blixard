@@ -232,11 +232,9 @@ impl IrohTransportV2 {
             // Start the bridge
             bridge.start().await?;
             
-            // Configure endpoint with discovery using a closure
-            let dm_clone = dm.clone();
-            builder = builder.add_discovery(move |_secret_key| {
-                Some(create_combined_discovery(dm_clone))
-            });
+            // Configure endpoint with discovery
+            let discovery = create_combined_discovery(dm_clone);
+            builder = builder.add_discovery(discovery);
             
             Some(bridge)
         } else {
@@ -276,10 +274,7 @@ impl IrohTransportV2 {
         
         // Get direct addresses from bound sockets
         let bound_sockets = self.endpoint.bound_sockets();
-        let mut direct_addresses = vec![bound_sockets.0];
-        if let Some(addr) = bound_sockets.1 {
-            direct_addresses.push(addr);
-        }
+        let direct_addresses = bound_sockets;
         
         // Create NodeAddr with both node ID and direct addresses
         let mut node_addr = NodeAddr::new(node_id)

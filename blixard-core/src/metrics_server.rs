@@ -123,8 +123,7 @@ async fn get_bootstrap_info(shared_state: &SharedNodeState) -> BlixardResult<Boo
     
     // Get our addresses
     let our_addrs = endpoint.bound_sockets();
-    let p2p_addresses: Vec<String> = our_addrs
-        .into_iter()
+    let p2p_addresses: Vec<String> = our_addrs.iter()
         .map(|addr| addr.to_string())
         .collect();
     

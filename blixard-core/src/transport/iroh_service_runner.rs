@@ -18,7 +18,8 @@ use crate::transport::{
 // VM operations are handled through SharedNodeState
 use async_trait::async_trait;
 use bytes::Bytes;
-use iroh::{Endpoint, discovery::dns::DnsDiscovery, protocol::{ProtocolHandler, Router}, endpoint::Connection};
+use tokio::io::AsyncWriteExt;
+use iroh::{Endpoint, discovery::dns::DnsDiscovery, protocol::{ProtocolHandler, Router, AcceptError}, endpoint::Connection};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -136,6 +137,16 @@ impl IrohServiceRunner {
         write_message(&mut send, MessageType::Response, header.request_id, &response_bytes).await?;
         debug!("Response message written successfully");
         
+        // Ensure the response is flushed before finishing
+        debug!("Flushing send stream");
+        send.flush().await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to flush response stream: {}", e),
+            })?;
+        
+        // Small delay to ensure client reads the response before we close
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        
         // Finish sending to signal we're done
         debug!("Finishing send stream");
         send.finish()
@@ -163,7 +174,7 @@ impl std::fmt::Debug for IrohProtocolHandler {
 
 #[async_trait]
 impl ProtocolHandler for IrohProtocolHandler {
-    fn accept<'a>(&'a self, connection: Connection) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), anyhow::Error>> + Send + 'a>> {
+    fn accept<'a>(&'a self, connection: Connection) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AcceptError>> + Send + 'a>> {
         Box::pin(async move {
             debug!("Accepted connection from {:?}", connection.remote_node_id());
             
@@ -202,7 +213,7 @@ pub async fn start_iroh_services(
     } else {
         // Create a new Iroh endpoint if P2P manager isn't available
         let ep = Endpoint::builder()
-            .discovery(Box::new(DnsDiscovery::n0_dns()))
+            .discovery(DnsDiscovery::n0_dns())
             .bind()
             .await
             .map_err(|e| BlixardError::Internal {

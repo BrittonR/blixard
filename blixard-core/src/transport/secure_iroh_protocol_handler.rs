@@ -190,7 +190,7 @@ impl SecureRpcProtocolHandler {
 }
 
 impl ProtocolHandler for SecureRpcProtocolHandler {
-    fn accept<'a>(&'a self, connection: Connection) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), anyhow::Error>> + Send + 'a>> {
+    fn accept<'a>(&'a self, connection: Connection) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AcceptError>> + Send + 'a>> {
         Box::pin(async move {
         debug!("Accepting secure RPC connection from {:?}", connection.remote_node_id());
         

@@ -146,7 +146,6 @@ impl Discovery for IrohDiscoveryBridge {
     /// Resolve a node ID to its addresses
     fn resolve(
         &self,
-        _endpoint: iroh::Endpoint,
         node_id: iroh::PublicKey,
     ) -> Option<Pin<Box<dyn Stream<Item = Result<DiscoveryItem, anyhow::Error>> + Send + 'static>>> {
         let node_cache = self.node_cache.clone();
