@@ -34,11 +34,21 @@ impl ClusterOperations for ClusterOperationsAdapter {
             message: format!("Invalid bind address: {}", e),
         })?;
         
-        // Add peer to our peer list with P2P info
-        if p2p_node_id.is_some() || !p2p_addresses.is_empty() {
-            self.shared_state.add_peer_with_p2p(node_id, addr.to_string(), p2p_node_id.clone(), p2p_addresses.clone(), p2p_relay_url.clone()).await?;
+        // Add peer to our peer list with P2P info (only if it doesn't already exist)
+        if self.shared_state.get_peer(node_id).await.is_none() {
+            if p2p_node_id.is_some() || !p2p_addresses.is_empty() {
+                self.shared_state.add_peer_with_p2p(node_id, addr.to_string(), p2p_node_id.clone(), p2p_addresses.clone(), p2p_relay_url.clone()).await?;
+            } else {
+                self.shared_state.add_peer(node_id, addr.to_string()).await?;
+            }
         } else {
-            self.shared_state.add_peer(node_id, addr.to_string()).await?;
+            debug!("Peer {} already exists, updating P2P info", node_id);
+            // Update P2P info if provided
+            if p2p_node_id.is_some() || !p2p_addresses.is_empty() {
+                // Remove and re-add to update P2P info
+                self.shared_state.remove_peer(node_id).await;
+                self.shared_state.add_peer_with_p2p(node_id, addr.to_string(), p2p_node_id.clone(), p2p_addresses.clone(), p2p_relay_url.clone()).await?;
+            }
         }
         
         // If the joining node has P2P info, try to connect
