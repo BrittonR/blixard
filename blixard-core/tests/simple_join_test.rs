@@ -29,31 +29,49 @@ async fn test_simple_node_join() {
     println!("Node 1 peers before join: {:?}", peers1_before);
     
     // Create node 2 that joins node 1
-    let mut node2 = TestNode::start(2, 9002).await.expect("Failed to create node 2");
-    println!("Created node 2 at {}", node2.addr);
-    
-    // Explicitly join the cluster
-    println!("Node 2 joining cluster via {}", node1.addr);
-    let join_result = node2.node.join_cluster(Some(node1.addr)).await;
-    match &join_result {
-        Ok(_) => println!("Join succeeded!"),
-        Err(e) => println!("Join failed: {:?}", e),
-    }
-    assert!(join_result.is_ok(), "Join should succeed: {:?}", join_result.err());
+    // IMPORTANT: Use start_with_join to prevent node 2 from bootstrapping as its own cluster
+    let node2 = TestNode::start_with_join(2, 9002, Some(node1.addr))
+        .await
+        .expect("Failed to create node 2");
+    println!("Created node 2 at {} and joined cluster via {}", node2.addr, node1.addr);
     
     // Wait for propagation
     tokio::time::sleep(Duration::from_secs(2)).await;
     
-    // Check peers
+    // Check the authoritative voter list from Raft
+    let voters1 = node1.shared_state.get_current_voters().await
+        .expect("Should get voters from node 1");
+    let voters2 = node2.shared_state.get_current_voters().await
+        .expect("Should get voters from node 2");
+    
+    println!("Node 1 voters after join: {:?}", voters1);
+    println!("Node 2 voters after join: {:?}", voters2);
+    
+    // Also check the local peer cache for debugging
     let peers1 = node1.shared_state.get_peers().await;
     let peers2 = node2.shared_state.get_peers().await;
     
-    println!("Node 1 peers after join: {:?}", peers1);
-    println!("Node 2 peers after join: {:?}", peers2);
+    println!("Node 1 peers (local cache) after join: {:?}", peers1);
+    println!("Node 2 peers (local cache) after join: {:?}", peers2);
     
-    // Verify they see each other
-    assert!(!peers1.is_empty(), "Node 1 should have peers");
-    assert!(!peers2.is_empty(), "Node 2 should have peers");
+    // Check Raft status
+    let raft_status1 = node1.shared_state.get_raft_status().await
+        .expect("Should get raft status from node 1");
+    let raft_status2 = node2.shared_state.get_raft_status().await
+        .expect("Should get raft status from node 2");
+    
+    println!("Node 1 Raft status: is_leader={}, leader_id={:?}, term={}", 
+             raft_status1.is_leader, raft_status1.leader_id, raft_status1.term);
+    println!("Node 2 Raft status: is_leader={}, leader_id={:?}, term={}", 
+             raft_status2.is_leader, raft_status2.leader_id, raft_status2.term);
+    
+    // Verify they see each other in the voter list
+    assert!(voters1.len() >= 2, "Node 1 should see at least 2 voters, got: {:?}", voters1);
+    assert!(voters2.len() >= 2, "Node 2 should see at least 2 voters, got: {:?}", voters2);
+    assert!(voters1.contains(&1), "Node 1 voter list should contain node 1");
+    assert!(voters1.contains(&2), "Node 1 voter list should contain node 2");
+    assert!(voters2.contains(&1), "Node 2 voter list should contain node 1");
+    assert!(voters2.contains(&2), "Node 2 voter list should contain node 2");
     
     // Check P2P addresses
     for peer in &peers1 {

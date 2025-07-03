@@ -34,6 +34,20 @@ impl ClusterOperations for ClusterOperationsAdapter {
             message: format!("Invalid bind address: {}", e),
         })?;
         
+        // Get our own info upfront
+        let our_id = self.shared_state.get_id();
+        let our_addr = self.shared_state.get_bind_addr().to_string();
+        
+        // Get our P2P info if available
+        let (our_p2p_node_id, our_p2p_addresses, our_p2p_relay_url) = if let Some(node_addr) = self.shared_state.get_p2p_node_addr().await {
+            let p2p_id = node_addr.node_id.to_string();
+            let p2p_addrs: Vec<String> = node_addr.direct_addresses().map(|a| a.to_string()).collect();
+            let relay_url = node_addr.relay_url().map(|u| u.to_string());
+            (Some(p2p_id), p2p_addrs, relay_url)
+        } else {
+            (None, Vec::new(), None)
+        };
+        
         // Add peer to our peer list with P2P info (only if it doesn't already exist)
         if self.shared_state.get_peer(node_id).await.is_none() {
             if p2p_node_id.is_some() || !p2p_addresses.is_empty() {
@@ -84,54 +98,69 @@ impl ClusterOperations for ClusterOperationsAdapter {
         // Propose configuration change through Raft
         match self.shared_state.propose_conf_change(ConfChangeType::AddNode, node_id, addr.to_string()).await {
             Ok(_) => {
-                info!("Node {} successfully joined cluster", node_id);
+                info!("Node {} configuration change proposed and committed", node_id);
                 
-                // Get current cluster information
-                let mut peers = self.shared_state.get_peers().await;
-                let status = self.shared_state.get_raft_status().await?;
+                // Wait for the configuration change to be reflected in Raft's configuration
+                // The propose_conf_change already waits for the change to be committed, but
+                // we need to ensure the new node appears in the voter list
+                let mut retries = 0;
+                let max_retries = 10;
+                let mut found_node = false;
                 
-                // Add our own info to the peers list
-                let our_id = self.shared_state.get_id();
-                let our_addr = self.shared_state.get_bind_addr().to_string();
-                
-                // Get our P2P info if available
-                let (our_p2p_node_id, our_p2p_addresses, our_p2p_relay_url) = if let Some(node_addr) = self.shared_state.get_p2p_node_addr().await {
-                    let p2p_id = node_addr.node_id.to_string();
-                    let p2p_addrs: Vec<String> = node_addr.direct_addresses().map(|a| a.to_string()).collect();
-                    let relay_url = node_addr.relay_url().map(|u| u.to_string());
-                    (Some(p2p_id), p2p_addrs, relay_url)
-                } else {
-                    (None, Vec::new(), None)
-                };
-                
-                // Create our peer info
-                let our_peer_info = crate::node_shared::PeerInfo {
-                    id: our_id,
-                    address: our_addr,
-                    is_connected: true,
-                    p2p_node_id: our_p2p_node_id.clone(),
-                    p2p_addresses: our_p2p_addresses.clone(),
-                    p2p_relay_url: our_p2p_relay_url.clone(),
-                };
-                
-                // Add ourselves to the peer list if not already there
-                if !peers.iter().any(|p| p.id == our_id) {
-                    peers.push(our_peer_info);
+                while retries < max_retries && !found_node {
+                    // Get the authoritative list of voters from Raft
+                    let voters = self.shared_state.get_current_voters().await?;
+                    found_node = voters.contains(&node_id);
+                    
+                    if !found_node {
+                        debug!("Waiting for node {} to appear in Raft configuration, attempt {}/{}",
+                               node_id, retries + 1, max_retries);
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        retries += 1;
+                    }
                 }
                 
-                // Convert PeerInfo to NodeInfo
-                let node_infos: Vec<NodeInfo> = peers.iter().map(|p| NodeInfo {
-                    id: p.id,
-                    address: p.address.clone(),
-                    state: 0, // NodeStateUnknown
-                    p2p_node_id: p.p2p_node_id.clone().unwrap_or_default(),
-                    p2p_addresses: p.p2p_addresses.clone(),
-                    p2p_relay_url: p.p2p_relay_url.clone().unwrap_or_default(),
-                }).collect();
+                if !found_node {
+                    warn!("Node {} did not appear in Raft configuration after {} retries", 
+                          node_id, max_retries);
+                }
                 
-                // Get voters from Raft configuration
-                // For now, we'll return all peer IDs as voters
-                let voters: Vec<u64> = peers.iter().map(|p| p.id).collect();
+                // Get current cluster information using the authoritative voter list
+                let voters = self.shared_state.get_current_voters().await?;
+                let status = self.shared_state.get_raft_status().await?;
+                
+                // Build peer information from the voter list and our local peer cache
+                let mut node_infos = Vec::new();
+                for voter_id in &voters {
+                    if let Some(peer_info) = self.shared_state.get_peer(*voter_id).await {
+                        node_infos.push(NodeInfo {
+                            id: peer_info.id,
+                            address: peer_info.address.clone(),
+                            state: if *voter_id == our_id { 
+                                if status.is_leader { 3 } else { 1 } // Leader = 3, Follower = 1
+                            } else { 0 }, // NodeStateUnknown for peers
+                            p2p_node_id: peer_info.p2p_node_id.clone().unwrap_or_default(),
+                            p2p_addresses: peer_info.p2p_addresses.clone(),
+                            p2p_relay_url: peer_info.p2p_relay_url.clone().unwrap_or_default(),
+                        });
+                    } else if *voter_id == our_id {
+                        // Add ourselves if not in peer list
+                        node_infos.push(NodeInfo {
+                            id: our_id,
+                            address: our_addr.clone(),
+                            state: if status.is_leader { 3 } else { 1 },
+                            p2p_node_id: our_p2p_node_id.clone().unwrap_or_default(),
+                            p2p_addresses: our_p2p_addresses.clone(),
+                            p2p_relay_url: our_p2p_relay_url.clone().unwrap_or_default(),
+                        });
+                    }
+                }
+                
+                // Sort by ID for consistent ordering
+                node_infos.sort_by_key(|n| n.id);
+                
+                // The voters list is the authoritative list from Raft
+                // Return it directly instead of building from the local peer cache
                 
                 Ok((true, "Successfully joined cluster".to_string(), node_infos, voters))
             }
@@ -168,28 +197,53 @@ impl ClusterOperations for ClusterOperationsAdapter {
         // Get Raft status
         let raft_status = self.shared_state.get_raft_status().await?;
         
-        // Get all peers and convert to NodeInfo
-        let peers = self.shared_state.get_peers().await;
-        let mut nodes: Vec<NodeInfo> = peers.iter().map(|p| NodeInfo {
-            id: p.id,
-            address: p.address.clone(),
-            state: 0, // NodeStateUnknown
-            p2p_node_id: p.p2p_node_id.clone().unwrap_or_default(),
-            p2p_addresses: p.p2p_addresses.clone(),
-            p2p_relay_url: p.p2p_relay_url.clone().unwrap_or_default(),
-        }).collect();
+        // Get the authoritative list of voters from Raft
+        let voters = self.shared_state.get_current_voters().await?;
         
-        // Add ourselves to the list
-        let config = &self.shared_state.config;
-        let self_info = NodeInfo {
-            id: config.id,
-            address: config.bind_addr.to_string(),
-            state: if raft_status.is_leader { 3 } else { 1 }, // Leader = 3, Follower = 1
-            p2p_node_id: String::new(), // TODO: Get from P2P manager
-            p2p_addresses: vec![],
-            p2p_relay_url: String::new(),
+        // Get our own info
+        let our_id = self.shared_state.get_id();
+        let our_addr = self.shared_state.get_bind_addr().to_string();
+        
+        // Get our P2P info if available
+        let (our_p2p_node_id, our_p2p_addresses, our_p2p_relay_url) = if let Some(node_addr) = self.shared_state.get_p2p_node_addr().await {
+            let p2p_id = node_addr.node_id.to_string();
+            let p2p_addrs: Vec<String> = node_addr.direct_addresses().map(|a| a.to_string()).collect();
+            let relay_url = node_addr.relay_url().map(|u| u.to_string());
+            (Some(p2p_id), p2p_addrs, relay_url)
+        } else {
+            (None, Vec::new(), None)
         };
-        nodes.push(self_info);
+        
+        // Build node information from the voter list
+        let mut nodes: Vec<NodeInfo> = Vec::new();
+        for voter_id in &voters {
+            if let Some(peer_info) = self.shared_state.get_peer(*voter_id).await {
+                nodes.push(NodeInfo {
+                    id: peer_info.id,
+                    address: peer_info.address.clone(),
+                    state: if *voter_id == our_id {
+                        if raft_status.is_leader { 3 } else { 1 } // Leader = 3, Follower = 1
+                    } else if raft_status.leader_id == Some(*voter_id) {
+                        3 // Leader
+                    } else {
+                        1 // Follower
+                    },
+                    p2p_node_id: peer_info.p2p_node_id.clone().unwrap_or_default(),
+                    p2p_addresses: peer_info.p2p_addresses.clone(),
+                    p2p_relay_url: peer_info.p2p_relay_url.clone().unwrap_or_default(),
+                });
+            } else if *voter_id == our_id {
+                // Add ourselves if not in peer list
+                nodes.push(NodeInfo {
+                    id: our_id,
+                    address: our_addr.clone(),
+                    state: if raft_status.is_leader { 3 } else { 1 },
+                    p2p_node_id: our_p2p_node_id.clone().unwrap_or_default(),
+                    p2p_addresses: our_p2p_addresses.clone(),
+                    p2p_relay_url: our_p2p_relay_url.clone().unwrap_or_default(),
+                });
+            }
+        }
         
         // Sort by ID for consistent ordering
         nodes.sort_by_key(|n| n.id);
