@@ -238,8 +238,8 @@ pub async fn start_iroh_services(
     let handler = IrohProtocolHandler { services };
     
     // Create router to handle incoming connections
-    // Router::builder takes ownership of the endpoint
-    let router = Router::builder(endpoint)
+    // Router::builder takes ownership of the endpoint, so we pass a clone
+    let router = Router::builder(endpoint.clone())
         .accept(BLIXARD_ALPN.to_vec(), Arc::new(handler))
         .spawn();
     
