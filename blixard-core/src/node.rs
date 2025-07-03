@@ -592,10 +592,12 @@ impl Node {
                                                 }
                                                 
                                                 // Add direct addresses
-                                                for addr_str in &peer_info.p2p_addresses {
-                                                    if let Ok(addr) = addr_str.parse() {
-                                                        node_addr = node_addr.with_direct_addresses([addr]);
-                                                    }
+                                                let addrs: Vec<SocketAddr> = peer_info.p2p_addresses
+                                                    .iter()
+                                                    .filter_map(|addr_str| addr_str.parse().ok())
+                                                    .collect();
+                                                if !addrs.is_empty() {
+                                                    node_addr = node_addr.with_direct_addresses(addrs);
                                                 }
                                                 
                                                 // Try to connect
@@ -685,10 +687,13 @@ impl Node {
                 
                 // Create NodeAddr with the bootstrap info
                 let mut node_addr = iroh::NodeAddr::new(p2p_node_id);
-                for addr_str in &bootstrap_info.p2p_addresses {
-                    if let Ok(addr) = addr_str.parse::<SocketAddr>() {
-                        node_addr = node_addr.with_direct_addresses([addr]);
-                    }
+                // Collect all valid addresses and add them at once
+                let addrs: Vec<SocketAddr> = bootstrap_info.p2p_addresses
+                    .iter()
+                    .filter_map(|addr_str| addr_str.parse().ok())
+                    .collect();
+                if !addrs.is_empty() {
+                    node_addr = node_addr.with_direct_addresses(addrs);
                 }
                 
                 // Add relay URL if available

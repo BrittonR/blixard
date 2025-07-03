@@ -137,23 +137,16 @@ impl IrohServiceRunner {
         write_message(&mut send, MessageType::Response, header.request_id, &response_bytes).await?;
         debug!("Response message written successfully");
         
-        // Ensure the response is flushed before finishing
+        // Ensure the response is flushed
         debug!("Flushing send stream");
         send.flush().await
             .map_err(|e| BlixardError::Internal {
                 message: format!("Failed to flush response stream: {}", e),
             })?;
+        debug!("Response flushed successfully");
         
-        // Small delay to ensure client reads the response before we close
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        
-        // Finish sending to signal we're done
-        debug!("Finishing send stream");
-        send.finish()
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Failed to finish response stream: {}", e),
-            })?;
-        debug!("Send stream finished successfully");
+        // Let the stream close naturally when it goes out of scope
+        // This allows the client to read the response before the stream closes
         
         Ok(())
     }

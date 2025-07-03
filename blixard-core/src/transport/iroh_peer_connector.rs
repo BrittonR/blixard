@@ -4,6 +4,7 @@
 //! maintaining feature parity with the gRPC PeerConnector.
 
 use std::collections::{HashMap, VecDeque};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{RwLock, Mutex, watch};
@@ -517,11 +518,13 @@ impl IrohPeerConnector {
                         }
                     }
                 
-                // Add direct addresses
-                for addr_str in &peer.p2p_addresses {
-                    if let Ok(addr) = addr_str.parse() {
-                        node_addr = node_addr.with_direct_addresses([addr]);
-                    }
+                // Collect all direct addresses and add them at once
+                let addrs: Vec<SocketAddr> = peer.p2p_addresses
+                    .iter()
+                    .filter_map(|addr_str| addr_str.parse().ok())
+                    .collect();
+                if !addrs.is_empty() {
+                    node_addr = node_addr.with_direct_addresses(addrs);
                 }
                     
                     return Ok(node_addr);
