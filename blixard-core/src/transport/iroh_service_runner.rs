@@ -206,20 +206,15 @@ pub async fn start_iroh_services(
     shared_state: Arc<SharedNodeState>,
     bind_addr: SocketAddr,
 ) -> BlixardResult<JoinHandle<()>> {
-    // Get or create Iroh endpoint (ensure we have Arc<Endpoint>)
-    let endpoint: Arc<Endpoint> = if let Some(p2p_manager) = shared_state.get_p2p_manager().await {
+    // Get the Iroh endpoint from P2P manager
+    let endpoint = if let Some(p2p_manager) = shared_state.get_p2p_manager().await {
         let (endpoint, _node_id) = p2p_manager.get_endpoint();
-        Arc::new(endpoint)
+        endpoint
     } else {
-        // Create a new Iroh endpoint if P2P manager isn't available
-        let ep = Endpoint::builder()
-            .discovery(DnsDiscovery::n0_dns())
-            .bind()
-            .await
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Failed to create Iroh endpoint: {}", e),
-            })?;
-        Arc::new(ep)
+        // This shouldn't happen - P2P manager should always be available when starting services
+        return Err(BlixardError::Internal {
+            message: "P2P manager not available when starting Iroh services".to_string(),
+        });
     };
 
     info!(
@@ -228,8 +223,11 @@ pub async fn start_iroh_services(
         endpoint.node_id()
     );
 
+    // We need Arc for the runner
+    let endpoint_arc = Arc::new(endpoint.clone());
+
     // Register our ALPN protocol
-    let mut runner = IrohServiceRunner::new(shared_state, endpoint.clone());
+    let mut runner = IrohServiceRunner::new(shared_state, endpoint_arc.clone());
     
     // Register all services
     runner.register_services().await?;
@@ -240,8 +238,8 @@ pub async fn start_iroh_services(
     let handler = IrohProtocolHandler { services };
     
     // Create router to handle incoming connections
-    // Note: Router::builder takes ownership, so we need to dereference the Arc
-    let router = Router::builder((*endpoint).clone())
+    // Router::builder takes ownership of the endpoint
+    let router = Router::builder(endpoint)
         .accept(BLIXARD_ALPN.to_vec(), Arc::new(handler))
         .spawn();
     
