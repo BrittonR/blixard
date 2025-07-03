@@ -61,31 +61,40 @@ impl IrohClient {
         };
         
         // Connect to peer
+        debug!("Connecting to peer {} with ALPN {:?}", self.node_addr.node_id, crate::transport::BLIXARD_ALPN);
         let conn = self.endpoint
             .connect(self.node_addr.clone(), crate::transport::BLIXARD_ALPN)
             .await
             .map_err(|e| BlixardError::NetworkError(format!("Failed to connect: {}", e)))?;
+        debug!("Connected successfully");
         
         // Open a bidirectional stream
+        debug!("Opening bidirectional stream");
         let (mut send, mut recv) = conn
             .open_bi()
             .await
             .map_err(|e| BlixardError::NetworkError(format!("Failed to open stream: {}", e)))?;
+        debug!("Bidirectional stream opened");
         
         // Send request
         let request_id = generate_request_id();
         let request_payload = serialize_payload(&rpc_request)?;
+        debug!("Writing request message with id {:?} (size: {} bytes)", request_id, request_payload.len());
         write_message(&mut send, MessageType::Request, request_id, &request_payload).await?;
+        debug!("Request message written");
         
         // Finish sending to signal we're done
+        debug!("Finishing send stream");
         send.finish()
             .map_err(|e| BlixardError::NetworkError(format!("Failed to finish stream: {}", e)))?;
+        debug!("Send stream finished");
         
         // Set read timeout - longer for cluster operations
         let timeout = match method {
             "join_cluster" | "leave_cluster" | "get_cluster_status" => Duration::from_secs(120),
             _ => Duration::from_secs(30),
         };
+        debug!("Reading response with timeout {:?}", timeout);
         let read_fut = read_message(&mut recv);
         
         // Read response with timeout
@@ -94,6 +103,7 @@ impl IrohClient {
             .map_err(|_| BlixardError::Internal {
                 message: "RPC call timed out".to_string(),
             })??;
+        debug!("Received response with type {:?}, request_id: {:?}", header.msg_type, header.request_id);
         
         // Validate response
         if header.msg_type != MessageType::Response {

@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use iroh::endpoint::{RecvStream, SendStream};
+use tracing::{debug, error};
 
 /// Protocol version for compatibility checking
 pub const PROTOCOL_VERSION: u8 = 1;
@@ -170,21 +171,34 @@ pub async fn write_message(
     
     let header = MessageHeader::new(msg_type, payload.len() as u32, request_id);
     
+    debug!("Writing message header: type={:?}, payload_len={}", 
+           msg_type, payload.len());
+    
     // Write header
     stream
         .write_all(&header.to_bytes())
         .await
-        .map_err(|e| BlixardError::Internal {
-            message: format!("Failed to write to stream: {}", e),
+        .map_err(|e| {
+            error!("Failed to write header to stream: {}", e);
+            BlixardError::Internal {
+                message: format!("Failed to write to stream: {}", e),
+            }
         })?;
+    
+    debug!("Header written successfully, writing payload");
     
     // Write payload
     stream
         .write_all(payload)
         .await
-        .map_err(|e| BlixardError::Internal {
-            message: format!("Failed to write to stream: {}", e),
+        .map_err(|e| {
+            error!("Failed to write payload to stream: {}", e);
+            BlixardError::Internal {
+                message: format!("Failed to write to stream: {}", e),
+            }
         })?;
+    
+    debug!("Payload written successfully");
     
     Ok(())
 }
@@ -197,7 +211,7 @@ pub async fn read_message(stream: &mut RecvStream) -> BlixardResult<(MessageHead
         .read_exact(&mut header_bytes)
         .await
         .map_err(|e| BlixardError::Internal {
-            message: format!("Failed to write to stream: {}", e),
+            message: format!("Failed to read from stream: {}", e),
         })?;
     
     let header = MessageHeader::from_bytes(&header_bytes)?;
@@ -208,7 +222,7 @@ pub async fn read_message(stream: &mut RecvStream) -> BlixardResult<(MessageHead
         .read_exact(&mut payload)
         .await
         .map_err(|e| BlixardError::Internal {
-            message: format!("Failed to write to stream: {}", e),
+            message: format!("Failed to read from stream: {}", e),
         })?;
     
     Ok((header, Bytes::from(payload)))

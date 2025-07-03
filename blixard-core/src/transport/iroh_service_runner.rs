@@ -16,13 +16,14 @@ use crate::transport::{
     BLIXARD_ALPN,
 };
 // VM operations are handled through SharedNodeState
+use async_trait::async_trait;
 use bytes::Bytes;
-use iroh::{Endpoint, discovery::dns::DnsDiscovery};
+use iroh::{Endpoint, discovery::dns::DnsDiscovery, protocol::{ProtocolHandler, AcceptError, Router}, endpoint::Connection};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
-use tracing::{error, info, warn};
+use tracing::{error, info, warn, debug};
 
 /// Iroh service runner that handles all RPC services
 pub struct IrohServiceRunner {
@@ -84,68 +85,6 @@ impl IrohServiceRunner {
         Ok(())
     }
 
-    /// Run the service runner
-    pub async fn run(mut self) -> BlixardResult<()> {
-        // Register all services
-        self.register_services().await?;
-
-        let services = Arc::new(self.services);
-        let endpoint = self.endpoint.clone();
-
-        info!(
-            "Starting Iroh service runner on node {}",
-            endpoint.node_id()
-        );
-
-        // Accept incoming connections
-        loop {
-            match endpoint.accept().await {
-                Some(incoming) => {
-                    let services = services.clone();
-                    tokio::spawn(async move {
-                        match incoming.await {
-                            Ok(connection) => {
-                                // ALPN is already checked during handshake
-
-                                let remote_node_id = connection.remote_node_id();
-                                match remote_node_id {
-                                    Ok(node_id) => info!("Accepted connection from {}", node_id),
-                                    Err(e) => info!("Accepted connection from unknown node: {}", e),
-                                }
-
-                                // Handle all streams on this connection
-                                loop {
-                                    match connection.accept_bi().await {
-                                        Ok((send, recv)) => {
-                                            let services = services.clone();
-                                            tokio::spawn(async move {
-                                                if let Err(e) = Self::handle_rpc_stream(send, recv, &services).await {
-                                                    error!("Error handling RPC stream: {}", e);
-                                                }
-                                            });
-                                        }
-                                        Err(e) => {
-                                            info!("Connection closed: {}", e);
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                error!("Failed to accept connection: {}", e);
-                            }
-                        }
-                    });
-                }
-                None => {
-                    info!("Endpoint closed, shutting down service runner");
-                    break;
-                }
-            }
-        }
-
-        Ok(())
-    }
 
     /// Handle an RPC stream
     async fn handle_rpc_stream(
@@ -153,8 +92,12 @@ impl IrohServiceRunner {
         mut recv: iroh::endpoint::RecvStream,
         services: &HashMap<String, Arc<dyn IrohService>>,
     ) -> BlixardResult<()> {
+        debug!("Starting to handle RPC stream");
+        
         // Read the request
+        debug!("Reading message from stream");
         let (header, payload) = read_message(&mut recv).await?;
+        debug!("Read message with type {:?}, request_id: {:?}", header.msg_type, header.request_id);
         
         if header.msg_type != MessageType::Request {
             return Err(BlixardError::Internal {
@@ -164,12 +107,14 @@ impl IrohServiceRunner {
         
         // Deserialize the RPC request
         let request: RpcRequest = crate::transport::iroh_protocol::deserialize_payload(&payload)?;
+        debug!("Received RPC request for service: {}, method: {}", request.service, request.method);
         
         // Find the service
         let service = services.get(&request.service)
             .ok_or_else(|| BlixardError::ServiceNotFound(request.service.clone()))?;
         
         // Handle the request
+        debug!("Calling service handler for {}.{}", request.service, request.method);
         let response = match service.handle_call(&request.method, request.payload).await {
             Ok(result) => RpcResponse {
                 success: true,
@@ -183,17 +128,65 @@ impl IrohServiceRunner {
             },
         };
         
+        debug!("Service handler completed, success: {}", response.success);
+        
         // Send the response
         let response_bytes = crate::transport::iroh_protocol::serialize_payload(&response)?;
+        debug!("Writing response message, size: {} bytes", response_bytes.len());
         write_message(&mut send, MessageType::Response, header.request_id, &response_bytes).await?;
+        debug!("Response message written successfully");
         
         // Finish sending to signal we're done
+        debug!("Finishing send stream");
         send.finish()
             .map_err(|e| BlixardError::Internal {
                 message: format!("Failed to finish response stream: {}", e),
             })?;
+        debug!("Send stream finished successfully");
         
         Ok(())
+    }
+}
+
+/// Protocol handler for BLIXARD_ALPN
+struct IrohProtocolHandler {
+    services: HashMap<String, Arc<dyn IrohService>>,
+}
+
+impl std::fmt::Debug for IrohProtocolHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IrohProtocolHandler")
+            .field("services", &self.services.len())
+            .finish()
+    }
+}
+
+#[async_trait]
+impl ProtocolHandler for IrohProtocolHandler {
+    fn accept<'a>(&'a self, connection: Connection) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AcceptError>> + Send + 'a>> {
+        Box::pin(async move {
+            debug!("Accepted connection from {:?}", connection.remote_node_id());
+            
+            // Handle all streams on this connection
+            loop {
+                match connection.accept_bi().await {
+                    Ok((send, recv)) => {
+                        let services = self.services.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = IrohServiceRunner::handle_rpc_stream(send, recv, &services).await {
+                                error!("Error handling RPC stream: {}", e);
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        info!("Connection closed: {}", e);
+                        break;
+                    }
+                }
+            }
+            
+            Ok(())
+        })
     }
 }
 
@@ -202,20 +195,20 @@ pub async fn start_iroh_services(
     shared_state: Arc<SharedNodeState>,
     bind_addr: SocketAddr,
 ) -> BlixardResult<JoinHandle<()>> {
-    // Get or create Iroh endpoint
-    let endpoint = if let Some(p2p_manager) = shared_state.get_p2p_manager().await {
+    // Get or create Iroh endpoint (ensure we have Arc<Endpoint>)
+    let endpoint: Arc<Endpoint> = if let Some(p2p_manager) = shared_state.get_p2p_manager().await {
         let (endpoint, _node_id) = p2p_manager.get_endpoint();
         Arc::new(endpoint)
     } else {
         // Create a new Iroh endpoint if P2P manager isn't available
-        let endpoint = Endpoint::builder()
+        let ep = Endpoint::builder()
             .discovery(DnsDiscovery::n0_dns())
             .bind()
             .await
             .map_err(|e| BlixardError::Internal {
                 message: format!("Failed to create Iroh endpoint: {}", e),
             })?;
-        Arc::new(endpoint)
+        Arc::new(ep)
     };
 
     info!(
@@ -224,11 +217,32 @@ pub async fn start_iroh_services(
         endpoint.node_id()
     );
 
-    let runner = IrohServiceRunner::new(shared_state, endpoint);
+    // Register our ALPN protocol
+    let mut runner = IrohServiceRunner::new(shared_state, endpoint.clone());
+    
+    // Register all services
+    runner.register_services().await?;
+    
+    let services = runner.services.clone();
+    
+    // Create a protocol handler for our ALPN
+    let handler = IrohProtocolHandler { services };
+    
+    // Create router to handle incoming connections
+    // Note: Router::builder takes ownership, so we need to dereference the Arc
+    let router = Router::builder((*endpoint).clone())
+        .accept(BLIXARD_ALPN.to_vec(), Arc::new(handler))
+        .spawn();
+    
+    info!("Registered BLIXARD_ALPN protocol handler with {} services", runner.services.len());
 
     let handle = tokio::spawn(async move {
-        if let Err(e) = runner.run().await {
-            error!("Iroh service runner error: {}", e);
+        // Keep the router alive - it will handle connections until dropped
+        let _router = router;
+        
+        // Keep the task running until cancelled
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
         }
     });
 
