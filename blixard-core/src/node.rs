@@ -482,6 +482,26 @@ impl Node {
                 tracing::error!("Failed to join cluster: {}", e);
                 return Err(e);
             }
+            
+            // After successfully joining the cluster, wait a bit for leader election
+            // and configuration to stabilize, then register as a worker
+            tracing::info!("Successfully joined cluster, waiting for configuration to stabilize");
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            
+            // Now register as a worker through Raft
+            if let Err(e) = self.register_as_worker().await {
+                tracing::error!("Failed to register as worker after joining cluster: {}", e);
+                // Don't fail initialization if worker registration fails - the node
+                // is still part of the cluster and can participate in consensus
+                tracing::warn!("Continuing without worker registration - node can still participate in cluster");
+            }
+        } else {
+            // Bootstrap mode: register as worker immediately
+            if let Err(e) = self.register_as_worker().await {
+                tracing::error!("Failed to register as worker in bootstrap mode: {}", e);
+                // Don't fail initialization if worker registration fails
+                tracing::warn!("Continuing without worker registration");
+            }
         }
         
         // Mark node as initialized
@@ -893,7 +913,7 @@ impl Node {
         self.shared.get_vm_ip(name).await
     }
 
-    /// Join a cluster
+    /// Join a cluster and optionally register as a worker
     pub async fn join_cluster(&mut self, peer_addr: Option<std::net::SocketAddr>) -> BlixardResult<()> {
         // Check if initialized
         if !self.shared.is_initialized().await {
@@ -902,6 +922,20 @@ impl Node {
             });
         }
         
+        if peer_addr.is_none() {
+            // Bootstrap mode: register as worker immediately
+            self.register_as_worker().await?;
+        } else {
+            // Join existing cluster - worker registration will happen later
+            // after the node has successfully joined and can identify the leader
+            tracing::info!("Joining existing cluster at {:?} - worker registration deferred", peer_addr);
+        }
+        
+        Ok(())
+    }
+    
+    /// Register this node as a worker in the cluster
+    pub async fn register_as_worker(&self) -> BlixardResult<()> {
         let node_id = self.shared.get_id();
         let address = self.shared.get_bind_addr().to_string();
         // Get system resources - use reasonable defaults
@@ -918,7 +952,8 @@ impl Node {
         // Get topology from node config
         let topology = self.shared.config.topology.clone();
         
-        if peer_addr.is_none() {
+        // Check if we're the bootstrap node (no join_addr in config)
+        if self.shared.config.join_addr.is_none() {
             // Bootstrap mode: When starting as a single-node cluster, we can write
             // directly to the database. This is the ONLY exception to the rule that
             // all state must go through Raft consensus.

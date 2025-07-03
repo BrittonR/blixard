@@ -79,11 +79,13 @@ impl ClusterOperations for ClusterOperationsAdapter {
                         }
                     }
                     
-                    // Add direct addresses
-                    for addr_str in &p2p_addresses {
-                        if let Ok(addr) = addr_str.parse() {
-                            node_addr = node_addr.with_direct_addresses([addr]);
-                        }
+                    // Collect all valid addresses and add them at once
+                    let addrs: Vec<SocketAddr> = p2p_addresses
+                        .iter()
+                        .filter_map(|addr_str| addr_str.parse().ok())
+                        .collect();
+                    if !addrs.is_empty() {
+                        node_addr = node_addr.with_direct_addresses(addrs);
                     }
                     
                     // Try to connect

@@ -198,10 +198,16 @@ impl IrohRaftTransport {
     
     /// Start the transport (accept incoming connections, process outgoing messages)
     pub async fn start(&self) -> BlixardResult<()> {
-        // Start accepting incoming connections
-        let accept_task = self.spawn_accept_task();
+        // IMPORTANT: We do NOT spawn an accept task here because the Raft transport
+        // should not accept incoming connections directly. The iroh_service_runner
+        // handles all incoming connections through the Router, which properly filters
+        // by ALPN protocol and dispatches to the appropriate service.
+        //
+        // Raft messages are sent directly between peers using the send_message() method,
+        // which opens outgoing connections as needed. This prevents the Raft transport
+        // from intercepting RPC connections meant for the cluster service.
         
-        // Start message batch processor
+        // Start message batch processor for outgoing messages
         let batch_task = self.spawn_batch_processor();
         
         // Start connection health checker
@@ -209,10 +215,10 @@ impl IrohRaftTransport {
         
         // Store task handles
         let mut tasks = self.tasks.lock().await;
-        tasks.push(accept_task);
         tasks.push(batch_task);
         tasks.push(health_task);
         
+        tracing::info!("Iroh Raft transport started (outgoing connections only)");
         Ok(())
     }
     

@@ -485,14 +485,8 @@ impl TestNodeBuilder {
         // Set running state
         shared_state.set_running(true).await;
         
-        // If join_addr is provided, actually join the cluster
-        if let Some(join_addr_str) = self.join_addr.as_ref() {
-            tracing::info!("Node {} joining cluster via {}", id, join_addr_str);
-            let join_addr: SocketAddr = join_addr_str.parse()
-                .map_err(|e| BlixardError::ConfigError(format!("Invalid join address '{}': {}", join_addr_str, e)))?;
-            node.join_cluster(Some(join_addr)).await?;
-            tracing::info!("Node {} successfully joined cluster", id);
-        }
+        // No need to explicitly call join_cluster here anymore
+        // The node initialization handles joining if join_addr is in config
         
         Ok(TestNode {
             id,
