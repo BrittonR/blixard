@@ -24,6 +24,7 @@ use crate::{
     error::{BlixardError, BlixardResult},
     iroh_types::{HealthCheckRequest, LeaveRequest},
     transport::iroh_client::IrohClusterServiceClient,
+    metrics_server::spawn_metrics_server,
 };
 
 /// Global port allocator for tests
@@ -243,6 +244,7 @@ pub struct TestNode {
     pub addr: SocketAddr,
     pub shutdown_tx: Option<oneshot::Sender<()>>,
     pub server_handle: Option<JoinHandle<()>>,
+    pub metrics_handle: Option<JoinHandle<BlixardResult<()>>>,
     _temp_dir: Option<tempfile::TempDir>,
 }
 
@@ -306,11 +308,17 @@ impl TestNode {
         // - Stopping PeerConnector background tasks
         self.node.stop().await.expect("Failed to stop node");
         
-        // Abort the gRPC server handle if it hasn't been already
+        // Abort the Iroh server handle if it hasn't been already
         if let Some(handle) = self.server_handle.take() {
             handle.abort();
             // Give the server more time to fully shut down and release the port
             tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        
+        // Abort the metrics server handle
+        if let Some(handle) = self.metrics_handle.take() {
+            handle.abort();
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
         
         // Temp dir will be cleaned up on drop
@@ -432,12 +440,6 @@ impl TestNodeBuilder {
         let mut node = Node::new(config);
         let shared_state = node.shared();
         
-        // If we have a join address, add it as a peer before initializing
-        if let Some(join_addr) = &self.join_addr {
-            // Assume node 1 is always the bootstrap node for tests
-            let _ = shared_state.add_peer(1, join_addr.clone()).await;
-        }
-        
         // Create shutdown channel
         let (shutdown_tx, _shutdown_rx) = oneshot::channel();
         shared_state.set_shutdown_tx(shutdown_tx).await;
@@ -471,6 +473,15 @@ impl TestNodeBuilder {
         // so we'll just wait a bit
         tokio::time::sleep(Duration::from_millis(200)).await;
         
+        // Start metrics server for bootstrap endpoint
+        // This is required for other nodes to join the cluster
+        let metrics_port = port + 1000; // Default offset from orchestrator
+        let metrics_addr: SocketAddr = format!("127.0.0.1:{}", metrics_port).parse().unwrap();
+        let metrics_handle = spawn_metrics_server(metrics_addr, shared_state.clone());
+        
+        // Give metrics server time to start
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        
         // Set running state
         shared_state.set_running(true).await;
         
@@ -481,6 +492,7 @@ impl TestNodeBuilder {
             addr,
             shutdown_tx: None,
             server_handle: Some(server_handle),
+            metrics_handle: Some(metrics_handle),
             _temp_dir: temp_dir,
         })
     }
