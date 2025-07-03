@@ -187,6 +187,12 @@ impl IrohServiceRunner {
         let response_bytes = crate::transport::iroh_protocol::serialize_payload(&response)?;
         write_message(&mut send, MessageType::Response, header.request_id, &response_bytes).await?;
         
+        // Finish sending to signal we're done
+        send.finish()
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to finish response stream: {}", e),
+            })?;
+        
         Ok(())
     }
 }

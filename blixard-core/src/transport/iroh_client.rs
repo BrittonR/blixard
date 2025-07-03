@@ -77,8 +77,15 @@ impl IrohClient {
         let request_payload = serialize_payload(&rpc_request)?;
         write_message(&mut send, MessageType::Request, request_id, &request_payload).await?;
         
-        // Set read timeout
-        let timeout = Duration::from_secs(30);
+        // Finish sending to signal we're done
+        send.finish()
+            .map_err(|e| BlixardError::NetworkError(format!("Failed to finish stream: {}", e)))?;
+        
+        // Set read timeout - longer for cluster operations
+        let timeout = match method {
+            "join_cluster" | "leave_cluster" | "get_cluster_status" => Duration::from_secs(120),
+            _ => Duration::from_secs(30),
+        };
         let read_fut = read_message(&mut recv);
         
         // Read response with timeout
