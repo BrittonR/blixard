@@ -578,8 +578,12 @@ impl Node {
                 
                 // Determine if join_addr is already an HTTP URL or a socket address
                 let bootstrap_url = if join_addr.starts_with("http://") || join_addr.starts_with("https://") {
-                    // Already an HTTP URL, use it directly
-                    join_addr.clone()
+                    // Already an HTTP URL, append /bootstrap if not present
+                    if join_addr.ends_with("/bootstrap") {
+                        join_addr.clone()
+                    } else {
+                        format!("{}/bootstrap", join_addr.trim_end_matches('/'))
+                    }
                 } else {
                     // Parse as socket address and construct HTTP URL
                     let addr: SocketAddr = join_addr.parse()
