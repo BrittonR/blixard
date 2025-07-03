@@ -658,14 +658,15 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
     };
     use crate::client::UnifiedClient;
     
-    // Default to connecting to local node
-    let local_addr = "127.0.0.1:7001";
+    // Check for BLIXARD_NODE_ADDR environment variable first
+    let node_addr = std::env::var("BLIXARD_NODE_ADDR")
+        .unwrap_or_else(|_| "127.0.0.1:7001".to_string());
     
-    // Connect to the local node using unified client
-    let mut client = UnifiedClient::new(local_addr)
+    // Connect to the node using unified client (supports both direct addresses and registry files)
+    let mut client = UnifiedClient::new(&node_addr)
         .await
         .map_err(|e| BlixardError::Internal { 
-            message: format!("Failed to connect to local node at {}: {}", local_addr, e)
+            message: format!("Failed to connect to node at {}: {}", node_addr, e)
         })?;
     
     match command {

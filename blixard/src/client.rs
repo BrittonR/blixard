@@ -41,9 +41,10 @@ impl IrohClient {
         // Create Iroh NodeAddr
         let node_addr = discovery.create_node_addr(&node_info)?;
         
-        // Create Iroh endpoint for client
+        // Create Iroh endpoint for client with BLIXARD_ALPN protocol
         let endpoint = iroh::Endpoint::builder()
             .discovery_n0()
+            .alpns(vec![blixard_core::transport::BLIXARD_ALPN.to_vec()])
             .bind()
             .await
             .map_err(|e| BlixardError::Internal {
