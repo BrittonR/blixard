@@ -37,7 +37,7 @@ wait_for_port() {
 # Start Node 1 (bootstrap node)
 echo ""
 echo "🔷 Starting Node 1 (bootstrap node)..."
-cargo run -- node --id 1 --bind 127.0.0.1:7001 --data-dir /tmp/blixard-cluster-test/node-1 > /tmp/blixard-cluster-test/node-1.log 2>&1 &
+RUST_LOG=blixard=debug,blixard_core=debug cargo run -- node --id 1 --bind 127.0.0.1:7001 --data-dir /tmp/blixard-cluster-test/node-1 > /tmp/blixard-cluster-test/node-1.log 2>&1 &
 NODE1_PID=$!
 echo "  PID: $NODE1_PID"
 
@@ -59,7 +59,7 @@ fi
 # Start Node 2
 echo ""
 echo "🔷 Starting Node 2..."
-cargo run -- node --id 2 --bind 127.0.0.1:7002 --data-dir /tmp/blixard-cluster-test/node-2 --join-address http://127.0.0.1:8001 > /tmp/blixard-cluster-test/node-2.log 2>&1 &
+RUST_LOG=blixard=debug,blixard_core=debug cargo run -- node --id 2 --bind 127.0.0.1:7002 --data-dir /tmp/blixard-cluster-test/node-2 --join-address http://127.0.0.1:8001 > /tmp/blixard-cluster-test/node-2.log 2>&1 &
 NODE2_PID=$!
 echo "  PID: $NODE2_PID"
 
@@ -71,7 +71,7 @@ wait_for_port 8002 || { echo "❌ Node 2 failed to start"; kill $NODE1_PID $NODE
 # Start Node 3
 echo ""
 echo "🔷 Starting Node 3..."
-cargo run -- node --id 3 --bind 127.0.0.1:7003 --data-dir /tmp/blixard-cluster-test/node-3 --join-address http://127.0.0.1:8001 > /tmp/blixard-cluster-test/node-3.log 2>&1 &
+RUST_LOG=blixard=debug,blixard_core=debug cargo run -- node --id 3 --bind 127.0.0.1:7003 --data-dir /tmp/blixard-cluster-test/node-3 --join-address http://127.0.0.1:8001 > /tmp/blixard-cluster-test/node-3.log 2>&1 &
 NODE3_PID=$!
 echo "  PID: $NODE3_PID"
 

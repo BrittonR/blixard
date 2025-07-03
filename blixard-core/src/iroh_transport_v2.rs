@@ -233,7 +233,7 @@ impl IrohTransportV2 {
             bridge.start().await?;
             
             // Configure endpoint with discovery
-            let discovery = create_combined_discovery(dm_clone);
+            let discovery = create_combined_discovery(dm.clone());
             builder = builder.add_discovery(discovery);
             
             Some(bridge)

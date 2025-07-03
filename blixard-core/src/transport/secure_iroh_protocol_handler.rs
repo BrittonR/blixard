@@ -18,7 +18,7 @@ use crate::{
 use async_trait::async_trait;
 use bytes::Bytes;
 use iroh::{
-    protocol::ProtocolHandler,
+    protocol::{ProtocolHandler, AcceptError},
     endpoint::Connection,
 };
 use std::{
@@ -192,27 +192,27 @@ impl SecureRpcProtocolHandler {
 impl ProtocolHandler for SecureRpcProtocolHandler {
     fn accept<'a>(&'a self, connection: Connection) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AcceptError>> + Send + 'a>> {
         Box::pin(async move {
-        debug!("Accepting secure RPC connection from {:?}", connection.remote_node_id());
-        
-        // Accept bidirectional stream
-        let (send, recv) = match connection.accept_bi().await {
-            Ok(streams) => streams,
-            Err(e) => {
-                error!("Failed to accept bidirectional stream: {}", e);
-                return Err(anyhow::anyhow!("Failed to accept bidirectional stream: {}", e));
+            debug!("Accepting secure RPC connection from {:?}", connection.remote_node_id());
+            
+            // Handle all streams on this connection
+            loop {
+                match connection.accept_bi().await {
+                    Ok((send, recv)) => {
+                        // Handle the RPC stream
+                        if let Err(e) = self.handle_rpc_stream(connection.clone(), send, recv).await {
+                            error!("RPC stream handler error: {}", e);
+                            // Continue handling other streams
+                        }
+                    }
+                    Err(e) => {
+                        // Connection closed, this is normal
+                        info!("Connection closed: {}", e);
+                        break;
+                    }
+                }
             }
-        };
-        
-        // Handle the RPC stream
-        if let Err(e) = self.handle_rpc_stream(connection.clone(), send, recv).await {
-            error!("RPC stream handler error: {}", e);
-        }
-        
-        // Wait for connection to close
-        connection.closed().await;
-        debug!("Connection closed");
-        
-        Ok(())
+            
+            Ok(())
         })
     }
 }

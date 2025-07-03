@@ -11,7 +11,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 use iroh::{NodeAddr, NodeId};
-use iroh::discovery::{Discovery, DiscoveryItem, NodeData, NodeInfo};
+use iroh::discovery::{Discovery, DiscoveryItem, DiscoveryError, NodeData, NodeInfo};
 use futures::Stream;
 
 use crate::discovery::{DiscoveryEvent, DiscoveryManager, IrohNodeInfo};
@@ -147,7 +147,7 @@ impl Discovery for IrohDiscoveryBridge {
     fn resolve(
         &self,
         node_id: iroh::PublicKey,
-    ) -> Option<Pin<Box<dyn Stream<Item = Result<DiscoveryItem, anyhow::Error>> + Send + 'static>>> {
+    ) -> Option<Pin<Box<dyn Stream<Item = Result<DiscoveryItem, DiscoveryError>> + Send + 'static>>> {
         let node_cache = self.node_cache.clone();
         
         // Create a stream that will yield discovery items for this node

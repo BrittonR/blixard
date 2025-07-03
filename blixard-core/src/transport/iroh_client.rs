@@ -83,12 +83,6 @@ impl IrohClient {
         write_message(&mut send, MessageType::Request, request_id, &request_payload).await?;
         debug!("Request message written");
         
-        // Finish sending to signal we're done
-        debug!("Finishing send stream");
-        send.finish()
-            .map_err(|e| BlixardError::NetworkError(format!("Failed to finish stream: {}", e)))?;
-        debug!("Send stream finished");
-        
         // Set read timeout - longer for cluster operations
         let timeout = match method {
             "join_cluster" | "leave_cluster" | "get_cluster_status" => Duration::from_secs(120),
@@ -103,6 +97,12 @@ impl IrohClient {
             .map_err(|_| BlixardError::Internal {
                 message: "RPC call timed out".to_string(),
             })??;
+        
+        // Finish sending AFTER reading response to keep connection alive
+        debug!("Finishing send stream");
+        send.finish()
+            .map_err(|e| BlixardError::NetworkError(format!("Failed to finish stream: {}", e)))?;
+        debug!("Send stream finished");
         debug!("Received response with type {:?}, request_id: {:?}", header.msg_type, header.request_id);
         
         // Validate response
