@@ -1,0 +1,10 @@
+{
+  "cluster_node_id": 1,
+  "iroh_node_id": "n83GRe3LYnZdDLRg49PPcWByeL8L5zgjmVX3A1RWFAE=",
+  "direct_addresses": [
+    "0.0.0.0:15007",
+    "[::]:15008"
+  ],
+  "relay_url": "https://relay.iroh.network./",
+  "address": "127.0.0.1:7001"
+}
