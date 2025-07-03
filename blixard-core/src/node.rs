@@ -576,14 +576,20 @@ impl Node {
                 // If discovery didn't work, use HTTP bootstrap mechanism
                 tracing::info!("Attempting HTTP bootstrap from {}", join_addr);
                 
-                // Parse join address to get HTTP bootstrap URL
-                let addr: SocketAddr = join_addr.parse()
-                    .map_err(|e| BlixardError::ConfigError(format!("Invalid join address '{}': {}", join_addr, e)))?;
-                
-                // Get metrics port offset from config
-                let config = crate::config_global::get();
-                let bootstrap_port = addr.port() + config.network.metrics.port_offset;
-                let bootstrap_url = format!("http://{}:{}/bootstrap", addr.ip(), bootstrap_port);
+                // Determine if join_addr is already an HTTP URL or a socket address
+                let bootstrap_url = if join_addr.starts_with("http://") || join_addr.starts_with("https://") {
+                    // Already an HTTP URL, use it directly
+                    join_addr.clone()
+                } else {
+                    // Parse as socket address and construct HTTP URL
+                    let addr: SocketAddr = join_addr.parse()
+                        .map_err(|e| BlixardError::ConfigError(format!("Invalid join address '{}': {}", join_addr, e)))?;
+                    
+                    // Get metrics port offset from config
+                    let config = crate::config_global::get();
+                    let bootstrap_port = addr.port() + config.network.metrics.port_offset;
+                    format!("http://{}:{}/bootstrap", addr.ip(), bootstrap_port)
+                };
                 
                 // Fetch bootstrap info
                 tracing::debug!("Fetching bootstrap info from {}", bootstrap_url);

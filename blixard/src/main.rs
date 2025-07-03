@@ -484,7 +484,8 @@ async fn main() -> BlixardResult<()> {
                             let actual_bind_address = orchestrator.bind_address();
                             
                             // Start metrics server
-                            let metrics_port = config.node.metrics_port.unwrap_or(8081);
+                            let node_port = actual_bind_address.port();
+                            let metrics_port = node_port + 1080; // Use node port + 1080 for metrics
                             let metrics_addr: SocketAddr = format!("0.0.0.0:{}", metrics_port).parse()
                                 .map_err(|e| BlixardError::ConfigError(format!("Invalid metrics address: {}", e)))?;
                             let _metrics_handle = blixard_core::metrics_server::spawn_metrics_server(
@@ -524,7 +525,8 @@ async fn main() -> BlixardResult<()> {
                     let actual_bind_address = orchestrator.bind_address();
                     
                     // Start metrics server
-                    let metrics_port = config.node.metrics_port.unwrap_or(8081);
+                    let node_port = actual_bind_address.port();
+                    let metrics_port = node_port + 1080; // Use node port + 1080 for metrics
                     let metrics_addr: SocketAddr = format!("0.0.0.0:{}", metrics_port).parse()
                         .map_err(|e| BlixardError::ConfigError(format!("Invalid metrics address: {}", e)))?;
                     let _metrics_handle = blixard_core::metrics_server::spawn_metrics_server(
