@@ -63,6 +63,10 @@ enum Commands {
         #[arg(long)]
         peers: Option<String>,
         
+        /// HTTP bootstrap address to join cluster (e.g., http://127.0.0.1:8081)
+        #[arg(long)]
+        join_address: Option<String>,
+        
         /// Run node in background as daemon
         #[arg(long)]
         daemon: bool,
@@ -370,7 +374,7 @@ async fn main() -> BlixardResult<()> {
     let cli = Cli::parse();
     
     match cli.command {
-        Commands::Node { id, bind, data_dir, vm_config_dir: _, vm_data_dir: _, mock_vm, vm_backend, peers, daemon } => {
+        Commands::Node { id, bind, data_dir, vm_config_dir: _, vm_data_dir: _, mock_vm, vm_backend, peers, join_address, daemon } => {
             // Load configuration from file or create from CLI args
             let mut config = if let Some(config_path) = cli.config {
                 // Load from TOML file
@@ -378,7 +382,10 @@ async fn main() -> BlixardResult<()> {
                 Config::from_file(path)?
             } else {
                 // Create from CLI arguments
-                let join_addr = if let Some(peers_str) = peers {
+                // Prefer join_address over peers for backward compatibility
+                let join_addr = if let Some(addr) = join_address {
+                    Some(addr)
+                } else if let Some(peers_str) = peers {
                     let peer_addrs: Vec<&str> = peers_str.split(',').collect();
                     if !peer_addrs.is_empty() {
                         // Validate that it's a valid socket address
@@ -469,12 +476,21 @@ async fn main() -> BlixardResult<()> {
                             
                             // Create and initialize the orchestrator
                             let mut orchestrator = BlixardOrchestrator::new(orchestrator_config).await?;
-                            orchestrator.initialize(config).await?;
+                            orchestrator.initialize(config.clone()).await?;
                             orchestrator.start().await?;
                             
                             // Get shared state for gRPC server
                             let shared_state = orchestrator.node().shared();
                             let actual_bind_address = orchestrator.bind_address();
+                            
+                            // Start metrics server
+                            let metrics_port = config.node.metrics_port.unwrap_or(8081);
+                            let metrics_addr: SocketAddr = format!("0.0.0.0:{}", metrics_port).parse()
+                                .map_err(|e| BlixardError::ConfigError(format!("Invalid metrics address: {}", e)))?;
+                            let _metrics_handle = blixard_core::metrics_server::spawn_metrics_server(
+                                metrics_addr,
+                                shared_state.clone(),
+                            );
                             
                             // Keep orchestrator alive while running server
                             let _orchestrator = orchestrator;
@@ -500,12 +516,21 @@ async fn main() -> BlixardResult<()> {
                     // Run in foreground (normal mode)
                     // Create and initialize the orchestrator
                     let mut orchestrator = BlixardOrchestrator::new(orchestrator_config).await?;
-                    orchestrator.initialize(config).await?;
+                    orchestrator.initialize(config.clone()).await?;
                     orchestrator.start().await?;
                     
                     // Get shared state for gRPC server
                     let shared_state = orchestrator.node().shared();
                     let actual_bind_address = orchestrator.bind_address();
+                    
+                    // Start metrics server
+                    let metrics_port = config.node.metrics_port.unwrap_or(8081);
+                    let metrics_addr: SocketAddr = format!("0.0.0.0:{}", metrics_port).parse()
+                        .map_err(|e| BlixardError::ConfigError(format!("Invalid metrics address: {}", e)))?;
+                    let _metrics_handle = blixard_core::metrics_server::spawn_metrics_server(
+                        metrics_addr,
+                        shared_state.clone(),
+                    );
                     
                     // Keep orchestrator alive while running server
                     let _orchestrator = orchestrator;
