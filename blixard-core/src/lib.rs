@@ -10,6 +10,7 @@ pub mod raft_batch_processor;
 pub mod raft_codec;
 pub mod raft_manager;
 pub mod resource_management;
+pub mod resource_monitor;
 pub mod storage;
 pub mod types;
 pub mod vm_backend;

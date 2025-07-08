@@ -17,7 +17,7 @@ use crate::storage::{
     RedbRaftStorage, SnapshotData, CLUSTER_STATE_TABLE, TASK_ASSIGNMENT_TABLE, TASK_RESULT_TABLE,
     TASK_TABLE, VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE,
 };
-use crate::types::{VmCommand, VmStatus};
+use crate::types::{VmCommand, VmConfig, VmStatus};
 
 #[cfg(feature = "failpoints")]
 use crate::fail_point;
@@ -432,6 +432,84 @@ impl RaftStateMachine {
         Ok(())
     }
 
+    /// Validates that a VM can be admitted to the specified node
+    /// This is critical admission control that prevents resource overcommit
+    fn validate_vm_admission(&self, config: &VmConfig, node_id: u64) -> BlixardResult<()> {
+        // Get worker capabilities for the target node
+        let read_txn = self.database.begin_read()?;
+        let worker_table = read_txn.open_table(WORKER_TABLE)?;
+        
+        let worker_capabilities = if let Some(data) = worker_table.get(&node_id)? {
+            bincode::deserialize::<WorkerCapabilities>(data.value())
+                .map_err(|e| BlixardError::Serialization {
+                    operation: "deserialize worker capabilities".to_string(),
+                    source: Box::new(e),
+                })?
+        } else {
+            return Err(BlixardError::SchedulingError {
+                message: format!("Target node {} not found in worker registry", node_id),
+            });
+        };
+
+        // Calculate current resource usage on the target node
+        let vm_table = read_txn.open_table(VM_STATE_TABLE)?;
+        let mut used_vcpus = 0u32;
+        let mut used_memory_mb = 0u64;
+        let mut used_disk_gb = 0u64;
+
+        // Iterate through all VMs on this node
+        for entry in vm_table.iter()? {
+            let (_, vm_data) = entry?;
+            if let Ok(vm_state) = bincode::deserialize::<crate::types::VmState>(vm_data.value()) {
+                if vm_state.node_id == node_id && vm_state.status != VmStatus::Stopped {
+                    used_vcpus += vm_state.config.vcpus;
+                    used_memory_mb += vm_state.config.memory as u64;
+                    used_disk_gb += 5; // Default disk usage per VM
+                }
+            }
+        }
+
+        // Check if the new VM would exceed node capacity
+        let new_total_vcpus = used_vcpus + config.vcpus;
+        let new_total_memory_mb = used_memory_mb + config.memory as u64;
+        let new_total_disk_gb = used_disk_gb + 5; // Default disk for new VM
+
+        if new_total_vcpus > worker_capabilities.cpu_cores {
+            return Err(BlixardError::InsufficientResources {
+                requested: format!("{}vCPU (total would be {})", config.vcpus, new_total_vcpus),
+                available: format!("{}vCPU ({} already used)", 
+                    worker_capabilities.cpu_cores.saturating_sub(used_vcpus), used_vcpus),
+            });
+        }
+
+        if new_total_memory_mb > worker_capabilities.memory_mb {
+            return Err(BlixardError::InsufficientResources {
+                requested: format!("{}MB memory (total would be {})", config.memory, new_total_memory_mb),
+                available: format!("{}MB memory ({} already used)", 
+                    worker_capabilities.memory_mb.saturating_sub(used_memory_mb), used_memory_mb),
+            });
+        }
+
+        if new_total_disk_gb > worker_capabilities.disk_gb {
+            return Err(BlixardError::InsufficientResources {
+                requested: format!("5GB disk (total would be {})", new_total_disk_gb),
+                available: format!("{}GB disk ({} already used)", 
+                    worker_capabilities.disk_gb.saturating_sub(used_disk_gb), used_disk_gb),
+            });
+        }
+
+        // Check required features
+        for feature in &["microvm"] {
+            if !worker_capabilities.features.contains(&feature.to_string()) {
+                return Err(BlixardError::SchedulingError {
+                    message: format!("Node {} does not support required feature: {}", node_id, feature),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
     fn apply_vm_command(&self, txn: WriteTransaction, command: &VmCommand) -> BlixardResult<()> {
         tracing::info!("🔥 apply_vm_command called with command: {:?}", command);
         use crate::storage::VM_STATE_TABLE;
@@ -461,6 +539,9 @@ impl RaftStateMachine {
 
             match command {
                 VmCommand::Create { config, node_id } => {
+                    // Perform admission control before creating VM
+                    self.validate_vm_admission(config, *node_id)?;
+                    
                     let vm_state = crate::types::VmState {
                         name: config.name.clone(),
                         config: config.clone(),

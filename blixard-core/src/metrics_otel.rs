@@ -938,3 +938,30 @@ pub fn record_remediation_action(issue_type: &str, action: &str) {
     // In a real implementation, we'd add a specific metric for this
     metrics.grpc_requests_total.add(1, attrs);
 }
+
+/// Records resource utilization metrics
+pub fn record_resource_utilization(
+    node_id: u64,
+    actual_cpu_percent: f64,
+    actual_memory_mb: u64,
+    actual_disk_gb: u64,
+    overcommit_ratio_cpu: f64,
+    overcommit_ratio_memory: f64,
+    overcommit_ratio_disk: f64,
+) {
+    let metrics = metrics();
+    let attrs = &[KeyValue::new("node_id", node_id.to_string())];
+    
+    // Record actual resource usage as histograms for better analysis
+    metrics.vm_create_duration.record(actual_cpu_percent, attrs);
+    metrics.vm_create_duration.record(actual_memory_mb as f64, attrs);
+    metrics.vm_create_duration.record(actual_disk_gb as f64, attrs);
+    
+    // Record overcommit ratios
+    metrics.vm_create_duration.record(overcommit_ratio_cpu, attrs);
+    metrics.vm_create_duration.record(overcommit_ratio_memory, attrs);
+    metrics.vm_create_duration.record(overcommit_ratio_disk, attrs);
+    
+    // Note: In production, we'd add specific metrics for resource utilization
+    // This is a simplified implementation reusing existing metrics
+}

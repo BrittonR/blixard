@@ -1724,6 +1724,18 @@ impl SharedNodeState {
             }
         }
     }
+
+    /// Get worker capabilities for this node
+    pub async fn get_worker_capabilities(&self) -> BlixardResult<crate::raft_manager::WorkerCapabilities> {
+        // Default capabilities for this node
+        // In production, this would query actual system resources
+        Ok(crate::raft_manager::WorkerCapabilities {
+            cpu_cores: 8,
+            memory_mb: 16384,
+            disk_gb: 100,
+            features: vec!["microvm".to_string()],
+        })
+    }
 }
 
 // Ensure SharedNodeState is Send + Sync
