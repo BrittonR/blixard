@@ -36,7 +36,19 @@ pub struct RaftConfChange {
     pub change_type: ConfChangeType,
     pub node_id: u64,
     pub address: String,
+    pub p2p_node_id: Option<String>,
+    pub p2p_addresses: Vec<String>,
+    pub p2p_relay_url: Option<String>,
     pub response_tx: Option<oneshot::Sender<BlixardResult<()>>>,
+}
+
+/// Configuration change context that includes P2P info
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct ConfChangeContext {
+    pub address: String,
+    pub p2p_node_id: Option<String>,
+    pub p2p_addresses: Vec<String>,
+    pub p2p_relay_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1337,11 +1349,17 @@ impl RaftManager {
         cc.set_change_type(change_type);
         cc.node_id = conf_change.node_id;
         
-        // For add node, include the address in context
+        // For add node, include the address and P2P info in context
         let context = if matches!(conf_change.change_type, ConfChangeType::AddNode) {
-            bincode::serialize(&conf_change.address)
+            let ctx = ConfChangeContext {
+                address: conf_change.address.clone(),
+                p2p_node_id: conf_change.p2p_node_id.clone(),
+                p2p_addresses: conf_change.p2p_addresses.clone(),
+                p2p_relay_url: conf_change.p2p_relay_url.clone(),
+            };
+            bincode::serialize(&ctx)
                 .map_err(|e| BlixardError::Serialization {
-                    operation: "serialize node address".to_string(),
+                    operation: "serialize conf change context".to_string(),
                     source: Box::new(e),
                 })?
         } else {
@@ -1988,20 +2006,42 @@ impl RaftManager {
                                 RaftConfChangeType::AddNode => {
                                     // Deserialize address from context
                                     if !cc.context.is_empty() {
-                                        if let Ok(address) = bincode::deserialize::<String>(&cc.context) {
-                                            let mut peers = self.peers.write().await;
-                                            peers.insert(cc.node_id, address.clone());
-                                            info!(self.logger, "[RAFT-CONF] Added peer to local list"; "node_id" => cc.node_id);
-                                            
-                                            // Also update SharedNodeState peers
-                                            if let Some(shared) = self.shared_state.upgrade() {
-                                                // Check if peer already exists to avoid duplicate add
-                                                if shared.get_peer(cc.node_id).await.is_none() {
-                                                    let _ = shared.add_peer(cc.node_id, address.clone()).await;
-                                                    info!(self.logger, "[RAFT-CONF] Added peer to SharedNodeState"; "node_id" => cc.node_id);
-                                                } else {
-                                                    info!(self.logger, "[RAFT-CONF] Peer already exists in SharedNodeState"; "node_id" => cc.node_id);
-                                                }
+                                        // Try to deserialize as new format first, fall back to old format
+                                        let (address, p2p_node_id, p2p_addresses, p2p_relay_url) = 
+                                            if let Ok(ctx) = bincode::deserialize::<ConfChangeContext>(&cc.context) {
+                                                // New format with P2P info
+                                                (ctx.address, ctx.p2p_node_id, ctx.p2p_addresses, ctx.p2p_relay_url)
+                                            } else if let Ok(addr) = bincode::deserialize::<String>(&cc.context) {
+                                                // Old format with just address
+                                                (addr, None, Vec::new(), None)
+                                            } else {
+                                                error!(self.logger, "[RAFT-CONF] Failed to deserialize conf change context");
+                                                continue;
+                                            };
+                                        
+                                        let mut peers = self.peers.write().await;
+                                        peers.insert(cc.node_id, address.clone());
+                                        info!(self.logger, "[RAFT-CONF] Added peer to local list"; "node_id" => cc.node_id);
+                                        
+                                        // Also update SharedNodeState peers with P2P info
+                                        if let Some(shared) = self.shared_state.upgrade() {
+                                            // Check if peer already exists to avoid duplicate add
+                                            if shared.get_peer(cc.node_id).await.is_none() {
+                                                // Add peer with P2P info if available
+                                                let _ = shared.add_peer_with_p2p(
+                                                    cc.node_id, 
+                                                    address.clone(),
+                                                    p2p_node_id.clone(),
+                                                    p2p_addresses.clone(),
+                                                    p2p_relay_url.clone()
+                                                ).await;
+                                                info!(self.logger, "[RAFT-CONF] Added peer with P2P info to SharedNodeState"; 
+                                                    "node_id" => cc.node_id,
+                                                    "has_p2p_info" => p2p_node_id.is_some()
+                                                );
+                                            } else {
+                                                info!(self.logger, "[RAFT-CONF] Peer already exists in SharedNodeState"; "node_id" => cc.node_id);
+                                            }
                                                 
                                                 // CRITICAL FIX: Ensure all existing peers know about each other
                                                 // When a new node joins, we need to share peer information

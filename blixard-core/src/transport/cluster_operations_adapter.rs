@@ -97,8 +97,15 @@ impl ClusterOperations for ClusterOperationsAdapter {
             }
         }
         
-        // Propose configuration change through Raft
-        match self.shared_state.propose_conf_change(ConfChangeType::AddNode, node_id, addr.to_string()).await {
+        // Propose configuration change through Raft with P2P info
+        match self.shared_state.propose_conf_change_with_p2p(
+            ConfChangeType::AddNode, 
+            node_id, 
+            addr.to_string(),
+            p2p_node_id.clone(),
+            p2p_addresses.clone(),
+            p2p_relay_url.clone()
+        ).await {
             Ok(_) => {
                 info!("Node {} configuration change proposed and committed", node_id);
                 

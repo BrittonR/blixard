@@ -1170,6 +1170,19 @@ impl SharedNodeState {
     
     /// Propose a configuration change through Raft
     pub async fn propose_conf_change(&self, change_type: ConfChangeType, node_id: u64, address: String) -> BlixardResult<()> {
+        self.propose_conf_change_with_p2p(change_type, node_id, address, None, Vec::new(), None).await
+    }
+    
+    /// Propose a configuration change through Raft with P2P info
+    pub async fn propose_conf_change_with_p2p(
+        &self, 
+        change_type: ConfChangeType, 
+        node_id: u64, 
+        address: String,
+        p2p_node_id: Option<String>,
+        p2p_addresses: Vec<String>,
+        p2p_relay_url: Option<String>
+    ) -> BlixardResult<()> {
         tracing::info!("[NODE-SHARED] Proposing conf change: {:?} for node {} at {}", change_type, node_id, address);
         
         // Check if we're initialized
@@ -1198,6 +1211,9 @@ impl SharedNodeState {
                 change_type,
                 node_id,
                 address: address.clone(),
+                p2p_node_id,
+                p2p_addresses,
+                p2p_relay_url,
                 response_tx: Some(response_tx),
             };
             
