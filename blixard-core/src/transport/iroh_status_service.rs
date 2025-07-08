@@ -4,8 +4,8 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
-    node_shared::SharedNodeState,
     iroh_types,
+    node_shared::SharedNodeState,
     transport::{
         iroh_protocol::{deserialize_payload, serialize_payload},
         iroh_service::IrohService,
@@ -14,8 +14,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use bytes::Bytes;
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 // Wrapper types for serialization
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,38 +59,38 @@ impl IrohService for IrohStatusService {
     fn name(&self) -> &'static str {
         "status"
     }
-    
+
     fn methods(&self) -> Vec<&'static str> {
         vec!["get_cluster_status", "get_raft_status"]
     }
-    
+
     async fn handle_call(&self, method: &str, payload: Bytes) -> BlixardResult<Bytes> {
         match method {
             "get_cluster_status" => {
                 // Deserialize request
                 let _request: ClusterStatusRequest = deserialize_payload(&payload)?;
-                
+
                 // Get cluster status
                 let proto_response = self.service.get_cluster_status().await?;
-                
+
                 // Convert to wrapper type
                 let response = ClusterStatusResponse {
                     leader_id: proto_response.leader_id,
                     member_ids: proto_response.nodes.iter().map(|n| n.id).collect(),
                     term: proto_response.term,
                 };
-                
+
                 // Serialize response
                 serialize_payload(&response)
             }
-            
+
             "get_raft_status" => {
                 // Deserialize request
                 let _request: GetRaftStatusRequest = deserialize_payload(&payload)?;
-                
+
                 // Get Raft status
                 let proto_response = self.service.node.get_raft_status().await?;
-                
+
                 // Convert to wrapper type
                 let response = GetRaftStatusResponse {
                     is_leader: proto_response.is_leader,
@@ -99,11 +99,11 @@ impl IrohService for IrohStatusService {
                     term: proto_response.term,
                     state: proto_response.state,
                 };
-                
+
                 // Serialize response
                 serialize_payload(&response)
             }
-            
+
             _ => Err(BlixardError::Internal {
                 message: format!("Unknown method: {}", method),
             }),
@@ -125,15 +125,20 @@ impl<'a> IrohStatusClient<'a> {
     ) -> Self {
         Self { client, node_addr }
     }
-    
+
     /// Get cluster status
     pub async fn get_cluster_status(&self) -> BlixardResult<ClusterStatusResponse> {
         let request = ClusterStatusRequest {};
         self.client
-            .call(self.node_addr.clone(), "status", "get_cluster_status", request)
+            .call(
+                self.node_addr.clone(),
+                "status",
+                "get_cluster_status",
+                request,
+            )
             .await
     }
-    
+
     /// Get Raft status
     pub async fn get_raft_status(&self) -> BlixardResult<GetRaftStatusResponse> {
         let request = GetRaftStatusRequest {};
@@ -146,11 +151,11 @@ impl<'a> IrohStatusClient<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_status_service_creation() {
         use crate::types::NodeConfig;
-        
+
         let config = NodeConfig {
             id: 1,
             data_dir: "/tmp/test".to_string(),
@@ -163,8 +168,11 @@ mod tests {
         };
         let node = Arc::new(SharedNodeState::new(config));
         let service = IrohStatusService::new(node);
-        
+
         assert_eq!(service.name(), "status");
-        assert_eq!(service.methods(), vec!["get_cluster_status", "get_raft_status"]);
+        assert_eq!(
+            service.methods(),
+            vec!["get_cluster_status", "get_raft_status"]
+        );
     }
 }

@@ -1,5 +1,5 @@
 //! Linearizability tests for Blixard distributed operations
-//! 
+//!
 //! These tests verify that concurrent operations on the distributed system
 //! maintain linearizability - they appear to take effect atomically.
 
@@ -26,8 +26,11 @@ use linearizability_framework::*;
 async fn test_concurrent_vm_creation_linearizability() {
     let recorder = HistoryRecorder::new();
     let cluster = TestCluster::new(3).await.unwrap();
-    cluster.wait_for_convergence(Duration::from_secs(10)).await.unwrap();
-    
+    cluster
+        .wait_for_convergence(Duration::from_secs(10))
+        .await
+        .unwrap();
+
     // Get clients for each node
     let mut clients = vec![];
     for i in 1..=3 {
@@ -35,16 +38,16 @@ async fn test_concurrent_vm_creation_linearizability() {
     }
     let num_vms = 5;
     let num_clients = 3;
-    
+
     // Spawn concurrent operations
     let mut handles = vec![];
-    
+
     for client_id in 0..num_clients {
         for vm_id in 0..num_vms {
             let vm_name = format!("vm-{}-{}", client_id, vm_id);
             let client = clients[client_id % clients.len()].clone();
             let recorder = recorder.clone();
-            
+
             let handle = tokio::spawn(async move {
                 // Record operation start
                 let op = Operation::CreateVm {
@@ -55,18 +58,20 @@ async fn test_concurrent_vm_creation_linearizability() {
                     },
                 };
                 let process_id = recorder.begin_operation(op).await;
-                
+
                 // Perform operation
-                let result = client.create_vm(crate::iroh_types::VmConfig {
-                    name: vm_name,
-                    memory: 1024 * 1024 * 1024,
-                    vcpus: 2,
-                    disk_size: 10 * 1024 * 1024 * 1024,
-                    image: "test-image".to_string(),
-                    network_interfaces: vec![],
-                    metadata: HashMap::new(),
-                }).await;
-                
+                let result = client
+                    .create_vm(crate::iroh_types::VmConfig {
+                        name: vm_name,
+                        memory: 1024 * 1024 * 1024,
+                        vcpus: 2,
+                        disk_size: 10 * 1024 * 1024 * 1024,
+                        image: "test-image".to_string(),
+                        network_interfaces: vec![],
+                        metadata: HashMap::new(),
+                    })
+                    .await;
+
                 // Record operation end
                 let response = match result {
                     Ok(_) => Response::VmCreated { success: true },
@@ -74,25 +79,28 @@ async fn test_concurrent_vm_creation_linearizability() {
                 };
                 recorder.end_operation(process_id, response).await;
             });
-            
+
             handles.push(handle);
         }
     }
-    
+
     // Wait for all operations to complete
     for handle in handles {
         handle.await.unwrap();
     }
-    
+
     // Check linearizability
     let history = recorder.get_history().await;
     let result = check_linearizability(&history, VmSpecification::new);
-    
+
     if let Err(e) = result {
         // Analyze the failure
         let analyzer = HistoryAnalyzer::new(history);
         if let Some(minimal) = analyzer.find_minimal_violation(VmSpecification::new) {
-            panic!("Linearizability violation found. Minimal failing sequence: {:?}", minimal);
+            panic!(
+                "Linearizability violation found. Minimal failing sequence: {:?}",
+                minimal
+            );
         }
         panic!("Linearizability check failed: {}", e);
     }
@@ -104,8 +112,11 @@ async fn test_concurrent_vm_creation_linearizability() {
 async fn test_kv_linearizability() {
     let recorder = HistoryRecorder::new();
     let cluster = TestCluster::new(3).await.unwrap();
-    cluster.wait_for_convergence(Duration::from_secs(10)).await.unwrap();
-    
+    cluster
+        .wait_for_convergence(Duration::from_secs(10))
+        .await
+        .unwrap();
+
     // Get clients for each node
     let mut clients = vec![];
     for i in 1..=3 {
@@ -113,19 +124,19 @@ async fn test_kv_linearizability() {
     }
     let num_operations = 50;
     let num_keys = 5;
-    
+
     // Shared counter for generating values
     let counter = Arc::new(Mutex::new(0));
     let mut handles = vec![];
-    
+
     for i in 0..num_operations {
         let client = clients[i % clients.len()].clone();
         let recorder = recorder.clone();
         let counter = counter.clone();
-        
+
         let handle = tokio::spawn(async move {
             let key = format!("key-{}", i % num_keys);
-            
+
             // Mix of read and write operations
             let op = if i % 3 == 0 {
                 // Read operation
@@ -137,42 +148,47 @@ async fn test_kv_linearizability() {
                     *c += 1;
                     format!("value-{}", *c)
                 };
-                Operation::Write { key: key.clone(), value }
+                Operation::Write {
+                    key: key.clone(),
+                    value,
+                }
             };
-            
+
             let process_id = recorder.begin_operation(op.clone()).await;
-            
+
             // Simulate operation through the distributed system
             // In real implementation, this would use actual Raft operations
             let response = match &op {
                 Operation::Read { key } => {
                     // Simulate read through consensus
                     sleep(Duration::from_millis(10)).await;
-                    Response::Value { value: Some(format!("value-{}", key)) }
-                },
+                    Response::Value {
+                        value: Some(format!("value-{}", key)),
+                    }
+                }
                 Operation::Write { .. } => {
                     // Simulate write through consensus
                     sleep(Duration::from_millis(20)).await;
                     Response::Written { success: true }
-                },
+                }
                 _ => unreachable!(),
             };
-            
+
             recorder.end_operation(process_id, response).await;
         });
-        
+
         handles.push(handle);
     }
-    
+
     // Wait for all operations
     for handle in handles {
         handle.await.unwrap();
     }
-    
+
     // Check linearizability
     let history = recorder.get_history().await;
     let result = check_linearizability(&history, KvSpecification::new);
-    
+
     assert!(result.is_ok(), "Key-value operations are not linearizable");
 }
 
@@ -183,26 +199,29 @@ async fn test_cluster_membership_linearizability() {
     let cluster = Arc::new(Mutex::new(TestCluster::new(3).await.unwrap()));
     {
         let cluster_lock = cluster.lock().await;
-        cluster_lock.wait_for_convergence(Duration::from_secs(10)).await.unwrap();
+        cluster_lock
+            .wait_for_convergence(Duration::from_secs(10))
+            .await
+            .unwrap();
     }
-    
+
     let mut handles = vec![];
-    
+
     // Concurrent join operations
     for node_id in 4..7 {
         let recorder = recorder.clone();
         let cluster_arc = cluster.clone();
-        
+
         let handle = tokio::spawn(async move {
             let op = Operation::JoinCluster { node_id };
             let process_id = recorder.begin_operation(op).await;
-            
+
             // Add node to cluster
             let result = {
                 let mut cluster_lock = cluster_arc.lock().await;
                 cluster_lock.add_node().await
             };
-            
+
             let response = match result {
                 Ok(new_node_id) => Response::Joined {
                     success: true,
@@ -213,55 +232,55 @@ async fn test_cluster_membership_linearizability() {
                     peers: vec![],
                 },
             };
-            
+
             recorder.end_operation(process_id, response).await;
         });
-        
+
         handles.push(handle);
     }
-    
+
     // Wait for joins to complete
     for handle in handles {
         handle.await.unwrap();
     }
-    
+
     // Concurrent leave operations
     let mut handles = vec![];
     for node_id in 4..6 {
         let recorder = recorder.clone();
         let cluster_arc = cluster.clone();
-        
+
         let handle = tokio::spawn(async move {
             let op = Operation::LeaveCluster { node_id };
             let process_id = recorder.begin_operation(op).await;
-            
+
             let result = {
                 let mut cluster_lock = cluster_arc.lock().await;
                 cluster_lock.remove_node(node_id).await
             };
-            
+
             let response = Response::Left {
                 success: result.is_ok(),
             };
-            
+
             recorder.end_operation(process_id, response).await;
         });
-        
+
         handles.push(handle);
     }
-    
+
     for handle in handles {
         handle.await.unwrap();
     }
-    
+
     // Verify linearizability
     let history = recorder.get_history().await;
-    
+
     // For cluster operations, we need a custom specification
     struct ClusterSpecification {
         members: std::collections::HashSet<u64>,
     }
-    
+
     impl ClusterSpecification {
         fn new() -> Self {
             Self {
@@ -269,7 +288,7 @@ async fn test_cluster_membership_linearizability() {
             }
         }
     }
-    
+
     impl Specification for ClusterSpecification {
         fn apply(&mut self, operation: &Operation) -> Response {
             match operation {
@@ -285,11 +304,9 @@ async fn test_cluster_membership_linearizability() {
                             peers: vec![],
                         }
                     }
-                },
-                Operation::LeaveCluster { node_id } => {
-                    Response::Left {
-                        success: self.members.remove(node_id),
-                    }
+                }
+                Operation::LeaveCluster { node_id } => Response::Left {
+                    success: self.members.remove(node_id),
                 },
                 _ => Response::Error {
                     message: "Unsupported operation".to_string(),
@@ -297,9 +314,12 @@ async fn test_cluster_membership_linearizability() {
             }
         }
     }
-    
+
     let result = check_linearizability(&history, ClusterSpecification::new);
-    assert!(result.is_ok(), "Cluster membership changes are not linearizable");
+    assert!(
+        result.is_ok(),
+        "Cluster membership changes are not linearizable"
+    );
 }
 
 /// Test for detecting split-brain scenarios
@@ -308,11 +328,14 @@ async fn test_cluster_membership_linearizability() {
 async fn test_split_brain_detection() {
     let recorder = HistoryRecorder::new();
     let cluster = TestCluster::new(5).await.unwrap();
-    cluster.wait_for_convergence(Duration::from_secs(10)).await.unwrap();
-    
+    cluster
+        .wait_for_convergence(Duration::from_secs(10))
+        .await
+        .unwrap();
+
     // Create network partition
     cluster.partition_network(vec![1, 2], vec![3, 4, 5]).await;
-    
+
     // Try concurrent writes from both partitions
     // Get clients for each node
     let mut clients = vec![];
@@ -320,97 +343,98 @@ async fn test_split_brain_detection() {
         clients.push(cluster.client(i).await.unwrap());
     }
     let mut handles = vec![];
-    
+
     // Operations from minority partition
     for i in 0..5 {
         let client = clients[0].clone(); // Node 1
         let recorder = recorder.clone();
-        
+
         let handle = tokio::spawn(async move {
             let op = Operation::Write {
                 key: format!("key-{}", i),
                 value: "minority".to_string(),
             };
             let process_id = recorder.begin_operation(op).await;
-            
+
             let result = client.write_key(format!("key-{}", i), "minority").await;
-            
+
             let response = Response::Written {
                 success: result.is_ok(),
             };
             recorder.end_operation(process_id, response).await;
         });
-        
+
         handles.push(handle);
     }
-    
+
     // Operations from majority partition
     for i in 0..5 {
         let client = clients[2].clone(); // Node 3
         let recorder = recorder.clone();
-        
+
         let handle = tokio::spawn(async move {
             let op = Operation::Write {
                 key: format!("key-{}", i),
                 value: "majority".to_string(),
             };
             let process_id = recorder.begin_operation(op).await;
-            
+
             let result = client.write_key(format!("key-{}", i), "majority").await;
-            
+
             let response = Response::Written {
                 success: result.is_ok(),
             };
             recorder.end_operation(process_id, response).await;
         });
-        
+
         handles.push(handle);
     }
-    
+
     for handle in handles {
         handle.await.unwrap();
     }
-    
+
     // Heal partition
     cluster.heal_network_partition().await;
-    
+
     // Read all keys to check final state
     let mut handles = vec![];
     for i in 0..5 {
         let client = clients[0].clone();
         let recorder = recorder.clone();
-        
+
         let handle = tokio::spawn(async move {
             let op = Operation::Read {
                 key: format!("key-{}", i),
             };
             let process_id = recorder.begin_operation(op).await;
-            
+
             let result = client.read_key(format!("key-{}", i)).await;
-            
-            let response = Response::Value {
-                value: result.ok(),
-            };
+
+            let response = Response::Value { value: result.ok() };
             recorder.end_operation(process_id, response).await;
         });
-        
+
         handles.push(handle);
     }
-    
+
     for handle in handles {
         handle.await.unwrap();
     }
-    
+
     // Check linearizability - minority writes should have failed
     let history = recorder.get_history().await;
     let result = check_linearizability(&history, KvSpecification::new);
-    
+
     // Analyze patterns
     let analyzer = HistoryAnalyzer::new(history);
     let patterns = analyzer.detect_violation_patterns();
-    
+
     // In a properly functioning system, minority partition writes should fail
     // This prevents split-brain scenarios
-    assert!(result.is_ok() || patterns.is_empty(),
-        "Split-brain scenario detected: {:?}", patterns);
+    assert!(
+        result.is_ok() || patterns.is_empty(),
+        "Split-brain scenario detected: {:?}",
+        patterns
+    );
 }

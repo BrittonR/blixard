@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
 use crate::anti_affinity::AntiAffinityRules;
 use crate::vm_health_types::VmHealthCheckConfig;
+use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 
 /// Node topology information for multi-datacenter awareness
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -80,7 +80,10 @@ impl VmConfig {
     /// Validate the VM configuration
     pub fn validate(&self) -> Result<(), String> {
         if self.priority > 1000 {
-            return Err(format!("Priority must be between 0 and 1000, got {}", self.priority));
+            return Err(format!(
+                "Priority must be between 0 and 1000, got {}",
+                self.priority
+            ));
         }
         if self.name.is_empty() {
             return Err("VM name cannot be empty".to_string());

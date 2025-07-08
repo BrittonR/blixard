@@ -1,5 +1,5 @@
 //! Comprehensive linearizability test for Blixard
-//! 
+//!
 //! This test implements a Jepsen-style linearizability testing framework
 //! inspired by FoundationDB and TigerBeetle's approaches.
 
@@ -75,7 +75,7 @@ impl History {
             next_process_id: Arc::new(AtomicU64::new(0)),
         }
     }
-    
+
     async fn begin_operation(&self, operation: Operation) -> u64 {
         let process_id = self.next_process_id.fetch_add(1, Ordering::SeqCst);
         let entry = HistoryEntry {
@@ -88,7 +88,7 @@ impl History {
         self.entries.lock().await.push(entry);
         process_id
     }
-    
+
     async fn end_operation(&self, process_id: u64, response: Response) {
         let mut entries = self.entries.lock().await;
         if let Some(entry) = entries.iter_mut().find(|e| e.process_id == process_id) {
@@ -96,9 +96,11 @@ impl History {
             entry.response = Some(response);
         }
     }
-    
+
     async fn get_completed(&self) -> Vec<HistoryEntry> {
-        self.entries.lock().await
+        self.entries
+            .lock()
+            .await
             .iter()
             .filter(|e| e.response.is_some())
             .cloned()
@@ -117,7 +119,7 @@ impl VmSpecification {
             vms: HashMap::new(),
         }
     }
-    
+
     fn apply(&mut self, operation: &Operation) -> Response {
         match operation {
             Operation::CreateVm { name, config } => {
@@ -178,26 +180,29 @@ fn check_linearizability(
 ) -> Result<(), String> {
     // Simple linearizability check using permutation search
     // For production, use more efficient algorithms
-    
+
     if completed.is_empty() {
         return Ok(());
     }
-    
+
     // Build happens-before graph based on real-time ordering
     let mut happens_before: HashMap<u64, HashSet<u64>> = HashMap::new();
-    
+
     for i in 0..completed.len() {
         let op1 = &completed[i];
-        happens_before.entry(op1.process_id).or_insert_with(HashSet::new);
-        
+        happens_before
+            .entry(op1.process_id)
+            .or_insert_with(HashSet::new);
+
         for j in 0..completed.len() {
             if i != j {
                 let op2 = &completed[j];
-                
+
                 // op1 happens-before op2 if op1 completes before op2 starts
                 if let (Some(end1), start2) = (op1.response_time, op2.invocation_time) {
                     if end1 < start2 {
-                        happens_before.get_mut(&op1.process_id)
+                        happens_before
+                            .get_mut(&op1.process_id)
                             .unwrap()
                             .insert(op2.process_id);
                     }
@@ -205,11 +210,11 @@ fn check_linearizability(
             }
         }
     }
-    
+
     // Try to find a valid linearization
     let mut linearization = Vec::new();
     let mut used = HashSet::new();
-    
+
     if find_linearization(
         completed,
         &happens_before,
@@ -233,12 +238,12 @@ fn find_linearization(
     if linearization.len() == operations.len() {
         return true;
     }
-    
+
     for op in operations {
         if used.contains(&op.process_id) {
             continue;
         }
-        
+
         // Check if all operations that must happen before this one are already linearized
         let can_linearize = operations.iter().all(|other| {
             if let Some(successors) = happens_before.get(&other.process_id) {
@@ -247,35 +252,35 @@ fn find_linearization(
                 true
             }
         });
-        
+
         if !can_linearize {
             continue;
         }
-        
+
         // Try linearizing this operation
         let expected = spec.apply(&op.operation);
-        
+
         if op.response.as_ref() == Some(&expected) {
             // Mark as used and continue
             used.insert(op.process_id);
             linearization.push(op.process_id);
-            
+
             // Clone spec state for backtracking
             let spec_backup = VmSpecification {
                 vms: spec.vms.clone(),
             };
-            
+
             if find_linearization(operations, happens_before, spec, linearization, used) {
                 return true;
             }
-            
+
             // Backtrack
             *spec = spec_backup;
             linearization.pop();
             used.remove(&op.process_id);
         }
     }
-    
+
     false
 }
 
@@ -288,14 +293,14 @@ async fn generate_workload(
 ) {
     let clients = cluster.get_clients().await;
     let mut handles = vec![];
-    
+
     for client_id in 0..client_count {
         let client = clients[client_id % clients.len()].clone();
         let history = history.clone();
-        
+
         let handle = tokio::spawn(async move {
             let mut rng = thread_rng();
-            
+
             for op_idx in 0..operations_per_client {
                 // Generate random operation
                 let op = match rng.gen_range(0..5) {
@@ -319,45 +324,42 @@ async fn generate_workload(
                         name: format!("vm-{}-{}", client_id, rng.gen_range(0..op_idx.max(1))),
                     },
                 };
-                
+
                 let process_id = history.begin_operation(op.clone()).await;
-                
+
                 // Execute operation
                 let response = match &op {
                     Operation::CreateVm { name, config } => {
-                        match client.create_vm(CreateVmRequest {
-                            name: name.clone(),
-                            config: BlixardVmConfig {
-                                memory: config.memory_mb as u64 * 1024 * 1024,
-                                vcpus: config.vcpus,
-                                disk_size: 10 * 1024 * 1024 * 1024,
-                                image: "test-image".to_string(),
-                                network_interfaces: vec![],
-                                metadata: HashMap::new(),
-                            },
-                        }).await {
+                        match client
+                            .create_vm(CreateVmRequest {
+                                name: name.clone(),
+                                config: BlixardVmConfig {
+                                    memory: config.memory_mb as u64 * 1024 * 1024,
+                                    vcpus: config.vcpus,
+                                    disk_size: 10 * 1024 * 1024 * 1024,
+                                    image: "test-image".to_string(),
+                                    network_interfaces: vec![],
+                                    metadata: HashMap::new(),
+                                },
+                            })
+                            .await
+                        {
                             Ok(_) => Response::VmCreated { success: true },
                             Err(_) => Response::VmCreated { success: false },
                         }
                     }
-                    Operation::StartVm { name } => {
-                        match client.start_vm(name.clone()).await {
-                            Ok(_) => Response::VmStarted { success: true },
-                            Err(_) => Response::VmStarted { success: false },
-                        }
-                    }
-                    Operation::StopVm { name } => {
-                        match client.stop_vm(name.clone()).await {
-                            Ok(_) => Response::VmStopped { success: true },
-                            Err(_) => Response::VmStopped { success: false },
-                        }
-                    }
-                    Operation::DeleteVm { name } => {
-                        match client.delete_vm(name.clone()).await {
-                            Ok(_) => Response::VmDeleted { success: true },
-                            Err(_) => Response::VmDeleted { success: false },
-                        }
-                    }
+                    Operation::StartVm { name } => match client.start_vm(name.clone()).await {
+                        Ok(_) => Response::VmStarted { success: true },
+                        Err(_) => Response::VmStarted { success: false },
+                    },
+                    Operation::StopVm { name } => match client.stop_vm(name.clone()).await {
+                        Ok(_) => Response::VmStopped { success: true },
+                        Err(_) => Response::VmStopped { success: false },
+                    },
+                    Operation::DeleteVm { name } => match client.delete_vm(name.clone()).await {
+                        Ok(_) => Response::VmDeleted { success: true },
+                        Err(_) => Response::VmDeleted { success: false },
+                    },
                     Operation::GetVmStatus { name } => {
                         match client.get_vm_status(name.clone()).await {
                             Ok(status) => Response::VmStatus {
@@ -374,17 +376,17 @@ async fn generate_workload(
                         message: "Not implemented".to_string(),
                     },
                 };
-                
+
                 history.end_operation(process_id, response).await;
-                
+
                 // Small delay between operations
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         });
-        
+
         handles.push(handle);
     }
-    
+
     // Wait for all clients
     for handle in handles {
         handle.await.unwrap();
@@ -396,18 +398,21 @@ async fn generate_workload(
 async fn test_vm_linearizability() {
     // Setup cluster
     let cluster = TestCluster::new(3).await;
-    cluster.wait_for_leader(Duration::from_secs(10)).await.unwrap();
-    
+    cluster
+        .wait_for_leader(Duration::from_secs(10))
+        .await
+        .unwrap();
+
     // Create history
     let history = History::new();
-    
+
     // Generate concurrent workload
     generate_workload(5, 20, &cluster, history.clone()).await;
-    
+
     // Check linearizability
     let completed = history.get_completed().await;
     println!("Completed {} operations", completed.len());
-    
+
     let spec = VmSpecification::new();
     match check_linearizability(&completed, spec) {
         Ok(()) => println!("History is linearizable!"),
@@ -434,10 +439,13 @@ async fn test_vm_linearizability() {
 #[tokio::test]
 async fn test_partition_linearizability() {
     let cluster = TestCluster::new(5).await;
-    cluster.wait_for_leader(Duration::from_secs(10)).await.unwrap();
-    
+    cluster
+        .wait_for_leader(Duration::from_secs(10))
+        .await
+        .unwrap();
+
     let history = History::new();
-    
+
     // Start workload
     let workload_handle = {
         let cluster = cluster.clone();
@@ -446,41 +454,41 @@ async fn test_partition_linearizability() {
             generate_workload(3, 30, &cluster, history).await;
         })
     };
-    
+
     // Inject partition after some operations
     tokio::time::sleep(Duration::from_secs(5)).await;
     cluster.partition_network(vec![1, 2], vec![3, 4, 5]).await;
-    
+
     // Let it run with partition
     tokio::time::sleep(Duration::from_secs(10)).await;
-    
+
     // Heal partition
     cluster.heal_network_partition().await;
-    
+
     // Wait for workload to complete
     workload_handle.await.unwrap();
-    
+
     // Check linearizability
     let completed = history.get_completed().await;
     println!("Completed {} operations under partition", completed.len());
-    
+
     // Count operations by response type
     let mut success_count = 0;
     let mut failure_count = 0;
-    
+
     for entry in &completed {
         match &entry.response {
-            Some(Response::VmCreated { success: true }) |
-            Some(Response::VmStarted { success: true }) |
-            Some(Response::VmStopped { success: true }) |
-            Some(Response::VmDeleted { success: true }) => success_count += 1,
+            Some(Response::VmCreated { success: true })
+            | Some(Response::VmStarted { success: true })
+            | Some(Response::VmStopped { success: true })
+            | Some(Response::VmDeleted { success: true }) => success_count += 1,
             _ => failure_count += 1,
         }
     }
-    
+
     println!("Successful operations: {}", success_count);
     println!("Failed operations: {}", failure_count);
-    
+
     // Check that minority partition operations failed
     let spec = VmSpecification::new();
     match check_linearizability(&completed, spec) {
@@ -493,48 +501,56 @@ async fn test_partition_linearizability() {
 #[tokio::test]
 async fn test_clock_skew_linearizability() {
     let cluster = TestCluster::new(3).await;
-    cluster.wait_for_leader(Duration::from_secs(10)).await.unwrap();
-    
+    cluster
+        .wait_for_leader(Duration::from_secs(10))
+        .await
+        .unwrap();
+
     let history = History::new();
-    
+
     // Simulate clock skew by adding artificial delays
     let clients = cluster.get_clients().await;
     let mut handles = vec![];
-    
+
     for (client_id, client) in clients.iter().enumerate() {
         let client = client.clone();
         let history = history.clone();
         let skew_ms = client_id as u64 * 1000; // Different skew per client
-        
+
         let handle = tokio::spawn(async move {
             // Add artificial "clock skew"
             tokio::time::sleep(Duration::from_millis(skew_ms)).await;
-            
+
             for i in 0..10 {
                 let op = Operation::Write {
                     key: format!("key-{}", i),
                     value: format!("client-{}-value-{}", client_id, i),
                 };
-                
+
                 let process_id = history.begin_operation(op).await;
-                
+
                 // Simulate write through consensus
                 tokio::time::sleep(Duration::from_millis(50)).await;
-                
-                history.end_operation(process_id, Response::Written { success: true }).await;
+
+                history
+                    .end_operation(process_id, Response::Written { success: true })
+                    .await;
             }
         });
-        
+
         handles.push(handle);
     }
-    
+
     for handle in handles {
         handle.await.unwrap();
     }
-    
+
     let completed = history.get_completed().await;
-    println!("Completed {} operations with simulated clock skew", completed.len());
-    
+    println!(
+        "Completed {} operations with simulated clock skew",
+        completed.len()
+    );
+
     // For key-value ops, we'd need a KV specification
     // This demonstrates the framework's capability to handle timing issues
 }
@@ -542,11 +558,11 @@ async fn test_clock_skew_linearizability() {
 /// Analyze violation patterns
 fn analyze_violations(history: &[HistoryEntry]) {
     println!("\nAnalyzing violation patterns...");
-    
+
     // Check for lost updates
     let mut writes_by_key: HashMap<String, Vec<&HistoryEntry>> = HashMap::new();
     let mut reads_by_key: HashMap<String, Vec<&HistoryEntry>> = HashMap::new();
-    
+
     for entry in history {
         match &entry.operation {
             Operation::Write { key, .. } => {
@@ -558,29 +574,34 @@ fn analyze_violations(history: &[HistoryEntry]) {
             _ => {}
         }
     }
-    
+
     // Look for anomalies
     for (key, writes) in &writes_by_key {
         if let Some(reads) = reads_by_key.get(key) {
             for read in reads {
-                if let Some(Response::Value { value: Some(read_value) }) = &read.response {
+                if let Some(Response::Value {
+                    value: Some(read_value),
+                }) = &read.response
+                {
                     // Check if this value was ever written
                     let value_written = writes.iter().any(|w| {
                         matches!(&w.operation, Operation::Write { value, .. } if value == read_value)
                     });
-                    
+
                     if !value_written {
-                        println!("Anomaly: Read of key '{}' returned value '{}' that was never written", 
-                            key, read_value);
+                        println!(
+                            "Anomaly: Read of key '{}' returned value '{}' that was never written",
+                            key, read_value
+                        );
                     }
                 }
             }
         }
     }
-    
+
     // Check for duplicate successful operations
     let mut successful_creates: HashMap<String, usize> = HashMap::new();
-    
+
     for entry in history {
         if let Operation::CreateVm { name, .. } = &entry.operation {
             if let Some(Response::VmCreated { success: true }) = &entry.response {
@@ -588,10 +609,13 @@ fn analyze_violations(history: &[HistoryEntry]) {
             }
         }
     }
-    
+
     for (name, count) in successful_creates {
         if count > 1 {
-            println!("Anomaly: VM '{}' was successfully created {} times", name, count);
+            println!(
+                "Anomaly: VM '{}' was successfully created {} times",
+                name, count
+            );
         }
     }
 }
@@ -599,15 +623,16 @@ fn analyze_violations(history: &[HistoryEntry]) {
 /// Performance analysis
 fn analyze_performance(history: &[HistoryEntry]) {
     println!("\nPerformance Analysis:");
-    
+
     let mut latencies = Vec::new();
     let mut op_counts: HashMap<String, usize> = HashMap::new();
-    
+
     for entry in history {
-        if let (Some(response_time), invocation_time) = (entry.response_time, entry.invocation_time) {
+        if let (Some(response_time), invocation_time) = (entry.response_time, entry.invocation_time)
+        {
             let latency = response_time.duration_since(invocation_time);
             latencies.push(latency);
-            
+
             let op_type = match &entry.operation {
                 Operation::CreateVm { .. } => "CreateVm",
                 Operation::StartVm { .. } => "StartVm",
@@ -617,22 +642,22 @@ fn analyze_performance(history: &[HistoryEntry]) {
                 Operation::Write { .. } => "Write",
                 Operation::Read { .. } => "Read",
             };
-            
+
             *op_counts.entry(op_type.to_string()).or_default() += 1;
         }
     }
-    
+
     if !latencies.is_empty() {
         latencies.sort();
-        
+
         let avg_latency = latencies.iter().sum::<Duration>() / latencies.len() as u32;
         let p50 = latencies[latencies.len() / 2];
         let p99 = latencies[latencies.len() * 99 / 100];
-        
+
         println!("Average latency: {:?}", avg_latency);
         println!("P50 latency: {:?}", p50);
         println!("P99 latency: {:?}", p99);
-        
+
         println!("\nOperation counts:");
         for (op_type, count) in op_counts {
             println!("  {}: {}", op_type, count);

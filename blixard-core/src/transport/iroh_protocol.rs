@@ -9,10 +9,10 @@
 
 use crate::error::{BlixardError, BlixardResult};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use iroh::endpoint::{RecvStream, SendStream};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use iroh::endpoint::{RecvStream, SendStream};
 use tracing::{debug, error};
 
 /// Protocol version for compatibility checking
@@ -43,7 +43,7 @@ pub enum MessageType {
 
 impl TryFrom<u8> for MessageType {
     type Error = BlixardError;
-    
+
     fn try_from(value: u8) -> Result<Self, BlixardError> {
         match value {
             1 => Ok(MessageType::Request),
@@ -76,7 +76,7 @@ pub struct MessageHeader {
 impl MessageHeader {
     /// Size of header in bytes
     pub const SIZE: usize = 24; // 1 + 1 + 4 + 16 + 2 padding
-    
+
     /// Create a new message header
     pub fn new(msg_type: MessageType, payload_len: u32, request_id: [u8; 16]) -> Self {
         Self {
@@ -86,7 +86,7 @@ impl MessageHeader {
             request_id,
         }
     }
-    
+
     /// Serialize header to bytes
     pub fn to_bytes(&self) -> [u8; Self::SIZE] {
         let mut bytes = [0u8; Self::SIZE];
@@ -97,7 +97,7 @@ impl MessageHeader {
         // bytes[22..24] are padding
         bytes
     }
-    
+
     /// Deserialize header from bytes
     pub fn from_bytes(bytes: &[u8]) -> BlixardResult<Self> {
         if bytes.len() < Self::SIZE {
@@ -105,26 +105,26 @@ impl MessageHeader {
                 message: format!("Header too short: {} bytes", bytes.len()),
             });
         }
-        
+
         let version = bytes[0];
         if version != PROTOCOL_VERSION {
             return Err(BlixardError::Internal {
                 message: format!("Unsupported protocol version: {}", version),
             });
         }
-        
+
         let msg_type = MessageType::try_from(bytes[1])?;
         let payload_len = u32::from_be_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]);
-        
+
         if payload_len > MAX_MESSAGE_SIZE {
             return Err(BlixardError::Internal {
                 message: format!("Message too large: {} bytes", payload_len),
             });
         }
-        
+
         let mut request_id = [0u8; 16];
         request_id.copy_from_slice(&bytes[6..22]);
-        
+
         Ok(Self {
             version,
             msg_type,
@@ -168,38 +168,35 @@ pub async fn write_message(
             message: format!("Payload too large: {} bytes", payload.len()),
         });
     }
-    
+
     let header = MessageHeader::new(msg_type, payload.len() as u32, request_id);
-    
-    debug!("Writing message header: type={:?}, payload_len={}", 
-           msg_type, payload.len());
-    
+
+    debug!(
+        "Writing message header: type={:?}, payload_len={}",
+        msg_type,
+        payload.len()
+    );
+
     // Write header
-    stream
-        .write_all(&header.to_bytes())
-        .await
-        .map_err(|e| {
-            error!("Failed to write header to stream: {}", e);
-            BlixardError::Internal {
-                message: format!("Failed to write to stream: {}", e),
-            }
-        })?;
-    
+    stream.write_all(&header.to_bytes()).await.map_err(|e| {
+        error!("Failed to write header to stream: {}", e);
+        BlixardError::Internal {
+            message: format!("Failed to write to stream: {}", e),
+        }
+    })?;
+
     debug!("Header written successfully, writing payload");
-    
+
     // Write payload
-    stream
-        .write_all(payload)
-        .await
-        .map_err(|e| {
-            error!("Failed to write payload to stream: {}", e);
-            BlixardError::Internal {
-                message: format!("Failed to write to stream: {}", e),
-            }
-        })?;
-    
+    stream.write_all(payload).await.map_err(|e| {
+        error!("Failed to write payload to stream: {}", e);
+        BlixardError::Internal {
+            message: format!("Failed to write to stream: {}", e),
+        }
+    })?;
+
     debug!("Payload written successfully");
-    
+
     Ok(())
 }
 
@@ -213,9 +210,9 @@ pub async fn read_message(stream: &mut RecvStream) -> BlixardResult<(MessageHead
         .map_err(|e| BlixardError::Internal {
             message: format!("Failed to read from stream: {}", e),
         })?;
-    
+
     let header = MessageHeader::from_bytes(&header_bytes)?;
-    
+
     // Read payload
     let mut payload = vec![0u8; header.payload_len as usize];
     stream
@@ -224,7 +221,7 @@ pub async fn read_message(stream: &mut RecvStream) -> BlixardResult<(MessageHead
         .map_err(|e| BlixardError::Internal {
             message: format!("Failed to read from stream: {}", e),
         })?;
-    
+
     Ok((header, Bytes::from(payload)))
 }
 
@@ -243,28 +240,27 @@ pub fn serialize_payload<T: Serialize>(value: &T) -> BlixardResult<Bytes> {
 
 /// Helper to deserialize bytes to a value
 pub fn deserialize_payload<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> BlixardResult<T> {
-    bincode::deserialize(bytes)
-        .map_err(|e| BlixardError::SerializationError(e))
+    bincode::deserialize(bytes).map_err(|e| BlixardError::SerializationError(e))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_message_header_roundtrip() {
         let request_id = generate_request_id();
         let header = MessageHeader::new(MessageType::Request, 1234, request_id);
-        
+
         let bytes = header.to_bytes();
         let decoded = MessageHeader::from_bytes(&bytes).unwrap();
-        
+
         assert_eq!(decoded.version, PROTOCOL_VERSION);
         assert_eq!(decoded.msg_type, MessageType::Request);
         assert_eq!(decoded.payload_len, 1234);
         assert_eq!(decoded.request_id, request_id);
     }
-    
+
     #[test]
     fn test_message_type_conversion() {
         assert_eq!(MessageType::try_from(1).unwrap(), MessageType::Request);
@@ -272,7 +268,7 @@ mod tests {
         assert_eq!(MessageType::try_from(3).unwrap(), MessageType::Error);
         assert!(MessageType::try_from(99).is_err());
     }
-    
+
     #[test]
     fn test_payload_serialization() {
         #[derive(Serialize, Deserialize, PartialEq, Debug)]
@@ -280,15 +276,15 @@ mod tests {
             id: u64,
             name: String,
         }
-        
+
         let data = TestData {
             id: 42,
             name: "test".to_string(),
         };
-        
+
         let bytes = serialize_payload(&data).unwrap();
         let decoded: TestData = deserialize_payload(&bytes).unwrap();
-        
+
         assert_eq!(decoded, data);
     }
 }

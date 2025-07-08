@@ -1,6 +1,6 @@
 use crate::error::{BlixardError, BlixardResult};
-use crate::p2p_monitor::{ConnectionQuality, P2pMonitor};
 use crate::iroh_types::{HealthCheckRequest, HealthCheckResponse};
+use crate::p2p_monitor::{ConnectionQuality, P2pMonitor};
 use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -20,7 +20,7 @@ impl P2pHealthChecker {
             timeout_duration: Duration::from_secs(5),
         }
     }
-    
+
     /// Perform a health check and RTT measurement for a peer
     pub async fn check_peer_health(
         &self,
@@ -28,24 +28,24 @@ impl P2pHealthChecker {
         _client: Arc<crate::transport::iroh_client::IrohClusterServiceClient>,
     ) -> BlixardResult<f64> {
         let start = Instant::now();
-        
+
         // Send health check request using Iroh client
         let request = HealthCheckRequest {};
-        
+
         match timeout(self.timeout_duration, _client.health_check(request)).await {
             Ok(Ok(response)) => {
                 let rtt_ms = start.elapsed().as_secs_f64() * 1000.0;
                 let response = response.into_inner();
-                
+
                 debug!(
                     peer_id = peer_id,
                     rtt_ms = rtt_ms,
                     "Health check successful"
                 );
-                
+
                 // Record RTT measurement
                 self.monitor.record_rtt(peer_id, rtt_ms).await;
-                
+
                 // Verify response indicates health
                 if !response.healthy {
                     warn!(
@@ -54,7 +54,7 @@ impl P2pHealthChecker {
                         "Health check indicates unhealthy peer"
                     );
                 }
-                
+
                 Ok(rtt_ms)
             }
             Ok(Err(e)) => {
@@ -81,7 +81,7 @@ impl P2pHealthChecker {
             }
         }
     }
-    
+
     /// Calculate connection quality based on recent measurements
     pub async fn calculate_connection_quality(
         &self,
@@ -95,27 +95,29 @@ impl P2pHealthChecker {
         } else {
             0.0
         };
-        
+
         let avg_rtt = if !recent_rtts.is_empty() {
             recent_rtts.iter().sum::<f64>() / recent_rtts.len() as f64
         } else {
             999.0 // High default if no measurements
         };
-        
+
         // TODO: Get actual QUIC stats for packet loss and bandwidth
         let packet_loss = 0.0; // Placeholder
         let bandwidth = 1_000_000.0; // 1 MB/s placeholder
-        
+
         let quality = ConnectionQuality {
             success_rate,
             avg_rtt,
             packet_loss,
             bandwidth,
         };
-        
+
         // Update connection quality in monitor
-        self.monitor.update_connection_quality(peer_id, quality.clone()).await;
-        
+        self.monitor
+            .update_connection_quality(peer_id, quality.clone())
+            .await;
+
         quality
     }
 }
@@ -125,7 +127,7 @@ impl P2pHealthChecker {
 pub trait HealthChecker: Send + Sync {
     /// Check if a peer is healthy and measure RTT
     async fn check_health(&self, peer_id: &str) -> BlixardResult<f64>;
-    
+
     /// Get connection quality metrics for a peer
     async fn get_connection_quality(&self, peer_id: &str) -> BlixardResult<ConnectionQuality>;
 }
@@ -134,24 +136,28 @@ pub trait HealthChecker: Send + Sync {
 mod tests {
     use super::*;
     use crate::p2p_monitor::NoOpMonitor;
-    
+
     #[tokio::test]
     async fn test_connection_quality_calculation() {
         let monitor = Arc::new(NoOpMonitor);
         let checker = P2pHealthChecker::new(monitor);
-        
+
         // Test with good metrics
         let rtts = vec![10.0, 12.0, 11.0, 13.0];
-        let quality = checker.calculate_connection_quality("peer1", &rtts, 95, 100).await;
-        
+        let quality = checker
+            .calculate_connection_quality("peer1", &rtts, 95, 100)
+            .await;
+
         assert_eq!(quality.success_rate, 0.95);
         assert_eq!(quality.avg_rtt, 11.5);
         assert!(quality.score() > 0.8); // Should have high score
-        
+
         // Test with poor metrics
         let rtts = vec![500.0, 600.0, 550.0];
-        let quality = checker.calculate_connection_quality("peer2", &rtts, 50, 100).await;
-        
+        let quality = checker
+            .calculate_connection_quality("peer2", &rtts, 50, 100)
+            .await;
+
         assert_eq!(quality.success_rate, 0.5);
         assert_eq!(quality.avg_rtt, 550.0);
         assert!(quality.score() < 0.5); // Should have low score

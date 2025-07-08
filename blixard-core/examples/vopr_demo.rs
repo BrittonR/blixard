@@ -1,5 +1,5 @@
 //! VOPR Fuzzer Demo
-//! 
+//!
 //! This example demonstrates how to run the VOPR fuzzer to test
 //! Blixard's distributed consensus system.
 
@@ -12,10 +12,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .init();
-    
+
     println!("🚀 Blixard VOPR Fuzzer Demo");
     println!("=============================\n");
-    
+
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
     let seed = if args.len() > 1 {
@@ -23,14 +23,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         42
     };
-    
+
     println!("Configuration:");
     println!("  Seed: {}", seed);
     println!("  Time acceleration: 1000x");
     println!("  Max operations: 1000");
     println!("  Coverage-guided: enabled");
     println!("  Shrinking: enabled\n");
-    
+
     // Create fuzzer configuration
     let config = VoprConfig {
         seed,
@@ -43,10 +43,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         enable_visualization: true,
         coverage_guided: true,
     };
-    
+
     // Create and run the fuzzer
     let mut vopr = Vopr::new(config);
-    
+
     match vopr.run().await {
         Ok(()) => {
             println!("\n✅ Fuzzing completed successfully!");
@@ -55,36 +55,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(failure) => {
             println!("\n❌ FUZZING FAILURE!");
             println!("==================\n");
-            
+
             // Print failure details
             println!("Violated invariant: {}", failure.violated_invariant);
             println!("Seed: {}", failure.seed);
-            println!("Original test case: {} operations", failure.operations.len());
-            
+            println!(
+                "Original test case: {} operations",
+                failure.operations.len()
+            );
+
             if let Some(ref minimal) = failure.minimal_reproducer {
                 println!("Minimized to: {} operations", minimal.len());
             }
-            
+
             // Generate and print the report
             println!("\nDetailed Report:");
             println!("================");
             let report = vopr.generate_report(&failure);
             println!("{}", report);
-            
+
             // Generate reproducer code
             println!("\nReproducer Code:");
             println!("================");
             let reproducer = vopr.generate_reproducer(&failure);
             println!("{}", reproducer);
-            
+
             // Save to file
             let filename = format!("vopr_failure_{}.txt", failure.seed);
             std::fs::write(&filename, &report)?;
             println!("\nReport saved to: {}", filename);
-            
+
             return Err("Invariant violation detected".into());
         }
     }
-    
+
     Ok(())
 }

@@ -2,7 +2,7 @@
 
 let
   inherit (lib) mkOption types;
-  
+
   # Network configuration type
   networkType = types.submodule {
     options = {
@@ -27,7 +27,7 @@ let
       };
     };
   };
-  
+
   # Volume configuration type
   volumeType = types.submodule {
     options = {
@@ -63,7 +63,8 @@ let
     };
   };
 
-in {
+in
+{
   options.blixard.vms = mkOption {
     type = types.attrsOf (types.submodule {
       options = {
@@ -72,73 +73,73 @@ in {
           default = true;
           description = "Whether to enable this VM";
         };
-        
+
         hypervisor = mkOption {
           type = types.enum [ "cloud-hypervisor" "firecracker" "qemu" ];
           default = "cloud-hypervisor";
           description = "Hypervisor backend to use";
         };
-        
+
         vcpus = mkOption {
           type = types.int;
           default = 1;
           description = "Number of virtual CPUs";
         };
-        
+
         memory = mkOption {
           type = types.int;
           default = 512;
           description = "Memory in MB";
         };
-        
+
         kernel = mkOption {
           type = types.nullOr types.package;
           default = null;
           description = "Custom kernel package to use";
         };
-        
+
         kernelParams = mkOption {
           type = types.listOf types.str;
           default = [ ];
           description = "Additional kernel command line parameters";
         };
-        
+
         initrdPath = mkOption {
           type = types.nullOr types.path;
           default = null;
           description = "Path to custom initrd";
         };
-        
+
         networks = mkOption {
           type = types.listOf networkType;
           default = [ ];
           description = "Network interfaces";
         };
-        
+
         volumes = mkOption {
           type = types.listOf volumeType;
           default = [ ];
           description = "Storage volumes";
         };
-        
+
         nixosModules = mkOption {
           type = types.listOf types.deferredModule;
           default = [ ];
           description = "NixOS configuration modules for the VM";
         };
-        
+
         graphics = mkOption {
           type = types.bool;
           default = false;
           description = "Enable graphical output";
         };
-        
+
         autostart = mkOption {
           type = types.bool;
           default = false;
           description = "Automatically start the VM";
         };
-        
+
         extraOptions = mkOption {
           type = types.attrs;
           default = { };

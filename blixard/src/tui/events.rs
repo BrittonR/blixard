@@ -26,7 +26,7 @@ pub struct EventHandler {
 impl EventHandler {
     pub fn new(tick_rate: u64) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
-        
+
         Self {
             sender,
             receiver,
@@ -37,7 +37,8 @@ impl EventHandler {
 
     /// Get the next event, blocking until one is available
     pub async fn next(&mut self) -> crate::BlixardResult<Event> {
-        let timeout = self.tick_rate
+        let timeout = self
+            .tick_rate
             .checked_sub(self.last_tick.elapsed())
             .unwrap_or_else(|| Duration::from_secs(0));
 

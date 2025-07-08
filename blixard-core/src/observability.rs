@@ -3,8 +3,8 @@
 //! This module provides a single interface for initializing and managing
 //! observability features including OpenTelemetry metrics and tracing.
 
-use crate::error::BlixardResult;
 use crate::config_v2::ObservabilityConfig;
+use crate::error::BlixardResult;
 use std::sync::Arc;
 use tracing::info;
 
@@ -12,10 +12,10 @@ use tracing::info;
 pub struct ObservabilityManager {
     /// Configuration
     config: ObservabilityConfig,
-    
+
     /// Whether metrics are enabled
     metrics_enabled: bool,
-    
+
     /// Whether tracing is enabled
     tracing_enabled: bool,
 }
@@ -24,7 +24,7 @@ impl ObservabilityManager {
     /// Create a new observability manager
     pub async fn new(config: ObservabilityConfig) -> BlixardResult<Self> {
         info!("Initializing observability manager");
-        
+
         // Check if metrics are enabled
         let metrics_enabled = config.metrics.enabled;
         if metrics_enabled {
@@ -32,7 +32,7 @@ impl ObservabilityManager {
         } else {
             info!("Metrics disabled");
         }
-        
+
         // Check if tracing is enabled
         let tracing_enabled = config.tracing.enabled;
         if tracing_enabled {
@@ -40,31 +40,31 @@ impl ObservabilityManager {
         } else {
             info!("Tracing disabled");
         }
-        
+
         Ok(Self {
             config,
             metrics_enabled,
             tracing_enabled,
         })
     }
-    
+
     /// Check if metrics are enabled
     pub fn metrics_enabled(&self) -> bool {
         self.metrics_enabled
     }
-    
+
     /// Check if tracing is enabled
     pub fn tracing_enabled(&self) -> bool {
         self.tracing_enabled
     }
-    
+
     /// Shutdown observability services
     pub async fn shutdown(&self) -> BlixardResult<()> {
         info!("Shutting down observability services");
-        
+
         // Metrics and tracing shutdown would be handled globally
         // For now, this is a no-op
-        
+
         Ok(())
     }
 }
@@ -101,12 +101,12 @@ pub fn default_dev_observability_config() -> ObservabilityConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_observability_manager_creation() {
         let config = default_dev_observability_config();
         let manager = ObservabilityManager::new(config).await.unwrap();
-        
+
         // Should work with disabled metrics and tracing
         assert!(!manager.metrics_enabled());
         assert!(!manager.tracing_enabled());

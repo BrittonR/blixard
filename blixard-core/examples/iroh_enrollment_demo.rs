@@ -6,36 +6,31 @@
 //! 3. Enroll nodes and verify their permissions
 
 use blixard_core::{
+    config_v2::{AuthConfig, SecurityConfig, TlsConfig},
+    error::BlixardResult,
+    node_shared::SharedNodeState,
+    security::{default_dev_security_config, SecurityManager},
     transport::{
-        iroh_middleware::{IrohMiddleware, NodeIdentityRegistry},
         iroh_identity_enrollment::{
-            IdentityEnrollmentManager, CertificateEnrollmentConfig, CertRoleMapping,
+            CertRoleMapping, CertificateEnrollmentConfig, IdentityEnrollmentManager,
         },
+        iroh_middleware::{IrohMiddleware, NodeIdentityRegistry},
         iroh_secure_vm_service::SecureIrohVmService,
         secure_iroh_protocol_handler::SecureIrohServiceBuilder,
     },
-    security::{SecurityManager, default_dev_security_config},
-    config_v2::{SecurityConfig, AuthConfig, TlsConfig},
-    node_shared::SharedNodeState,
     types::{NodeConfig, NodeId as BlixardNodeId},
-    error::BlixardResult,
 };
 use iroh::{Endpoint, NodeId};
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::Duration,
-    path::PathBuf,
-};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 use tracing::{info, warn};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
     tracing_subscriber::fmt::init();
-    
+
     println!("🔐 Iroh Node Enrollment Demo\n");
-    
+
     // Create security infrastructure
     let security_config = SecurityConfig {
         auth: AuthConfig {
@@ -51,10 +46,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             require_client_cert: false,
         },
     };
-    
+
     let security_manager = Arc::new(SecurityManager::new(security_config).await?);
     let identity_registry = Arc::new(NodeIdentityRegistry::new());
-    
+
     // Configure certificate-based enrollment
     let cert_config = CertificateEnrollmentConfig {
         ca_cert_path: PathBuf::from("/etc/ssl/certs/ca.pem"),
@@ -84,63 +79,74 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         default_tenant: "default".to_string(),
         allow_self_signed: false,
     };
-    
+
     // Create enrollment manager
     let enrollment_manager = Arc::new(IdentityEnrollmentManager::new(
         identity_registry.clone(),
         Some(cert_config),
         Some(PathBuf::from("enrollment_state.json")),
     ));
-    
+
     // Load any existing enrollment state
     enrollment_manager.load_state().await?;
-    
+
     // Demo 1: Generate enrollment tokens
     println!("📝 Generating Enrollment Tokens\n");
-    
+
     // Single-use operator token
-    let op_token = enrollment_manager.generate_enrollment_token(
-        "new-operator".to_string(),
-        vec!["operator".to_string()],
-        "operations".to_string(),
-        Duration::from_days(7),
-        false,
-        None,
-    ).await?;
-    
+    let op_token = enrollment_manager
+        .generate_enrollment_token(
+            "new-operator".to_string(),
+            vec!["operator".to_string()],
+            "operations".to_string(),
+            Duration::from_days(7),
+            false,
+            None,
+        )
+        .await?;
+
     println!("Operator Token (single-use, 7 days):");
     println!("  ID: {}", op_token.token_id);
     println!("  Secret: {}", op_token.secret);
-    println!("  Command: blixard node enroll --token {} --secret {}\n", 
-        op_token.token_id, op_token.secret);
-    
+    println!(
+        "  Command: blixard node enroll --token {} --secret {}\n",
+        op_token.token_id, op_token.secret
+    );
+
     // Multi-use worker token
-    let worker_token = enrollment_manager.generate_enrollment_token(
-        "worker-pool".to_string(),
-        vec!["worker".to_string()],
-        "compute".to_string(),
-        Duration::from_days(30),
-        true,
-        Some(50), // Allow up to 50 workers
-    ).await?;
-    
+    let worker_token = enrollment_manager
+        .generate_enrollment_token(
+            "worker-pool".to_string(),
+            vec!["worker".to_string()],
+            "compute".to_string(),
+            Duration::from_days(30),
+            true,
+            Some(50), // Allow up to 50 workers
+        )
+        .await?;
+
     println!("Worker Token (multi-use, 30 days, max 50):");
     println!("  ID: {}", worker_token.token_id);
     println!("  Secret: {}", worker_token.secret);
-    println!("  Command: blixard node enroll --token {} --secret {}\n", 
-        worker_token.token_id, worker_token.secret);
-    
+    println!(
+        "  Command: blixard node enroll --token {} --secret {}\n",
+        worker_token.token_id, worker_token.secret
+    );
+
     // Demo 2: Simulate certificate-based enrollment
     println!("🎓 Certificate-Based Enrollment Examples\n");
-    
+
     // Simulate ops team member
     let ops_node = NodeId::new(&[1u8; 32]);
     let mut ops_cert = HashMap::new();
     ops_cert.insert("CN".to_string(), "alice.ops.blixard.io".to_string());
     ops_cert.insert("OU".to_string(), "Operations".to_string());
     ops_cert.insert("O".to_string(), "Blixard Inc".to_string());
-    
-    match enrollment_manager.enroll_with_certificate(ops_node, ops_cert.clone()).await {
+
+    match enrollment_manager
+        .enroll_with_certificate(ops_node, ops_cert.clone())
+        .await
+    {
         Ok(result) => {
             println!("✅ Ops team enrollment successful:");
             println!("   User: {}", result.user_id);
@@ -151,15 +157,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("❌ Ops team enrollment failed: {}\n", e);
         }
     }
-    
+
     // Simulate developer
     let dev_node = NodeId::new(&[2u8; 32]);
     let mut dev_cert = HashMap::new();
     dev_cert.insert("CN".to_string(), "bob@blixard.io".to_string());
     dev_cert.insert("OU".to_string(), "Development".to_string());
     dev_cert.insert("O".to_string(), "Blixard Inc".to_string());
-    
-    match enrollment_manager.enroll_with_certificate(dev_node, dev_cert.clone()).await {
+
+    match enrollment_manager
+        .enroll_with_certificate(dev_node, dev_cert.clone())
+        .await
+    {
         Ok(result) => {
             println!("✅ Developer enrollment successful:");
             println!("   User: {}", result.user_id);
@@ -170,16 +179,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("❌ Developer enrollment failed: {}\n", e);
         }
     }
-    
+
     // Demo 3: Test token enrollment
     println!("🎟️ Token-Based Enrollment Example\n");
-    
+
     let test_node = NodeId::new(&[3u8; 32]);
-    match enrollment_manager.enroll_with_token(
-        test_node,
-        &worker_token.token_id,
-        &worker_token.secret,
-    ).await {
+    match enrollment_manager
+        .enroll_with_token(test_node, &worker_token.token_id, &worker_token.secret)
+        .await
+    {
         Ok(result) => {
             println!("✅ Worker enrollment successful:");
             println!("   User: {}", result.user_id);
@@ -190,71 +198,83 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("❌ Worker enrollment failed: {}\n", e);
         }
     }
-    
+
     // Demo 4: List active tokens
     println!("📋 Active Enrollment Tokens:\n");
-    
+
     let tokens = enrollment_manager.list_tokens().await;
     for token in tokens {
         println!("Token: {}", token.token_id);
         println!("  User: {}", token.user_id);
         println!("  Roles: {:?}", token.roles);
         println!("  Multi-use: {}", token.multi_use);
-        println!("  Uses: {}/{}", token.use_count, 
-            token.max_uses.map(|m| m.to_string()).unwrap_or("unlimited".to_string()));
+        println!(
+            "  Uses: {}/{}",
+            token.use_count,
+            token
+                .max_uses
+                .map(|m| m.to_string())
+                .unwrap_or("unlimited".to_string())
+        );
         println!();
     }
-    
+
     // Demo 5: Authorization test
     println!("🔑 Testing Authorization with Enrolled Nodes\n");
-    
+
     // Create middleware with our registry
     let middleware = Arc::new(IrohMiddleware::new(
         Some(security_manager),
         None,
         identity_registry.clone(),
     ));
-    
+
     // Test ops node authorization
     if let Some(user) = identity_registry.get_user_for_node(ops_node).await {
         println!("Testing ops node ({}) permissions:", user);
-        
+
         // Simulate authorization checks
         let actions = vec![
             ("createVM", "Node", "node-1"),
             ("deleteVM", "VM", "vm-123"),
             ("updateCluster", "Cluster", "prod-cluster"),
         ];
-        
+
         for (action, resource_type, resource_id) in actions {
             // In real code, this would go through Cedar
-            println!("  {} on {}/{}: Would check Cedar policy", action, resource_type, resource_id);
+            println!(
+                "  {} on {}/{}: Would check Cedar policy",
+                action, resource_type, resource_id
+            );
         }
         println!();
     }
-    
+
     // Test developer node authorization
     if let Some(user) = identity_registry.get_user_for_node(dev_node).await {
         println!("Testing developer node ({}) permissions:", user);
-        
+
         let actions = vec![
             ("createVM", "Node", "node-1"),
             ("listVMs", "Node", "node-1"),
             ("viewLogs", "VM", "vm-123"),
         ];
-        
+
         for (action, resource_type, resource_id) in actions {
-            println!("  {} on {}/{}: Would check Cedar policy", action, resource_type, resource_id);
+            println!(
+                "  {} on {}/{}: Would check Cedar policy",
+                action, resource_type, resource_id
+            );
         }
         println!();
     }
-    
+
     // Save enrollment state
     enrollment_manager.save_state().await?;
     println!("💾 Enrollment state saved\n");
-    
+
     println!("✨ Demo complete!");
-    
+
     Ok(())
 }
 

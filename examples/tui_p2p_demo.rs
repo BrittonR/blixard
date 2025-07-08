@@ -21,9 +21,7 @@ use tokio::sync::mpsc;
 #[tokio::main]
 async fn main() -> BlixardResult<()> {
     // Initialize logging
-    tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .init();
+    tracing_subscriber::fmt().with_env_filter("info").init();
 
     // Setup terminal
     enable_raw_mode()?;
@@ -35,10 +33,10 @@ async fn main() -> BlixardResult<()> {
     // Create app and switch to P2P tab
     let mut app = App::new().await?;
     app.switch_tab(AppTab::P2P);
-    
+
     // Create event channel
     let (tx, mut rx) = mpsc::channel(100);
-    
+
     // Spawn input handler
     let tx_clone = tx.clone();
     tokio::spawn(async move {
@@ -50,7 +48,7 @@ async fn main() -> BlixardResult<()> {
             }
         }
     });
-    
+
     // Spawn tick handler
     tokio::spawn(async move {
         loop {
@@ -67,7 +65,7 @@ async fn main() -> BlixardResult<()> {
         // Handle events
         if let Ok(event) = rx.try_recv() {
             app.handle_event(event).await?;
-            
+
             if app.should_quit {
                 break;
             }

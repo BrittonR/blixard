@@ -3,9 +3,9 @@
 //! This module provides trait-based abstractions for process execution,
 //! enabling testing without actually spawning system processes.
 
+use crate::error::BlixardResult;
 use async_trait::async_trait;
 use std::collections::HashMap;
-use crate::error::BlixardResult;
 
 /// Result of a process execution
 #[derive(Debug, Clone)]
@@ -35,14 +35,10 @@ pub trait ProcessExecutor: Send + Sync {
         args: &[&str],
         env: Option<HashMap<String, String>>,
     ) -> BlixardResult<ProcessOutput>;
-    
+
     /// Execute a command and return only the exit status
-    async fn execute_status(
-        &self,
-        command: &str,
-        args: &[&str],
-    ) -> BlixardResult<bool>;
-    
+    async fn execute_status(&self, command: &str, args: &[&str]) -> BlixardResult<bool>;
+
     /// Execute a command in the background (fire and forget)
     async fn spawn(
         &self,
@@ -50,10 +46,10 @@ pub trait ProcessExecutor: Send + Sync {
         args: &[&str],
         env: Option<HashMap<String, String>>,
     ) -> BlixardResult<u32>; // Returns process ID
-    
+
     /// Kill a process by ID
     async fn kill(&self, pid: u32) -> BlixardResult<()>;
-    
+
     /// Check if a process is running
     async fn is_running(&self, pid: u32) -> BlixardResult<bool>;
 }
@@ -88,31 +84,27 @@ impl ProcessExecutor for TokioProcessExecutor {
     ) -> BlixardResult<ProcessOutput> {
         let mut cmd = Command::new(command);
         cmd.args(args);
-        
+
         if let Some(env_vars) = env {
             for (key, value) in env_vars {
                 cmd.env(key, value);
             }
         }
-        
+
         let output = cmd.output().await?;
-        
+
         Ok(ProcessOutput {
             status: output.status.code().unwrap_or(-1),
             stdout: output.stdout,
             stderr: output.stderr,
         })
     }
-    
-    async fn execute_status(
-        &self,
-        command: &str,
-        args: &[&str],
-    ) -> BlixardResult<bool> {
+
+    async fn execute_status(&self, command: &str, args: &[&str]) -> BlixardResult<bool> {
         let output = self.execute(command, args, None).await?;
         Ok(output.success())
     }
-    
+
     async fn spawn(
         &self,
         command: &str,
@@ -121,17 +113,17 @@ impl ProcessExecutor for TokioProcessExecutor {
     ) -> BlixardResult<u32> {
         let mut cmd = Command::new(command);
         cmd.args(args);
-        
+
         if let Some(env_vars) = env {
             for (key, value) in env_vars {
                 cmd.env(key, value);
             }
         }
-        
+
         let child = cmd.spawn()?;
         Ok(child.id().unwrap_or(0))
     }
-    
+
     async fn kill(&self, pid: u32) -> BlixardResult<()> {
         // TODO: Implement with nix crate for Unix systems
         // For now, use a simple approach
@@ -144,17 +136,17 @@ impl ProcessExecutor for TokioProcessExecutor {
                 .output()
                 .map_err(|e| crate::error::BlixardError::SystemError(e.to_string()))?;
         }
-        
+
         #[cfg(not(unix))]
         {
             return Err(crate::error::BlixardError::NotImplemented {
-                feature: "Process killing on non-Unix systems".to_string()
+                feature: "Process killing on non-Unix systems".to_string(),
             });
         }
-        
+
         Ok(())
     }
-    
+
     async fn is_running(&self, pid: u32) -> BlixardResult<bool> {
         #[cfg(unix)]
         {
@@ -165,10 +157,10 @@ impl ProcessExecutor for TokioProcessExecutor {
                 .arg(pid.to_string())
                 .output()
                 .map_err(|e| crate::error::BlixardError::SystemError(e.to_string()))?;
-            
+
             Ok(output.status.success())
         }
-        
+
         #[cfg(not(unix))]
         {
             Ok(false) // Conservative default on non-Unix
@@ -200,28 +192,39 @@ impl MockProcessExecutor {
             next_pid: Arc::new(RwLock::new(1000)),
         }
     }
-    
+
     /// Set expected output for a command
     pub async fn set_output(&self, command: &str, output: ProcessOutput) {
-        self.outputs.write().await.insert(command.to_string(), output);
+        self.outputs
+            .write()
+            .await
+            .insert(command.to_string(), output);
     }
-    
+
     /// Set successful output with stdout
     pub async fn set_success(&self, command: &str, stdout: &str) {
-        self.set_output(command, ProcessOutput {
-            status: 0,
-            stdout: stdout.as_bytes().to_vec(),
-            stderr: Vec::new(),
-        }).await;
+        self.set_output(
+            command,
+            ProcessOutput {
+                status: 0,
+                stdout: stdout.as_bytes().to_vec(),
+                stderr: Vec::new(),
+            },
+        )
+        .await;
     }
-    
+
     /// Set failed output with stderr
     pub async fn set_failure(&self, command: &str, stderr: &str) {
-        self.set_output(command, ProcessOutput {
-            status: 1,
-            stdout: Vec::new(),
-            stderr: stderr.as_bytes().to_vec(),
-        }).await;
+        self.set_output(
+            command,
+            ProcessOutput {
+                status: 1,
+                stdout: Vec::new(),
+                stderr: stderr.as_bytes().to_vec(),
+            },
+        )
+        .await;
     }
 }
 
@@ -239,23 +242,21 @@ impl ProcessExecutor for MockProcessExecutor {
         _args: &[&str],
         _env: Option<HashMap<String, String>>,
     ) -> BlixardResult<ProcessOutput> {
-        self.outputs.read().await
+        self.outputs
+            .read()
+            .await
             .get(command)
             .cloned()
             .ok_or_else(|| crate::error::BlixardError::Internal {
-                message: format!("No mock output configured for command: {}", command)
+                message: format!("No mock output configured for command: {}", command),
             })
     }
-    
-    async fn execute_status(
-        &self,
-        command: &str,
-        args: &[&str],
-    ) -> BlixardResult<bool> {
+
+    async fn execute_status(&self, command: &str, args: &[&str]) -> BlixardResult<bool> {
         let output = self.execute(command, args, None).await?;
         Ok(output.success())
     }
-    
+
     async fn spawn(
         &self,
         command: &str,
@@ -265,16 +266,19 @@ impl ProcessExecutor for MockProcessExecutor {
         let mut next_pid = self.next_pid.write().await;
         let pid = *next_pid;
         *next_pid += 1;
-        
-        self.processes.write().await.insert(pid, command.to_string());
+
+        self.processes
+            .write()
+            .await
+            .insert(pid, command.to_string());
         Ok(pid)
     }
-    
+
     async fn kill(&self, pid: u32) -> BlixardResult<()> {
         self.processes.write().await.remove(&pid);
         Ok(())
     }
-    
+
     async fn is_running(&self, pid: u32) -> BlixardResult<bool> {
         Ok(self.processes.read().await.contains_key(&pid))
     }

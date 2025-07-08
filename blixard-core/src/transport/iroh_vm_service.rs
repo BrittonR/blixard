@@ -2,18 +2,20 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
+    metrics_otel::{attributes, metrics, Timer},
     node_shared::SharedNodeState,
     transport::{
-        services::vm::{VmOperationRequest, VmOperationResponse, VmServiceImpl, VmInfoData, VmService},
         iroh_protocol::{deserialize_payload, serialize_payload},
         iroh_service::IrohService,
+        services::vm::{
+            VmInfoData, VmOperationRequest, VmOperationResponse, VmService, VmServiceImpl,
+        },
     },
-    metrics_otel::{metrics, Timer, attributes},
 };
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::{debug, info};
-use serde::{Serialize, Deserialize};
 // Removed unused imports - Hash and FromStr
 use bytes::Bytes;
 use futures::TryStreamExt;
@@ -103,12 +105,24 @@ impl IrohVmService {
             image_metadata: Arc::new(RwLock::new(HashMap::new())),
         }
     }
-    
+
     /// Handle VM operation request
-    pub async fn handle_vm_operation(&self, request: VmOperationRequest) -> BlixardResult<VmOperationResponse> {
+    pub async fn handle_vm_operation(
+        &self,
+        request: VmOperationRequest,
+    ) -> BlixardResult<VmOperationResponse> {
         match request {
-            VmOperationRequest::Create { name, config_path: _, vcpus, memory_mb } => {
-                match self.vm_service.create_vm(name.clone(), vcpus, memory_mb).await {
+            VmOperationRequest::Create {
+                name,
+                config_path: _,
+                vcpus,
+                memory_mb,
+            } => {
+                match self
+                    .vm_service
+                    .create_vm(name.clone(), vcpus, memory_mb)
+                    .await
+                {
                     Ok(vm_id) => Ok(VmOperationResponse::Create {
                         success: true,
                         message: format!("VM '{}' created successfully", name),
@@ -121,75 +135,66 @@ impl IrohVmService {
                     }),
                 }
             }
-            VmOperationRequest::Start { name } => {
-                match self.vm_service.start_vm(&name).await {
-                    Ok(()) => Ok(VmOperationResponse::Start {
-                        success: true,
-                        message: format!("VM '{}' started", name),
-                    }),
-                    Err(e) => Ok(VmOperationResponse::Start {
-                        success: false,
-                        message: e.to_string(),
-                    }),
+            VmOperationRequest::Start { name } => match self.vm_service.start_vm(&name).await {
+                Ok(()) => Ok(VmOperationResponse::Start {
+                    success: true,
+                    message: format!("VM '{}' started", name),
+                }),
+                Err(e) => Ok(VmOperationResponse::Start {
+                    success: false,
+                    message: e.to_string(),
+                }),
+            },
+            VmOperationRequest::Stop { name } => match self.vm_service.stop_vm(&name).await {
+                Ok(()) => Ok(VmOperationResponse::Stop {
+                    success: true,
+                    message: format!("VM '{}' stopped", name),
+                }),
+                Err(e) => Ok(VmOperationResponse::Stop {
+                    success: false,
+                    message: e.to_string(),
+                }),
+            },
+            VmOperationRequest::Delete { name } => match self.vm_service.delete_vm(&name).await {
+                Ok(()) => Ok(VmOperationResponse::Delete {
+                    success: true,
+                    message: format!("VM '{}' deleted", name),
+                }),
+                Err(e) => Ok(VmOperationResponse::Delete {
+                    success: false,
+                    message: e.to_string(),
+                }),
+            },
+            VmOperationRequest::List => match self.vm_service.list_vms().await {
+                Ok(vms) => {
+                    let vm_infos = vms
+                        .into_iter()
+                        .map(|(config, status)| VmInfoData {
+                            name: config.name,
+                            state: format!("{:?}", status),
+                            vcpus: config.vcpus,
+                            memory_mb: config.memory,
+                            node_id: self.node.get_id(),
+                            ip_address: config.ip_address.unwrap_or_default(),
+                        })
+                        .collect();
+                    Ok(VmOperationResponse::List { vms: vm_infos })
                 }
-            }
-            VmOperationRequest::Stop { name } => {
-                match self.vm_service.stop_vm(&name).await {
-                    Ok(()) => Ok(VmOperationResponse::Stop {
-                        success: true,
-                        message: format!("VM '{}' stopped", name),
-                    }),
-                    Err(e) => Ok(VmOperationResponse::Stop {
-                        success: false,
-                        message: e.to_string(),
-                    }),
-                }
-            }
-            VmOperationRequest::Delete { name } => {
-                match self.vm_service.delete_vm(&name).await {
-                    Ok(()) => Ok(VmOperationResponse::Delete {
-                        success: true,
-                        message: format!("VM '{}' deleted", name),
-                    }),
-                    Err(e) => Ok(VmOperationResponse::Delete {
-                        success: false,
-                        message: e.to_string(),
-                    }),
-                }
-            }
-            VmOperationRequest::List => {
-                match self.vm_service.list_vms().await {
-                    Ok(vms) => {
-                        let vm_infos = vms.into_iter().map(|(config, status)| {
-                            VmInfoData {
-                                name: config.name,
-                                state: format!("{:?}", status),
-                                vcpus: config.vcpus,
-                                memory_mb: config.memory,
-                                node_id: self.node.get_id(),
-                                ip_address: config.ip_address.unwrap_or_default(),
-                            }
-                        }).collect();
-                        Ok(VmOperationResponse::List { vms: vm_infos })
-                    }
-                    Err(e) => Err(e),
-                }
-            }
+                Err(e) => Err(e),
+            },
             VmOperationRequest::GetStatus { name } => {
                 match self.vm_service.get_vm_status(&name).await {
-                    Ok(Some((config, status))) => {
-                        Ok(VmOperationResponse::GetStatus {
-                            found: true,
-                            vm_info: Some(VmInfoData {
-                                name: config.name,
-                                state: format!("{:?}", status),
-                                vcpus: config.vcpus,
-                                memory_mb: config.memory,
-                                node_id: self.node.get_id(),
-                                ip_address: config.ip_address.unwrap_or_default(),
-                            }),
-                        })
-                    }
+                    Ok(Some((config, status))) => Ok(VmOperationResponse::GetStatus {
+                        found: true,
+                        vm_info: Some(VmInfoData {
+                            name: config.name,
+                            state: format!("{:?}", status),
+                            vcpus: config.vcpus,
+                            memory_mb: config.memory,
+                            node_id: self.node.get_id(),
+                            ip_address: config.ip_address.unwrap_or_default(),
+                        }),
+                    }),
                     Ok(None) => Ok(VmOperationResponse::GetStatus {
                         found: false,
                         vm_info: None,
@@ -197,8 +202,17 @@ impl IrohVmService {
                     Err(e) => Err(e),
                 }
             }
-            VmOperationRequest::Migrate { vm_name, target_node_id, live_migration, force } => {
-                match self.vm_service.migrate_vm(&vm_name, target_node_id, live_migration, force).await {
+            VmOperationRequest::Migrate {
+                vm_name,
+                target_node_id,
+                live_migration,
+                force,
+            } => {
+                match self
+                    .vm_service
+                    .migrate_vm(&vm_name, target_node_id, live_migration, force)
+                    .await
+                {
                     Ok(()) => Ok(VmOperationResponse::Migrate {
                         success: true,
                         message: format!("Migration of VM '{}' started", vm_name),
@@ -217,8 +231,28 @@ impl IrohVmService {
                     }),
                 }
             }
-            VmOperationRequest::CreateWithScheduling { name, vcpus, memory_mb, strategy, constraints, features, priority } => {
-                match self.vm_service.create_vm_with_scheduling(name.clone(), vcpus, memory_mb, strategy, constraints, features, priority).await {
+            VmOperationRequest::CreateWithScheduling {
+                name,
+                vcpus,
+                memory_mb,
+                strategy,
+                constraints,
+                features,
+                priority,
+            } => {
+                match self
+                    .vm_service
+                    .create_vm_with_scheduling(
+                        name.clone(),
+                        vcpus,
+                        memory_mb,
+                        strategy,
+                        constraints,
+                        features,
+                        priority,
+                    )
+                    .await
+                {
                     Ok((vm_id, node_id, reason)) => Ok(VmOperationResponse::CreateWithScheduling {
                         success: true,
                         message: format!("VM '{}' created successfully on node {}", name, node_id),
@@ -235,15 +269,28 @@ impl IrohVmService {
                     }),
                 }
             }
-            VmOperationRequest::SchedulePlacement { name, vcpus, memory_mb, strategy, constraints, features } => {
-                match self.vm_service.schedule_vm_placement(&name, vcpus, memory_mb, strategy, constraints, features).await {
-                    Ok((node_id, score, reason, alternatives)) => Ok(VmOperationResponse::SchedulePlacement {
-                        success: true,
-                        assigned_node_id: node_id,
-                        placement_score: score,
-                        placement_reason: reason,
-                        alternative_nodes: alternatives,
-                    }),
+            VmOperationRequest::SchedulePlacement {
+                name,
+                vcpus,
+                memory_mb,
+                strategy,
+                constraints,
+                features,
+            } => {
+                match self
+                    .vm_service
+                    .schedule_vm_placement(&name, vcpus, memory_mb, strategy, constraints, features)
+                    .await
+                {
+                    Ok((node_id, score, reason, alternatives)) => {
+                        Ok(VmOperationResponse::SchedulePlacement {
+                            success: true,
+                            assigned_node_id: node_id,
+                            placement_score: score,
+                            placement_reason: reason,
+                            alternative_nodes: alternatives,
+                        })
+                    }
                     Err(e) => Ok(VmOperationResponse::SchedulePlacement {
                         success: false,
                         assigned_node_id: 0,
@@ -255,22 +302,30 @@ impl IrohVmService {
             }
         }
     }
-    
+
     /// Handle VM image operations
-    pub async fn handle_image_request(&self, request: VmImageRequest) -> BlixardResult<VmImageResponse> {
+    pub async fn handle_image_request(
+        &self,
+        request: VmImageRequest,
+    ) -> BlixardResult<VmImageResponse> {
         match request {
-            VmImageRequest::ShareImage { image_name, image_path, description, tags } => {
-                self.share_vm_image(image_name, image_path, description, tags).await
+            VmImageRequest::ShareImage {
+                image_name,
+                image_path,
+                description,
+                tags,
+            } => {
+                self.share_vm_image(image_name, image_path, description, tags)
+                    .await
             }
-            VmImageRequest::GetImage { image_hash, output_path } => {
-                self.get_vm_image(image_hash, output_path).await
-            }
-            VmImageRequest::ListImages => {
-                self.list_p2p_images().await
-            }
+            VmImageRequest::GetImage {
+                image_hash,
+                output_path,
+            } => self.get_vm_image(image_hash, output_path).await,
+            VmImageRequest::ListImages => self.list_p2p_images().await,
         }
     }
-    
+
     /// Share a VM image over P2P
     async fn share_vm_image(
         &self,
@@ -280,29 +335,36 @@ impl IrohVmService {
         tags: Vec<String>,
     ) -> BlixardResult<VmImageResponse> {
         info!("Sharing VM image: {} from path: {}", image_name, image_path);
-        
+
         // For now, we'll use the P2P image store through the node state
         // instead of directly accessing the Iroh node
-        let p2p_manager = self.node.get_p2p_manager().await
+        let p2p_manager = self
+            .node
+            .get_p2p_manager()
+            .await
             .ok_or_else(|| BlixardError::P2PError("P2P manager not available".to_string()))?;
-        
+
         // Share the image through the P2P manager using upload_resource
         let path = std::path::Path::new(&image_path);
-        p2p_manager.upload_resource(
-            crate::p2p_manager::ResourceType::VmImage,
-            &image_name,
-            "latest", // version
-            path,
-        ).await?;
-        
+        p2p_manager
+            .upload_resource(
+                crate::p2p_manager::ResourceType::VmImage,
+                &image_name,
+                "latest", // version
+                path,
+            )
+            .await?;
+
         // Generate a hash for tracking using SHA256
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(&image_name);
         let hash = format!("{:x}", hasher.finalize());
-        let size = tokio::fs::metadata(&image_path).await
-            .map_err(|e| BlixardError::IoError(e))?.len();
-        
+        let size = tokio::fs::metadata(&image_path)
+            .await
+            .map_err(|e| BlixardError::IoError(e))?
+            .len();
+
         // Store metadata
         let metadata = VmImageMetadata {
             name: image_name.clone(),
@@ -313,14 +375,14 @@ impl IrohVmService {
             description,
             tags,
         };
-        
+
         {
             let mut images = self.image_metadata.write().await;
             images.insert(hash.clone(), metadata);
         }
-        
+
         info!("VM image shared successfully: {} ({})", image_name, hash);
-        
+
         Ok(VmImageResponse::ImageShared {
             success: true,
             message: format!("VM image '{}' shared successfully", image_name),
@@ -328,37 +390,50 @@ impl IrohVmService {
             size,
         })
     }
-    
+
     /// Get a VM image from P2P network
     async fn get_vm_image(
         &self,
         image_hash: String,
         output_path: String,
     ) -> BlixardResult<VmImageResponse> {
-        info!("Retrieving VM image: {} to path: {}", image_hash, output_path);
-        
+        info!(
+            "Retrieving VM image: {} to path: {}",
+            image_hash, output_path
+        );
+
         // Get the P2P manager
-        let p2p_manager = self.node.get_p2p_manager().await
+        let p2p_manager = self
+            .node
+            .get_p2p_manager()
+            .await
             .ok_or_else(|| BlixardError::P2PError("P2P manager not available".to_string()))?;
-        
+
         // Download the image through the P2P manager
         // For now, create a dummy download until we have proper hash-based lookup
-        let download_id = p2p_manager.request_download(
-            crate::p2p_manager::ResourceType::VmImage,
-            &image_hash, // Use hash as name for now
-            "latest",
-            crate::p2p_manager::TransferPriority::Normal,
-        ).await?;
-        
+        let download_id = p2p_manager
+            .request_download(
+                crate::p2p_manager::ResourceType::VmImage,
+                &image_hash, // Use hash as name for now
+                "latest",
+                crate::p2p_manager::TransferPriority::Normal,
+            )
+            .await?;
+
         // TODO: Wait for download to complete and copy to output_path
         tracing::info!("Download requested with ID: {}", download_id);
-        
+
         // Get the size of the downloaded file
-        let size = tokio::fs::metadata(&output_path).await
-            .map_err(|e| BlixardError::IoError(e))?.len();
-        
-        info!("VM image retrieved successfully: {} ({} bytes)", image_hash, size);
-        
+        let size = tokio::fs::metadata(&output_path)
+            .await
+            .map_err(|e| BlixardError::IoError(e))?
+            .len();
+
+        info!(
+            "VM image retrieved successfully: {} ({} bytes)",
+            image_hash, size
+        );
+
         Ok(VmImageResponse::ImageRetrieved {
             success: true,
             message: format!("VM image retrieved successfully"),
@@ -366,54 +441,62 @@ impl IrohVmService {
             size,
         })
     }
-    
+
     /// List available P2P images
     async fn list_p2p_images(&self) -> BlixardResult<VmImageResponse> {
         let images = self.image_metadata.read().await;
         let image_list: Vec<VmImageMetadata> = images.values().cloned().collect();
-        
-        Ok(VmImageResponse::ImageList {
-            images: image_list,
-        })
+
+        Ok(VmImageResponse::ImageList { images: image_list })
     }
-    
+
     // VM Health Monitoring handlers
-    
+
     /// Get VM health status
     async fn handle_get_health_status(
         &self,
         request: crate::iroh_types::GetVmHealthStatusRequest,
     ) -> BlixardResult<crate::iroh_types::GetVmHealthStatusResponse> {
         // Get the VM health monitor from the node
-        let health_monitor = self.node.get_vm_health_monitor().await
-            .ok_or_else(|| BlixardError::Internal {
-                message: "VM health monitor not available".to_string(),
-            })?;
-        
+        let health_monitor =
+            self.node
+                .get_vm_health_monitor()
+                .await
+                .ok_or_else(|| BlixardError::Internal {
+                    message: "VM health monitor not available".to_string(),
+                })?;
+
         // Get health status for the VM
         let health_status = health_monitor.get_health_status(&request.vm_name).await;
-        
-        Ok(crate::iroh_types::GetVmHealthStatusResponse {
-            health_status,
-        })
+
+        Ok(crate::iroh_types::GetVmHealthStatusResponse { health_status })
     }
-    
+
     /// Add a health check to a VM
     async fn handle_add_health_check(
         &self,
         request: crate::iroh_types::AddVmHealthCheckRequest,
     ) -> BlixardResult<crate::iroh_types::AddVmHealthCheckResponse> {
         // Get the VM health monitor from the node
-        let health_monitor = self.node.get_vm_health_monitor().await
-            .ok_or_else(|| BlixardError::Internal {
-                message: "VM health monitor not available".to_string(),
-            })?;
-        
+        let health_monitor =
+            self.node
+                .get_vm_health_monitor()
+                .await
+                .ok_or_else(|| BlixardError::Internal {
+                    message: "VM health monitor not available".to_string(),
+                })?;
+
         // Add the health check
-        match health_monitor.add_health_check(&request.vm_name, request.health_check).await {
+        match health_monitor
+            .add_health_check(&request.vm_name, request.health_check)
+            .await
+        {
             Ok(()) => Ok(crate::iroh_types::AddVmHealthCheckResponse {
                 success: true,
-                message: format!("Health check added successfully to VM '{}'", request.vm_name),
+                message: format!(
+                    "Health check added successfully to VM '{}'",
+                    request.vm_name
+                ),
             }),
             Err(e) => Ok(crate::iroh_types::AddVmHealthCheckResponse {
                 success: false,
@@ -421,43 +504,55 @@ impl IrohVmService {
             }),
         }
     }
-    
+
     /// List health checks for a VM
     async fn handle_list_health_checks(
         &self,
         request: crate::iroh_types::ListVmHealthChecksRequest,
     ) -> BlixardResult<crate::iroh_types::ListVmHealthChecksResponse> {
         // Get the VM health monitor from the node
-        let health_monitor = self.node.get_vm_health_monitor().await
-            .ok_or_else(|| BlixardError::Internal {
-                message: "VM health monitor not available".to_string(),
-            })?;
-        
+        let health_monitor =
+            self.node
+                .get_vm_health_monitor()
+                .await
+                .ok_or_else(|| BlixardError::Internal {
+                    message: "VM health monitor not available".to_string(),
+                })?;
+
         // Get health checks for the VM
-        let health_checks = health_monitor.list_health_checks(&request.vm_name).await
+        let health_checks = health_monitor
+            .list_health_checks(&request.vm_name)
+            .await
             .unwrap_or_else(|_| Vec::new());
-        
-        Ok(crate::iroh_types::ListVmHealthChecksResponse {
-            health_checks,
-        })
+
+        Ok(crate::iroh_types::ListVmHealthChecksResponse { health_checks })
     }
-    
+
     /// Remove a health check from a VM
     async fn handle_remove_health_check(
         &self,
         request: crate::iroh_types::RemoveVmHealthCheckRequest,
     ) -> BlixardResult<crate::iroh_types::RemoveVmHealthCheckResponse> {
         // Get the VM health monitor from the node
-        let health_monitor = self.node.get_vm_health_monitor().await
-            .ok_or_else(|| BlixardError::Internal {
-                message: "VM health monitor not available".to_string(),
-            })?;
-        
+        let health_monitor =
+            self.node
+                .get_vm_health_monitor()
+                .await
+                .ok_or_else(|| BlixardError::Internal {
+                    message: "VM health monitor not available".to_string(),
+                })?;
+
         // Remove the health check
-        match health_monitor.remove_health_check(&request.vm_name, &request.check_name).await {
+        match health_monitor
+            .remove_health_check(&request.vm_name, &request.check_name)
+            .await
+        {
             Ok(()) => Ok(crate::iroh_types::RemoveVmHealthCheckResponse {
                 success: true,
-                message: format!("Health check '{}' removed from VM '{}'", request.check_name, request.vm_name),
+                message: format!(
+                    "Health check '{}' removed from VM '{}'",
+                    request.check_name, request.vm_name
+                ),
             }),
             Err(e) => Ok(crate::iroh_types::RemoveVmHealthCheckResponse {
                 success: false,
@@ -465,21 +560,27 @@ impl IrohVmService {
             }),
         }
     }
-    
+
     /// Toggle health monitoring for a VM
     async fn handle_toggle_health_monitoring(
         &self,
         request: crate::iroh_types::ToggleVmHealthMonitoringRequest,
     ) -> BlixardResult<crate::iroh_types::ToggleVmHealthMonitoringResponse> {
         // Get the VM health monitor from the node
-        let health_monitor = self.node.get_vm_health_monitor().await
-            .ok_or_else(|| BlixardError::Internal {
-                message: "VM health monitor not available".to_string(),
-            })?;
-        
+        let health_monitor =
+            self.node
+                .get_vm_health_monitor()
+                .await
+                .ok_or_else(|| BlixardError::Internal {
+                    message: "VM health monitor not available".to_string(),
+                })?;
+
         // Toggle health monitoring
         let action = if request.enable { "enable" } else { "disable" };
-        match health_monitor.toggle_monitoring(&request.vm_name, request.enable).await {
+        match health_monitor
+            .toggle_monitoring(&request.vm_name, request.enable)
+            .await
+        {
             Ok(()) => Ok(crate::iroh_types::ToggleVmHealthMonitoringResponse {
                 success: true,
                 message: format!("Health monitoring {} for VM '{}'", action, request.vm_name),
@@ -490,20 +591,26 @@ impl IrohVmService {
             }),
         }
     }
-    
+
     /// Configure recovery policy for a VM
     async fn handle_configure_recovery_policy(
         &self,
         request: crate::iroh_types::ConfigureVmRecoveryPolicyRequest,
     ) -> BlixardResult<crate::iroh_types::ConfigureVmRecoveryPolicyResponse> {
         // Get the VM auto-recovery service from the node
-        let recovery_service = self.node.get_vm_auto_recovery().await
-            .ok_or_else(|| BlixardError::Internal {
-                message: "VM auto-recovery service not available".to_string(),
-            })?;
-        
+        let recovery_service =
+            self.node
+                .get_vm_auto_recovery()
+                .await
+                .ok_or_else(|| BlixardError::Internal {
+                    message: "VM auto-recovery service not available".to_string(),
+                })?;
+
         // Configure the recovery policy
-        match recovery_service.configure_recovery_policy(&request.vm_name, request.policy).await {
+        match recovery_service
+            .configure_recovery_policy(&request.vm_name, request.policy)
+            .await
+        {
             Ok(()) => Ok(crate::iroh_types::ConfigureVmRecoveryPolicyResponse {
                 success: true,
                 message: format!("Recovery policy configured for VM '{}'", request.vm_name),
@@ -521,16 +628,28 @@ impl IrohService for IrohVmService {
     fn name(&self) -> &'static str {
         "vm"
     }
-    
+
     fn methods(&self) -> Vec<&'static str> {
         vec![
-            "create", "start", "stop", "delete", "list", "get_status", "migrate",
-            "share_image", "get_image", "list_images",
-            "get_health_status", "add_health_check", "list_health_checks",
-            "remove_health_check", "toggle_health_monitoring", "configure_recovery_policy"
+            "create",
+            "start",
+            "stop",
+            "delete",
+            "list",
+            "get_status",
+            "migrate",
+            "share_image",
+            "get_image",
+            "list_images",
+            "get_health_status",
+            "add_health_check",
+            "list_health_checks",
+            "remove_health_check",
+            "toggle_health_monitoring",
+            "configure_recovery_policy",
         ]
     }
-    
+
     async fn handle_call(&self, method: &str, payload: Bytes) -> BlixardResult<Bytes> {
         let metrics = metrics();
         let _timer = Timer::with_attributes(
@@ -540,66 +659,74 @@ impl IrohService for IrohVmService {
                 attributes::node_id(self.node.get_id()),
             ],
         );
-        metrics.grpc_requests_total.add(1, &[attributes::method(method)]);
-        
+        metrics
+            .grpc_requests_total
+            .add(1, &[attributes::method(method)]);
+
         match method {
             // VM lifecycle operations
             "create" | "start" | "stop" | "delete" | "list" | "get_status" | "migrate" => {
                 // Deserialize VM operation request
                 let request: VmOperationRequest = deserialize_payload(&payload)?;
                 debug!("Handling VM operation: {:?}", request);
-                
+
                 let response = self.handle_vm_operation(request).await?;
                 serialize_payload(&response)
             }
-            
+
             // VM image operations
             "share_image" | "get_image" | "list_images" => {
                 // Deserialize VM image request
                 let request: VmImageRequest = deserialize_payload(&payload)?;
                 debug!("Handling VM image operation: {:?}", request);
-                
+
                 let response = self.handle_image_request(request).await?;
                 serialize_payload(&response)
             }
-            
+
             // VM health monitoring operations
             "get_health_status" => {
-                let request: crate::iroh_types::GetVmHealthStatusRequest = deserialize_payload(&payload)?;
+                let request: crate::iroh_types::GetVmHealthStatusRequest =
+                    deserialize_payload(&payload)?;
                 let response = self.handle_get_health_status(request).await?;
                 serialize_payload(&response)
             }
-            
+
             "add_health_check" => {
-                let request: crate::iroh_types::AddVmHealthCheckRequest = deserialize_payload(&payload)?;
+                let request: crate::iroh_types::AddVmHealthCheckRequest =
+                    deserialize_payload(&payload)?;
                 let response = self.handle_add_health_check(request).await?;
                 serialize_payload(&response)
             }
-            
+
             "list_health_checks" => {
-                let request: crate::iroh_types::ListVmHealthChecksRequest = deserialize_payload(&payload)?;
+                let request: crate::iroh_types::ListVmHealthChecksRequest =
+                    deserialize_payload(&payload)?;
                 let response = self.handle_list_health_checks(request).await?;
                 serialize_payload(&response)
             }
-            
+
             "remove_health_check" => {
-                let request: crate::iroh_types::RemoveVmHealthCheckRequest = deserialize_payload(&payload)?;
+                let request: crate::iroh_types::RemoveVmHealthCheckRequest =
+                    deserialize_payload(&payload)?;
                 let response = self.handle_remove_health_check(request).await?;
                 serialize_payload(&response)
             }
-            
+
             "toggle_health_monitoring" => {
-                let request: crate::iroh_types::ToggleVmHealthMonitoringRequest = deserialize_payload(&payload)?;
+                let request: crate::iroh_types::ToggleVmHealthMonitoringRequest =
+                    deserialize_payload(&payload)?;
                 let response = self.handle_toggle_health_monitoring(request).await?;
                 serialize_payload(&response)
             }
-            
+
             "configure_recovery_policy" => {
-                let request: crate::iroh_types::ConfigureVmRecoveryPolicyRequest = deserialize_payload(&payload)?;
+                let request: crate::iroh_types::ConfigureVmRecoveryPolicyRequest =
+                    deserialize_payload(&payload)?;
                 let response = self.handle_configure_recovery_policy(request).await?;
                 serialize_payload(&response)
             }
-            
+
             _ => Err(BlixardError::Internal {
                 message: format!("Unknown method: {}", method),
             }),
@@ -621,9 +748,14 @@ impl<'a> IrohVmClient<'a> {
     ) -> Self {
         Self { client, node_addr }
     }
-    
+
     /// Create a VM
-    pub async fn create_vm(&self, name: String, vcpus: u32, memory_mb: u32) -> BlixardResult<VmOperationResponse> {
+    pub async fn create_vm(
+        &self,
+        name: String,
+        vcpus: u32,
+        memory_mb: u32,
+    ) -> BlixardResult<VmOperationResponse> {
         let request = VmOperationRequest::Create {
             name,
             config_path: String::new(),
@@ -634,7 +766,7 @@ impl<'a> IrohVmClient<'a> {
             .call(self.node_addr.clone(), "vm", "create", request)
             .await
     }
-    
+
     /// Start a VM
     pub async fn start_vm(&self, name: String) -> BlixardResult<VmOperationResponse> {
         let request = VmOperationRequest::Start { name };
@@ -642,7 +774,7 @@ impl<'a> IrohVmClient<'a> {
             .call(self.node_addr.clone(), "vm", "start", request)
             .await
     }
-    
+
     /// Stop a VM
     pub async fn stop_vm(&self, name: String) -> BlixardResult<VmOperationResponse> {
         let request = VmOperationRequest::Stop { name };
@@ -650,7 +782,7 @@ impl<'a> IrohVmClient<'a> {
             .call(self.node_addr.clone(), "vm", "stop", request)
             .await
     }
-    
+
     /// Delete a VM
     pub async fn delete_vm(&self, name: String) -> BlixardResult<VmOperationResponse> {
         let request = VmOperationRequest::Delete { name };
@@ -658,7 +790,7 @@ impl<'a> IrohVmClient<'a> {
             .call(self.node_addr.clone(), "vm", "delete", request)
             .await
     }
-    
+
     /// List VMs
     pub async fn list_vms(&self) -> BlixardResult<VmOperationResponse> {
         let request = VmOperationRequest::List;
@@ -666,7 +798,7 @@ impl<'a> IrohVmClient<'a> {
             .call(self.node_addr.clone(), "vm", "list", request)
             .await
     }
-    
+
     /// Get VM status
     pub async fn get_vm_status(&self, name: String) -> BlixardResult<VmOperationResponse> {
         let request = VmOperationRequest::GetStatus { name };
@@ -674,7 +806,7 @@ impl<'a> IrohVmClient<'a> {
             .call(self.node_addr.clone(), "vm", "get_status", request)
             .await
     }
-    
+
     /// Migrate a VM
     pub async fn migrate_vm(
         &self,
@@ -693,7 +825,7 @@ impl<'a> IrohVmClient<'a> {
             .call(self.node_addr.clone(), "vm", "migrate", request)
             .await
     }
-    
+
     /// Share a VM image
     pub async fn share_image(
         &self,
@@ -712,9 +844,13 @@ impl<'a> IrohVmClient<'a> {
             .call(self.node_addr.clone(), "vm", "share_image", request)
             .await
     }
-    
+
     /// Get a VM image
-    pub async fn get_image(&self, image_hash: String, output_path: String) -> BlixardResult<VmImageResponse> {
+    pub async fn get_image(
+        &self,
+        image_hash: String,
+        output_path: String,
+    ) -> BlixardResult<VmImageResponse> {
         let request = VmImageRequest::GetImage {
             image_hash,
             output_path,
@@ -723,7 +859,7 @@ impl<'a> IrohVmClient<'a> {
             .call(self.node_addr.clone(), "vm", "get_image", request)
             .await
     }
-    
+
     /// List available images
     pub async fn list_images(&self) -> BlixardResult<VmImageResponse> {
         let request = VmImageRequest::ListImages;

@@ -1,13 +1,13 @@
-use std::sync::Arc;
 use blixard_core::node::Node;
 use blixard_core::node_shared::SharedNodeState;
 use blixard_core::types::NodeConfig;
+use std::sync::Arc;
 
 #[test]
 fn test_shared_node_state_is_send_sync() {
     // This test verifies that SharedNodeState is Send + Sync
     fn assert_send_sync<T: Send + Sync>() {}
-    
+
     assert_send_sync::<SharedNodeState>();
     assert_send_sync::<Arc<SharedNodeState>>();
 }
@@ -24,10 +24,10 @@ async fn test_node_can_be_shared_via_arc() {
         transport_config: None,
         topology: Default::default(),
     };
-    
+
     let node = Node::new(config);
     let shared = node.shared();
-    
+
     // This should work now - we can share the state across threads
     let shared_clone = Arc::clone(&shared);
     let handle = tokio::spawn(async move {
@@ -35,7 +35,7 @@ async fn test_node_can_be_shared_via_arc() {
         let id = shared_clone.get_id();
         assert_eq!(id, 1);
     });
-    
+
     handle.await.unwrap();
 }
 

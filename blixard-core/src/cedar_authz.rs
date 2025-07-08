@@ -34,11 +34,9 @@ impl CedarAuthz {
     /// Create a new Cedar authorization engine
     pub async fn new(schema_path: &Path, policies_dir: &Path) -> BlixardResult<Self> {
         // Load schema
-        let schema_str = tokio::fs::read_to_string(schema_path)
-            .await
-            .map_err(|e| BlixardError::ConfigError(
-                format!("Failed to read Cedar schema: {}", e)
-            ))?;
+        let schema_str = tokio::fs::read_to_string(schema_path).await.map_err(|e| {
+            BlixardError::ConfigError(format!("Failed to read Cedar schema: {}", e))
+        })?;
 
         // In Cedar 3.x, schema loading is done differently
         // For now, we'll store the schema as an option and use basic validation
@@ -66,41 +64,35 @@ impl CedarAuthz {
         let mut policy_set = PolicySet::new();
 
         // Read all .cedar files in the directory
-        let mut entries = tokio::fs::read_dir(policies_dir)
-            .await
-            .map_err(|e| BlixardError::ConfigError(
-                format!("Failed to read policies directory: {}", e)
-            ))?;
+        let mut entries = tokio::fs::read_dir(policies_dir).await.map_err(|e| {
+            BlixardError::ConfigError(format!("Failed to read policies directory: {}", e))
+        })?;
 
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|e| BlixardError::ConfigError(
-                format!("Failed to read directory entry: {}", e)
-            ))?
-        {
+        while let Some(entry) = entries.next_entry().await.map_err(|e| {
+            BlixardError::ConfigError(format!("Failed to read directory entry: {}", e))
+        })? {
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) == Some("cedar") {
-                let policy_text = tokio::fs::read_to_string(&path)
-                    .await
-                    .map_err(|e| BlixardError::ConfigError(
-                        format!("Failed to read policy file {:?}: {}", path, e)
-                    ))?;
+                let policy_text = tokio::fs::read_to_string(&path).await.map_err(|e| {
+                    BlixardError::ConfigError(format!(
+                        "Failed to read policy file {:?}: {}",
+                        path, e
+                    ))
+                })?;
 
                 // Parse policies from text
-                let parsed_policies = PolicySet::from_str(&policy_text).map_err(|e| 
-                    BlixardError::ConfigError(
-                        format!("Failed to parse policy file {:?}: {}", path, e)
-                    )
-                )?;
+                let parsed_policies = PolicySet::from_str(&policy_text).map_err(|e| {
+                    BlixardError::ConfigError(format!(
+                        "Failed to parse policy file {:?}: {}",
+                        path, e
+                    ))
+                })?;
 
                 // Add policies to set
                 for policy in parsed_policies.policies() {
-                    policy_set.add(policy.clone()).map_err(|e| 
-                        BlixardError::ConfigError(
-                            format!("Failed to add policy: {}", e)
-                        )
-                    )?;
+                    policy_set.add(policy.clone()).map_err(|e| {
+                        BlixardError::ConfigError(format!("Failed to add policy: {}", e))
+                    })?;
                 }
 
                 info!("Loaded Cedar policies from {:?}", path);
@@ -119,25 +111,22 @@ impl CedarAuthz {
         context: HashMap<String, Value>,
     ) -> BlixardResult<bool> {
         // Parse principal EntityUid
-        let principal_uid = EntityUid::from_str(principal).map_err(|e| {
-            BlixardError::AuthorizationError {
+        let principal_uid =
+            EntityUid::from_str(principal).map_err(|e| BlixardError::AuthorizationError {
                 message: format!("Invalid principal format '{}': {}", principal, e),
-            }
-        })?;
+            })?;
 
         // Parse action EntityUid
-        let action_uid = EntityUid::from_str(action).map_err(|e| {
-            BlixardError::AuthorizationError {
+        let action_uid =
+            EntityUid::from_str(action).map_err(|e| BlixardError::AuthorizationError {
                 message: format!("Invalid action format '{}': {}", action, e),
-            }
-        })?;
+            })?;
 
         // Parse resource EntityUid
-        let resource_uid = EntityUid::from_str(resource).map_err(|e| {
-            BlixardError::AuthorizationError {
+        let resource_uid =
+            EntityUid::from_str(resource).map_err(|e| BlixardError::AuthorizationError {
                 message: format!("Invalid resource format '{}': {}", resource, e),
-            }
-        })?;
+            })?;
 
         // Convert context to Cedar context
         let cedar_context = self.build_cedar_context(context)?;
@@ -153,7 +142,8 @@ impl CedarAuthz {
             Some(resource_uid),
             cedar_context,
             schema_ref,
-        ).map_err(|e| BlixardError::AuthorizationError {
+        )
+        .map_err(|e| BlixardError::AuthorizationError {
             message: format!("Failed to create authorization request: {}", e),
         })?;
 
@@ -162,7 +152,9 @@ impl CedarAuthz {
         let entities = self.entities.read().await;
 
         // Make authorization decision
-        let response = self.authorizer.is_authorized(&request, &policy_set, &entities);
+        let response = self
+            .authorizer
+            .is_authorized(&request, &policy_set, &entities);
 
         match response.decision() {
             Decision::Allow => {
@@ -193,10 +185,8 @@ impl CedarAuthz {
                 .collect::<serde_json::Map<String, Value>>(),
         );
 
-        Context::from_json_value(context_json, None).map_err(|e| {
-            BlixardError::AuthorizationError {
-                message: format!("Failed to build Cedar context: {}", e),
-            }
+        Context::from_json_value(context_json, None).map_err(|e| BlixardError::AuthorizationError {
+            message: format!("Failed to build Cedar context: {}", e),
         })
     }
 
@@ -218,10 +208,7 @@ impl CedarAuthz {
         // In Cedar 3.x, entity creation is simplified
         // For now, we'll log the addition but not actually create the entity
         // as the Entity API has changed
-        info!(
-            "Added entity (simulated): {}::{}",
-            entity_type, entity_id
-        );
+        info!("Added entity (simulated): {}::{}", entity_type, entity_id);
         Ok(())
     }
 

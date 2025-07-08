@@ -1,10 +1,10 @@
 // Common test utilities and helpers for integration tests
 
-use std::time::Duration;
 use blixard_core::{
     error::{BlixardError, Result as BlixardResult},
-    types::{NodeConfig, VmConfig, NodeTopology, LocalityPreference}
+    types::{LocalityPreference, NodeConfig, NodeTopology, VmConfig},
 };
+use std::time::Duration;
 
 // Re-export timing utilities for easier access
 pub mod test_timing;
@@ -56,44 +56,43 @@ where
 {
     // Use consistent time abstractions for deterministic testing
     #[cfg(madsim)]
-    use madsim::time::{Instant, sleep};
+    use madsim::time::{sleep, Instant};
     #[cfg(not(madsim))]
     use std::time::Instant;
     #[cfg(not(madsim))]
     use tokio::time::sleep;
-    
+
     let start = Instant::now();
-    
+
     while start.elapsed() < timeout {
         if condition().await {
             return Ok(());
         }
         sleep(Duration::from_millis(100)).await;
     }
-    
-    Err(BlixardError::SystemError(
-        format!("Timeout waiting for condition after {:?}", timeout)
-    ))
+
+    Err(BlixardError::SystemError(format!(
+        "Timeout waiting for condition after {:?}",
+        timeout
+    )))
 }
 
 /// Property testing utilities
 pub mod proptest_utils {
     use proptest::prelude::*;
-    
+
     /// Strategy for generating valid node IDs
     pub fn node_id_strategy() -> impl Strategy<Value = u64> {
         1u64..=1000u64
     }
-    
+
     /// Strategy for generating valid port numbers
     pub fn port_strategy() -> impl Strategy<Value = u16> {
         7000u16..=8000u16
     }
-    
+
     /// Strategy for generating VM names
     pub fn vm_name_strategy() -> impl Strategy<Value = String> {
-        "[a-z][a-z0-9-]*".prop_filter("Must be valid VM name", |s| {
-            s.len() >= 2 && s.len() <= 32
-        })
+        "[a-z][a-z0-9-]*".prop_filter("Must be valid VM name", |s| s.len() >= 2 && s.len() <= 32)
     }
 }

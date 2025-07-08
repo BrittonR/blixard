@@ -5,12 +5,12 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
-    node_shared::SharedNodeState,
     metrics_otel::metrics,
+    node_shared::SharedNodeState,
 };
 use async_trait::async_trait;
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Monitoring data response
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,7 +66,7 @@ pub struct ClusterHealth {
 pub trait MonitoringService: Send + Sync {
     /// Get monitoring data
     async fn get_monitoring_data(&self) -> BlixardResult<MonitoringResponse>;
-    
+
     /// Get raw Prometheus metrics
     async fn get_prometheus_metrics(&self) -> BlixardResult<String>;
 }
@@ -86,15 +86,15 @@ impl MonitoringServiceImpl {
             start_time: std::time::Instant::now(),
         }
     }
-    
+
     /// Get system information
     async fn get_system_info(&self) -> SystemInfo {
         // Get system metrics from the OS
         // For now, return placeholder values
         // In production, use sysinfo crate or similar
-        
+
         let uptime_seconds = self.start_time.elapsed().as_secs();
-        
+
         // Placeholder values - would query actual system metrics
         SystemInfo {
             uptime_seconds,
@@ -105,15 +105,17 @@ impl MonitoringServiceImpl {
             total_disk_gb: 500,
         }
     }
-    
+
     /// Get cluster health information
     async fn get_cluster_health(&self) -> ClusterHealth {
         let is_leader = self.node.is_leader().await;
         let connected_peers = self.node.get_peers().await.len() as u32;
-        
+
         // Get VM count
         let running_vms = if let Some(vm_manager) = self.node.get_vm_manager().await {
-            vm_manager.list_vms().await
+            vm_manager
+                .list_vms()
+                .await
                 .unwrap_or_default()
                 .iter()
                 .filter(|(_, status)| *status == crate::types::VmStatus::Running)
@@ -121,18 +123,19 @@ impl MonitoringServiceImpl {
         } else {
             0
         };
-        
+
         // Get Raft metrics
-        let (raft_term, raft_commit_index) = if let Ok(raft_status) = self.node.get_raft_status().await {
-            // TODO: Get actual commit index from Raft manager
-            (raft_status.term, 0u64)
-        } else {
-            (0, 0)
-        };
-        
+        let (raft_term, raft_commit_index) =
+            if let Ok(raft_status) = self.node.get_raft_status().await {
+                // TODO: Get actual commit index from Raft manager
+                (raft_status.term, 0u64)
+            } else {
+                (0, 0)
+            };
+
         // TODO: Get actual pending task count
         let pending_tasks = 0;
-        
+
         ClusterHealth {
             is_leader,
             connected_peers,
@@ -152,11 +155,11 @@ impl MonitoringService for MonitoringServiceImpl {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        
+
         let metrics = self.get_prometheus_metrics().await?;
         let system_info = self.get_system_info().await;
         let cluster_health = self.get_cluster_health().await;
-        
+
         Ok(MonitoringResponse {
             node_id,
             timestamp,
@@ -165,7 +168,7 @@ impl MonitoringService for MonitoringServiceImpl {
             cluster_health,
         })
     }
-    
+
     async fn get_prometheus_metrics(&self) -> BlixardResult<String> {
         // TODO: Implement proper metrics export when metrics infrastructure is ready
         // For now, return a placeholder
@@ -192,7 +195,7 @@ impl MonitoringProtocolHandler {
             service: MonitoringServiceImpl::new(node),
         }
     }
-    
+
     /// Handle a monitoring request over Iroh
     pub async fn handle_request(
         &self,
@@ -208,7 +211,7 @@ impl MonitoringProtocolHandler {
                 // Return just Prometheus metrics
             }
         }
-        
+
         Err(BlixardError::NotImplemented {
             feature: "Iroh monitoring protocol handler".to_string(),
         })

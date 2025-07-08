@@ -5,19 +5,19 @@
 
 use blixard_core::{
     error::BlixardResult,
+    iroh_types::{HealthCheckRequest, HealthCheckResponse},
     node_shared::SharedNodeState,
     transport::{
-        iroh_service_runner::start_iroh_services,
-        iroh_service::{IrohRpcClient, IrohRpcServer},
         iroh_health_service::IrohHealthService,
+        iroh_service::{IrohRpcClient, IrohRpcServer},
+        iroh_service_runner::start_iroh_services,
     },
     types::NodeConfig,
-    iroh_types::{HealthCheckRequest, HealthCheckResponse},
 };
-use std::sync::Arc;
-use std::net::SocketAddr;
-use tokio::time::{sleep, Duration};
 use iroh::{Endpoint, NodeAddr};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::time::{sleep, Duration};
 
 #[tokio::main]
 async fn main() -> BlixardResult<()> {
@@ -27,11 +27,11 @@ async fn main() -> BlixardResult<()> {
         .init();
 
     println!("=== Minimal Iroh Node Test ===\n");
-    
+
     // Create minimal node configuration
     let node_id = 1;
     let bind_addr: SocketAddr = "127.0.0.1:7001".parse().unwrap();
-    
+
     let config = NodeConfig {
         id: node_id,
         bind_addr,
@@ -42,32 +42,32 @@ async fn main() -> BlixardResult<()> {
         transport_config: Some(Default::default()),
         topology: Default::default(),
     };
-    
+
     // Create shared state (minimal initialization)
     let shared_state = Arc::new(SharedNodeState::new(config.clone()));
-    
+
     // Create Iroh endpoint directly
     let endpoint = Endpoint::builder()
         .discovery(Box::new(iroh::discovery::dns::DnsDiscovery::n0_dns()))
         .bind(0)
         .await
         .map_err(|e| blixard_core::error::BlixardError::Internal {
-            message: format!("Failed to create Iroh endpoint: {}", e)
+            message: format!("Failed to create Iroh endpoint: {}", e),
         })?;
-    
+
     println!("✓ Created Iroh endpoint");
     println!("  Node ID: {}", endpoint.node_id());
     println!("  Bound to: {:?}", endpoint.bound_sockets());
-    
+
     // Create a simple RPC server
     let server = Arc::new(IrohRpcServer::new(endpoint.clone()));
-    
+
     // Register health service
     let health_service = IrohHealthService::new(shared_state.clone());
     server.register_service(health_service).await;
-    
+
     println!("✓ Registered health service");
-    
+
     // Start the server in background
     let server_handle = {
         let server = server.clone();
@@ -77,27 +77,30 @@ async fn main() -> BlixardResult<()> {
             }
         })
     };
-    
+
     // Give server time to start
     sleep(Duration::from_millis(500)).await;
-    
+
     println!("\n📡 Testing local health check...");
-    
+
     // Create a client and test health check
     let client = IrohRpcClient::new(endpoint.clone());
-    
+
     // Get our own address
-    let our_addr = NodeAddr::new(endpoint.node_id())
-        .with_direct_addresses(endpoint.bound_sockets());
-    
+    let our_addr =
+        NodeAddr::new(endpoint.node_id()).with_direct_addresses(endpoint.bound_sockets());
+
     // Test health check
     let request = HealthCheckRequest {};
-    match client.call::<HealthCheckRequest, HealthCheckResponse>(
-        our_addr.clone(),
-        "health",
-        "check_health",
-        request,
-    ).await {
+    match client
+        .call::<HealthCheckRequest, HealthCheckResponse>(
+            our_addr.clone(),
+            "health",
+            "check_health",
+            request,
+        )
+        .await
+    {
         Ok(response) => {
             println!("✓ Health check successful!");
             println!("  Status: {}", response.status);
@@ -108,22 +111,22 @@ async fn main() -> BlixardResult<()> {
             println!("✗ Health check failed: {}", e);
         }
     }
-    
+
     // Keep running for a bit to allow testing with other nodes
     println!("\n🚀 Node is running. Press Ctrl+C to stop.");
     println!("To test from another node, use node address:");
     println!("  {}", endpoint.node_id());
-    
+
     // Wait for Ctrl+C
     tokio::signal::ctrl_c().await.unwrap();
-    
+
     println!("\n🛑 Shutting down...");
-    
+
     // Cleanup
     server_handle.abort();
     endpoint.close().await?;
-    
+
     println!("✅ Shutdown complete");
-    
+
     Ok(())
 }

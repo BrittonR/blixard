@@ -17,44 +17,46 @@
 
 mod common;
 
+use once_cell::sync::Lazy;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestCaseError};
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tempfile::TempDir;
-use once_cell::sync::Lazy;
-use rand::{Rng, SeedableRng};
-use rand_chacha::ChaCha8Rng;
 
 use blixard_core::{
     error::{BlixardError, BlixardResult},
-    test_helpers::{TestCluster, TestNode, timing},
-    raft_manager::{ProposalData, VmCommand, WorkerCapabilities, WorkerStatus, TaskSpec, TaskResult, ResourceRequirements},
-    types::{VmConfig, VmStatus, NodeTopology},
+    raft_manager::{
+        ProposalData, ResourceRequirements, TaskResult, TaskSpec, VmCommand, WorkerCapabilities,
+        WorkerStatus,
+    },
     storage::{RAFT_LOG_TABLE, RAFT_SNAPSHOT_TABLE},
+    test_helpers::{timing, TestCluster, TestNode},
+    types::{NodeTopology, VmConfig, VmStatus},
 };
 
 // Shared runtime for all property tests
-static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
-    tokio::runtime::Runtime::new().unwrap()
-});
+static RUNTIME: Lazy<tokio::runtime::Runtime> =
+    Lazy::new(|| tokio::runtime::Runtime::new().unwrap());
 
 /// Tracks all safety-relevant state for verification
 #[derive(Debug, Clone)]
 struct SafetyTracker {
     /// Maps term -> set of node IDs that claimed leadership
     term_leaders: Arc<Mutex<HashMap<u64, HashSet<u64>>>>,
-    
+
     /// Maps (node_id, log_index) -> log entry for leader append-only checks
     leader_logs: Arc<Mutex<HashMap<(u64, u64), LogEntrySnapshot>>>,
-    
+
     /// Maps log_index -> canonical committed entry
     committed_entries: Arc<Mutex<HashMap<u64, LogEntrySnapshot>>>,
-    
+
     /// Maps (node_id, applied_index) -> applied entry for state machine safety
     applied_entries: Arc<Mutex<HashMap<(u64, u64), LogEntrySnapshot>>>,
-    
+
     /// Recorded safety violations
     violations: Arc<Mutex<Vec<SafetyViolation>>>,
 }
@@ -63,17 +65,14 @@ struct SafetyTracker {
 struct LogEntrySnapshot {
     index: u64,
     term: u64,
-    data_hash: u64,  // Hash of the entry data for comparison
+    data_hash: u64, // Hash of the entry data for comparison
 }
 
 #[derive(Debug, Clone)]
 enum SafetyViolation {
     /// Multiple nodes claimed leadership in the same term
-    MultipleLeadersInTerm { 
-        term: u64, 
-        leaders: Vec<u64> 
-    },
-    
+    MultipleLeadersInTerm { term: u64, leaders: Vec<u64> },
+
     /// A leader overwrote or deleted an entry in its log
     LeaderOverwroteEntry {
         leader_id: u64,
@@ -82,7 +81,7 @@ enum SafetyViolation {
         old_entry: LogEntrySnapshot,
         new_entry: LogEntrySnapshot,
     },
-    
+
     /// Two nodes have different entries at the same index with the same term
     LogMismatch {
         node1: u64,
@@ -92,7 +91,7 @@ enum SafetyViolation {
         entry1_hash: u64,
         entry2_hash: u64,
     },
-    
+
     /// A committed entry is missing from a leader of a higher term
     CommittedEntryMissing {
         committed_term: u64,
@@ -100,7 +99,7 @@ enum SafetyViolation {
         leader_id: u64,
         leader_term: u64,
     },
-    
+
     /// Two nodes applied different entries at the same index
     StateMachineDivergence {
         index: u64,
@@ -121,12 +120,12 @@ impl SafetyTracker {
             violations: Arc::new(Mutex::new(Vec::new())),
         }
     }
-    
+
     fn record_leader(&self, node_id: u64, term: u64) {
         let mut term_leaders = self.term_leaders.lock().unwrap();
         let leaders = term_leaders.entry(term).or_insert_with(HashSet::new);
         leaders.insert(node_id);
-        
+
         // Check election safety immediately
         if leaders.len() > 1 {
             self.record_violation(SafetyViolation::MultipleLeadersInTerm {
@@ -135,11 +134,11 @@ impl SafetyTracker {
             });
         }
     }
-    
+
     fn record_leader_log_entry(&self, leader_id: u64, entry: LogEntrySnapshot) {
         let mut leader_logs = self.leader_logs.lock().unwrap();
         let key = (leader_id, entry.index);
-        
+
         if let Some(existing) = leader_logs.get(&key) {
             if existing != &entry {
                 self.record_violation(SafetyViolation::LeaderOverwroteEntry {
@@ -151,62 +150,62 @@ impl SafetyTracker {
                 });
             }
         }
-        
+
         leader_logs.insert(key, entry);
     }
-    
+
     fn record_committed_entry(&self, entry: LogEntrySnapshot) {
         let mut committed = self.committed_entries.lock().unwrap();
-        
+
         if let Some(existing) = committed.get(&entry.index) {
             if existing != &entry {
                 // This is a critical safety violation - same index committed with different entries
                 self.record_violation(SafetyViolation::StateMachineDivergence {
                     index: entry.index,
-                    node1: 0,  // Unknown which nodes, but this shouldn't happen
+                    node1: 0, // Unknown which nodes, but this shouldn't happen
                     entry1: existing.clone(),
                     node2: 0,
                     entry2: entry.clone(),
                 });
             }
         }
-        
+
         committed.insert(entry.index, entry);
     }
-    
+
     fn record_applied_entry(&self, node_id: u64, entry: LogEntrySnapshot) {
         let mut applied = self.applied_entries.lock().unwrap();
         applied.insert((node_id, entry.index), entry);
     }
-    
+
     fn record_violation(&self, violation: SafetyViolation) {
         let mut violations = self.violations.lock().unwrap();
         violations.push(violation);
     }
-    
+
     fn check_all_violations(&self) -> Vec<SafetyViolation> {
         let violations = self.violations.lock().unwrap();
         violations.clone()
     }
-    
+
     fn verify_log_matching(&self, nodes: &HashMap<u64, TestNode>) {
         let node_ids: Vec<_> = nodes.keys().copied().collect();
-        
+
         // Compare logs between all pairs of nodes
         for i in 0..node_ids.len() {
-            for j in i+1..node_ids.len() {
+            for j in i + 1..node_ids.len() {
                 let node1_id = node_ids[i];
                 let node2_id = node_ids[j];
-                
+
                 // In a real implementation, we would inspect the actual Raft logs
                 // For now, we track via our safety tracker
             }
         }
     }
-    
+
     fn verify_leader_completeness(&self, current_leaders: &HashMap<u64, u64>) {
         let committed = self.committed_entries.lock().unwrap();
-        
+
         for (leader_id, leader_term) in current_leaders {
             for (index, committed_entry) in committed.iter() {
                 if committed_entry.term < *leader_term {
@@ -216,16 +215,19 @@ impl SafetyTracker {
             }
         }
     }
-    
+
     fn verify_state_machine_safety(&self) {
         let applied = self.applied_entries.lock().unwrap();
         let mut index_entries: HashMap<u64, Vec<(u64, LogEntrySnapshot)>> = HashMap::new();
-        
+
         // Group by index
         for ((node_id, index), entry) in applied.iter() {
-            index_entries.entry(*index).or_default().push((*node_id, entry.clone()));
+            index_entries
+                .entry(*index)
+                .or_default()
+                .push((*node_id, entry.clone()));
         }
-        
+
         // Check for divergence
         for (index, entries) in index_entries {
             if entries.len() > 1 {
@@ -251,30 +253,33 @@ impl SafetyTracker {
 enum RaftOperation {
     /// Client proposes a new entry
     ClientProposal { data: Vec<u8> },
-    
+
     /// Trigger an election on a specific node
     TriggerElection { node_id: u64 },
-    
+
     /// Partition nodes from each other
     PartitionNodes { group1: Vec<u64>, group2: Vec<u64> },
-    
+
     /// Heal all network partitions
     HealPartitions,
-    
+
     /// Kill a node (simulate crash)
     KillNode { node_id: u64 },
-    
+
     /// Restart a killed node
     RestartNode { node_id: u64 },
-    
+
     /// Inject a delay
     Delay { millis: u64 },
-    
+
     /// Force log compaction
     CompactLog { node_id: u64 },
-    
+
     /// Simulate Byzantine behavior (for adversarial testing)
-    ByzantineBehavior { node_id: u64, behavior: ByzantineAction },
+    ByzantineBehavior {
+        node_id: u64,
+        behavior: ByzantineAction,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -297,12 +302,12 @@ fn operation_sequence_strategy() -> impl Strategy<Value = Vec<RaftOperation>> {
             40 => any::<Vec<u8>>()
                 .prop_filter("Non-empty data", |d| !d.is_empty() && d.len() <= 1024)
                 .prop_map(|data| RaftOperation::ClientProposal { data }),
-            
+
             // 15% elections
-            15 => (0u64..5).prop_map(|node_id| RaftOperation::TriggerElection { 
-                node_id: node_id + 1 
+            15 => (0u64..5).prop_map(|node_id| RaftOperation::TriggerElection {
+                node_id: node_id + 1
             }),
-            
+
             // 10% partitions
             10 => (
                 prop::collection::vec(0u64..5, 1..3),
@@ -311,29 +316,29 @@ fn operation_sequence_strategy() -> impl Strategy<Value = Vec<RaftOperation>> {
                 group1: g1.into_iter().map(|n| n + 1).collect(),
                 group2: g2.into_iter().map(|n| n + 1).collect(),
             }),
-            
+
             // 5% heal partitions
             5 => Just(RaftOperation::HealPartitions),
-            
+
             // 10% node failures
-            10 => (0u64..5).prop_map(|node_id| RaftOperation::KillNode { 
-                node_id: node_id + 1 
+            10 => (0u64..5).prop_map(|node_id| RaftOperation::KillNode {
+                node_id: node_id + 1
             }),
-            
+
             // 10% node restarts
-            10 => (0u64..5).prop_map(|node_id| RaftOperation::RestartNode { 
-                node_id: node_id + 1 
+            10 => (0u64..5).prop_map(|node_id| RaftOperation::RestartNode {
+                node_id: node_id + 1
             }),
-            
+
             // 5% delays
             5 => (10u64..500).prop_map(|millis| RaftOperation::Delay { millis }),
-            
+
             // 5% log compaction
-            5 => (0u64..5).prop_map(|node_id| RaftOperation::CompactLog { 
-                node_id: node_id + 1 
+            5 => (0u64..5).prop_map(|node_id| RaftOperation::CompactLog {
+                node_id: node_id + 1
             }),
         ],
-        5..100  // 5 to 100 operations per test
+        5..100, // 5 to 100 operations per test
     )
 }
 
@@ -344,19 +349,22 @@ async fn execute_scenario(
 ) -> Result<SafetyTracker, TestCaseError> {
     let tracker = SafetyTracker::new();
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
-    
+
     // Create test cluster
-    let cluster = TestCluster::new(5).await
+    let cluster = TestCluster::new(5)
+        .await
         .map_err(|e| TestCaseError::fail(format!("Failed to create cluster: {}", e)))?;
-    
+
     // Wait for initial convergence
-    cluster.wait_for_convergence(Duration::from_secs(10)).await
+    cluster
+        .wait_for_convergence(Duration::from_secs(10))
+        .await
         .map_err(|e| TestCaseError::fail(format!("Cluster failed to converge: {}", e)))?;
-    
+
     // Track live nodes
     let mut live_nodes: HashSet<u64> = (1..=5).collect();
     let mut partitions: Vec<(Vec<u64>, Vec<u64>)> = Vec::new();
-    
+
     // Execute operations
     for (i, op) in operations.iter().enumerate() {
         match op {
@@ -372,23 +380,25 @@ async fn execute_scenario(
                             vcpus: 1,
                             tenant_id: "test".to_string(),
                             ip_address: None,
-                            metadata: Some(std::collections::HashMap::from([
-                                ("test_data".to_string(), hex::encode(data))
-                            ])),
+                            metadata: Some(std::collections::HashMap::from([(
+                                "test_data".to_string(),
+                                hex::encode(data),
+                            )])),
                             anti_affinity: None,
                         },
                         node_id: leader_id,
                     };
-                    
+
                     if let Some(leader_node) = cluster.nodes().get(&leader_id) {
-                        let result = leader_node.shared_state
+                        let result = leader_node
+                            .shared_state
                             .propose_raft_command(ProposalData::CreateVm(vm_command))
                             .await;
-                        
+
                         if result.is_ok() {
                             // Track this as a committed entry
                             let entry = LogEntrySnapshot {
-                                index: i as u64,  // Simplified - real impl would get actual index
+                                index: i as u64, // Simplified - real impl would get actual index
                                 term: get_current_term(&cluster).await,
                                 data_hash: hash_data(data),
                             };
@@ -397,63 +407,63 @@ async fn execute_scenario(
                     }
                 }
             }
-            
+
             RaftOperation::TriggerElection { node_id } => {
                 if live_nodes.contains(node_id) {
                     // In real implementation, would trigger election via Raft
                     timing::robust_sleep(Duration::from_millis(100)).await;
                 }
             }
-            
+
             RaftOperation::PartitionNodes { group1, group2 } => {
                 // Simulate network partition
                 partitions.push((group1.clone(), group2.clone()));
                 // In real implementation, would block network traffic between groups
             }
-            
+
             RaftOperation::HealPartitions => {
                 partitions.clear();
                 // In real implementation, would restore network connectivity
             }
-            
+
             RaftOperation::KillNode { node_id } => {
                 if live_nodes.contains(node_id) {
                     live_nodes.remove(node_id);
                     // In real implementation, would stop the node
                 }
             }
-            
+
             RaftOperation::RestartNode { node_id } => {
                 if !live_nodes.contains(node_id) {
                     live_nodes.insert(*node_id);
                     // In real implementation, would restart the node
                 }
             }
-            
+
             RaftOperation::Delay { millis } => {
                 timing::robust_sleep(Duration::from_millis(*millis)).await;
             }
-            
+
             RaftOperation::CompactLog { node_id } => {
                 if live_nodes.contains(node_id) {
                     // In real implementation, would trigger log compaction
                 }
             }
-            
+
             RaftOperation::ByzantineBehavior { .. } => {
                 // Byzantine behaviors would be implemented as fault injection
             }
         }
-        
+
         // Periodically check safety properties
         if i % 10 == 0 {
             check_safety_properties(&cluster, &tracker).await;
         }
     }
-    
+
     // Final safety check
     check_safety_properties(&cluster, &tracker).await;
-    
+
     // Verify no violations occurred
     let violations = tracker.check_all_violations();
     if !violations.is_empty() {
@@ -462,7 +472,7 @@ async fn execute_scenario(
             violations
         )));
     }
-    
+
     Ok(tracker)
 }
 
@@ -488,7 +498,7 @@ async fn get_current_term(cluster: &TestCluster) -> u64 {
 fn hash_data(data: &[u8]) -> u64 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
-    
+
     let mut hasher = DefaultHasher::new();
     data.hash(&mut hasher);
     hasher.finish()
@@ -505,7 +515,7 @@ async fn check_safety_properties(cluster: &TestCluster, tracker: &SafetyTracker)
             }
         }
     }
-    
+
     // Verify other properties
     tracker.verify_log_matching(cluster.nodes());
     tracker.verify_leader_completeness(&current_leaders);
@@ -521,7 +531,7 @@ proptest! {
         timeout: 60000,  // 60 second timeout per test
         ..Config::default()
     })]
-    
+
     #[test]
     fn prop_raft_safety_comprehensive(
         operations in operation_sequence_strategy(),
@@ -542,7 +552,7 @@ proptest! {
         timeout: 30000,
         ..Config::default()
     })]
-    
+
     #[test]
     fn prop_election_safety_focused(
         election_pattern in prop::collection::vec(
@@ -553,15 +563,15 @@ proptest! {
     ) {
         RUNTIME.block_on(async {
             let mut operations = Vec::new();
-            
+
             // Generate election-heavy scenario
             for (node_offset, delay) in election_pattern {
-                operations.push(RaftOperation::TriggerElection { 
-                    node_id: node_offset + 1 
+                operations.push(RaftOperation::TriggerElection {
+                    node_id: node_offset + 1
                 });
                 operations.push(RaftOperation::Delay { millis: delay });
             }
-            
+
             execute_scenario(operations, seed).await
         })?;
     }
@@ -573,7 +583,7 @@ proptest! {
         timeout: 30000,
         ..Config::default()
     })]
-    
+
     #[test]
     fn prop_log_consistency_under_partitions(
         partition_pattern in prop::collection::vec(
@@ -589,7 +599,7 @@ proptest! {
         RUNTIME.block_on(async {
             let mut operations = Vec::new();
             let mut partitioned = false;
-            
+
             for (i, should_partition) in partition_pattern.iter().enumerate() {
                 if *should_partition && !partitioned {
                     // Create partition
@@ -603,17 +613,17 @@ proptest! {
                     operations.push(RaftOperation::HealPartitions);
                     partitioned = false;
                 }
-                
+
                 // Intersperse with proposals
                 if i < proposals.len() {
                     operations.push(RaftOperation::ClientProposal {
                         data: proposals[i].clone(),
                     });
                 }
-                
+
                 operations.push(RaftOperation::Delay { millis: 100 });
             }
-            
+
             execute_scenario(operations, seed).await
         })?;
     }
@@ -625,7 +635,7 @@ proptest! {
         timeout: 45000,
         ..Config::default()
     })]
-    
+
     #[test]
     fn prop_state_machine_safety_with_crashes(
         crash_pattern in prop::collection::vec(
@@ -641,16 +651,16 @@ proptest! {
         RUNTIME.block_on(async {
             let mut operations = Vec::new();
             let mut proposal_idx = 0;
-            
+
             for (node_offset, action) in crash_pattern {
                 let node_id = node_offset + 1;
-                
+
                 match action {
                     0 => operations.push(RaftOperation::KillNode { node_id }),
                     1 => operations.push(RaftOperation::RestartNode { node_id }),
                     _ => {}
                 }
-                
+
                 // Add some proposals
                 if proposal_idx < proposals.len() {
                     operations.push(RaftOperation::ClientProposal {
@@ -658,10 +668,10 @@ proptest! {
                     });
                     proposal_idx += 1;
                 }
-                
+
                 operations.push(RaftOperation::Delay { millis: 50 });
             }
-            
+
             execute_scenario(operations, seed).await
         })?;
     }
@@ -673,7 +683,7 @@ proptest! {
         timeout: 60000,
         ..Config::default()
     })]
-    
+
     #[test]
     fn prop_leader_completeness_with_compaction(
         compaction_points in prop::collection::vec(
@@ -686,23 +696,23 @@ proptest! {
         RUNTIME.block_on(async {
             let mut final_ops = Vec::new();
             let mut compaction_map: HashMap<usize, Vec<u64>> = HashMap::new();
-            
+
             // Build compaction schedule
             for (node_offset, after_ops) in compaction_points {
                 compaction_map.entry(after_ops).or_default().push(node_offset + 1);
             }
-            
+
             // Interleave operations with compactions
             for (i, op) in operations.into_iter().enumerate() {
                 final_ops.push(op);
-                
+
                 if let Some(nodes) = compaction_map.get(&i) {
                     for node_id in nodes {
                         final_ops.push(RaftOperation::CompactLog { node_id: *node_id });
                     }
                 }
             }
-            
+
             execute_scenario(final_ops, seed).await
         })?;
     }
@@ -716,31 +726,35 @@ fn test_regression_split_brain_scenario() {
     RUNTIME.block_on(async {
         let operations = vec![
             // Initial proposals to establish state
-            RaftOperation::ClientProposal { data: vec![1, 2, 3] },
-            RaftOperation::ClientProposal { data: vec![4, 5, 6] },
+            RaftOperation::ClientProposal {
+                data: vec![1, 2, 3],
+            },
+            RaftOperation::ClientProposal {
+                data: vec![4, 5, 6],
+            },
             RaftOperation::Delay { millis: 200 },
-            
             // Create network partition
             RaftOperation::PartitionNodes {
                 group1: vec![1, 2],
                 group2: vec![3, 4, 5],
             },
-            
             // Trigger elections in both partitions
             RaftOperation::TriggerElection { node_id: 1 },
             RaftOperation::TriggerElection { node_id: 3 },
             RaftOperation::Delay { millis: 500 },
-            
             // Both groups try to make progress
-            RaftOperation::ClientProposal { data: vec![7, 8, 9] },
-            RaftOperation::ClientProposal { data: vec![10, 11, 12] },
+            RaftOperation::ClientProposal {
+                data: vec![7, 8, 9],
+            },
+            RaftOperation::ClientProposal {
+                data: vec![10, 11, 12],
+            },
             RaftOperation::Delay { millis: 300 },
-            
             // Heal partition
             RaftOperation::HealPartitions,
             RaftOperation::Delay { millis: 1000 },
         ];
-        
+
         // Use fixed seed for determinism
         execute_scenario(operations, 12345).await.unwrap();
     });
@@ -756,26 +770,22 @@ fn test_regression_leader_completeness_violation() {
             RaftOperation::ClientProposal { data: vec![2] },
             RaftOperation::ClientProposal { data: vec![3] },
             RaftOperation::Delay { millis: 300 },
-            
             // Kill nodes that have the committed entries
             RaftOperation::KillNode { node_id: 1 },
             RaftOperation::KillNode { node_id: 2 },
             RaftOperation::Delay { millis: 200 },
-            
             // Force election among remaining nodes
             RaftOperation::TriggerElection { node_id: 4 },
             RaftOperation::Delay { millis: 500 },
-            
             // New leader shouldn't be elected without committed entries
             // If it is, that's a violation
             RaftOperation::ClientProposal { data: vec![4] },
-            
             // Bring back nodes
             RaftOperation::RestartNode { node_id: 1 },
             RaftOperation::RestartNode { node_id: 2 },
             RaftOperation::Delay { millis: 1000 },
         ];
-        
+
         execute_scenario(operations, 54321).await.unwrap();
     });
 }
@@ -792,22 +802,19 @@ fn test_regression_concurrent_log_compaction() {
             RaftOperation::ClientProposal { data: vec![4] },
             RaftOperation::ClientProposal { data: vec![5] },
             RaftOperation::Delay { millis: 500 },
-            
             // Trigger compaction on multiple nodes concurrently
             RaftOperation::CompactLog { node_id: 1 },
             RaftOperation::CompactLog { node_id: 2 },
             RaftOperation::CompactLog { node_id: 3 },
-            
             // Continue operations during compaction
             RaftOperation::ClientProposal { data: vec![6] },
             RaftOperation::ClientProposal { data: vec![7] },
             RaftOperation::Delay { millis: 300 },
-            
             // Trigger election to ensure leader completeness after compaction
             RaftOperation::TriggerElection { node_id: 4 },
             RaftOperation::Delay { millis: 500 },
         ];
-        
+
         execute_scenario(operations, 99999).await.unwrap();
     });
 }

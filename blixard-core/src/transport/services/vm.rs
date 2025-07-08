@@ -4,14 +4,14 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
+    iroh_types::VmState,
     node_shared::SharedNodeState,
     types::{VmCommand, VmConfig, VmStatus as InternalVmStatus},
-    iroh_types::VmState,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
 // Removed tonic imports - using Iroh-only transport
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// VM operation request types for Iroh transport
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,7 +127,7 @@ pub struct VmInfoData {
 pub trait VmService: Send + Sync {
     /// Create a new VM
     async fn create_vm(&self, name: String, vcpus: u32, memory_mb: u32) -> BlixardResult<String>;
-    
+
     /// Create a new VM with automatic scheduling
     async fn create_vm_with_scheduling(
         &self,
@@ -139,7 +139,7 @@ pub trait VmService: Send + Sync {
         features: Option<Vec<String>>,
         priority: Option<u32>,
     ) -> BlixardResult<(String, u64, String)>; // Returns (vm_id, node_id, placement_decision)
-    
+
     /// Schedule VM placement without creating
     async fn schedule_vm_placement(
         &self,
@@ -150,22 +150,25 @@ pub trait VmService: Send + Sync {
         constraints: Option<Vec<String>>,
         features: Option<Vec<String>>,
     ) -> BlixardResult<(u64, f32, String, Vec<u64>)>; // Returns (node_id, score, reason, alternatives)
-    
+
     /// Start a VM
     async fn start_vm(&self, name: &str) -> BlixardResult<()>;
-    
+
     /// Stop a VM
     async fn stop_vm(&self, name: &str) -> BlixardResult<()>;
-    
+
     /// Delete a VM
     async fn delete_vm(&self, name: &str) -> BlixardResult<()>;
-    
+
     /// List all VMs
     async fn list_vms(&self) -> BlixardResult<Vec<(VmConfig, InternalVmStatus)>>;
-    
+
     /// Get VM status
-    async fn get_vm_status(&self, name: &str) -> BlixardResult<Option<(VmConfig, InternalVmStatus)>>;
-    
+    async fn get_vm_status(
+        &self,
+        name: &str,
+    ) -> BlixardResult<Option<(VmConfig, InternalVmStatus)>>;
+
     /// Migrate a VM to another node
     async fn migrate_vm(
         &self,
@@ -187,7 +190,7 @@ impl VmServiceImpl {
     pub fn new(node: Arc<SharedNodeState>) -> Self {
         Self { node }
     }
-    
+
     /// Convert internal VM status to proto
     fn vm_status_to_proto(status: &InternalVmStatus) -> VmState {
         match status {
@@ -199,11 +202,11 @@ impl VmServiceImpl {
             InternalVmStatus::Failed => VmState::VmStateFailed,
         }
     }
-    
+
     /// Parse placement strategy from string
     fn parse_strategy(strategy_str: Option<String>) -> crate::vm_scheduler::PlacementStrategy {
         use crate::vm_scheduler::PlacementStrategy;
-        
+
         match strategy_str.as_deref() {
             Some("most-available") => PlacementStrategy::MostAvailable,
             Some("least-available") => PlacementStrategy::LeastAvailable,
@@ -227,42 +230,53 @@ impl VmService for VmServiceImpl {
             anti_affinity: None,
             ..Default::default()
         };
-        
+
         // Send command through Raft consensus
-        self.node.send_vm_command(VmCommand::Create {
-            config: vm_config,
-            node_id: self.node.get_id(),
-        }).await?;
-        
+        self.node
+            .send_vm_command(VmCommand::Create {
+                config: vm_config,
+                node_id: self.node.get_id(),
+            })
+            .await?;
+
         Ok(name)
     }
-    
+
     async fn start_vm(&self, name: &str) -> BlixardResult<()> {
-        self.node.send_vm_command(VmCommand::Start {
-            name: name.to_string(),
-        }).await
+        self.node
+            .send_vm_command(VmCommand::Start {
+                name: name.to_string(),
+            })
+            .await
     }
-    
+
     async fn stop_vm(&self, name: &str) -> BlixardResult<()> {
-        self.node.send_vm_command(VmCommand::Stop {
-            name: name.to_string(),
-        }).await
+        self.node
+            .send_vm_command(VmCommand::Stop {
+                name: name.to_string(),
+            })
+            .await
     }
-    
+
     async fn delete_vm(&self, name: &str) -> BlixardResult<()> {
-        self.node.send_vm_command(VmCommand::Delete {
-            name: name.to_string(),
-        }).await
+        self.node
+            .send_vm_command(VmCommand::Delete {
+                name: name.to_string(),
+            })
+            .await
     }
-    
+
     async fn list_vms(&self) -> BlixardResult<Vec<(VmConfig, InternalVmStatus)>> {
         self.node.list_vms().await
     }
-    
-    async fn get_vm_status(&self, name: &str) -> BlixardResult<Option<(VmConfig, InternalVmStatus)>> {
+
+    async fn get_vm_status(
+        &self,
+        name: &str,
+    ) -> BlixardResult<Option<(VmConfig, InternalVmStatus)>> {
         self.node.get_vm_status(name).await
     }
-    
+
     async fn create_vm_with_scheduling(
         &self,
         name: String,
@@ -273,8 +287,8 @@ impl VmService for VmServiceImpl {
         features: Option<Vec<String>>,
         priority: Option<u32>,
     ) -> BlixardResult<(String, u64, String)> {
-        use crate::anti_affinity::{AntiAffinityRules, AntiAffinityRule};
-        
+        use crate::anti_affinity::{AntiAffinityRule, AntiAffinityRules};
+
         let mut vm_config = VmConfig {
             name: name.clone(),
             config_path: format!("/etc/blixard/vms/{}.yaml", name),
@@ -287,7 +301,7 @@ impl VmService for VmServiceImpl {
             priority: priority.unwrap_or(100),
             ..Default::default()
         };
-        
+
         // Convert constraints to anti-affinity rules
         if let Some(constraints) = constraints {
             let rules: Vec<AntiAffinityRule> = constraints
@@ -298,24 +312,27 @@ impl VmService for VmServiceImpl {
                 vm_config.anti_affinity = Some(AntiAffinityRules { rules });
             }
         }
-        
+
         // Add required features
         if let Some(features) = features {
             vm_config.metadata = Some(
                 vec![("required_features".to_string(), features.join(","))]
                     .into_iter()
-                    .collect()
+                    .collect(),
             );
         }
-        
+
         let strategy = Self::parse_strategy(strategy);
-        
+
         // Use the scheduling method from SharedNodeState
-        let decision = self.node.create_vm_with_scheduling(vm_config, strategy).await?;
-        
+        let decision = self
+            .node
+            .create_vm_with_scheduling(vm_config, strategy)
+            .await?;
+
         Ok((name, decision.selected_node_id, decision.reason))
     }
-    
+
     async fn schedule_vm_placement(
         &self,
         name: &str,
@@ -325,8 +342,8 @@ impl VmService for VmServiceImpl {
         constraints: Option<Vec<String>>,
         features: Option<Vec<String>>,
     ) -> BlixardResult<(u64, f32, String, Vec<u64>)> {
-        use crate::anti_affinity::{AntiAffinityRules, AntiAffinityRule};
-        
+        use crate::anti_affinity::{AntiAffinityRule, AntiAffinityRules};
+
         let mut vm_config = VmConfig {
             name: name.to_string(),
             config_path: format!("/etc/blixard/vms/{}.yaml", name),
@@ -338,7 +355,7 @@ impl VmService for VmServiceImpl {
             anti_affinity: None,
             ..Default::default()
         };
-        
+
         // Convert constraints to anti-affinity rules
         if let Some(constraints) = constraints {
             let rules: Vec<AntiAffinityRule> = constraints
@@ -349,21 +366,24 @@ impl VmService for VmServiceImpl {
                 vm_config.anti_affinity = Some(AntiAffinityRules { rules });
             }
         }
-        
+
         // Add required features
         if let Some(features) = features {
             vm_config.metadata = Some(
                 vec![("required_features".to_string(), features.join(","))]
                     .into_iter()
-                    .collect()
+                    .collect(),
             );
         }
-        
+
         let strategy = Self::parse_strategy(strategy);
-        
+
         // Use the scheduling method from SharedNodeState
-        let decision = self.node.schedule_vm_placement(&vm_config, strategy).await?;
-        
+        let decision = self
+            .node
+            .schedule_vm_placement(&vm_config, strategy)
+            .await?;
+
         // For now, return a default score since PlacementDecision doesn't have a score field
         Ok((
             decision.selected_node_id,
@@ -372,7 +392,7 @@ impl VmService for VmServiceImpl {
             decision.alternative_nodes,
         ))
     }
-    
+
     async fn migrate_vm(
         &self,
         vm_name: &str,
@@ -381,14 +401,14 @@ impl VmService for VmServiceImpl {
         force: bool,
     ) -> BlixardResult<()> {
         use crate::types::VmMigrationTask;
-        
+
         // Verify we're the leader
         if !self.node.is_leader().await {
             return Err(BlixardError::Internal {
                 message: "Not the leader".to_string(),
             });
         }
-        
+
         let migration_task = VmMigrationTask {
             vm_name: vm_name.to_string(),
             source_node_id: self.node.get_id(),
@@ -396,8 +416,12 @@ impl VmService for VmServiceImpl {
             live_migration,
             force,
         };
-        
-        self.node.send_vm_command(VmCommand::Migrate { task: migration_task }).await
+
+        self.node
+            .send_vm_command(VmCommand::Migrate {
+                task: migration_task,
+            })
+            .await
     }
 }
 
@@ -414,7 +438,7 @@ impl VmProtocolHandler {
             service: VmServiceImpl::new(node),
         }
     }
-    
+
     /// Handle a VM operation request over Iroh
     pub async fn handle_request(
         &self,
@@ -422,89 +446,83 @@ impl VmProtocolHandler {
         request: VmOperationRequest,
     ) -> BlixardResult<VmOperationResponse> {
         match request {
-            VmOperationRequest::Create { name, config_path: _, vcpus, memory_mb } => {
-                match self.service.create_vm(name.clone(), vcpus, memory_mb).await {
-                    Ok(vm_id) => Ok(VmOperationResponse::Create {
-                        success: true,
-                        message: format!("VM '{}' created successfully", name),
-                        vm_id,
-                    }),
-                    Err(e) => Ok(VmOperationResponse::Create {
-                        success: false,
-                        message: e.to_string(),
-                        vm_id: String::new(),
-                    }),
+            VmOperationRequest::Create {
+                name,
+                config_path: _,
+                vcpus,
+                memory_mb,
+            } => match self.service.create_vm(name.clone(), vcpus, memory_mb).await {
+                Ok(vm_id) => Ok(VmOperationResponse::Create {
+                    success: true,
+                    message: format!("VM '{}' created successfully", name),
+                    vm_id,
+                }),
+                Err(e) => Ok(VmOperationResponse::Create {
+                    success: false,
+                    message: e.to_string(),
+                    vm_id: String::new(),
+                }),
+            },
+            VmOperationRequest::Start { name } => match self.service.start_vm(&name).await {
+                Ok(()) => Ok(VmOperationResponse::Start {
+                    success: true,
+                    message: format!("VM '{}' started", name),
+                }),
+                Err(e) => Ok(VmOperationResponse::Start {
+                    success: false,
+                    message: e.to_string(),
+                }),
+            },
+            VmOperationRequest::Stop { name } => match self.service.stop_vm(&name).await {
+                Ok(()) => Ok(VmOperationResponse::Stop {
+                    success: true,
+                    message: format!("VM '{}' stopped", name),
+                }),
+                Err(e) => Ok(VmOperationResponse::Stop {
+                    success: false,
+                    message: e.to_string(),
+                }),
+            },
+            VmOperationRequest::Delete { name } => match self.service.delete_vm(&name).await {
+                Ok(()) => Ok(VmOperationResponse::Delete {
+                    success: true,
+                    message: format!("VM '{}' deleted", name),
+                }),
+                Err(e) => Ok(VmOperationResponse::Delete {
+                    success: false,
+                    message: e.to_string(),
+                }),
+            },
+            VmOperationRequest::List => match self.service.list_vms().await {
+                Ok(vms) => {
+                    let vm_infos = vms
+                        .into_iter()
+                        .map(|(config, status)| VmInfoData {
+                            name: config.name,
+                            state: format!("{:?}", status),
+                            vcpus: config.vcpus,
+                            memory_mb: config.memory,
+                            node_id: self.service.node.get_id(),
+                            ip_address: config.ip_address.unwrap_or_default(),
+                        })
+                        .collect();
+                    Ok(VmOperationResponse::List { vms: vm_infos })
                 }
-            }
-            VmOperationRequest::Start { name } => {
-                match self.service.start_vm(&name).await {
-                    Ok(()) => Ok(VmOperationResponse::Start {
-                        success: true,
-                        message: format!("VM '{}' started", name),
-                    }),
-                    Err(e) => Ok(VmOperationResponse::Start {
-                        success: false,
-                        message: e.to_string(),
-                    }),
-                }
-            }
-            VmOperationRequest::Stop { name } => {
-                match self.service.stop_vm(&name).await {
-                    Ok(()) => Ok(VmOperationResponse::Stop {
-                        success: true,
-                        message: format!("VM '{}' stopped", name),
-                    }),
-                    Err(e) => Ok(VmOperationResponse::Stop {
-                        success: false,
-                        message: e.to_string(),
-                    }),
-                }
-            }
-            VmOperationRequest::Delete { name } => {
-                match self.service.delete_vm(&name).await {
-                    Ok(()) => Ok(VmOperationResponse::Delete {
-                        success: true,
-                        message: format!("VM '{}' deleted", name),
-                    }),
-                    Err(e) => Ok(VmOperationResponse::Delete {
-                        success: false,
-                        message: e.to_string(),
-                    }),
-                }
-            }
-            VmOperationRequest::List => {
-                match self.service.list_vms().await {
-                    Ok(vms) => {
-                        let vm_infos = vms.into_iter().map(|(config, status)| {
-                            VmInfoData {
-                                name: config.name,
-                                state: format!("{:?}", status),
-                                vcpus: config.vcpus,
-                                memory_mb: config.memory,
-                                node_id: self.service.node.get_id(),
-                                ip_address: config.ip_address.unwrap_or_default(),
-                            }
-                        }).collect();
-                        Ok(VmOperationResponse::List { vms: vm_infos })
-                    }
-                    Err(e) => Err(e),
-                }
-            }
+                Err(e) => Err(e),
+            },
             VmOperationRequest::GetStatus { name } => {
                 match self.service.get_vm_status(&name).await {
-                    Ok(Some((config, status))) => {
-                        Ok(VmOperationResponse::GetStatus {
-                            found: true,
-                            vm_info: Some(VmInfoData {
-                                name: config.name,
-                                state: format!("{:?}", status),
-                                vcpus: config.vcpus,
-                                memory_mb: config.memory,
-                                node_id: self.service.node.get_id(),
-                                ip_address: config.ip_address.unwrap_or_default(),
-                            }),
-                        })
-                    }
+                    Ok(Some((config, status))) => Ok(VmOperationResponse::GetStatus {
+                        found: true,
+                        vm_info: Some(VmInfoData {
+                            name: config.name,
+                            state: format!("{:?}", status),
+                            vcpus: config.vcpus,
+                            memory_mb: config.memory,
+                            node_id: self.service.node.get_id(),
+                            ip_address: config.ip_address.unwrap_or_default(),
+                        }),
+                    }),
                     Ok(None) => Ok(VmOperationResponse::GetStatus {
                         found: false,
                         vm_info: None,
@@ -512,8 +530,17 @@ impl VmProtocolHandler {
                     Err(e) => Err(e),
                 }
             }
-            VmOperationRequest::Migrate { vm_name, target_node_id, live_migration, force } => {
-                match self.service.migrate_vm(&vm_name, target_node_id, live_migration, force).await {
+            VmOperationRequest::Migrate {
+                vm_name,
+                target_node_id,
+                live_migration,
+                force,
+            } => {
+                match self
+                    .service
+                    .migrate_vm(&vm_name, target_node_id, live_migration, force)
+                    .await
+                {
                     Ok(()) => Ok(VmOperationResponse::Migrate {
                         success: true,
                         message: format!("Migration of VM '{}' started", vm_name),
@@ -532,8 +559,28 @@ impl VmProtocolHandler {
                     }),
                 }
             }
-            VmOperationRequest::CreateWithScheduling { name, vcpus, memory_mb, strategy, constraints, features, priority } => {
-                match self.service.create_vm_with_scheduling(name.clone(), vcpus, memory_mb, strategy, constraints, features, priority).await {
+            VmOperationRequest::CreateWithScheduling {
+                name,
+                vcpus,
+                memory_mb,
+                strategy,
+                constraints,
+                features,
+                priority,
+            } => {
+                match self
+                    .service
+                    .create_vm_with_scheduling(
+                        name.clone(),
+                        vcpus,
+                        memory_mb,
+                        strategy,
+                        constraints,
+                        features,
+                        priority,
+                    )
+                    .await
+                {
                     Ok((vm_id, node_id, reason)) => Ok(VmOperationResponse::CreateWithScheduling {
                         success: true,
                         message: format!("VM '{}' created successfully on node {}", name, node_id),
@@ -550,15 +597,28 @@ impl VmProtocolHandler {
                     }),
                 }
             }
-            VmOperationRequest::SchedulePlacement { name, vcpus, memory_mb, strategy, constraints, features } => {
-                match self.service.schedule_vm_placement(&name, vcpus, memory_mb, strategy, constraints, features).await {
-                    Ok((node_id, score, reason, alternatives)) => Ok(VmOperationResponse::SchedulePlacement {
-                        success: true,
-                        assigned_node_id: node_id,
-                        placement_score: score,
-                        placement_reason: reason,
-                        alternative_nodes: alternatives,
-                    }),
+            VmOperationRequest::SchedulePlacement {
+                name,
+                vcpus,
+                memory_mb,
+                strategy,
+                constraints,
+                features,
+            } => {
+                match self
+                    .service
+                    .schedule_vm_placement(&name, vcpus, memory_mb, strategy, constraints, features)
+                    .await
+                {
+                    Ok((node_id, score, reason, alternatives)) => {
+                        Ok(VmOperationResponse::SchedulePlacement {
+                            success: true,
+                            assigned_node_id: node_id,
+                            placement_score: score,
+                            placement_reason: reason,
+                            alternative_nodes: alternatives,
+                        })
+                    }
                     Err(e) => Ok(VmOperationResponse::SchedulePlacement {
                         success: false,
                         assigned_node_id: 0,

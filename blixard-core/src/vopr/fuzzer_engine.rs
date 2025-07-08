@@ -1,16 +1,16 @@
 //! Core fuzzing engine with coverage-guided operation generation
-//! 
+//!
 //! This module implements the main fuzzing logic, including random operation
 //! generation, coverage tracking, and execution orchestration.
 
+use rand::{seq::SliceRandom, Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use rand::{Rng, SeedableRng, seq::SliceRandom};
-use rand_chacha::ChaCha8Rng;
 
+use crate::vopr::invariants::{Invariant, InvariantChecker};
 use crate::vopr::operation_generator::{Operation, OperationGenerator};
 use crate::vopr::state_tracker::StateTracker;
-use crate::vopr::invariants::{Invariant, InvariantChecker};
 
 /// Fuzzing mode - safety vs liveness
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,22 +28,22 @@ pub enum FuzzMode {
 pub struct FuzzConfig {
     /// Maximum operations per test
     pub max_operations: usize,
-    
+
     /// Probability of each operation type
     pub operation_weights: OperationWeights,
-    
+
     /// Enable coverage-guided fuzzing
     pub coverage_guided: bool,
-    
+
     /// Minimum cluster size
     pub min_nodes: usize,
-    
+
     /// Maximum cluster size
     pub max_nodes: usize,
-    
+
     /// Probability of introducing faults
     pub fault_probability: f64,
-    
+
     /// Maximum message delay in milliseconds
     pub max_message_delay_ms: u64,
 }
@@ -89,13 +89,13 @@ impl Default for OperationWeights {
 pub struct Coverage {
     /// Set of basic blocks hit
     pub basic_blocks: HashSet<u64>,
-    
+
     /// Edge coverage (from_bb -> to_bb)
     pub edges: HashSet<(u64, u64)>,
-    
+
     /// State space coverage
     pub states_seen: HashSet<u64>,
-    
+
     /// Interesting values seen
     pub interesting_values: HashMap<String, HashSet<u64>>,
 }
@@ -107,26 +107,26 @@ impl Coverage {
         if !self.basic_blocks.is_superset(&other.basic_blocks) {
             return true;
         }
-        
+
         // New edges?
         if !self.edges.is_superset(&other.edges) {
             return true;
         }
-        
+
         // New states?
         if !self.states_seen.is_superset(&other.states_seen) {
             return true;
         }
-        
+
         false
     }
-    
+
     /// Merge coverage from another execution
     fn merge(&mut self, other: &Coverage) {
         self.basic_blocks.extend(&other.basic_blocks);
         self.edges.extend(&other.edges);
         self.states_seen.extend(&other.states_seen);
-        
+
         for (key, values) in &other.interesting_values {
             self.interesting_values
                 .entry(key.clone())
@@ -140,19 +140,19 @@ impl Coverage {
 pub struct FuzzerEngine {
     /// Random number generator
     rng: ChaCha8Rng,
-    
+
     /// Current seed
     seed: u64,
-    
+
     /// Coverage-guided fuzzing enabled
     coverage_guided: bool,
-    
+
     /// Global coverage information
     global_coverage: Arc<Mutex<Coverage>>,
-    
+
     /// Corpus of interesting test cases
     corpus: Arc<Mutex<Vec<TestCase>>>,
-    
+
     /// Operation generator
     op_generator: OperationGenerator,
 }
@@ -162,16 +162,16 @@ pub struct FuzzerEngine {
 struct TestCase {
     /// Seed that generated this test case
     seed: u64,
-    
+
     /// Operations in this test case
     operations: Vec<Operation>,
-    
+
     /// Coverage achieved by this test case
     coverage: Coverage,
-    
+
     /// Whether this test case found a bug
     found_bug: bool,
-    
+
     /// Execution time
     execution_time: std::time::Duration,
 }
@@ -188,7 +188,7 @@ impl FuzzerEngine {
             op_generator: OperationGenerator::new(seed),
         }
     }
-    
+
     /// Generate a random test case
     pub fn generate_test_case(&mut self, config: &FuzzConfig) -> Vec<Operation> {
         if self.coverage_guided && !self.corpus.lock().unwrap().is_empty() {
@@ -197,31 +197,35 @@ impl FuzzerEngine {
                 return self.mutate_test_case(config);
             }
         }
-        
+
         // Generate a fresh test case
         self.generate_random_operations(config)
     }
-    
+
     /// Generate random operations
     fn generate_random_operations(&mut self, config: &FuzzConfig) -> Vec<Operation> {
         let num_operations = self.rng.gen_range(1..=config.max_operations);
         let mut operations = Vec::with_capacity(num_operations);
-        
+
         // Start with some nodes
         let initial_nodes = self.rng.gen_range(config.min_nodes..=config.max_nodes);
         for node_id in 1..=initial_nodes {
-            operations.push(Operation::StartNode { node_id: node_id as u64 });
+            operations.push(Operation::StartNode {
+                node_id: node_id as u64,
+            });
         }
-        
+
         // Generate random operations
         for _ in 0..num_operations {
-            let op = self.op_generator.generate_weighted(&config.operation_weights, &mut self.rng);
+            let op = self
+                .op_generator
+                .generate_weighted(&config.operation_weights, &mut self.rng);
             operations.push(op);
         }
-        
+
         operations
     }
-    
+
     /// Mutate an existing test case from the corpus
     fn mutate_test_case(&mut self, config: &FuzzConfig) -> Vec<Operation> {
         let corpus = self.corpus.lock().unwrap();
@@ -229,12 +233,12 @@ impl FuzzerEngine {
             drop(corpus);
             return self.generate_random_operations(config);
         }
-        
+
         // Pick a random test case
         let test_case = corpus.choose(&mut self.rng).unwrap();
         let mut operations = test_case.operations.clone();
         drop(corpus);
-        
+
         // Apply mutations
         let num_mutations = self.rng.gen_range(1..=5);
         for _ in 0..num_mutations {
@@ -243,7 +247,9 @@ impl FuzzerEngine {
                     // Insert a random operation
                     if !operations.is_empty() {
                         let pos = self.rng.gen_range(0..=operations.len());
-                        let op = self.op_generator.generate_weighted(&config.operation_weights, &mut self.rng);
+                        let op = self
+                            .op_generator
+                            .generate_weighted(&config.operation_weights, &mut self.rng);
                         operations.insert(pos, op);
                     }
                 }
@@ -274,16 +280,18 @@ impl FuzzerEngine {
                     // Mutate an operation
                     if !operations.is_empty() {
                         let pos = self.rng.gen_range(0..operations.len());
-                        operations[pos] = self.op_generator.mutate_operation(&operations[pos], &mut self.rng);
+                        operations[pos] = self
+                            .op_generator
+                            .mutate_operation(&operations[pos], &mut self.rng);
                     }
                 }
                 _ => unreachable!(),
             }
         }
-        
+
         operations
     }
-    
+
     /// Record execution results
     pub fn record_execution(
         &self,
@@ -294,15 +302,15 @@ impl FuzzerEngine {
         execution_time: std::time::Duration,
     ) {
         let mut global_cov = self.global_coverage.lock().unwrap();
-        
+
         // Check if this execution found new coverage
         let is_interesting = global_cov.has_new_coverage(&coverage) || found_bug;
-        
+
         if is_interesting {
             // Update global coverage
             global_cov.merge(&coverage);
             drop(global_cov);
-            
+
             // Add to corpus
             let test_case = TestCase {
                 seed,
@@ -311,16 +319,16 @@ impl FuzzerEngine {
                 found_bug,
                 execution_time,
             };
-            
+
             self.corpus.lock().unwrap().push(test_case);
         }
     }
-    
+
     /// Get corpus statistics
     pub fn corpus_stats(&self) -> CorpusStats {
         let corpus = self.corpus.lock().unwrap();
         let global_cov = self.global_coverage.lock().unwrap();
-        
+
         CorpusStats {
             total_test_cases: corpus.len(),
             bug_finding_cases: corpus.iter().filter(|tc| tc.found_bug).count(),
@@ -335,7 +343,7 @@ impl FuzzerEngine {
             },
         }
     }
-    
+
     /// Set a new seed
     pub fn set_seed(&mut self, seed: u64) {
         self.seed = seed;
@@ -358,7 +366,7 @@ pub struct CorpusStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_operation_generation() {
         let mut engine = FuzzerEngine::new(42, false);
@@ -371,36 +379,37 @@ mod tests {
             fault_probability: 0.1,
             max_message_delay_ms: 1000,
         };
-        
+
         let operations = engine.generate_test_case(&config);
-        
+
         // Should start with node starts
-        let start_ops: Vec<_> = operations.iter()
+        let start_ops: Vec<_> = operations
+            .iter()
             .take_while(|op| matches!(op, Operation::StartNode { .. }))
             .collect();
-        
+
         assert!(start_ops.len() >= config.min_nodes);
         assert!(start_ops.len() <= config.max_nodes);
-        
+
         // Total operations should be within bounds
         assert!(operations.len() <= config.max_operations + config.max_nodes);
     }
-    
+
     #[test]
     fn test_coverage_tracking() {
         let mut cov1 = Coverage::default();
         cov1.basic_blocks.insert(1);
         cov1.basic_blocks.insert(2);
         cov1.edges.insert((1, 2));
-        
+
         let mut cov2 = Coverage::default();
         cov2.basic_blocks.insert(2);
         cov2.basic_blocks.insert(3);
         cov2.edges.insert((2, 3));
-        
+
         // cov2 has new coverage
         assert!(cov1.has_new_coverage(&cov2));
-        
+
         // After merging, no new coverage
         cov1.merge(&cov2);
         assert!(!cov1.has_new_coverage(&cov2));

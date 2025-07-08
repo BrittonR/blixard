@@ -3,21 +3,21 @@
 //! This module provides the Iroh P2P transport implementation for all
 //! Blixard communication.
 
+pub mod cluster_operations_adapter;
 pub mod config;
-pub mod metrics;
-pub mod services;
+pub mod iroh_client;
+pub mod iroh_cluster_service;
+pub mod iroh_health_service;
 pub mod iroh_peer_connector;
 pub mod iroh_protocol;
+pub mod iroh_raft_transport;
 pub mod iroh_service;
-pub mod iroh_health_service;
+pub mod iroh_service_runner;
 pub mod iroh_status_service;
 pub mod iroh_vm_service;
-pub mod iroh_raft_transport;
+pub mod metrics;
 pub mod raft_transport_adapter;
-pub mod iroh_cluster_service;
-pub mod cluster_operations_adapter;
-pub mod iroh_client;
-pub mod iroh_service_runner;
+pub mod services;
 
 // Iroh security modules
 pub mod iroh_middleware;
@@ -45,12 +45,12 @@ impl IrohTransport {
         let node_id = endpoint.node_id();
         Self { endpoint, node_id }
     }
-    
+
     /// Get the node ID
     pub fn node_id(&self) -> iroh::NodeId {
         self.node_id
     }
-    
+
     /// Get the endpoint
     pub fn endpoint(&self) -> &iroh::Endpoint {
         &self.endpoint

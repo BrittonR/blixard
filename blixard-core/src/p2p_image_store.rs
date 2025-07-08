@@ -4,11 +4,11 @@
 //! efficient peer-to-peer sharing of VM images across the cluster.
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::iroh_transport_v2::{IrohTransportV2, DocumentType};
-use std::path::{Path, PathBuf};
-use serde::{Serialize, Deserialize};
+use crate::iroh_transport_v2::{DocumentType, IrohTransportV2};
 use chrono::{DateTime, Utc};
 use iroh_blobs::Hash;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use tracing::info;
 
 /// Metadata for a VM image
@@ -55,10 +55,12 @@ impl P2pImageStore {
         std::fs::create_dir_all(&cache_dir)?;
 
         let transport = IrohTransportV2::new(node_id, data_dir).await?;
-        
+
         // Create or join the VM images document
         // Now we can enable this since IrohTransportV2 has working document operations!
-        transport.create_or_join_doc(DocumentType::VmImages, true).await?;
+        transport
+            .create_or_join_doc(DocumentType::VmImages, true)
+            .await?;
 
         Ok(Self {
             transport,
@@ -78,7 +80,10 @@ impl P2pImageStore {
         architecture: &str,
         tags: Vec<String>,
     ) -> BlixardResult<VmImageMetadata> {
-        info!("Uploading VM image {} v{} from {:?}", name, version, image_path);
+        info!(
+            "Uploading VM image {} v{} from {:?}",
+            name, version, image_path
+        );
 
         // Get file size
         let file_metadata = std::fs::metadata(image_path)?;
@@ -105,9 +110,14 @@ impl P2pImageStore {
         // Store metadata in the document
         let key = format!("image:{}:{}", name, version);
         let metadata_json = serde_json::to_vec(&metadata)?;
-        self.transport.write_to_doc(DocumentType::VmImages, &key, metadata_json.as_slice()).await?;
+        self.transport
+            .write_to_doc(DocumentType::VmImages, &key, metadata_json.as_slice())
+            .await?;
 
-        info!("VM image {} v{} uploaded successfully with hash {}", name, version, content_hash);
+        info!(
+            "VM image {} v{} uploaded successfully with hash {}",
+            name, version, content_hash
+        );
         Ok(metadata)
     }
 
@@ -123,10 +133,18 @@ impl P2pImageStore {
     }
 
     /// Get metadata for a specific image
-    pub async fn get_image_metadata(&self, name: &str, version: &str) -> BlixardResult<Option<VmImageMetadata>> {
+    pub async fn get_image_metadata(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> BlixardResult<Option<VmImageMetadata>> {
         let key = format!("image:{}:{}", name, version);
-        
-        match self.transport.read_from_doc(DocumentType::VmImages, &key).await {
+
+        match self
+            .transport
+            .read_from_doc(DocumentType::VmImages, &key)
+            .await
+        {
             Ok(data) => {
                 let metadata: VmImageMetadata = serde_json::from_slice(&data)?;
                 Ok(Some(metadata))
@@ -140,17 +158,18 @@ impl P2pImageStore {
         info!("Downloading VM image {} v{}", name, version);
 
         // Get metadata
-        let metadata = self.get_image_metadata(name, version).await?
+        let metadata = self
+            .get_image_metadata(name, version)
+            .await?
             .ok_or_else(|| BlixardError::NotFound {
                 resource: format!("VM image {}:{}", name, version),
             })?;
 
         // Parse hash using FromStr trait
         use std::str::FromStr;
-        let hash = Hash::from_str(&metadata.content_hash)
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Invalid hash format: {}", e),
-            })?;
+        let hash = Hash::from_str(&metadata.content_hash).map_err(|e| BlixardError::Internal {
+            message: format!("Invalid hash format: {}", e),
+        })?;
 
         // Determine output path
         let output_path = self.cache_dir.join(format!("{}-{}.img", name, version));
@@ -164,7 +183,10 @@ impl P2pImageStore {
         // Download the image
         self.transport.download_file(hash, &output_path).await?;
 
-        info!("VM image {} v{} downloaded to {:?}", name, version, output_path);
+        info!(
+            "VM image {} v{} downloaded to {:?}",
+            name, version, output_path
+        );
         Ok(output_path)
     }
 
@@ -177,7 +199,7 @@ impl P2pImageStore {
     /// Clear the local cache
     pub async fn clear_cache(&self) -> BlixardResult<()> {
         info!("Clearing image cache");
-        
+
         for entry in std::fs::read_dir(&self.cache_dir)? {
             let entry = entry?;
             if entry.path().extension().map_or(false, |ext| ext == "img") {
@@ -210,9 +232,11 @@ impl P2pImageStore {
     }
 
     /// Subscribe to new image announcements
-    pub async fn subscribe_to_images(&self) -> BlixardResult<impl futures::Stream<Item = VmImageMetadata> + '_> {
+    pub async fn subscribe_to_images(
+        &self,
+    ) -> BlixardResult<impl futures::Stream<Item = VmImageMetadata> + '_> {
         use futures::stream;
-        
+
         // Return empty stream for now (stub implementation)
         Ok(stream::empty())
     }
@@ -223,10 +247,15 @@ impl P2pImageStore {
     }
 
     /// Send image metadata to a peer
-    pub async fn send_image_metadata(&self, peer_addr: &iroh::NodeAddr, metadata: &VmImageMetadata) -> BlixardResult<()> {
-        let data = serde_json::to_vec(metadata)
-            .map_err(|e| BlixardError::JsonError(e))?;
-        self.transport.send_to_peer(peer_addr, DocumentType::VmImages, &data).await
+    pub async fn send_image_metadata(
+        &self,
+        peer_addr: &iroh::NodeAddr,
+        metadata: &VmImageMetadata,
+    ) -> BlixardResult<()> {
+        let data = serde_json::to_vec(metadata).map_err(|e| BlixardError::JsonError(e))?;
+        self.transport
+            .send_to_peer(peer_addr, DocumentType::VmImages, &data)
+            .await
     }
 }
 
@@ -250,7 +279,7 @@ mod tests {
     async fn test_image_store_creation() {
         let temp_dir = TempDir::new().unwrap();
         let store = P2pImageStore::new(1, temp_dir.path()).await.unwrap();
-        
+
         // Check cache directory was created
         assert!(temp_dir.path().join("image-cache").exists());
     }
@@ -259,7 +288,7 @@ mod tests {
     async fn test_cache_stats() {
         let temp_dir = TempDir::new().unwrap();
         let store = P2pImageStore::new(1, temp_dir.path()).await.unwrap();
-        
+
         let stats = store.get_cache_stats().unwrap();
         assert_eq!(stats.image_count, 0);
         assert_eq!(stats.total_size, 0);

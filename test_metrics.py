@@ -2,8 +2,6 @@
 """Test script to verify metrics are working"""
 
 import requests
-import json
-import time
 
 # Test the metrics endpoint
 print("Testing metrics endpoint...")
@@ -12,21 +10,21 @@ try:
     response = requests.get(metrics_url)
     if response.status_code == 200:
         print("✓ Metrics endpoint is accessible")
-        
+
         # Check for key metrics
         metrics_text = response.text
         metrics_to_check = [
             "storage_write_duration",
             "storage_reads_total",
-            "otel_scope_info"
+            "otel_scope_info",
         ]
-        
+
         for metric in metrics_to_check:
             if metric in metrics_text:
                 print(f"✓ Found metric: {metric}")
             else:
                 print(f"✗ Missing metric: {metric}")
-                
+
     else:
         print(f"✗ Metrics endpoint returned status: {response.status_code}")
 except Exception as e:
@@ -48,10 +46,10 @@ except Exception as e:
 print("\nSample metrics:")
 try:
     response = requests.get(metrics_url)
-    lines = response.text.split('\n')
+    lines = response.text.split("\n")
     count = 0
     for line in lines:
-        if line and not line.startswith('#') and ('storage' in line or 'grpc' in line):
+        if line and not line.startswith("#") and ("storage" in line or "grpc" in line):
             print(f"  {line}")
             count += 1
             if count >= 10:

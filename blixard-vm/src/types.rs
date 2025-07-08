@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -61,20 +61,20 @@ pub enum NetworkConfig {
     },
     /// Routed network with macvtap interface (recommended)
     Routed {
-        id: String,           // Interface ID (e.g., "vm-test")
-        mac: String,          // MAC address (e.g., "02:00:00:01:01:01") 
-        ip: String,           // VM IP address (e.g., "10.0.0.10")
-        gateway: String,      // Gateway IP (usually "10.0.0.1")
-        subnet: String,       // Subnet CIDR (e.g., "10.0.0.0/24")
+        id: String,      // Interface ID (e.g., "vm-test")
+        mac: String,     // MAC address (e.g., "02:00:00:01:01:01")
+        ip: String,      // VM IP address (e.g., "10.0.0.10")
+        gateway: String, // Gateway IP (usually "10.0.0.1")
+        subnet: String,  // Subnet CIDR (e.g., "10.0.0.0/24")
     },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum VolumeConfig {
-    RootDisk { 
+    RootDisk {
         size: u64, // MB
     },
-    DataDisk { 
+    DataDisk {
         path: String,
         size: u64,
         read_only: bool,

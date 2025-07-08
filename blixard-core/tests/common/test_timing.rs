@@ -4,10 +4,10 @@
 //! by implementing condition-based waiting, exponential backoff, and
 //! environment-aware timeout multipliers.
 
+use std::env;
 use std::future::Future;
 use std::time::Duration;
 use tokio::time::{sleep, Instant};
-use std::env;
 
 /// Get a timeout multiplier based on the environment
 /// CI environments often need longer timeouts due to resource constraints
@@ -16,14 +16,14 @@ pub fn timeout_multiplier() -> u64 {
     if env::var("CI").is_ok() || env::var("GITHUB_ACTIONS").is_ok() {
         return 3; // 3x slower in CI
     }
-    
+
     // Allow manual override
     if let Ok(multiplier) = env::var("TEST_TIMEOUT_MULTIPLIER") {
         if let Ok(m) = multiplier.parse::<u64>() {
             return m;
         }
     }
-    
+
     1 // Normal speed for local development
 }
 
@@ -33,7 +33,7 @@ pub fn scaled_timeout(base: Duration) -> Duration {
 }
 
 /// Wait for a condition to become true with exponential backoff
-/// 
+///
 /// This is more robust than fixed sleep durations as it:
 /// - Returns as soon as the condition is met
 /// - Increases wait time between checks to reduce CPU usage
@@ -51,18 +51,18 @@ where
     let scaled_max = scaled_timeout(max_wait);
     let mut interval = check_interval;
     let max_interval = Duration::from_secs(1);
-    
+
     while start.elapsed() < scaled_max {
         if condition().await {
             return Ok(());
         }
-        
+
         sleep(interval).await;
-        
+
         // Exponential backoff with cap
         interval = (interval * 2).min(max_interval);
     }
-    
+
     Err(format!("Condition not met within {:?}", scaled_max))
 }
 
@@ -79,7 +79,7 @@ where
 {
     let mut delay = initial_delay;
     let max_delay = Duration::from_secs(5);
-    
+
     for attempt in 1..=max_attempts {
         match operation().await {
             Ok(result) => return Ok(result),
@@ -87,14 +87,17 @@ where
             Err(e) => {
                 tracing::debug!(
                     "Attempt {}/{} failed: {}. Retrying in {:?}",
-                    attempt, max_attempts, e, delay
+                    attempt,
+                    max_attempts,
+                    e,
+                    delay
                 );
                 sleep(delay).await;
                 delay = (delay * 2).min(max_delay);
             }
         }
     }
-    
+
     unreachable!()
 }
 
@@ -131,18 +134,21 @@ where
     let start = Instant::now();
     let mut interval = Duration::from_millis(50);
     let max_interval = Duration::from_secs(1);
-    
+
     while start.elapsed() < scaled_timeout {
         match health_check().await {
             Ok(true) => return Ok(()),
             _ => {}
         }
-        
+
         sleep(interval).await;
         interval = (interval * 2).min(max_interval);
     }
-    
-    Err(format!("{} failed to become ready within {:?}", service_name, scaled_timeout))
+
+    Err(format!(
+        "{} failed to become ready within {:?}",
+        service_name, scaled_timeout
+    ))
 }
 
 /// Robust sleep that accounts for CI environments
@@ -154,7 +160,7 @@ pub async fn robust_sleep(base_duration: Duration) {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
-    
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_wait_for_condition_immediate() {
         let result = wait_for_condition(
@@ -163,16 +169,16 @@ mod tests {
             Duration::from_millis(10),
         )
         .await;
-        
+
         assert!(result.is_ok());
     }
-    
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_wait_for_condition_delayed() {
         let start = Instant::now();
         let count = Arc::new(Mutex::new(0));
         let count_clone = count.clone();
-        
+
         let result = wait_for_condition(
             move || {
                 let count = count_clone.clone();
@@ -186,11 +192,11 @@ mod tests {
             Duration::from_millis(10),
         )
         .await;
-        
+
         assert!(result.is_ok());
         assert!(start.elapsed() < Duration::from_secs(1));
     }
-    
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_wait_for_condition_timeout() {
         let result = wait_for_condition(
@@ -199,15 +205,15 @@ mod tests {
             Duration::from_millis(10),
         )
         .await;
-        
+
         assert!(result.is_err());
     }
-    
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_exponential_backoff() {
         let attempts = Arc::new(Mutex::new(0));
         let attempts_clone = attempts.clone();
-        
+
         let result = wait_for_async(
             move || {
                 let attempts = attempts_clone.clone();
@@ -225,7 +231,7 @@ mod tests {
             Duration::from_millis(10),
         )
         .await;
-        
+
         assert_eq!(result, Ok(42));
         assert_eq!(*attempts.lock().unwrap(), 3);
     }

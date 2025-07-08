@@ -3,26 +3,23 @@
 //! This module provides trait-based abstractions for configuration access,
 //! eliminating global state dependencies and enabling better testing.
 
+use crate::{config_v2::Config, error::BlixardResult};
 use async_trait::async_trait;
-use std::sync::Arc;
 use std::path::PathBuf;
-use crate::{
-    error::BlixardResult,
-    config_v2::Config,
-};
+use std::sync::Arc;
 
 /// Abstraction for configuration access
 #[async_trait]
 pub trait ConfigProvider: Send + Sync {
     /// Get current configuration
     async fn get(&self) -> BlixardResult<Arc<Config>>;
-    
+
     /// Get a specific configuration value by path
     async fn get_value(&self, path: &str) -> BlixardResult<Option<String>>;
-    
+
     /// Reload configuration from source
     async fn reload(&self) -> BlixardResult<()>;
-    
+
     /// Subscribe to configuration changes
     async fn subscribe(&self) -> tokio::sync::watch::Receiver<Arc<Config>>;
 }
@@ -50,10 +47,10 @@ impl ConfigProvider for GlobalConfigProvider {
     async fn get(&self) -> BlixardResult<Arc<Config>> {
         crate::config_v2::try_get()
     }
-    
+
     async fn get_value(&self, path: &str) -> BlixardResult<Option<String>> {
         let config = self.get().await?;
-        
+
         // Simple path-based value extraction
         // In a real implementation, this would use a proper path parser
         let value = match path {
@@ -64,17 +61,17 @@ impl ConfigProvider for GlobalConfigProvider {
             "cluster.peer.max_connections" => Some(config.cluster.peer.max_connections.to_string()),
             _ => None,
         };
-        
+
         Ok(value)
     }
-    
+
     async fn reload(&self) -> BlixardResult<()> {
         // Global config doesn't support reload without a path
         Err(crate::error::BlixardError::NotImplemented {
-            feature: "Configuration reload requires file path".to_string()
+            feature: "Configuration reload requires file path".to_string(),
         })
     }
-    
+
     async fn subscribe(&self) -> tokio::sync::watch::Receiver<Arc<Config>> {
         crate::config_v2::subscribe()
     }
@@ -82,7 +79,7 @@ impl ConfigProvider for GlobalConfigProvider {
 
 // Mock implementation for testing
 
-use tokio::sync::{RwLock, watch};
+use tokio::sync::{watch, RwLock};
 
 /// Mock config provider for testing
 pub struct MockConfigProvider {
@@ -96,37 +93,37 @@ impl MockConfigProvider {
     pub fn new() -> Self {
         let config = Arc::new(Config::default());
         let (tx, rx) = watch::channel(config.clone());
-        
+
         Self {
             config: Arc::new(RwLock::new(config)),
             sender: Arc::new(RwLock::new(tx)),
             receiver: rx,
         }
     }
-    
+
     /// Create with specific config
     pub fn with_config(config: Config) -> Self {
         let config = Arc::new(config);
         let (tx, rx) = watch::channel(config.clone());
-        
+
         Self {
             config: Arc::new(RwLock::new(config)),
             sender: Arc::new(RwLock::new(tx)),
             receiver: rx,
         }
     }
-    
+
     /// Update configuration
     pub async fn set_config(&self, config: Config) {
         let config = Arc::new(config);
         *self.config.write().await = config.clone();
         let _ = self.sender.read().await.send(config);
     }
-    
+
     /// Update a specific value
     pub async fn set_value(&self, path: &str, value: String) -> BlixardResult<()> {
         let mut config = (*self.config.read().await).as_ref().clone();
-        
+
         // Simple path-based value setting
         match path {
             "node.id" => config.node.id = Some(value.parse().unwrap_or(0)),
@@ -136,11 +133,14 @@ impl MockConfigProvider {
             "cluster.peer.max_connections" => {
                 config.cluster.peer.max_connections = value.parse().unwrap_or(100)
             }
-            _ => return Err(crate::error::BlixardError::ConfigError(
-                format!("Unknown config path: {}", path)
-            )),
+            _ => {
+                return Err(crate::error::BlixardError::ConfigError(format!(
+                    "Unknown config path: {}",
+                    path
+                )))
+            }
         }
-        
+
         self.set_config(config).await;
         Ok(())
     }
@@ -157,10 +157,10 @@ impl ConfigProvider for MockConfigProvider {
     async fn get(&self) -> BlixardResult<Arc<Config>> {
         Ok(self.config.read().await.clone())
     }
-    
+
     async fn get_value(&self, path: &str) -> BlixardResult<Option<String>> {
         let config = self.get().await?;
-        
+
         let value = match path {
             "node.id" => config.node.id.map(|id| id.to_string()),
             "node.bind_address" => Some(config.node.bind_address.clone()),
@@ -169,17 +169,17 @@ impl ConfigProvider for MockConfigProvider {
             "cluster.peer.max_connections" => Some(config.cluster.peer.max_connections.to_string()),
             _ => None,
         };
-        
+
         Ok(value)
     }
-    
+
     async fn reload(&self) -> BlixardResult<()> {
         // No-op for mock - just trigger a change notification
         let config = self.config.read().await.clone();
         let _ = self.sender.read().await.send(config);
         Ok(())
     }
-    
+
     async fn subscribe(&self) -> tokio::sync::watch::Receiver<Arc<Config>> {
         self.receiver.clone()
     }

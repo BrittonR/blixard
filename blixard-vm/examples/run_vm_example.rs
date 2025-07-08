@@ -1,12 +1,11 @@
 //! Example demonstrating actually RUNNING a VM from Rust code
 
+use blixard_core::{types::VmConfig, vm_backend::VmBackend};
 use blixard_vm::MicrovmBackend;
-use blixard_core::{
-    vm_backend::VmBackend,
-    types::VmConfig,
-};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::time::{sleep, Duration};
+use redb::Database;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -14,14 +13,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .init();
-    
+
     // Create directories for the backend
     let config_dir = PathBuf::from("vm-configs");
     let data_dir = PathBuf::from("vm-data");
-    
+
     println!("🚀 Creating MicrovmBackend...");
-    let backend = MicrovmBackend::new(config_dir, data_dir)?;
-    
+    let db_path = PathBuf::from("run-example.db");
+    let database = Arc::new(Database::create(&db_path)?);
+    let backend = MicrovmBackend::new(config_dir, data_dir, database)?;
+
     // Define a VM configuration
     let vm_config = VmConfig {
         name: "run-example-vm".to_string(),
@@ -37,29 +38,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         locality_preference: Default::default(),
         health_check_config: None,
     };
-    
+
     println!("📦 Creating VM '{}'...", vm_config.name);
     backend.create_vm(&vm_config, 1).await?;
     println!("✓ VM configuration created");
-    
+
     println!("🔨 Building and starting VM '{}'...", vm_config.name);
     println!("⏳ This will take a moment to build with Nix...");
-    
+
     // This should actually BUILD and RUN the VM
     match backend.start_vm(&vm_config.name).await {
         Ok(()) => {
             println!("🎉 VM '{}' started successfully!", vm_config.name);
-            
+
             // Let it run for a few seconds
             println!("⏱️ Letting VM run for 5 seconds...");
             sleep(Duration::from_secs(5)).await;
-            
+
             // Check status
             match backend.get_vm_status(&vm_config.name).await? {
                 Some(status) => println!("📊 VM status: {:?}", status),
                 None => println!("❓ VM status: Unknown (might be starting)"),
             }
-            
+
             // Stop the VM
             println!("🛑 Stopping VM...");
             match backend.stop_vm(&vm_config.name).await {
@@ -75,11 +76,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("   - Insufficient permissions");
         }
     }
-    
+
     // Clean up
     println!("🧹 Cleaning up...");
     backend.delete_vm(&vm_config.name).await?;
     println!("✓ VM deleted");
-    
+
     Ok(())
 }

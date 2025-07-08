@@ -1,14 +1,16 @@
-
-#[cfg(feature = "test-helpers")]
-use blixard_core::test_helpers::{TestNode, TestCluster, timing};
 use blixard_core::error::{BlixardError, BlixardResult};
+#[cfg(feature = "test-helpers")]
+use blixard_core::test_helpers::{timing, TestCluster, TestNode};
 use std::time::Duration;
 
 /// Helper to create a cluster and wait for convergence
 #[cfg(feature = "test-helpers")]
 pub async fn create_converged_cluster(size: usize) -> TestCluster {
     let cluster = TestCluster::new(size).await.unwrap();
-    cluster.wait_for_convergence(Duration::from_secs(30)).await.unwrap();
+    cluster
+        .wait_for_convergence(Duration::from_secs(30))
+        .await
+        .unwrap();
     cluster
 }
 
@@ -26,25 +28,25 @@ pub async fn find_leader(cluster: &TestCluster) -> Option<u64> {
 /// Helper to wait for a new leader different from the old one
 #[cfg(feature = "test-helpers")]
 pub async fn wait_for_new_leader(
-    cluster: &TestCluster, 
+    cluster: &TestCluster,
     old_leader: u64,
     timeout: Duration,
 ) -> BlixardResult<u64> {
     let start = std::time::Instant::now();
-    
+
     loop {
         if let Some(new_leader) = find_leader(cluster).await {
             if new_leader != old_leader {
                 return Ok(new_leader);
             }
         }
-        
+
         if start.elapsed() >= timeout {
             return Err(BlixardError::Internal {
                 message: format!("Timeout waiting for new leader after {:?}", timeout),
             });
         }
-        
+
         timing::robust_sleep(Duration::from_millis(100)).await;
     }
 }
@@ -63,6 +65,6 @@ pub async fn verify_all_applied(nodes: &[TestNode], _expected_index: u64) -> boo
             return false;
         }
     }
-    
+
     true
 }

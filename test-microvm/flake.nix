@@ -16,38 +16,38 @@
       imports = [
         inputs.microvm.flakeModule
       ];
-      
+
       systems = [ "x86_64-linux" ];
-      
+
       perSystem = { config, pkgs, ... }: {
         microvm.vms = {
           test-vm = {
             inherit pkgs;
             config = {
               networking.hostName = "test-vm";
-              
+
               microvm = {
                 hypervisor = "qemu";
                 vcpu = 2;
                 mem = 1024;
-                
+
                 interfaces = [{
                   type = "user";
                   id = "user0";
                   mac = "02:00:00:00:00:01";
                 }];
-                
+
                 volumes = [{
                   image = "rootdisk.img";
                   mountPoint = "/";
                   size = 2048;
                 }];
               };
-              
+
               # Basic NixOS configuration
               services.getty.autologinUser = "root";
               users.users.root.password = "";
-              
+
               systemd.services.test-service = {
                 description = "Test service to show VM is working";
                 wantedBy = [ "multi-user.target" ];
@@ -57,7 +57,7 @@
                   RemainAfterExit = true;
                 };
               };
-              
+
               system.stateVersion = "23.11";
             };
           };

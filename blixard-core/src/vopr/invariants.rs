@@ -1,19 +1,19 @@
 //! Invariant checking for safety and liveness properties
-//! 
+//!
 //! This module defines invariants that should hold throughout execution
 //! and provides mechanisms to check them.
 
-use std::collections::{HashMap, HashSet};
 use crate::vopr::state_tracker::StateSnapshot;
+use std::collections::{HashMap, HashSet};
 
 /// An invariant that should hold during execution
 pub trait Invariant: Send + Sync {
     /// Name of this invariant
     fn name(&self) -> &str;
-    
+
     /// Check if the invariant holds for the given state
     fn check(&self, state: &StateSnapshot) -> Result<(), String>;
-    
+
     /// Whether this is a safety or liveness invariant
     fn invariant_type(&self) -> InvariantType;
 }
@@ -42,20 +42,20 @@ impl SafetyInvariant {
             Box::new(ResourceLimitsInvariant),
             Box::new(ConsistentViewInvariant),
         ];
-        
+
         Self { invariants }
     }
-    
+
     /// Check all safety invariants
     pub fn check_all(&self, state: &StateSnapshot) -> Vec<String> {
         let mut violations = Vec::new();
-        
+
         for invariant in &self.invariants {
             if let Err(violation) = invariant.check(state) {
                 violations.push(format!("{}: {}", invariant.name(), violation));
             }
         }
-        
+
         violations
     }
 }
@@ -77,14 +77,14 @@ impl LivenessInvariant {
             Box::new(LeaderElectionInvariant::new()),
             Box::new(RequestCompletionInvariant::new()),
         ];
-        
+
         Self {
             invariants,
             history: Vec::new(),
             max_history: 100,
         }
     }
-    
+
     /// Update history and check liveness invariants
     pub fn check_all(&mut self, state: &StateSnapshot) -> Vec<String> {
         // Add to history
@@ -92,9 +92,9 @@ impl LivenessInvariant {
         if self.history.len() > self.max_history {
             self.history.remove(0);
         }
-        
+
         let mut violations = Vec::new();
-        
+
         // Liveness invariants need history to check
         if self.history.len() >= 10 {
             for invariant in &self.invariants {
@@ -103,7 +103,7 @@ impl LivenessInvariant {
                 }
             }
         }
-        
+
         violations
     }
 }
@@ -122,7 +122,7 @@ impl InvariantChecker {
             liveness: LivenessInvariant::new(),
         }
     }
-    
+
     /// Check all invariants
     pub fn check(&mut self, state: &StateSnapshot) -> Vec<String> {
         let mut violations = self.safety.check_all(state);
@@ -140,29 +140,32 @@ impl Invariant for SingleLeaderInvariant {
     fn name(&self) -> &str {
         "SingleLeader"
     }
-    
+
     fn check(&self, state: &StateSnapshot) -> Result<(), String> {
         // Group nodes by term
         let mut leaders_by_term: HashMap<u64, Vec<u64>> = HashMap::new();
-        
+
         for (node_id, node_state) in &state.nodes {
             if node_state.role == crate::vopr::state_tracker::NodeRole::Leader {
                 if let Some(term) = state.views.get(node_id) {
-                    leaders_by_term.entry(*term).or_insert_with(Vec::new).push(*node_id);
+                    leaders_by_term
+                        .entry(*term)
+                        .or_insert_with(Vec::new)
+                        .push(*node_id);
                 }
             }
         }
-        
+
         // Check for multiple leaders in same term
         for (term, leaders) in leaders_by_term {
             if leaders.len() > 1 {
                 return Err(format!("Multiple leaders in term {}: {:?}", term, leaders));
             }
         }
-        
+
         Ok(())
     }
-    
+
     fn invariant_type(&self) -> InvariantType {
         InvariantType::Safety
     }
@@ -175,7 +178,7 @@ impl Invariant for MonotonicTermInvariant {
     fn name(&self) -> &str {
         "MonotonicTerm"
     }
-    
+
     fn check(&self, state: &StateSnapshot) -> Result<(), String> {
         // This would need historical data to check properly
         // For now, just check that all terms are positive
@@ -186,7 +189,7 @@ impl Invariant for MonotonicTermInvariant {
         }
         Ok(())
     }
-    
+
     fn invariant_type(&self) -> InvariantType {
         InvariantType::Safety
     }
@@ -199,7 +202,7 @@ impl Invariant for LogMatchingInvariant {
     fn name(&self) -> &str {
         "LogMatching"
     }
-    
+
     fn check(&self, state: &StateSnapshot) -> Result<(), String> {
         // Check that commit points don't exceed log length
         for (node_id, node_state) in &state.nodes {
@@ -214,7 +217,7 @@ impl Invariant for LogMatchingInvariant {
         }
         Ok(())
     }
-    
+
     fn invariant_type(&self) -> InvariantType {
         InvariantType::Safety
     }
@@ -227,7 +230,7 @@ impl Invariant for CommitSafetyInvariant {
     fn name(&self) -> &str {
         "CommitSafety"
     }
-    
+
     fn check(&self, state: &StateSnapshot) -> Result<(), String> {
         // Check that applied index doesn't exceed commit point
         for (node_id, node_state) in &state.nodes {
@@ -242,7 +245,7 @@ impl Invariant for CommitSafetyInvariant {
         }
         Ok(())
     }
-    
+
     fn invariant_type(&self) -> InvariantType {
         InvariantType::Safety
     }
@@ -255,7 +258,7 @@ impl Invariant for VmUniquenessInvariant {
     fn name(&self) -> &str {
         "VmUniqueness"
     }
-    
+
     fn check(&self, state: &StateSnapshot) -> Result<(), String> {
         // VMs are already in a HashMap, so uniqueness is guaranteed
         // Check that running VMs have valid host nodes
@@ -263,7 +266,10 @@ impl Invariant for VmUniquenessInvariant {
             if vm_state.status == crate::vopr::state_tracker::VmStatus::Running {
                 if let Some(host) = vm_state.host_node {
                     if !state.nodes.contains_key(&host) {
-                        return Err(format!("VM {} running on non-existent node {}", vm_id, host));
+                        return Err(format!(
+                            "VM {} running on non-existent node {}",
+                            vm_id, host
+                        ));
                     }
                 } else {
                     return Err(format!("Running VM {} has no host node", vm_id));
@@ -272,7 +278,7 @@ impl Invariant for VmUniquenessInvariant {
         }
         Ok(())
     }
-    
+
     fn invariant_type(&self) -> InvariantType {
         InvariantType::Safety
     }
@@ -285,21 +291,27 @@ impl Invariant for ResourceLimitsInvariant {
     fn name(&self) -> &str {
         "ResourceLimits"
     }
-    
+
     fn check(&self, state: &StateSnapshot) -> Result<(), String> {
         // Check CPU usage
         if state.resources.total_cpu_percent > 100.0 {
-            return Err(format!("CPU usage {}% exceeds 100%", state.resources.total_cpu_percent));
+            return Err(format!(
+                "CPU usage {}% exceeds 100%",
+                state.resources.total_cpu_percent
+            ));
         }
-        
+
         // Check reasonable memory usage (e.g., < 1TB)
         if state.resources.total_memory_mb > 1_000_000 {
-            return Err(format!("Memory usage {}MB exceeds reasonable limits", state.resources.total_memory_mb));
+            return Err(format!(
+                "Memory usage {}MB exceeds reasonable limits",
+                state.resources.total_memory_mb
+            ));
         }
-        
+
         Ok(())
     }
-    
+
     fn invariant_type(&self) -> InvariantType {
         InvariantType::Safety
     }
@@ -312,30 +324,33 @@ impl Invariant for ConsistentViewInvariant {
     fn name(&self) -> &str {
         "ConsistentView"
     }
-    
+
     fn check(&self, state: &StateSnapshot) -> Result<(), String> {
         // If there are no partitions, all nodes should converge to same view
         if state.partitions.is_empty() {
-            let running_nodes: Vec<_> = state.nodes.values()
+            let running_nodes: Vec<_> = state
+                .nodes
+                .values()
                 .filter(|n| n.is_running && n.byzantine.is_none())
                 .map(|n| n.id)
                 .collect();
-                
+
             if running_nodes.len() > 1 {
                 // Check view consistency
-                let views: HashSet<_> = running_nodes.iter()
+                let views: HashSet<_> = running_nodes
+                    .iter()
                     .filter_map(|id| state.views.get(id))
                     .collect();
-                    
+
                 if views.len() > 2 {
                     return Err(format!("Too many different views: {:?}", views));
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     fn invariant_type(&self) -> InvariantType {
         InvariantType::Safety
     }
@@ -360,19 +375,19 @@ impl Invariant for ProgressInvariant {
     fn name(&self) -> &str {
         "Progress"
     }
-    
+
     fn check(&self, state: &StateSnapshot) -> Result<(), String> {
         // This would need historical data to check properly
         // For now, just check that some node has non-zero commit
         let max_commit = state.commit_points.values().max().copied().unwrap_or(0);
-        
+
         if max_commit == 0 && state.nodes.len() > 0 {
             return Err("No progress: all nodes have commit point 0".to_string());
         }
-        
+
         Ok(())
     }
-    
+
     fn invariant_type(&self) -> InvariantType {
         InvariantType::Liveness
     }
@@ -395,21 +410,25 @@ impl Invariant for LeaderElectionInvariant {
     fn name(&self) -> &str {
         "LeaderElection"
     }
-    
+
     fn check(&self, state: &StateSnapshot) -> Result<(), String> {
-        let has_leader = state.nodes.values()
+        let has_leader = state
+            .nodes
+            .values()
             .any(|n| n.role == crate::vopr::state_tracker::NodeRole::Leader && n.is_running);
-            
-        let has_running_nodes = state.nodes.values()
+
+        let has_running_nodes = state
+            .nodes
+            .values()
             .any(|n| n.is_running && n.byzantine.is_none());
-            
+
         if has_running_nodes && !has_leader {
             return Err("No leader elected despite having running nodes".to_string());
         }
-        
+
         Ok(())
     }
-    
+
     fn invariant_type(&self) -> InvariantType {
         InvariantType::Liveness
     }
@@ -432,13 +451,13 @@ impl Invariant for RequestCompletionInvariant {
     fn name(&self) -> &str {
         "RequestCompletion"
     }
-    
+
     fn check(&self, _state: &StateSnapshot) -> Result<(), String> {
         // This would need to track in-flight requests
         // For now, always pass
         Ok(())
     }
-    
+
     fn invariant_type(&self) -> InvariantType {
         InvariantType::Liveness
     }
@@ -447,8 +466,8 @@ impl Invariant for RequestCompletionInvariant {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vopr::state_tracker::{NodeState, NodeRole};
-    
+    use crate::vopr::state_tracker::{NodeRole, NodeState};
+
     #[test]
     fn test_single_leader_invariant() {
         let mut state = StateSnapshot {
@@ -467,33 +486,39 @@ mod tests {
             },
             violations: Vec::new(),
         };
-        
+
         // Add two leaders in same term
-        state.nodes.insert(1, NodeState {
-            id: 1,
-            role: NodeRole::Leader,
-            is_running: true,
-            last_heartbeat: 900,
-            log_length: 10,
-            applied_index: 5,
-            clock_skew_ms: 0,
-            byzantine: None,
-        });
-        
-        state.nodes.insert(2, NodeState {
-            id: 2,
-            role: NodeRole::Leader,
-            is_running: true,
-            last_heartbeat: 950,
-            log_length: 10,
-            applied_index: 5,
-            clock_skew_ms: 0,
-            byzantine: None,
-        });
-        
+        state.nodes.insert(
+            1,
+            NodeState {
+                id: 1,
+                role: NodeRole::Leader,
+                is_running: true,
+                last_heartbeat: 900,
+                log_length: 10,
+                applied_index: 5,
+                clock_skew_ms: 0,
+                byzantine: None,
+            },
+        );
+
+        state.nodes.insert(
+            2,
+            NodeState {
+                id: 2,
+                role: NodeRole::Leader,
+                is_running: true,
+                last_heartbeat: 950,
+                log_length: 10,
+                applied_index: 5,
+                clock_skew_ms: 0,
+                byzantine: None,
+            },
+        );
+
         state.views.insert(1, 5);
         state.views.insert(2, 5);
-        
+
         let invariant = SingleLeaderInvariant;
         assert!(invariant.check(&state).is_err());
     }

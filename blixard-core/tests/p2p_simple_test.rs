@@ -5,12 +5,12 @@
 #![cfg(feature = "test-helpers")]
 
 use blixard_core::{
-    iroh_transport::{IrohTransport, DocumentType},
-    p2p_manager::{P2pManager, P2pConfig},
     error::BlixardResult,
+    iroh_transport::{DocumentType, IrohTransport},
+    p2p_manager::{P2pConfig, P2pManager},
 };
-use tempfile::TempDir;
 use std::time::Duration;
+use tempfile::TempDir;
 
 #[tokio::test]
 async fn test_basic_p2p_initialization() -> BlixardResult<()> {
@@ -24,43 +24,55 @@ async fn test_basic_p2p_initialization() -> BlixardResult<()> {
     // Test 1: Create IrohTransport instances
     let temp_dir1 = TempDir::new().unwrap();
     let temp_dir2 = TempDir::new().unwrap();
-    
+
     let transport1 = IrohTransport::new(1, temp_dir1.path()).await?;
     let transport2 = IrohTransport::new(2, temp_dir2.path()).await?;
-    
+
     // Get node addresses
     let addr1 = transport1.node_addr().await?;
     let addr2 = transport2.node_addr().await?;
-    
+
     tracing::info!("Node 1 address: {:?}", addr1.node_id);
     tracing::info!("Node 2 address: {:?}", addr2.node_id);
-    
+
     // Test 2: Verify endpoints are created
     let (endpoint1, node_id1) = transport1.endpoint();
     let (endpoint2, node_id2) = transport2.endpoint();
-    
+
     assert!(endpoint1.node_id() == node_id1);
     assert!(endpoint2.node_id() == node_id2);
     assert!(node_id1 != node_id2);
-    
+
     tracing::info!("Successfully created two distinct Iroh transports");
-    
+
     // Test 3: Try to send data between nodes
     let test_data = b"Hello P2P!".to_vec();
-    match transport1.send_to_peer(&addr2, DocumentType::ClusterConfig, &test_data).await {
+    match transport1
+        .send_to_peer(&addr2, DocumentType::ClusterConfig, &test_data)
+        .await
+    {
         Ok(_) => tracing::info!("Successfully sent data from node 1 to node 2"),
-        Err(e) => tracing::warn!("Failed to send data (expected if not fully implemented): {}", e),
+        Err(e) => tracing::warn!(
+            "Failed to send data (expected if not fully implemented): {}",
+            e
+        ),
     }
-    
+
     // Test 4: Test document operations (expecting NotImplemented)
-    match transport1.create_or_join_doc(DocumentType::ClusterConfig, true).await {
+    match transport1
+        .create_or_join_doc(DocumentType::ClusterConfig, true)
+        .await
+    {
         Ok(_) => tracing::info!("Document creation succeeded"),
         Err(e) => {
             tracing::info!("Document creation failed as expected: {}", e);
-            assert!(e.to_string().contains("not implemented") || e.to_string().contains("NotImplemented"));
+            assert!(
+                e.to_string().contains("not implemented")
+                    || e.to_string().contains("NotImplemented")
+            );
         }
     }
-    
+
     tracing::info!("Basic P2P initialization test completed");
     Ok(())
 }
@@ -82,7 +94,7 @@ async fn test_p2p_manager_lifecycle() -> BlixardResult<()> {
         max_retry_attempts: 2,
         bandwidth_limit_mbps: Some(50.0),
     };
-    
+
     // Test that P2pManager creation fails due to unimplemented document operations
     match P2pManager::new(1, temp_dir.path(), config).await {
         Ok(_) => {
@@ -94,13 +106,13 @@ async fn test_p2p_manager_lifecycle() -> BlixardResult<()> {
         Err(e) => {
             tracing::info!("P2pManager creation failed as expected: {}", e);
             assert!(
-                e.to_string().contains("not implemented") || 
-                e.to_string().contains("NotImplemented") ||
-                e.to_string().contains("feature")
+                e.to_string().contains("not implemented")
+                    || e.to_string().contains("NotImplemented")
+                    || e.to_string().contains("feature")
             );
         }
     }
-    
+
     tracing::info!("P2P manager lifecycle test completed");
     Ok(())
 }
@@ -117,7 +129,7 @@ async fn test_iroh_transport_connectivity() -> BlixardResult<()> {
     let temp_dirs: Vec<TempDir> = (0..3).map(|_| TempDir::new().unwrap()).collect();
     let mut transports = Vec::new();
     let mut addresses = Vec::new();
-    
+
     for (i, temp_dir) in temp_dirs.iter().enumerate() {
         let transport = IrohTransport::new((i + 1) as u64, temp_dir.path()).await?;
         let addr = transport.node_addr().await?;
@@ -125,29 +137,32 @@ async fn test_iroh_transport_connectivity() -> BlixardResult<()> {
         addresses.push(addr);
         transports.push(transport);
     }
-    
+
     // Test connectivity matrix
     for i in 0..3 {
         for j in 0..3 {
             if i != j {
                 let data = format!("Message from node {} to node {}", i + 1, j + 1).into_bytes();
-                match transports[i].send_to_peer(&addresses[j], DocumentType::ClusterConfig, &data).await {
+                match transports[i]
+                    .send_to_peer(&addresses[j], DocumentType::ClusterConfig, &data)
+                    .await
+                {
                     Ok(_) => tracing::info!("Node {} -> Node {}: Success", i + 1, j + 1),
                     Err(e) => tracing::info!("Node {} -> Node {}: Failed ({})", i + 1, j + 1, e),
                 }
             }
         }
     }
-    
+
     // Test file sharing (expecting NotImplemented)
     let test_file = temp_dirs[0].path().join("test.txt");
     std::fs::write(&test_file, b"Test file content").unwrap();
-    
+
     match transports[0].share_file(&test_file).await {
         Ok(hash) => tracing::info!("File shared with hash: {}", hash),
         Err(e) => tracing::info!("File sharing failed as expected: {}", e),
     }
-    
+
     tracing::info!("Iroh transport connectivity test completed");
     Ok(())
 }

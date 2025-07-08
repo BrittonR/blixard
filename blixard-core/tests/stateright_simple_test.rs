@@ -39,7 +39,7 @@ impl Model for CounterModel {
 
     fn next_state(&self, state: &Self::State, action: Self::Action) -> Option<Self::State> {
         let mut new_state = state.clone();
-        
+
         match action {
             CounterAction::Increment => {
                 if new_state.value < u32::MAX {
@@ -55,7 +55,7 @@ impl Model for CounterModel {
                 new_state.value = 0;
             }
         }
-        
+
         Some(new_state)
     }
 
@@ -66,7 +66,6 @@ impl Model for CounterModel {
                 // This is always true for u32, but demonstrates the pattern
                 true
             }),
-            
             // Safety: Value can always be reset to 0
             Property::<Self>::always("can always reset", |_, state| {
                 // If value > 0, reset action should be available
@@ -85,21 +84,15 @@ impl Model for CounterModel {
 #[test]
 fn test_counter_model() {
     let model = CounterModel;
-    
+
     // Test with bounded model checking
-    model.checker()
-        .target_max_depth(5)
-        .spawn_dfs()
-        .join();
+    model.checker().target_max_depth(5).spawn_dfs().join();
 }
 
 #[test]
 fn test_counter_properties() {
     let model = CounterModel;
-    
+
     // Focus on property checking with shallow depth
-    model.checker()
-        .target_max_depth(3)
-        .spawn_dfs()
-        .join();
+    model.checker().target_max_depth(3).spawn_dfs().join();
 }

@@ -57,20 +57,20 @@
 //! See `docs/FLAKE_PARTS_GUIDE.md` for detailed documentation.
 
 pub mod microvm_backend;
-pub mod types;
 pub mod nix_generator;
 pub mod process_manager;
+pub mod types;
 
 pub use microvm_backend::{MicrovmBackend, MicrovmBackendFactory};
 pub use nix_generator::NixFlakeGenerator;
-pub use process_manager::{VmProcessManager, VmProcess, CommandExecutor};
+pub use process_manager::{CommandExecutor, VmProcess, VmProcessManager};
 
 // Re-export enhanced VM types
 pub use types::*;
 
 // Re-export core types for convenience
 pub use blixard_core::{
-    vm_backend::{VmBackend, VmManager},
-    types::VmStatus,
     error::{BlixardError, BlixardResult},
+    types::VmStatus,
+    vm_backend::{VmBackend, VmManager},
 };

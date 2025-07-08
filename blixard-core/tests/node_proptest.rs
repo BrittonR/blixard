@@ -3,22 +3,21 @@
 
 mod common;
 
-use proptest::prelude::*;
-use tokio::time::Duration;
-use tempfile::TempDir;
-use once_cell::sync::Lazy;
 use blixard_core::{
     node::Node,
-    types::{NodeConfig, VmConfig, VmCommand, VmStatus},
     test_helpers::timing,
+    types::{NodeConfig, VmCommand, VmConfig, VmStatus},
 };
+use once_cell::sync::Lazy;
+use proptest::prelude::*;
+use tempfile::TempDir;
+use tokio::time::Duration;
 
 mod common;
 
 // Shared runtime to prevent resource exhaustion from creating too many runtimes
-static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
-    tokio::runtime::Runtime::new().unwrap()
-});
+static RUNTIME: Lazy<tokio::runtime::Runtime> =
+    Lazy::new(|| tokio::runtime::Runtime::new().unwrap());
 
 // Strategy for generating valid node IDs
 fn node_id_strategy() -> impl Strategy<Value = u64> {
@@ -33,15 +32,20 @@ fn test_port_strategy() -> impl Strategy<Value = u16> {
 // Strategy for generating VM names
 fn vm_name_strategy() -> impl Strategy<Value = String> {
     "[a-z][a-z0-9\\-]{1,15}".prop_filter("Valid VM name", |s| {
-        s.len() >= 2 && s.len() <= 16 &&
-        s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') &&
-        s.chars().next().unwrap().is_ascii_lowercase()
+        s.len() >= 2
+            && s.len() <= 16
+            && s.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+            && s.chars().next().unwrap().is_ascii_lowercase()
     })
 }
 
 // Strategy for generating VM resource configurations
 fn vm_resources_strategy() -> impl Strategy<Value = (u32, u32)> {
-    (1u32..=8u32, prop::sample::select(&[128, 256, 512, 1024, 2048]))
+    (
+        1u32..=8u32,
+        prop::sample::select(&[128, 256, 512, 1024, 2048]),
+    )
 }
 
 async fn create_test_node_with_config(config: NodeConfig) -> (Node, TempDir) {
@@ -64,20 +68,20 @@ proptest! {
                 id,
                 data_dir: String::new(), // Will be replaced by create_test_node_with_config
                 bind_addr: "127.0.0.1:0".parse().unwrap(),
-                join_addr: if use_tailscale { 
+                join_addr: if use_tailscale {
                     Some("127.0.0.1:0".parse().unwrap())
-                } else { 
-                    None 
+                } else {
+                    None
                 },
                 use_tailscale,
                 vm_backend: "mock".to_string(),
             };
-            
+
             let (node, _temp_dir) = create_test_node_with_config(config.clone()).await;
-            
+
             // Node should be created in stopped state
             prop_assert!(!node.is_running().await);
-            
+
             // Node should reflect the configuration
             // (We can't directly access private fields, but we test behavior)
             Ok(())
@@ -101,13 +105,13 @@ proptest! {
                 use_tailscale: false,
             vm_backend: "mock".to_string(),
             };
-            
+
             let (mut node, _temp_dir) = create_test_node_with_config(config).await;
-            
+
             // Initialization should succeed for any valid config
             let result = node.initialize().await;
             prop_assert!(result.is_ok());
-            
+
             // Node should still not be running after initialization
             prop_assert!(!node.is_running().await);
             Ok(())
@@ -142,14 +146,14 @@ proptest! {
                 use_tailscale: false,
             vm_backend: "mock".to_string(),
             };
-            
+
             let (mut node, _temp_dir) = create_test_node_with_config(temp_config).await;
             node.initialize().await.unwrap();
-            
+
             let mut vm_config = common::test_vm_config(&vm_name);
             vm_config.vcpus = vcpus;
             vm_config.memory = memory;
-            
+
             let command = match command_type {
                 0 => VmCommand::Create { config: vm_config, node_id },
                 1 => VmCommand::Start { name: vm_name.clone() },
@@ -158,7 +162,7 @@ proptest! {
                 4 => VmCommand::UpdateStatus { name: vm_name.clone(), status },
                 _ => unreachable!(),
             };
-            
+
             // Sending any valid command should succeed
             let result = node.send_vm_command(command).await;
             prop_assert!(result.is_ok());
@@ -183,28 +187,28 @@ proptest! {
                 use_tailscale: false,
             vm_backend: "mock".to_string(),
             };
-            
+
             let (mut node, _temp_dir) = create_test_node_with_config(config).await;
-            
+
             // Initial state
             prop_assert!(!node.is_running().await);
-            
+
             // Initialize
             node.initialize().await.unwrap();
             prop_assert!(!node.is_running().await);
-            
+
             // Start
             node.start().await.unwrap();
             prop_assert!(node.is_running().await);
-            
+
             // Stop
             node.stop().await.unwrap();
             prop_assert!(!node.is_running().await);
-            
+
             // Should be able to start again
             node.start().await.unwrap();
             prop_assert!(node.is_running().await);
-            
+
             // Final stop
             node.stop().await.unwrap();
             prop_assert!(!node.is_running().await);
@@ -230,21 +234,21 @@ proptest! {
                 use_tailscale: false,
             vm_backend: "mock".to_string(),
             };
-            
+
             let (mut node, _temp_dir) = create_test_node_with_config(config).await;
-            
+
             // Uninitialized node should fail cluster operations
             let join_result = node.join_cluster(
                 Some(format!("127.0.0.1:{}", peer_port).parse().unwrap())
             ).await;
             prop_assert!(join_result.is_err(), "Uninitialized node should fail join_cluster");
-            
+
             let leave_result = node.leave_cluster().await;
             prop_assert!(leave_result.is_err(), "Uninitialized node should fail leave_cluster");
-            
+
             let status_result = node.get_cluster_status().await;
             prop_assert!(status_result.is_err(), "Uninitialized node should fail get_cluster_status");
-            
+
             Ok(())
         }).unwrap();
     }
@@ -267,19 +271,19 @@ proptest! {
                 use_tailscale: false,
             vm_backend: "mock".to_string(),
             };
-            
+
             let (mut node, _temp_dir) = create_test_node_with_config(config).await;
             node.initialize().await.unwrap();
-            
+
             for _ in 0..iterations {
                 // Start
                 let start_result = node.start().await;
                 prop_assert!(start_result.is_ok());
                 prop_assert!(node.is_running().await);
-                
+
                 // Small delay to ensure start completes
                 timing::robust_sleep(Duration::from_millis(10)).await;
-                
+
                 // Stop
                 let stop_result = node.stop().await;
                 prop_assert!(stop_result.is_ok());
@@ -307,29 +311,29 @@ proptest! {
                 use_tailscale: false,
             vm_backend: "mock".to_string(),
             };
-            
+
             let (mut node, _temp_dir) = create_test_node_with_config(config).await;
             node.initialize().await.unwrap();
-            
+
             let command = VmCommand::UpdateStatus {
                 name: vm_name.clone(),
                 status: VmStatus::Running,
             };
-            
+
             // Should work when node is stopped
             let result1 = node.send_vm_command(command.clone()).await;
             prop_assert!(result1.is_ok());
-            
+
             // Start node
             node.start().await.unwrap();
-            
+
             // Should still work when node is running
             let result2 = node.send_vm_command(command.clone()).await;
             prop_assert!(result2.is_ok());
-            
+
             // Stop node
             node.stop().await.unwrap();
-            
+
             // VM commands should fail after full shutdown (stop() clears all components)
             let result3 = node.send_vm_command(command).await;
             prop_assert!(result3.is_err());
@@ -355,19 +359,19 @@ proptest! {
                 use_tailscale: false,
             vm_backend: "mock".to_string(),
             };
-            
+
             let (mut node, _temp_dir) = create_test_node_with_config(config).await;
-            
+
             if start_node {
                 node.initialize().await.unwrap();
                 node.start().await.unwrap();
             }
-            
+
             // Stop should always succeed
             let result = node.stop().await;
             prop_assert!(result.is_ok());
             prop_assert!(!node.is_running().await);
-            
+
             // Multiple stops should be safe
             let result2 = node.stop().await;
             prop_assert!(result2.is_ok());

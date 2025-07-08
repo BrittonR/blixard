@@ -3,26 +3,26 @@
 //! This module provides the ability to export and import cluster configurations,
 //! allowing users to save their cluster setup and recreate it later.
 
+use crate::BlixardResult;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tokio::fs;
-use crate::BlixardResult;
 
 /// Complete cluster configuration that can be saved/loaded
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClusterConfiguration {
     /// Configuration metadata
     pub metadata: ConfigMetadata,
-    
+
     /// List of nodes in the cluster
     pub nodes: Vec<NodeConfiguration>,
-    
+
     /// List of VMs in the cluster
     pub vms: Vec<VmConfiguration>,
-    
+
     /// VM templates
     pub vm_templates: Vec<VmTemplate>,
-    
+
     /// Cluster-wide settings
     pub settings: ClusterSettings,
 }
@@ -32,13 +32,13 @@ pub struct ClusterConfiguration {
 pub struct ConfigMetadata {
     /// Configuration format version
     pub version: String,
-    
+
     /// When this configuration was created
     pub created_at: String,
-    
+
     /// Optional description
     pub description: Option<String>,
-    
+
     /// Cluster name
     pub cluster_name: Option<String>,
 }
@@ -48,22 +48,22 @@ pub struct ConfigMetadata {
 pub struct NodeConfiguration {
     /// Node ID
     pub id: u64,
-    
+
     /// Node bind address
     pub bind_address: String,
-    
+
     /// Data directory
     pub data_dir: String,
-    
+
     /// VM backend type
     pub vm_backend: String,
-    
+
     /// Whether this node uses Tailscale
     pub use_tailscale: bool,
-    
+
     /// Node role (leader/follower)
     pub role: String,
-    
+
     /// Node status
     pub status: String,
 }
@@ -73,19 +73,19 @@ pub struct NodeConfiguration {
 pub struct VmConfiguration {
     /// VM name
     pub name: String,
-    
+
     /// Number of vCPUs
     pub vcpus: u32,
-    
+
     /// Memory in MB
     pub memory: u32,
-    
+
     /// Node ID where VM is assigned
     pub node_id: u64,
-    
+
     /// Current status
     pub status: String,
-    
+
     /// Optional config path
     pub config_path: Option<String>,
 }
@@ -95,16 +95,16 @@ pub struct VmConfiguration {
 pub struct VmTemplate {
     /// Template name
     pub name: String,
-    
+
     /// Template description
     pub description: String,
-    
+
     /// Default vCPUs
     pub vcpus: u32,
-    
+
     /// Default memory in MB
     pub memory: u32,
-    
+
     /// Template type
     pub template_type: String,
 }
@@ -114,13 +114,13 @@ pub struct VmTemplate {
 pub struct ClusterSettings {
     /// Default VM backend
     pub default_vm_backend: String,
-    
+
     /// Default refresh rate in seconds
     pub refresh_rate: u64,
-    
+
     /// Maximum log entries to keep
     pub max_log_entries: usize,
-    
+
     /// Whether to auto-connect on startup
     pub auto_connect: bool,
 }
@@ -141,44 +141,48 @@ impl ClusterConfiguration {
             settings: ClusterSettings::default(),
         }
     }
-    
+
     /// Save configuration to a YAML file
     pub async fn save_to_file(&self, path: &Path) -> BlixardResult<()> {
-        let yaml = serde_yaml::to_string(self)
-            .map_err(|e| crate::BlixardError::Internal {
-                message: format!("Failed to serialize configuration: {}", e),
-            })?;
-        
-        fs::write(path, yaml).await
+        let yaml = serde_yaml::to_string(self).map_err(|e| crate::BlixardError::Internal {
+            message: format!("Failed to serialize configuration: {}", e),
+        })?;
+
+        fs::write(path, yaml)
+            .await
             .map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to write configuration file: {}", e),
             })?;
-        
+
         Ok(())
     }
-    
+
     /// Load configuration from a YAML file
     pub async fn load_from_file(path: &Path) -> BlixardResult<Self> {
-        let yaml = fs::read_to_string(path).await
+        let yaml = fs::read_to_string(path)
+            .await
             .map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to read configuration file: {}", e),
             })?;
-        
-        let config: Self = serde_yaml::from_str(&yaml)
-            .map_err(|e| crate::BlixardError::Internal {
+
+        let config: Self =
+            serde_yaml::from_str(&yaml).map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to parse configuration: {}", e),
             })?;
-        
+
         // Validate configuration version
         if config.metadata.version != "1.0" {
             return Err(crate::BlixardError::Internal {
-                message: format!("Unsupported configuration version: {}", config.metadata.version),
+                message: format!(
+                    "Unsupported configuration version: {}",
+                    config.metadata.version
+                ),
             });
         }
-        
+
         Ok(config)
     }
-    
+
     /// Validate the configuration
     pub fn validate(&self) -> BlixardResult<()> {
         // Check for duplicate node IDs
@@ -190,7 +194,7 @@ impl ClusterConfiguration {
                 });
             }
         }
-        
+
         // Check for duplicate VM names
         let mut vm_names = std::collections::HashSet::new();
         for vm in &self.vms {
@@ -199,15 +203,18 @@ impl ClusterConfiguration {
                     message: format!("Duplicate VM name: {}", vm.name),
                 });
             }
-            
+
             // Check that VM is assigned to a valid node
             if !node_ids.contains(&vm.node_id) {
                 return Err(crate::BlixardError::Internal {
-                    message: format!("VM '{}' assigned to non-existent node {}", vm.name, vm.node_id),
+                    message: format!(
+                        "VM '{}' assigned to non-existent node {}",
+                        vm.name, vm.node_id
+                    ),
                 });
             }
         }
-        
+
         Ok(())
     }
 }

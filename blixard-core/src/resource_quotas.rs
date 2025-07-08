@@ -18,22 +18,22 @@ pub type TenantId = String;
 pub struct TenantQuota {
     /// Tenant identifier
     pub tenant_id: TenantId,
-    
+
     /// VM resource limits
     pub vm_limits: VmResourceLimits,
-    
+
     /// API rate limits
     pub api_limits: ApiRateLimits,
-    
+
     /// Storage limits
     pub storage_limits: StorageLimits,
-    
+
     /// Enable/disable quota enforcement
     pub enabled: bool,
-    
+
     /// Quota creation timestamp
     pub created_at: SystemTime,
-    
+
     /// Quota last updated timestamp
     pub updated_at: SystemTime,
 }
@@ -43,22 +43,22 @@ pub struct TenantQuota {
 pub struct VmResourceLimits {
     /// Maximum number of VMs
     pub max_vms: u32,
-    
+
     /// Maximum total vCPUs across all VMs
     pub max_vcpus: u32,
-    
+
     /// Maximum total memory in MB across all VMs
     pub max_memory_mb: u64,
-    
+
     /// Maximum total disk space in GB across all VMs
     pub max_disk_gb: u64,
-    
+
     /// Maximum VMs per individual node
     pub max_vms_per_node: u32,
-    
+
     /// Resource overcommit ratio (1.0 = no overcommit)
     pub overcommit_ratio: f32,
-    
+
     /// Priority level for resource allocation (higher = more priority)
     pub priority: u8,
 }
@@ -68,13 +68,13 @@ pub struct VmResourceLimits {
 pub struct ApiRateLimits {
     /// Requests per second limit
     pub requests_per_second: u32,
-    
+
     /// Burst capacity (max requests in short bursts)
     pub burst_capacity: u32,
-    
+
     /// Concurrent request limit
     pub max_concurrent_requests: u32,
-    
+
     /// Specific operation limits
     pub operation_limits: OperationLimits,
 }
@@ -84,16 +84,16 @@ pub struct ApiRateLimits {
 pub struct OperationLimits {
     /// VM creation requests per minute
     pub vm_create_per_minute: u32,
-    
+
     /// VM deletion requests per minute
     pub vm_delete_per_minute: u32,
-    
+
     /// Cluster join requests per hour
     pub cluster_join_per_hour: u32,
-    
+
     /// Status query requests per second
     pub status_query_per_second: u32,
-    
+
     /// Configuration change requests per hour
     pub config_change_per_hour: u32,
 }
@@ -103,16 +103,16 @@ pub struct OperationLimits {
 pub struct StorageLimits {
     /// Maximum total storage usage in GB
     pub max_storage_gb: u64,
-    
+
     /// Maximum number of disk images
     pub max_disk_images: u32,
-    
+
     /// Maximum size per disk image in GB
     pub max_image_size_gb: u64,
-    
+
     /// Maximum backup storage in GB
     pub max_backup_storage_gb: u64,
-    
+
     /// I/O operations per second limit
     pub max_iops: u32,
 }
@@ -122,16 +122,16 @@ pub struct StorageLimits {
 pub struct TenantUsage {
     /// Tenant identifier
     pub tenant_id: TenantId,
-    
+
     /// Current VM resource usage
     pub vm_usage: VmResourceUsage,
-    
+
     /// Current API usage
     pub api_usage: ApiUsage,
-    
+
     /// Current storage usage
     pub storage_usage: StorageUsage,
-    
+
     /// Last updated timestamp
     pub updated_at: SystemTime,
 }
@@ -141,16 +141,16 @@ pub struct TenantUsage {
 pub struct VmResourceUsage {
     /// Number of active VMs
     pub active_vms: u32,
-    
+
     /// Total vCPUs in use
     pub used_vcpus: u32,
-    
+
     /// Total memory in use (MB)
     pub used_memory_mb: u64,
-    
+
     /// Total disk space in use (GB)
     pub used_disk_gb: u64,
-    
+
     /// VMs per node distribution
     pub vms_per_node: HashMap<u64, u32>, // node_id -> vm_count
 }
@@ -160,19 +160,19 @@ pub struct VmResourceUsage {
 pub struct ApiUsage {
     /// Requests in current second
     pub requests_current_second: u32,
-    
+
     /// Requests in current minute
     pub requests_current_minute: u32,
-    
+
     /// Requests in current hour
     pub requests_current_hour: u32,
-    
+
     /// Current concurrent requests
     pub concurrent_requests: u32,
-    
+
     /// Operation-specific usage
     pub operation_usage: OperationUsage,
-    
+
     /// Request timestamps for rate limiting
     pub request_timestamps: Vec<SystemTime>,
 }
@@ -182,16 +182,16 @@ pub struct ApiUsage {
 pub struct OperationUsage {
     /// VM creation requests in current minute
     pub vm_create_current_minute: u32,
-    
+
     /// VM deletion requests in current minute
     pub vm_delete_current_minute: u32,
-    
+
     /// Cluster join requests in current hour
     pub cluster_join_current_hour: u32,
-    
+
     /// Status queries in current second
     pub status_query_current_second: u32,
-    
+
     /// Config changes in current hour
     pub config_change_current_hour: u32,
 }
@@ -201,13 +201,13 @@ pub struct OperationUsage {
 pub struct StorageUsage {
     /// Total storage used in GB
     pub used_storage_gb: u64,
-    
+
     /// Number of disk images
     pub disk_image_count: u32,
-    
+
     /// Backup storage used in GB
     pub backup_storage_gb: u64,
-    
+
     /// Current IOPS usage
     pub current_iops: u32,
 }
@@ -221,42 +221,42 @@ pub enum QuotaViolation {
         current: u32,
         requested: u32,
     },
-    
+
     /// CPU limit exceeded
     CpuLimitExceeded {
         limit: u32,
         current: u32,
         requested: u32,
     },
-    
+
     /// Memory limit exceeded
     MemoryLimitExceeded {
         limit: u64,
         current: u64,
         requested: u64,
     },
-    
+
     /// Disk limit exceeded
     DiskLimitExceeded {
         limit: u64,
         current: u64,
         requested: u64,
     },
-    
+
     /// Per-node VM limit exceeded
     PerNodeVmLimitExceeded {
         node_id: u64,
         limit: u32,
         current: u32,
     },
-    
+
     /// Rate limit exceeded
     RateLimitExceeded {
         operation: String,
         limit: u32,
         current: u32,
     },
-    
+
     /// Storage limit exceeded
     StorageLimitExceeded {
         limit: u64,
@@ -270,19 +270,19 @@ pub enum QuotaViolation {
 pub struct ResourceRequest {
     /// Tenant making the request
     pub tenant_id: TenantId,
-    
+
     /// Target node (if specified)
     pub node_id: Option<u64>,
-    
+
     /// Required vCPUs
     pub vcpus: u32,
-    
+
     /// Required memory in MB
     pub memory_mb: u64,
-    
+
     /// Required disk space in GB
     pub disk_gb: u64,
-    
+
     /// Request timestamp
     pub timestamp: SystemTime,
 }
@@ -429,10 +429,10 @@ impl TenantQuota {
             updated_at: now,
         }
     }
-    
+
     /// Update quota limits
     pub fn update_limits(
-        &mut self, 
+        &mut self,
         vm_limits: Option<VmResourceLimits>,
         api_limits: Option<ApiRateLimits>,
         storage_limits: Option<StorageLimits>,
@@ -461,14 +461,15 @@ impl TenantUsage {
             updated_at: SystemTime::now(),
         }
     }
-    
+
     /// Update VM usage after VM creation/deletion
     pub fn update_vm_usage(&mut self, vcpus: i32, memory_mb: i64, disk_gb: i64, node_id: u64) {
         // Update totals (can be negative for deletions)
         self.vm_usage.used_vcpus = (self.vm_usage.used_vcpus as i32 + vcpus).max(0) as u32;
-        self.vm_usage.used_memory_mb = (self.vm_usage.used_memory_mb as i64 + memory_mb).max(0) as u64;
+        self.vm_usage.used_memory_mb =
+            (self.vm_usage.used_memory_mb as i64 + memory_mb).max(0) as u64;
         self.vm_usage.used_disk_gb = (self.vm_usage.used_disk_gb as i64 + disk_gb).max(0) as u64;
-        
+
         // Update VM counts
         if vcpus > 0 {
             self.vm_usage.active_vms += 1;
@@ -482,7 +483,7 @@ impl TenantUsage {
                 }
             }
         }
-        
+
         self.updated_at = SystemTime::now();
     }
 }
@@ -490,26 +491,82 @@ impl TenantUsage {
 impl std::fmt::Display for QuotaViolation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            QuotaViolation::VmLimitExceeded { limit, current, requested } => {
-                write!(f, "VM limit exceeded: limit={}, current={}, requested={}", limit, current, requested)
+            QuotaViolation::VmLimitExceeded {
+                limit,
+                current,
+                requested,
+            } => {
+                write!(
+                    f,
+                    "VM limit exceeded: limit={}, current={}, requested={}",
+                    limit, current, requested
+                )
             }
-            QuotaViolation::CpuLimitExceeded { limit, current, requested } => {
-                write!(f, "CPU limit exceeded: limit={}, current={}, requested={}", limit, current, requested)
+            QuotaViolation::CpuLimitExceeded {
+                limit,
+                current,
+                requested,
+            } => {
+                write!(
+                    f,
+                    "CPU limit exceeded: limit={}, current={}, requested={}",
+                    limit, current, requested
+                )
             }
-            QuotaViolation::MemoryLimitExceeded { limit, current, requested } => {
-                write!(f, "Memory limit exceeded: limit={}MB, current={}MB, requested={}MB", limit, current, requested)
+            QuotaViolation::MemoryLimitExceeded {
+                limit,
+                current,
+                requested,
+            } => {
+                write!(
+                    f,
+                    "Memory limit exceeded: limit={}MB, current={}MB, requested={}MB",
+                    limit, current, requested
+                )
             }
-            QuotaViolation::DiskLimitExceeded { limit, current, requested } => {
-                write!(f, "Disk limit exceeded: limit={}GB, current={}GB, requested={}GB", limit, current, requested)
+            QuotaViolation::DiskLimitExceeded {
+                limit,
+                current,
+                requested,
+            } => {
+                write!(
+                    f,
+                    "Disk limit exceeded: limit={}GB, current={}GB, requested={}GB",
+                    limit, current, requested
+                )
             }
-            QuotaViolation::PerNodeVmLimitExceeded { node_id, limit, current } => {
-                write!(f, "Per-node VM limit exceeded on node {}: limit={}, current={}", node_id, limit, current)
+            QuotaViolation::PerNodeVmLimitExceeded {
+                node_id,
+                limit,
+                current,
+            } => {
+                write!(
+                    f,
+                    "Per-node VM limit exceeded on node {}: limit={}, current={}",
+                    node_id, limit, current
+                )
             }
-            QuotaViolation::RateLimitExceeded { operation, limit, current } => {
-                write!(f, "Rate limit exceeded for {}: limit={}, current={}", operation, limit, current)
+            QuotaViolation::RateLimitExceeded {
+                operation,
+                limit,
+                current,
+            } => {
+                write!(
+                    f,
+                    "Rate limit exceeded for {}: limit={}, current={}",
+                    operation, limit, current
+                )
             }
-            QuotaViolation::StorageLimitExceeded { limit, current, requested } => {
-                write!(f, "Storage limit exceeded: limit={}GB, current={}GB, requested={}GB", limit, current, requested)
+            QuotaViolation::StorageLimitExceeded {
+                limit,
+                current,
+                requested,
+            } => {
+                write!(
+                    f,
+                    "Storage limit exceeded: limit={}GB, current={}GB, requested={}GB",
+                    limit, current, requested
+                )
             }
         }
     }

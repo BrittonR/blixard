@@ -15,7 +15,7 @@ static METRICS: OnceLock<Metrics> = OnceLock::new();
 /// Container for all application metrics
 pub struct Metrics {
     meter: Meter,
-    
+
     // Raft metrics
     pub raft_proposals_total: Counter<u64>,
     pub raft_proposals_failed: Counter<u64>,
@@ -25,20 +25,20 @@ pub struct Metrics {
     pub raft_term: UpDownCounter<i64>,
     pub raft_commit_index: UpDownCounter<i64>,
     pub raft_proposal_duration: Histogram<f64>,
-    
+
     // Raft batch processing metrics
     pub raft_batches_total: Counter<u64>,
     pub raft_batch_size: Histogram<f64>,
     pub raft_batch_bytes: Histogram<f64>,
     pub raft_batch_age_ms: Histogram<f64>,
-    
+
     // Network metrics
     pub grpc_requests_total: Counter<u64>,
     pub grpc_requests_failed: Counter<u64>,
     pub grpc_request_duration: Histogram<f64>,
     pub peer_connections_active: UpDownCounter<i64>,
     pub peer_reconnect_attempts: Counter<u64>,
-    
+
     // VM metrics
     pub vm_total: UpDownCounter<i64>,
     pub vm_running: UpDownCounter<i64>,
@@ -58,7 +58,7 @@ pub struct Metrics {
     pub vm_status_changes: Counter<u64>,
     pub vm_recovery_success: Counter<u64>,
     pub vm_recovery_failed: Counter<u64>,
-    
+
     // Resource monitoring metrics
     pub cluster_nodes_total: UpDownCounter<i64>,
     pub cluster_nodes_healthy: UpDownCounter<i64>,
@@ -75,13 +75,13 @@ pub struct Metrics {
     pub vm_placement_failures: Counter<u64>,
     pub vm_placement_duration: Histogram<f64>,
     pub vm_preemptions_total: Counter<u64>,
-    
+
     // Storage metrics
     pub storage_writes: Counter<u64>,
     pub storage_reads: Counter<u64>,
     pub storage_write_duration: Histogram<f64>,
     pub storage_read_duration: Histogram<f64>,
-    
+
     // P2P Image Transfer metrics
     pub p2p_image_imports_total: Counter<u64>,
     pub p2p_image_imports_failed: Counter<u64>,
@@ -96,7 +96,7 @@ pub struct Metrics {
     pub p2p_cache_hits: Counter<u64>,
     pub p2p_cache_misses: Counter<u64>,
     pub p2p_active_transfers: UpDownCounter<i64>,
-    
+
     // Connection pool metrics
     pub connection_pool_total: UpDownCounter<i64>,
     pub connection_pool_active: UpDownCounter<i64>,
@@ -143,7 +143,7 @@ impl Metrics {
                 .f64_histogram("raft.proposal.duration")
                 .with_description("Duration of Raft proposals in seconds")
                 .init(),
-            
+
             // Raft batch processing metrics
             raft_batches_total: meter
                 .u64_counter("raft.batches.total")
@@ -161,7 +161,7 @@ impl Metrics {
                 .f64_histogram("raft.batch.age_ms")
                 .with_description("Age of batches when flushed in milliseconds")
                 .init(),
-            
+
             // Network metrics
             grpc_requests_total: meter
                 .u64_counter("grpc.requests.total")
@@ -183,7 +183,7 @@ impl Metrics {
                 .u64_counter("peer.reconnect.attempts")
                 .with_description("Number of peer reconnection attempts")
                 .init(),
-            
+
             // VM metrics
             vm_total: meter
                 .i64_up_down_counter("vm.total")
@@ -239,7 +239,9 @@ impl Metrics {
                 .init(),
             vm_health_state: meter
                 .u64_counter("vm.health_state")
-                .with_description("VM health state (labeled by state: healthy, degraded, unhealthy)")
+                .with_description(
+                    "VM health state (labeled by state: healthy, degraded, unhealthy)",
+                )
                 .init(),
             vm_unhealthy_total: meter
                 .u64_counter("vm.unhealthy.total")
@@ -257,7 +259,7 @@ impl Metrics {
                 .u64_counter("vm.recovery.failed")
                 .with_description("Number of failed VM recovery attempts")
                 .init(),
-            
+
             // Resource monitoring metrics
             cluster_nodes_total: meter
                 .i64_up_down_counter("cluster.nodes.total")
@@ -319,7 +321,7 @@ impl Metrics {
                 .u64_counter("vm.preemptions.total")
                 .with_description("Total number of VM preemptions")
                 .init(),
-            
+
             // Storage metrics
             storage_writes: meter
                 .u64_counter("storage.writes.total")
@@ -337,7 +339,7 @@ impl Metrics {
                 .f64_histogram("storage.read.duration")
                 .with_description("Duration of storage reads in seconds")
                 .init(),
-            
+
             // P2P Image Transfer metrics
             p2p_image_imports_total: meter
                 .u64_counter("p2p.image.imports.total")
@@ -391,7 +393,7 @@ impl Metrics {
                 .i64_up_down_counter("p2p.transfers.active")
                 .with_description("Number of active P2P transfers")
                 .init(),
-            
+
             // Connection pool metrics
             connection_pool_total: meter
                 .i64_up_down_counter("connection_pool.connections.total")
@@ -417,7 +419,7 @@ impl Metrics {
                 .u64_counter("connection_pool.connections.reused")
                 .with_description("Total connection reuses from the pool")
                 .init(),
-            
+
             meter,
         }
     }
@@ -426,29 +428,28 @@ impl Metrics {
 /// Initialize metrics with Prometheus exporter
 pub fn init_prometheus() -> Result<&'static Metrics, Box<dyn std::error::Error>> {
     use opentelemetry_sdk::metrics::MeterProvider;
-    
+
     let registry = prometheus::Registry::new();
     let exporter = opentelemetry_prometheus::exporter()
         .with_registry(registry.clone())
         .build()?;
-    
+
     // Store the registry first since we'll move the exporter
     PROMETHEUS_REGISTRY.set(registry).ok();
-    
-    let provider = MeterProvider::builder()
-        .with_reader(exporter)
-        .build();
-    
+
+    let provider = MeterProvider::builder().with_reader(exporter).build();
+
     global::set_meter_provider(provider);
-    
+
     let meter = global::meter("blixard");
     let metrics = Metrics::new(meter);
-    
-    METRICS.set(metrics).map_err(|_| "Metrics already initialized")?;
-    
+
+    METRICS
+        .set(metrics)
+        .map_err(|_| "Metrics already initialized")?;
+
     Ok(METRICS.get().expect("Metrics was just initialized"))
 }
-
 
 /// Prometheus registry instance
 static PROMETHEUS_REGISTRY: OnceLock<prometheus::Registry> = OnceLock::new();
@@ -456,16 +457,16 @@ static PROMETHEUS_REGISTRY: OnceLock<prometheus::Registry> = OnceLock::new();
 /// Get Prometheus metrics as a string
 pub fn prometheus_metrics() -> String {
     use prometheus::{Encoder, TextEncoder};
-    
+
     if let Some(registry) = PROMETHEUS_REGISTRY.get() {
         let mut buffer = Vec::new();
         let encoder = TextEncoder::new();
         let metric_families = registry.gather();
-        
+
         if let Err(e) = encoder.encode(&metric_families, &mut buffer) {
             return format!("# Error encoding metrics: {}\n", e);
         }
-        
+
         String::from_utf8(buffer).unwrap_or_else(|_| "# Error encoding metrics\n".to_string())
     } else {
         String::from("# Metrics not initialized\n")
@@ -475,45 +476,71 @@ pub fn prometheus_metrics() -> String {
 /// Update cluster resource metrics from a cluster resource summary
 pub fn update_cluster_resource_metrics(summary: &crate::vm_scheduler::ClusterResourceSummary) {
     let metrics = metrics();
-    
+
     // Update cluster-wide resource metrics
-    metrics.cluster_nodes_total.add(summary.total_nodes as i64, &[]);
-    metrics.cluster_vcpus_total.add(summary.total_vcpus as i64, &[]);
-    metrics.cluster_vcpus_used.add(summary.used_vcpus as i64, &[]);
-    metrics.cluster_memory_mb_total.add(summary.total_memory_mb as i64, &[]);
-    metrics.cluster_memory_mb_used.add(summary.used_memory_mb as i64, &[]);
-    metrics.cluster_disk_gb_total.add(summary.total_disk_gb as i64, &[]);
-    metrics.cluster_disk_gb_used.add(summary.used_disk_gb as i64, &[]);
+    metrics
+        .cluster_nodes_total
+        .add(summary.total_nodes as i64, &[]);
+    metrics
+        .cluster_vcpus_total
+        .add(summary.total_vcpus as i64, &[]);
+    metrics
+        .cluster_vcpus_used
+        .add(summary.used_vcpus as i64, &[]);
+    metrics
+        .cluster_memory_mb_total
+        .add(summary.total_memory_mb as i64, &[]);
+    metrics
+        .cluster_memory_mb_used
+        .add(summary.used_memory_mb as i64, &[]);
+    metrics
+        .cluster_disk_gb_total
+        .add(summary.total_disk_gb as i64, &[]);
+    metrics
+        .cluster_disk_gb_used
+        .add(summary.used_disk_gb as i64, &[]);
 }
 
 /// Update node-specific resource metrics
 pub fn update_node_resource_metrics(node_id: u64, usage: &crate::vm_scheduler::NodeResourceUsage) {
     let metrics = metrics();
     let node_id_attr = attributes::node_id(node_id);
-    
+
     // Update per-node resource availability
-    metrics.node_vcpus_available.add(usage.available_vcpus() as i64, &[node_id_attr.clone()]);
-    metrics.node_memory_mb_available.add(usage.available_memory_mb() as i64, &[node_id_attr.clone()]);
-    metrics.node_disk_gb_available.add(usage.available_disk_gb() as i64, &[node_id_attr]);
+    metrics
+        .node_vcpus_available
+        .add(usage.available_vcpus() as i64, &[node_id_attr.clone()]);
+    metrics
+        .node_memory_mb_available
+        .add(usage.available_memory_mb() as i64, &[node_id_attr.clone()]);
+    metrics
+        .node_disk_gb_available
+        .add(usage.available_disk_gb() as i64, &[node_id_attr]);
 }
 
 /// Record VM placement attempt
 pub fn record_vm_placement_attempt(strategy: &str, success: bool, duration_secs: f64) {
     let metrics = metrics();
     let strategy_attr = KeyValue::new("strategy", strategy.to_string());
-    
-    metrics.vm_placement_attempts.add(1, &[strategy_attr.clone()]);
+
+    metrics
+        .vm_placement_attempts
+        .add(1, &[strategy_attr.clone()]);
     if !success {
-        metrics.vm_placement_failures.add(1, &[strategy_attr.clone()]);
+        metrics
+            .vm_placement_failures
+            .add(1, &[strategy_attr.clone()]);
     }
-    metrics.vm_placement_duration.record(duration_secs, &[strategy_attr]);
+    metrics
+        .vm_placement_duration
+        .record(duration_secs, &[strategy_attr]);
 }
 
 /// Record VM lifecycle operation
 pub fn record_vm_operation(operation: &str, success: bool) {
     let metrics = metrics();
     let operation_attr = KeyValue::new("operation", operation.to_string());
-    
+
     match operation {
         "create" => {
             metrics.vm_create_total.add(1, &[operation_attr.clone()]);
@@ -551,7 +578,7 @@ pub fn record_vm_preemption(vm_name: &str, node_id: u64, priority: u32, preempti
         KeyValue::new("priority", priority.to_string()),
         KeyValue::new("type", preemption_type.to_string()),
     ];
-    
+
     metrics.vm_preemptions_total.add(1, attrs);
 }
 
@@ -559,7 +586,7 @@ pub fn record_vm_preemption(vm_name: &str, node_id: u64, priority: u32, preempti
 pub fn record_p2p_image_import(artifact_type: &str, success: bool, size_bytes: u64) {
     let metrics = metrics();
     let type_attr = KeyValue::new("artifact_type", artifact_type.to_string());
-    
+
     metrics.p2p_image_imports_total.add(1, &[type_attr.clone()]);
     if !success {
         metrics.p2p_image_imports_failed.add(1, &[type_attr]);
@@ -571,7 +598,7 @@ pub fn record_p2p_image_import(artifact_type: &str, success: bool, size_bytes: u
 /// Record P2P image download operation
 pub fn record_p2p_image_download(image_id: &str, success: bool, duration_secs: f64) {
     let metrics = metrics();
-    
+
     metrics.p2p_image_downloads_total.add(1, &[]);
     if !success {
         metrics.p2p_image_downloads_failed.add(1, &[]);
@@ -582,7 +609,7 @@ pub fn record_p2p_image_download(image_id: &str, success: bool, duration_secs: f
 /// Record P2P chunk transfer
 pub fn record_p2p_chunk_transfer(chunk_size: u64, was_deduplicated: bool) {
     let metrics = metrics();
-    
+
     if was_deduplicated {
         metrics.p2p_chunks_deduplicated.add(1, &[]);
     } else {
@@ -595,7 +622,7 @@ pub fn record_p2p_chunk_transfer(chunk_size: u64, was_deduplicated: bool) {
 pub fn record_p2p_verification(success: bool, verification_type: &str) {
     let metrics = metrics();
     let type_attr = KeyValue::new("verification_type", verification_type.to_string());
-    
+
     if success {
         metrics.p2p_verification_success.add(1, &[type_attr]);
     } else {
@@ -607,7 +634,7 @@ pub fn record_p2p_verification(success: bool, verification_type: &str) {
 pub fn record_p2p_cache_access(hit: bool, cache_type: &str) {
     let metrics = metrics();
     let type_attr = KeyValue::new("cache_type", cache_type.to_string());
-    
+
     if hit {
         metrics.p2p_cache_hits.add(1, &[type_attr]);
     } else {
@@ -642,14 +669,18 @@ impl Drop for P2pTransferGuard {
 pub fn init_noop() -> Result<&'static Metrics, Box<dyn std::error::Error>> {
     let meter = global::meter("blixard");
     let metrics = Metrics::new(meter);
-    
-    METRICS.set(metrics).map_err(|_| "Metrics already initialized")?;
+
+    METRICS
+        .set(metrics)
+        .map_err(|_| "Metrics already initialized")?;
     Ok(METRICS.get().expect("Metrics was just initialized"))
 }
 
 /// Get the global metrics instance
 pub fn metrics() -> &'static Metrics {
-    METRICS.get().expect("Metrics not initialized. Call init_prometheus() or init_noop() first.")
+    METRICS
+        .get()
+        .expect("Metrics not initialized. Call init_prometheus() or init_noop() first.")
 }
 
 /// Try to get the global metrics instance, returning None if not initialized
@@ -673,7 +704,7 @@ impl Timer {
             attributes: vec![],
         }
     }
-    
+
     /// Create a timer with attributes
     pub fn with_attributes(histogram: Histogram<f64>, attributes: Vec<KeyValue>) -> Self {
         Self {
@@ -682,7 +713,7 @@ impl Timer {
             attributes,
         }
     }
-    
+
     /// Record the duration and consume the timer
     pub fn record(self) {
         let duration = self.start.elapsed().as_secs_f64();
@@ -699,63 +730,63 @@ impl Drop for Timer {
 
 /// Common attribute keys
 pub mod attributes {
-    use opentelemetry::{KeyValue, Key};
-    
+    use opentelemetry::{Key, KeyValue};
+
     pub const TRANSPORT_TYPE: Key = Key::from_static_str("transport.type");
     pub const MESSAGE_TYPE: Key = Key::from_static_str("message.type");
-    
+
     pub fn node_id(id: u64) -> KeyValue {
         KeyValue::new("node.id", id as i64)
     }
-    
+
     pub fn peer_id(id: u64) -> KeyValue {
         KeyValue::new("peer.id", id as i64)
     }
-    
+
     pub fn vm_name(name: &str) -> KeyValue {
         KeyValue::new("vm.name", name.to_string())
     }
-    
+
     pub fn health_state(state: &str) -> KeyValue {
         KeyValue::new("health.state", state.to_string())
     }
-    
+
     pub fn table(name: &str) -> KeyValue {
         KeyValue::new("table", name.to_string())
     }
-    
+
     pub fn operation(name: &str) -> KeyValue {
         KeyValue::new("operation", name.to_string())
     }
-    
+
     pub fn method(name: &str) -> KeyValue {
         KeyValue::new("method", name.to_string())
     }
-    
+
     pub fn status(value: &str) -> KeyValue {
         KeyValue::new("status", value.to_string())
     }
-    
+
     pub fn error(value: bool) -> KeyValue {
         KeyValue::new("error", value)
     }
-    
+
     pub fn recovery_type(value: &str) -> KeyValue {
         KeyValue::new("recovery.type", value.to_string())
     }
-    
+
     pub fn artifact_type(value: &str) -> KeyValue {
         KeyValue::new("artifact.type", value.to_string())
     }
-    
+
     pub fn image_id(value: &str) -> KeyValue {
         KeyValue::new("image.id", value.to_string())
     }
-    
+
     pub fn chunk_hash(value: &str) -> KeyValue {
         KeyValue::new("chunk.hash", value.to_string())
     }
-    
+
     pub fn transfer_direction(value: &str) -> KeyValue {
         KeyValue::new("transfer.direction", value.to_string())
     }
@@ -801,7 +832,7 @@ pub fn get_p2p_transfer_stats() -> P2pTransferStats {
 /// Record connection pool statistics
 pub fn record_connection_pool_stats(total: usize, active: usize, idle: usize) {
     let metrics = metrics();
-    
+
     // Update gauges with absolute values
     metrics.connection_pool_total.add(total as i64, &[]);
     metrics.connection_pool_active.add(active as i64, &[]);
@@ -811,7 +842,7 @@ pub fn record_connection_pool_stats(total: usize, active: usize, idle: usize) {
 /// Record connection pool event
 pub fn record_connection_pool_event(event: ConnectionPoolEvent) {
     let metrics = metrics();
-    
+
     match event {
         ConnectionPoolEvent::Created => {
             metrics.connection_pool_created.add(1, &[]);
@@ -836,47 +867,47 @@ pub enum ConnectionPoolEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_metrics_initialization() {
         let result = init_noop();
         assert!(result.is_ok());
-        
+
         let metrics = metrics();
-        
+
         // Test counter
         metrics.raft_proposals_total.add(1, &[]);
-        
+
         // Test up-down counter
         metrics.raft_term.add(5, &[]);
-        
+
         // Test histogram with timer
         {
             let _timer = Timer::new(metrics.raft_proposal_duration.clone());
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
     }
-    
+
     #[test]
     fn test_p2p_metrics() {
         let _ = init_noop();
-        
+
         // Test P2P import metrics
         record_p2p_image_import("microvm", true, 1024 * 1024);
         record_p2p_image_import("container", false, 0);
-        
+
         // Test P2P download metrics
         record_p2p_image_download("test-image-123", true, 2.5);
         record_p2p_image_download("test-image-456", false, 0.1);
-        
+
         // Test chunk transfer metrics
         record_p2p_chunk_transfer(4096, false);
         record_p2p_chunk_transfer(4096, true);
-        
+
         // Test verification metrics
         record_p2p_verification(true, "nar_hash");
         record_p2p_verification(false, "chunk_hash");
-        
+
         // Test cache metrics
         record_p2p_cache_access(true, "chunk");
         record_p2p_cache_access(false, "image");
@@ -890,7 +921,7 @@ pub fn record_vm_recovery_attempt(vm_name: &str, recovery_type: &str) {
         KeyValue::new("vm_name", vm_name.to_string()),
         KeyValue::new("type", recovery_type.to_string()),
     ];
-    
+
     // Use existing VM operation metrics as proxy
     metrics.vm_create_total.add(1, attrs);
 }
@@ -902,7 +933,7 @@ pub fn record_remediation_action(issue_type: &str, action: &str) {
         KeyValue::new("issue_type", issue_type.to_string()),
         KeyValue::new("action", action.to_string()),
     ];
-    
+
     // Use a general counter for remediation actions
     // In a real implementation, we'd add a specific metric for this
     metrics.grpc_requests_total.add(1, attrs);

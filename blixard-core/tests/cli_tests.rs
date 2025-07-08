@@ -11,7 +11,9 @@ fn test_cli_help_displays() {
     cmd.arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Distributed microVM orchestration platform"));
+        .stdout(predicate::str::contains(
+            "Distributed microVM orchestration platform",
+        ));
 }
 
 #[test]
@@ -89,9 +91,7 @@ fn test_node_id_edge_cases() {
 fn test_vm_name_edge_cases() {
     // Test with empty name
     let mut cmd = Command::cargo_bin("blixard").unwrap();
-    cmd.args(&["vm", "create", "--name", ""])
-        .assert()
-        .failure();
+    cmd.args(&["vm", "create", "--name", ""]).assert().failure();
 
     // Test with special characters
     let mut cmd = Command::cargo_bin("blixard").unwrap();

@@ -1,7 +1,7 @@
 // Property-based testing examples using proptest
 
-use proptest::prelude::*;
 use blixard_core::types::NodeConfig;
+use proptest::prelude::*;
 
 mod common;
 use common::proptest_utils::*;
@@ -11,7 +11,7 @@ proptest! {
     #[test]
     fn test_node_id_validity(id in node_id_strategy()) {
         let config = common::test_node_config(id, 7000);
-        
+
         // Node ID should be positive and within reasonable range
         prop_assert!(config.id > 0);
         prop_assert!(config.id <= 1000);
@@ -24,7 +24,7 @@ proptest! {
     #[test]
     fn test_port_validity(port in port_strategy()) {
         let config = common::test_node_config(1, port);
-        
+
         // Port should be in valid range
         prop_assert!(port >= 7000);
         prop_assert!(port <= 8000);
@@ -37,7 +37,7 @@ proptest! {
     #[test]
     fn test_vm_name_validity(name in vm_name_strategy()) {
         let config = common::test_vm_config(&name);
-        
+
         // VM name should meet requirements
         prop_assert!(config.name.len() >= 2);
         prop_assert!(config.name.len() <= 32);
@@ -59,7 +59,7 @@ proptest! {
         // Configuration should be internally consistent
         prop_assert_eq!(config.id, id);
         prop_assert!(config.bind_addr.to_string().contains(&port.to_string()));
-        
+
         // Data directory should be set
         prop_assert!(!config.data_dir.is_empty());
     }
@@ -76,13 +76,13 @@ proptest! {
         let mut config = common::test_vm_config(&name);
         config.memory = memory_mb;
         config.vcpus = vcpus;
-        
+
         // Resource constraints should be reasonable
         prop_assert!(config.memory >= 128);
         prop_assert!(config.memory <= 8192);
         prop_assert!(config.vcpus >= 1);
         prop_assert!(config.vcpus <= 16);
-        
+
         // Skip power-of-2 check for now since it's too restrictive
         // if config.memory >= 256 {
         //     prop_assert_eq!(config.memory & (config.memory - 1), 0);
@@ -97,16 +97,16 @@ proptest! {
         let cluster_config: Vec<NodeConfig> = (0..node_count)
             .map(|i| common::test_node_config(i as u64 + 1, 7000 + i as u16))
             .collect();
-        
+
         // Cluster properties
         prop_assert_eq!(cluster_config.len(), node_count);
-        
+
         // All node IDs should be unique
         let mut ids: Vec<u64> = cluster_config.iter().map(|c| c.id).collect();
         ids.sort();
         ids.dedup();
         prop_assert_eq!(ids.len(), node_count);
-        
+
         // All bind addresses should be unique
         let mut addrs: Vec<String> = cluster_config.iter().map(|c| c.bind_addr.to_string()).collect();
         addrs.sort();
@@ -123,19 +123,19 @@ proptest! {
         operation in "[a-zA-Z0-9_\\s]{1,100}"
     ) {
         use blixard_core::error::BlixardError;
-        
+
         let error = BlixardError::SystemError(
             format!("Feature not implemented: {}", feature)
         );
-        
+
         // Error should contain the feature name
         let error_string = format!("{}", error);
         prop_assert!(error_string.contains(&feature));
-        
+
         let network_error = BlixardError::ConfigError(
             format!("Invalid configuration for operation: {}", operation)
         );
-        
+
         // Config error should contain operation info
         let error_string = format!("{}", network_error);
         prop_assert!(error_string.contains(&operation));

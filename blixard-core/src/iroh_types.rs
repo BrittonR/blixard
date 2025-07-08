@@ -17,11 +17,11 @@ impl<T> Response<T> {
     pub fn new(inner: T) -> Self {
         Self { inner }
     }
-    
+
     pub fn into_inner(self) -> T {
         self.inner
     }
-    
+
     pub fn get_ref(&self) -> &T {
         &self.inner
     }
@@ -72,7 +72,7 @@ pub struct LeaveResponse {
 pub struct NodeInfo {
     pub id: u64,
     pub address: String,
-    pub state: i32,  // Maps to NodeState enum
+    pub state: i32, // Maps to NodeState enum
     pub p2p_node_id: String,
     pub p2p_addresses: Vec<String>,
     pub p2p_relay_url: String,
@@ -240,7 +240,7 @@ pub struct ListVmsResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VmInfo {
     pub name: String,
-    pub state: i32,  // Maps to VmState enum
+    pub state: i32, // Maps to VmState enum
     pub node_id: u64,
     pub vcpus: u32,
     pub memory_mb: u32,
@@ -301,7 +301,7 @@ pub struct TaskStatusResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskInfo {
     pub task_id: String,
-    pub status: i32,  // Maps to TaskStatus enum
+    pub status: i32, // Maps to TaskStatus enum
     pub worker_id: String,
     pub result: Vec<u8>,
 }
@@ -373,7 +373,7 @@ pub struct BootstrapInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RaftMessageRequest {
-    pub message: Vec<u8>,  // Serialized Raft message
+    pub message: Vec<u8>, // Serialized Raft message
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -391,7 +391,7 @@ pub struct CreateVmWithSchedulingRequest {
     pub config_path: String,
     pub vcpus: u32,
     pub memory_mb: u32,
-    pub strategy: i32,  // Maps to PlacementStrategy enum
+    pub strategy: i32, // Maps to PlacementStrategy enum
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -408,7 +408,7 @@ pub struct ScheduleVmPlacementRequest {
     pub config_path: String,
     pub vcpus: u32,
     pub memory_mb: u32,
-    pub strategy: i32,  // Maps to PlacementStrategy enum
+    pub strategy: i32, // Maps to PlacementStrategy enum
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

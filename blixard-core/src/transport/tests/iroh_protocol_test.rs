@@ -1,19 +1,16 @@
 //! Tests for Iroh protocol implementation
 
-use crate::{
-    error::BlixardResult,
-    transport::iroh_protocol::*,
-};
+use crate::{error::BlixardResult, transport::iroh_protocol::*};
 use bytes::Bytes;
 
 #[test]
 fn test_message_header_serialization() {
     let request_id = generate_request_id();
     let header = MessageHeader::new(MessageType::Request, 1234, request_id);
-    
+
     let bytes = header.to_bytes();
     let decoded = MessageHeader::from_bytes(&bytes).unwrap();
-    
+
     assert_eq!(decoded.version, PROTOCOL_VERSION);
     assert_eq!(decoded.msg_type, MessageType::Request);
     assert_eq!(decoded.payload_len, 1234);
@@ -39,14 +36,14 @@ fn test_rpc_request_serialization() -> BlixardResult<()> {
         method: "check".to_string(),
         payload: Bytes::from("test payload"),
     };
-    
+
     let bytes = serialize_payload(&request)?;
     let decoded: RpcRequest = deserialize_payload(&bytes)?;
-    
+
     assert_eq!(decoded.service, "health");
     assert_eq!(decoded.method, "check");
     assert_eq!(&decoded.payload[..], b"test payload");
-    
+
     Ok(())
 }
 
@@ -58,28 +55,28 @@ fn test_rpc_response_serialization() -> BlixardResult<()> {
         payload: Some(Bytes::from("response data")),
         error: None,
     };
-    
+
     let bytes = serialize_payload(&response)?;
     let decoded: RpcResponse = deserialize_payload(&bytes)?;
-    
+
     assert!(decoded.success);
     assert_eq!(&decoded.payload.unwrap()[..], b"response data");
     assert!(decoded.error.is_none());
-    
+
     // Error response
     let error_response = RpcResponse {
         success: false,
         payload: None,
         error: Some("Something went wrong".to_string()),
     };
-    
+
     let bytes = serialize_payload(&error_response)?;
     let decoded: RpcResponse = deserialize_payload(&bytes)?;
-    
+
     assert!(!decoded.success);
     assert!(decoded.payload.is_none());
     assert_eq!(decoded.error.unwrap(), "Something went wrong");
-    
+
     Ok(())
 }
 
@@ -89,7 +86,7 @@ fn test_header_size_validation() {
     let request_id = generate_request_id();
     let header = MessageHeader::new(MessageType::Request, MAX_MESSAGE_SIZE + 1, request_id);
     let bytes = header.to_bytes();
-    
+
     let result = MessageHeader::from_bytes(&bytes);
     assert!(result.is_err());
 }
@@ -100,7 +97,7 @@ fn test_protocol_version_check() {
     bytes[0] = 99; // Invalid version
     bytes[1] = MessageType::Request as u8;
     bytes[2..6].copy_from_slice(&1234u32.to_be_bytes());
-    
+
     let result = MessageHeader::from_bytes(&bytes);
     assert!(result.is_err());
 }

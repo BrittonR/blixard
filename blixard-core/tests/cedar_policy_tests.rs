@@ -11,16 +11,16 @@ mod tests {
     /// Helper to create test Cedar setup with policies
     async fn create_test_cedar_with_policies() -> (CedarAuthz, TempDir) {
         let temp_dir = TempDir::new().unwrap();
-        
+
         // Create schema file
         let schema_path = temp_dir.path().join("schema.cedarschema.json");
         let schema = include_str!("../../cedar/schema.cedarschema.json");
         fs::write(&schema_path, schema).await.unwrap();
-        
+
         // Create policies directory
         let policies_dir = temp_dir.path().join("policies");
         fs::create_dir(&policies_dir).await.unwrap();
-        
+
         // Write a simple test policy
         let test_policy = r#"
 // Test admin policy
@@ -64,13 +64,13 @@ forbid(
     context.hour >= 22 || context.hour <= 6
 };
 "#;
-        
+
         fs::write(policies_dir.join("test_policies.cedar"), test_policy)
             .await
             .unwrap();
-        
+
         let cedar = CedarAuthz::new(&schema_path, &policies_dir).await.unwrap();
-        
+
         (cedar, temp_dir)
     }
 
@@ -83,7 +83,7 @@ forbid(
     #[tokio::test]
     async fn test_basic_authorization() {
         let (cedar, _temp_dir) = create_test_cedar_with_policies().await;
-        
+
         // Test admin access - should be allowed for any action
         let result = cedar
             .is_authorized(
@@ -95,7 +95,7 @@ forbid(
             .await
             .unwrap();
         assert!(result, "Admin should be able to manage cluster");
-        
+
         // Test operator access to allowed action
         let result = cedar
             .is_authorized(
@@ -107,7 +107,7 @@ forbid(
             .await
             .unwrap();
         assert!(result, "Operator should be able to read cluster");
-        
+
         // Test operator access to denied action
         let result = cedar
             .is_authorized(
@@ -124,11 +124,11 @@ forbid(
     #[tokio::test]
     async fn test_time_based_access_control() {
         let (cedar, _temp_dir) = create_test_cedar_with_policies().await;
-        
+
         // Test deletion during business hours (should be denied)
         let mut context = HashMap::new();
         context.insert("hour".to_string(), json!(14)); // 2 PM
-        
+
         let result = cedar
             .is_authorized(
                 "User::\"operator-user\"",
@@ -138,12 +138,15 @@ forbid(
             )
             .await
             .unwrap();
-        assert!(!result, "Operator should NOT be able to delete VM during business hours");
-        
+        assert!(
+            !result,
+            "Operator should NOT be able to delete VM during business hours"
+        );
+
         // Test deletion during maintenance window (should be allowed)
         let mut context = HashMap::new();
         context.insert("hour".to_string(), json!(23)); // 11 PM
-        
+
         let result = cedar
             .is_authorized(
                 "User::\"operator-user\"",
@@ -153,13 +156,16 @@ forbid(
             )
             .await
             .unwrap();
-        assert!(result, "Operator should be able to delete VM during maintenance window");
+        assert!(
+            result,
+            "Operator should be able to delete VM during maintenance window"
+        );
     }
 
     #[tokio::test]
     async fn test_viewer_restrictions() {
         let (cedar, _temp_dir) = create_test_cedar_with_policies().await;
-        
+
         // Viewer can read
         let result = cedar
             .is_authorized(
@@ -171,7 +177,7 @@ forbid(
             .await
             .unwrap();
         assert!(result, "Viewer should be able to read VM");
-        
+
         // Viewer cannot create
         let result = cedar
             .is_authorized(
@@ -183,7 +189,7 @@ forbid(
             .await
             .unwrap();
         assert!(!result, "Viewer should NOT be able to create VM");
-        
+
         // Viewer cannot delete
         let result = cedar
             .is_authorized(
@@ -200,10 +206,10 @@ forbid(
     #[tokio::test]
     async fn test_policy_coverage_validation() {
         let (cedar, _temp_dir) = create_test_cedar_with_policies().await;
-        
+
         // Check that required actions are covered
         let uncovered = cedar.validate_policy_coverage().await.unwrap();
-        
+
         // With our test policies, some actions might not be covered
         // This is expected for the test
         println!("Uncovered actions: {:?}", uncovered);
@@ -212,16 +218,16 @@ forbid(
     #[tokio::test]
     async fn test_context_based_authorization() {
         let (cedar, _temp_dir) = create_test_cedar_with_policies().await;
-        
+
         // Create a policy that checks context values
         let temp_dir = TempDir::new().unwrap();
         let schema_path = temp_dir.path().join("schema.cedarschema.json");
         let schema = include_str!("../../cedar/schema.cedarschema.json");
         fs::write(&schema_path, schema).await.unwrap();
-        
+
         let policies_dir = temp_dir.path().join("policies");
         fs::create_dir(&policies_dir).await.unwrap();
-        
+
         let context_policy = r#"
 // Allow VM creation only if resources are available
 permit(
@@ -234,18 +240,18 @@ permit(
     context.requested_cpu <= context.available_cpu
 };
 "#;
-        
+
         fs::write(policies_dir.join("context_policy.cedar"), context_policy)
             .await
             .unwrap();
-        
+
         let cedar = CedarAuthz::new(&schema_path, &policies_dir).await.unwrap();
-        
+
         // Test with sufficient resources
         let mut context = HashMap::new();
         context.insert("requested_cpu".to_string(), json!(4));
         context.insert("available_cpu".to_string(), json!(8));
-        
+
         let result = cedar
             .is_authorized(
                 "User::\"operator-user\"",
@@ -255,13 +261,16 @@ permit(
             )
             .await
             .unwrap();
-        assert!(result, "Should be able to create VM with sufficient resources");
-        
+        assert!(
+            result,
+            "Should be able to create VM with sufficient resources"
+        );
+
         // Test with insufficient resources
         let mut context = HashMap::new();
         context.insert("requested_cpu".to_string(), json!(10));
         context.insert("available_cpu".to_string(), json!(8));
-        
+
         let result = cedar
             .is_authorized(
                 "User::\"operator-user\"",
@@ -271,6 +280,9 @@ permit(
             )
             .await
             .unwrap();
-        assert!(!result, "Should NOT be able to create VM with insufficient resources");
+        assert!(
+            !result,
+            "Should NOT be able to create VM with insufficient resources"
+        );
     }
 }

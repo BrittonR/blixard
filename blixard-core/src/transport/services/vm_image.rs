@@ -4,24 +4,22 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
+    iroh_types::{
+        GetVmImageRequest, GetVmImageResponse, ListP2pImagesRequest, ListP2pImagesResponse,
+        P2pImageInfo, ShareVmImageRequest, ShareVmImageResponse,
+    },
+    metrics_otel::{attributes, metrics, Timer},
     node_shared::SharedNodeState,
     p2p_manager::{P2pManager, ResourceType},
-    iroh_types::{
-        ShareVmImageRequest, ShareVmImageResponse,
-        GetVmImageRequest, GetVmImageResponse,
-        ListP2pImagesRequest, ListP2pImagesResponse,
-        P2pImageInfo,
-    },
-    metrics_otel::{metrics, Timer, attributes},
 };
 use async_trait::async_trait;
-use std::sync::Arc;
-use std::path::{Path, PathBuf};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 // Removed tonic imports - using Iroh transport
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tokio::fs;
-use sha2::{Sha256, Digest};
 
 /// VM image operation types for Iroh transport
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,7 +80,7 @@ pub trait VmImageService: Send + Sync {
         version: &str,
         metadata: HashMap<String, String>,
     ) -> BlixardResult<String>;
-    
+
     /// Get a VM image from the P2P network
     async fn get_image(
         &self,
@@ -90,7 +88,7 @@ pub trait VmImageService: Send + Sync {
         version: &str,
         image_hash: &str,
     ) -> BlixardResult<(String, HashMap<String, String>)>;
-    
+
     /// List available P2P images
     async fn list_images(&self) -> BlixardResult<Vec<ImageInfo>>;
 }
@@ -106,30 +104,34 @@ impl VmImageServiceImpl {
     pub fn new(node: Arc<SharedNodeState>) -> Self {
         Self { node }
     }
-    
+
     /// Calculate SHA256 hash of a file
     async fn calculate_file_hash(path: &Path) -> BlixardResult<String> {
-        let mut file = fs::File::open(path).await
+        let mut file = fs::File::open(path)
+            .await
             .map_err(|e| BlixardError::IoError(e))?;
         let mut hasher = Sha256::new();
         let mut buffer = vec![0; 8192];
-        
+
         loop {
             use tokio::io::AsyncReadExt;
-            let bytes_read = file.read(&mut buffer).await
+            let bytes_read = file
+                .read(&mut buffer)
+                .await
                 .map_err(|e| BlixardError::IoError(e))?;
             if bytes_read == 0 {
                 break;
             }
             hasher.update(&buffer[..bytes_read]);
         }
-        
+
         Ok(format!("{:x}", hasher.finalize()))
     }
-    
+
     /// Get file size
     async fn get_file_size(path: &Path) -> BlixardResult<u64> {
-        let metadata = fs::metadata(path).await
+        let metadata = fs::metadata(path)
+            .await
             .map_err(|e| BlixardError::IoError(e))?;
         Ok(metadata.len())
     }
@@ -145,30 +147,30 @@ impl VmImageService for VmImageServiceImpl {
         metadata: HashMap<String, String>,
     ) -> BlixardResult<String> {
         // Get P2P manager
-        let p2p_manager = self.node.get_p2p_manager().await
-            .ok_or_else(|| BlixardError::Internal {
-                message: "P2P manager not available".to_string(),
-            })?;
-        
+        let p2p_manager =
+            self.node
+                .get_p2p_manager()
+                .await
+                .ok_or_else(|| BlixardError::Internal {
+                    message: "P2P manager not available".to_string(),
+                })?;
+
         // Calculate image hash
         let path = Path::new(image_path);
         let hash = Self::calculate_file_hash(path).await?;
         let size = Self::get_file_size(path).await?;
-        
+
         // Upload the image to P2P network
-        p2p_manager.upload_resource(
-            ResourceType::VmImage,
-            image_name,
-            version,
-            path,
-        ).await?;
-        
+        p2p_manager
+            .upload_resource(ResourceType::VmImage, image_name, version, path)
+            .await?;
+
         // TODO: Store metadata in image store when implemented
         // if let Some(image_store) = p2p_manager.get_image_store() {
         //     let mut image_metadata = metadata.clone();
         //     image_metadata.insert("original_path".to_string(), image_path.to_string());
         //     image_metadata.insert("size_bytes".to_string(), size.to_string());
-        //     
+        //
         //     image_store.add_image(
         //         image_name,
         //         version,
@@ -177,10 +179,10 @@ impl VmImageService for VmImageServiceImpl {
         //         image_metadata,
         //     ).await?;
         // }
-        
+
         Ok(hash)
     }
-    
+
     async fn get_image(
         &self,
         image_name: &str,
@@ -188,58 +190,66 @@ impl VmImageService for VmImageServiceImpl {
         image_hash: &str,
     ) -> BlixardResult<(String, HashMap<String, String>)> {
         // Get P2P manager
-        let p2p_manager = self.node.get_p2p_manager().await
-            .ok_or_else(|| BlixardError::Internal {
-                message: "P2P manager not available".to_string(),
-            })?;
-        
+        let p2p_manager =
+            self.node
+                .get_p2p_manager()
+                .await
+                .ok_or_else(|| BlixardError::Internal {
+                    message: "P2P manager not available".to_string(),
+                })?;
+
         // TODO: Check if image is already cached when image store is available
         // if let Some(image_store) = p2p_manager.get_image_store() {
         //     if let Ok(Some(image)) = image_store.get_image_by_hash(image_hash).await {
         //         return Ok((image.local_path.to_string_lossy().to_string(), image.metadata));
         //     }
         // }
-        
+
         // Request download from P2P network
-        let request_id = p2p_manager.request_download(
-            ResourceType::VmImage,
-            image_name,
-            version,
-            crate::p2p_manager::TransferPriority::Normal,
-        ).await?;
-        
+        let request_id = p2p_manager
+            .request_download(
+                ResourceType::VmImage,
+                image_name,
+                version,
+                crate::p2p_manager::TransferPriority::Normal,
+            )
+            .await?;
+
         // Wait for download to complete (simplified - in production would use events)
         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-        
+
         // TODO: Check if download completed when image store is available
         // if let Some(image_store) = p2p_manager.get_image_store() {
         //     if let Ok(Some(image)) = image_store.get_image(image_name, version).await {
         //         return Ok((image.local_path.to_string_lossy().to_string(), image.metadata));
         //     }
         // }
-        
+
         Err(BlixardError::NotFound {
             resource: format!("VM image {}:{}", image_name, version),
         })
     }
-    
+
     async fn list_images(&self) -> BlixardResult<Vec<ImageInfo>> {
         // Get P2P manager
-        let p2p_manager = self.node.get_p2p_manager().await
-            .ok_or_else(|| BlixardError::Internal {
-                message: "P2P manager not available".to_string(),
-            })?;
-        
+        let p2p_manager =
+            self.node
+                .get_p2p_manager()
+                .await
+                .ok_or_else(|| BlixardError::Internal {
+                    message: "P2P manager not available".to_string(),
+                })?;
+
         // Get image store
         // TODO: Get image store when available
         // let image_store = p2p_manager.get_image_store()
         //     .ok_or_else(|| BlixardError::Internal {
         //         message: "Image store not available".to_string(),
         //     })?;
-        
+
         // TODO: List all images when image store is available
         // let images = image_store.list_images().await?;
-        // 
+        //
         // // Convert to ImageInfo
         // let image_infos = images.into_iter().map(|img| {
         //     ImageInfo {
@@ -252,9 +262,9 @@ impl VmImageService for VmImageServiceImpl {
         //         is_cached: true, // All listed images are cached locally
         //     }
         // }).collect();
-        // 
+        //
         // Ok(image_infos)
-        
+
         // Return empty list for now
         Ok(Vec::new())
     }
@@ -271,7 +281,7 @@ impl VmImageProtocolHandler {
             service: VmImageServiceImpl::new(node),
         }
     }
-    
+
     /// Handle a VM image operation over Iroh
     pub async fn handle_request(
         &self,
@@ -279,8 +289,17 @@ impl VmImageProtocolHandler {
         operation: VmImageOperation,
     ) -> BlixardResult<VmImageResponse> {
         match operation {
-            VmImageOperation::Share { image_name, image_path, version, metadata } => {
-                match self.service.share_image(&image_name, &image_path, &version, metadata).await {
+            VmImageOperation::Share {
+                image_name,
+                image_path,
+                version,
+                metadata,
+            } => {
+                match self
+                    .service
+                    .share_image(&image_name, &image_path, &version, metadata)
+                    .await
+                {
                     Ok(hash) => Ok(VmImageResponse::Share {
                         success: true,
                         message: format!("Image '{}' shared successfully", image_name),
@@ -293,8 +312,16 @@ impl VmImageProtocolHandler {
                     }),
                 }
             }
-            VmImageOperation::Get { image_name, version, image_hash } => {
-                match self.service.get_image(&image_name, &version, &image_hash).await {
+            VmImageOperation::Get {
+                image_name,
+                version,
+                image_hash,
+            } => {
+                match self
+                    .service
+                    .get_image(&image_name, &version, &image_hash)
+                    .await
+                {
                     Ok((local_path, metadata)) => Ok(VmImageResponse::Get {
                         success: true,
                         message: format!("Image '{}' retrieved successfully", image_name),
@@ -309,12 +336,10 @@ impl VmImageProtocolHandler {
                     }),
                 }
             }
-            VmImageOperation::List => {
-                match self.service.list_images().await {
-                    Ok(images) => Ok(VmImageResponse::List { images }),
-                    Err(e) => Err(e),
-                }
-            }
+            VmImageOperation::List => match self.service.list_images().await {
+                Ok(images) => Ok(VmImageResponse::List { images }),
+                Err(e) => Err(e),
+            },
         }
     }
 }

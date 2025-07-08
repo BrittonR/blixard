@@ -10,13 +10,13 @@ use blixard_core::{
     error::{BlixardError, BlixardResult},
     transport::iroh_peer_connector::IrohPeerConnector,
 };
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::path::Path;
+use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
-use serde::{Deserialize, Serialize};
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 /// Discovery source configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,37 +97,42 @@ impl DiscoveryManager {
 
     /// Start the discovery process
     pub async fn start(&self) -> BlixardResult<()> {
-        info!("Starting discovery manager with {} sources", self.config.sources.len());
-        
+        info!(
+            "Starting discovery manager with {} sources",
+            self.config.sources.len()
+        );
+
         // Initial discovery
         self.refresh_peers().await?;
-        
+
         // Start periodic refresh task
         let peers = self.peers.clone();
         let config = self.config.clone();
         let node_discovery = self.node_discovery.clone();
         let peer_connector = self.peer_connector.clone();
-        
+
         tokio::spawn(async move {
             let mut interval = interval(config.refresh_interval);
             loop {
                 interval.tick().await;
-                
+
                 // Refresh peers from all sources
                 for source in &config.sources {
                     if let Err(e) = Self::discover_from_source(
-                        source, 
-                        &peers, 
+                        source,
+                        &peers,
                         &node_discovery,
                         peer_connector.as_ref(),
-                        config.auto_connect
-                    ).await {
+                        config.auto_connect,
+                    )
+                    .await
+                    {
                         warn!("Discovery source {:?} failed: {}", source, e);
                     }
                 }
             }
         });
-        
+
         Ok(())
     }
 
@@ -135,16 +140,18 @@ impl DiscoveryManager {
     pub async fn refresh_peers(&self) -> BlixardResult<()> {
         for source in &self.config.sources {
             if let Err(e) = Self::discover_from_source(
-                source, 
-                &self.peers, 
+                source,
+                &self.peers,
                 &self.node_discovery,
                 self.peer_connector.as_ref(),
-                self.config.auto_connect
-            ).await {
+                self.config.auto_connect,
+            )
+            .await
+            {
                 warn!("Discovery source {:?} failed: {}", source, e);
             }
         }
-        
+
         Ok(())
     }
 
@@ -158,24 +165,34 @@ impl DiscoveryManager {
     ) -> BlixardResult<()> {
         match source {
             DiscoverySource::StaticFile { path } => {
-                Self::discover_from_static_file(path, peers, node_discovery, peer_connector, auto_connect).await
+                Self::discover_from_static_file(
+                    path,
+                    peers,
+                    node_discovery,
+                    peer_connector,
+                    auto_connect,
+                )
+                .await
             }
             DiscoverySource::NodeRegistry { locations } => {
                 for location in locations {
                     if let Err(e) = Self::discover_from_registry(
-                        location, 
-                        peers, 
+                        location,
+                        peers,
                         node_discovery,
                         peer_connector,
-                        auto_connect
-                    ).await {
+                        auto_connect,
+                    )
+                    .await
+                    {
                         warn!("Failed to discover from registry {}: {}", location, e);
                     }
                 }
                 Ok(())
             }
             DiscoverySource::Dns { domain } => {
-                Self::discover_from_dns(domain, peers, node_discovery, peer_connector, auto_connect).await
+                Self::discover_from_dns(domain, peers, node_discovery, peer_connector, auto_connect)
+                    .await
             }
         }
     }
@@ -188,34 +205,35 @@ impl DiscoveryManager {
         peer_connector: Option<&Arc<IrohPeerConnector>>,
         auto_connect: bool,
     ) -> BlixardResult<()> {
-        let content = tokio::fs::read_to_string(path)
-            .await
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Failed to read discovery file {}: {}", path, e),
-            })?;
-        
-        let discovered_peers: Vec<DiscoveredPeer> = serde_json::from_str(&content)
-            .map_err(|e| BlixardError::Internal {
+        let content =
+            tokio::fs::read_to_string(path)
+                .await
+                .map_err(|e| BlixardError::Internal {
+                    message: format!("Failed to read discovery file {}: {}", path, e),
+                })?;
+
+        let discovered_peers: Vec<DiscoveredPeer> =
+            serde_json::from_str(&content).map_err(|e| BlixardError::Internal {
                 message: format!("Failed to parse discovery file: {}", e),
             })?;
-        
+
         let mut peers_guard = peers.write().await;
         for mut peer in discovered_peers {
             peer.source = format!("static:{}", path);
             peer.discovered_at = std::time::SystemTime::now();
-            
+
             info!("Discovered peer {} from static file", peer.node_id);
-            
+
             // Auto-connect if enabled
             if auto_connect {
                 if let Some(connector) = peer_connector {
                     Self::connect_to_peer(&peer, connector).await;
                 }
             }
-            
+
             peers_guard.insert(peer.node_id, peer);
         }
-        
+
         Ok(())
     }
 
@@ -229,7 +247,7 @@ impl DiscoveryManager {
     ) -> BlixardResult<()> {
         let mut discovery = node_discovery.write().await;
         let entry = discovery.discover_node(location).await?;
-        
+
         let peer = DiscoveredPeer {
             node_id: entry.cluster_node_id,
             iroh_node_id: entry.iroh_node_id,
@@ -238,19 +256,19 @@ impl DiscoveryManager {
             source: format!("registry:{}", location),
             discovered_at: std::time::SystemTime::now(),
         };
-        
+
         info!("Discovered peer {} from registry", peer.node_id);
-        
+
         // Auto-connect if enabled
         if auto_connect {
             if let Some(connector) = peer_connector {
                 Self::connect_to_peer(&peer, connector).await;
             }
         }
-        
+
         let mut peers_guard = peers.write().await;
         peers_guard.insert(peer.node_id, peer);
-        
+
         Ok(())
     }
 
@@ -271,24 +289,33 @@ impl DiscoveryManager {
     /// Connect to a discovered peer
     async fn connect_to_peer(peer: &DiscoveredPeer, connector: &Arc<IrohPeerConnector>) {
         // Parse Iroh node ID
-        let node_id_bytes = match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &peer.iroh_node_id) {
+        let node_id_bytes = match base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            &peer.iroh_node_id,
+        ) {
             Ok(bytes) => bytes,
             Err(e) => {
-                error!("Failed to decode Iroh node ID for peer {}: {}", peer.node_id, e);
+                error!(
+                    "Failed to decode Iroh node ID for peer {}: {}",
+                    peer.node_id, e
+                );
                 return;
             }
         };
-        
+
         // Convert Vec<u8> to [u8; 32]
         let bytes_len = node_id_bytes.len();
         let node_id_array: [u8; 32] = match node_id_bytes.try_into() {
             Ok(arr) => arr,
             Err(_) => {
-                error!("Invalid Iroh node ID length for peer {}: expected 32 bytes, got {}", peer.node_id, bytes_len);
+                error!(
+                    "Invalid Iroh node ID length for peer {}: expected 32 bytes, got {}",
+                    peer.node_id, bytes_len
+                );
                 return;
             }
         };
-        
+
         let iroh_node_id = match iroh::NodeId::from_bytes(&node_id_array) {
             Ok(id) => id,
             Err(e) => {
@@ -296,28 +323,31 @@ impl DiscoveryManager {
                 return;
             }
         };
-        
+
         // Create NodeAddr
         let mut builder = iroh::NodeAddr::new(iroh_node_id);
-        
+
         // Add direct addresses
         for addr in &peer.direct_addresses {
             if let Ok(socket_addr) = addr.parse() {
                 builder = builder.with_direct_addresses([socket_addr]);
             }
         }
-        
+
         // Add relay URL
         if let Some(relay_url) = &peer.relay_url {
             if let Ok(url) = relay_url.parse() {
                 builder = builder.with_relay_url(url);
             }
         }
-        
+
         let node_addr = builder;
-        
+
         // Attempt connection
-        info!("Auto-connecting to discovered peer {} at {}", peer.node_id, iroh_node_id);
+        info!(
+            "Auto-connecting to discovered peer {} at {}",
+            peer.node_id, iroh_node_id
+        );
         if let Err(e) = connector.connect_to_peer(peer.node_id, node_addr).await {
             warn!("Failed to auto-connect to peer {}: {}", peer.node_id, e);
         } else {
@@ -338,14 +368,14 @@ impl DiscoveryManager {
     /// Manually add a discovered peer
     pub async fn add_peer(&self, peer: DiscoveredPeer) -> BlixardResult<()> {
         info!("Manually adding peer {} to discovery", peer.node_id);
-        
+
         // Auto-connect if enabled
         if self.config.auto_connect {
             if let Some(connector) = &self.peer_connector {
                 Self::connect_to_peer(&peer, connector).await;
             }
         }
-        
+
         self.peers.write().await.insert(peer.node_id, peer);
         Ok(())
     }
@@ -354,11 +384,9 @@ impl DiscoveryManager {
 /// Create a discovery config from node registry paths
 pub fn create_discovery_config(registry_paths: Vec<String>) -> DiscoveryConfig {
     DiscoveryConfig {
-        sources: vec![
-            DiscoverySource::NodeRegistry {
-                locations: registry_paths,
-            }
-        ],
+        sources: vec![DiscoverySource::NodeRegistry {
+            locations: registry_paths,
+        }],
         refresh_interval: Duration::from_secs(30),
         auto_connect: true,
     }

@@ -1,20 +1,20 @@
-use std::sync::Arc;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
+use base64::Engine;
 use blixard_core::{
-    error::BlixardResult,
-    types::NodeConfig,
-    vm_backend::{VmManager, VmBackendRegistry},
-    node::Node,
-    metrics_otel,
-    metrics_server,
+    config_global,
     // tracing_otel, // Temporarily disabled: uses tonic which we're removing
     config_v2::Config,
-    config_global,
+    error::BlixardResult,
+    metrics_otel,
+    metrics_server,
+    node::Node,
+    types::NodeConfig,
+    vm_backend::{VmBackendRegistry, VmManager},
 };
-use blixard_vm::{MicrovmBackendFactory};
+use blixard_vm::MicrovmBackendFactory;
 use tokio::task::JoinHandle;
-use base64::Engine;
 
 /// Configuration for the Blixard orchestrator
 #[derive(Debug, Clone)]
@@ -28,13 +28,13 @@ pub struct OrchestratorConfig {
 }
 
 /// Main orchestrator that coordinates between distributed systems and VM management
-/// 
+///
 /// This is the primary entry point for the Blixard system. It creates and manages
 /// both the distributed consensus layer (blixard-core) and the VM backend (blixard-vm),
 /// providing a unified interface for cluster and VM operations.
-/// 
+///
 /// ## Architecture
-/// 
+///
 /// ```text
 /// ┌─────────────────────────────────────────┐
 /// │           BlixardOrchestrator           │
@@ -63,39 +63,46 @@ pub struct BlixardOrchestrator {
 impl BlixardOrchestrator {
     /// Create a new orchestrator with the given configuration
     pub async fn new(config: OrchestratorConfig) -> BlixardResult<Self> {
-        tracing::info!("Creating Blixard orchestrator with VM backend: {}", config.vm_backend_type);
-        
+        tracing::info!(
+            "Creating Blixard orchestrator with VM backend: {}",
+            config.vm_backend_type
+        );
+
         // Update node config to include VM backend type
         let mut node_config = config.node_config.clone();
         node_config.vm_backend = config.vm_backend_type.clone();
-        
+
         // Create the distributed consensus node
         let node = Node::new(node_config.clone());
-        
-        tracing::info!("Blixard orchestrator created with {} VM backend", config.vm_backend_type);
-        
-        Ok(Self { 
+
+        tracing::info!(
+            "Blixard orchestrator created with {} VM backend",
+            config.vm_backend_type
+        );
+
+        Ok(Self {
             node,
             metrics_handle: None,
             node_config,
         })
     }
-    
+
     /// Initialize the node and start all services
     pub async fn initialize(&mut self, config: Config) -> BlixardResult<()> {
         tracing::info!("Initializing Blixard orchestrator services");
-        
+
         // Initialize global configuration
         config_global::init(config)?;
         tracing::info!("Global configuration initialized");
-        
+
         // Initialize metrics with Prometheus exporter
-        metrics_otel::init_prometheus()
-            .map_err(|e| blixard_core::error::BlixardError::Internal {
+        metrics_otel::init_prometheus().map_err(|e| {
+            blixard_core::error::BlixardError::Internal {
                 message: format!("Failed to initialize metrics: {}", e),
-            })?;
+            }
+        })?;
         tracing::info!("Metrics initialized with Prometheus exporter");
-        
+
         // Distributed tracing is already initialized in main.rs
         // Just log the current configuration
         let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok();
@@ -104,108 +111,119 @@ impl BlixardOrchestrator {
         } else {
             tracing::info!("Distributed tracing available but no OTLP exporter configured");
         }
-        
+
         // Set up the VM backend registry
         let mut registry = VmBackendRegistry::default(); // Includes built-in mock backend
-        
+
         // Register the microvm backend
         registry.register(Arc::new(MicrovmBackendFactory));
-        
+
         // TODO: Future backends can be registered here
         // registry.register(Arc::new(DockerBackendFactory));
         // registry.register(Arc::new(FirecrackerBackendFactory));
-        
+
         // Initialize with the VM backend registry
         self.node.initialize_with_vm_registry(registry).await?;
-        
+
         tracing::info!("Blixard orchestrator initialized successfully");
         Ok(())
     }
-    
+
     /// Start the node and all services
     pub async fn start(&mut self) -> BlixardResult<()> {
         tracing::info!("Starting Blixard node services");
         self.node.start().await?;
-        
+
         // Write node discovery information
         if let Err(e) = self.write_node_registry().await {
             tracing::warn!("Failed to write node registry: {}", e);
         }
-        
+
         // Start metrics server if enabled
         let config = config_global::get();
         if config.network.metrics.enabled {
             let bind_addr = *self.node.shared().get_bind_addr();
             let metrics_port = bind_addr.port() + config.network.metrics.port_offset;
             let metrics_addr = SocketAddr::new(bind_addr.ip(), metrics_port);
-            
+
             self.metrics_handle = Some(metrics_server::spawn_metrics_server(
                 metrics_addr,
                 self.node.shared().clone(),
             ));
-            tracing::info!("Metrics server started on http://{}{}", metrics_addr, config.network.metrics.path);
+            tracing::info!(
+                "Metrics server started on http://{}{}",
+                metrics_addr,
+                config.network.metrics.path
+            );
         } else {
             tracing::info!("Metrics server disabled by configuration");
         }
-        
+
         tracing::info!("Blixard node started successfully");
         Ok(())
     }
-    
+
     /// Stop the node and all services
     pub async fn stop(&mut self) -> BlixardResult<()> {
         tracing::info!("Stopping Blixard orchestrator");
-        
+
         // Stop metrics server
         if let Some(handle) = self.metrics_handle.take() {
             handle.abort();
         }
-        
+
         self.node.stop().await?;
-        
+
         // Shutdown tracing to flush any pending spans
         // tracing_otel::shutdown(); // Temporarily disabled: tracing_otel uses tonic which we're removing
-        
+
         tracing::info!("Blixard orchestrator stopped");
         Ok(())
     }
-    
+
     /// Get the node for direct access to distributed operations
     pub fn node(&self) -> &Node {
         &self.node
     }
-    
+
     /// Get the VM manager for direct access to VM operations
     pub async fn vm_manager(&self) -> Option<Arc<VmManager>> {
         self.node.shared().get_vm_manager().await
     }
-    
+
     /// Get the bind address of the gRPC server
     pub fn bind_address(&self) -> std::net::SocketAddr {
         *self.node.shared().get_bind_addr()
     }
-    
+
     /// Write node registry information for discovery
     async fn write_node_registry(&self) -> BlixardResult<()> {
         let shared = self.node.shared();
         let node_id = shared.config.id;
         let bind_addr = *shared.get_bind_addr();
-        
+
         // Get P2P information from Iroh transport
-        let (iroh_node_id, direct_addresses, relay_url) = if let Some(node_addr) = shared.get_p2p_node_addr().await {
-            let node_id_base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, node_addr.node_id.as_bytes());
-            let addresses: Vec<String> = node_addr.direct_addresses()
-                .map(|addr| addr.to_string())
-                .collect();
-            let relay = node_addr.relay_url
-                .as_ref()
-                .map(|url| url.to_string());
-            (node_id_base64, addresses, relay)
-        } else {
-            tracing::warn!("P2P node address not available, using placeholder values");
-            ("placeholder_node_id".to_string(), vec![bind_addr.to_string()], None)
-        };
-        
+        let (iroh_node_id, direct_addresses, relay_url) =
+            if let Some(node_addr) = shared.get_p2p_node_addr().await {
+                let node_id_base64 = base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    node_addr.node_id.as_bytes(),
+                );
+                let addresses: Vec<String> = node_addr
+                    .direct_addresses()
+                    .map(|addr| addr.to_string())
+                    .collect();
+                let relay = node_addr.relay_url.as_ref().map(|url| url.to_string());
+                (node_id_base64, addresses, relay)
+            } else {
+                tracing::warn!("P2P node address not available, using placeholder values");
+                (
+                    "placeholder_node_id".to_string(),
+                    vec![bind_addr.to_string()],
+                    None,
+                )
+            };
+
         // Create registry entry
         let entry = crate::node_discovery::NodeRegistryEntry {
             cluster_node_id: node_id,
@@ -214,16 +232,13 @@ impl BlixardOrchestrator {
             relay_url,
             address: bind_addr.to_string(),
         };
-        
+
         // Write to data directory
         let data_dir = std::path::Path::new(&self.node_config.data_dir);
         let registry_path = data_dir.join(format!("node-{}-registry.json", node_id));
-        
-        crate::node_discovery::save_node_registry(
-            registry_path.to_str().unwrap(),
-            &entry
-        ).await?;
-        
+
+        crate::node_discovery::save_node_registry(registry_path.to_str().unwrap(), &entry).await?;
+
         tracing::info!("Node registry written to: {}", registry_path.display());
         Ok(())
     }

@@ -3,12 +3,10 @@
 //! This module provides ways to discover Iroh node information
 //! from various sources.
 
-use blixard_core::{
-    error::{BlixardError, BlixardResult},
-};
-use std::path::Path;
-use std::collections::HashMap;
+use blixard_core::error::{BlixardError, BlixardResult};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::Path;
 
 /// Node registry entry containing connection information
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,7 +38,7 @@ impl NodeDiscovery {
     }
 
     /// Discover node information from an address string
-    /// 
+    ///
     /// Supports formats:
     /// - File path to node registry JSON
     /// - Address in format host:port (will look for registry file in default locations)
@@ -64,13 +62,15 @@ impl NodeDiscovery {
             format!("./data/node-1-registry.json"),
             format!("./node-1-registry.json"),
         ];
-        
+
         for path in &registry_paths {
             if Path::new(path).exists() {
                 match self.load_from_file(path).await {
                     Ok(entry) => {
                         // Check if the address matches
-                        if entry.address == address || entry.direct_addresses.contains(&address.to_string()) {
+                        if entry.address == address
+                            || entry.direct_addresses.contains(&address.to_string())
+                        {
                             self.cache.insert(address.to_string(), entry.clone());
                             return Ok(entry);
                         }
@@ -92,14 +92,15 @@ impl NodeDiscovery {
 
     /// Load node registry from a file
     async fn load_from_file(&mut self, path: &str) -> BlixardResult<NodeRegistryEntry> {
-        let contents = tokio::fs::read_to_string(path)
-            .await
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Failed to read node registry file: {}", e),
-            })?;
+        let contents =
+            tokio::fs::read_to_string(path)
+                .await
+                .map_err(|e| BlixardError::Internal {
+                    message: format!("Failed to read node registry file: {}", e),
+                })?;
 
-        let entry: NodeRegistryEntry = serde_json::from_str(&contents)
-            .map_err(|e| BlixardError::Internal {
+        let entry: NodeRegistryEntry =
+            serde_json::from_str(&contents).map_err(|e| BlixardError::Internal {
                 message: format!("Failed to parse node registry: {}", e),
             })?;
 
@@ -113,24 +114,33 @@ impl NodeDiscovery {
     /// Create an Iroh NodeAddr from registry entry
     pub fn create_node_addr(&self, entry: &NodeRegistryEntry) -> BlixardResult<iroh::NodeAddr> {
         // Parse Iroh node ID from base64
-        let node_id_bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &entry.iroh_node_id)
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Failed to decode Iroh node ID: {}", e),
-            })?;
+        let node_id_bytes = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            &entry.iroh_node_id,
+        )
+        .map_err(|e| BlixardError::Internal {
+            message: format!("Failed to decode Iroh node ID: {}", e),
+        })?;
 
         // Convert Vec<u8> to [u8; 32]
-        let node_id_array: [u8; 32] = node_id_bytes.try_into()
-            .map_err(|bytes: Vec<u8>| BlixardError::Internal {
-                message: format!("Invalid Iroh node ID length: expected 32 bytes, got {}", bytes.len()),
-            })?;
+        let node_id_array: [u8; 32] =
+            node_id_bytes
+                .try_into()
+                .map_err(|bytes: Vec<u8>| BlixardError::Internal {
+                    message: format!(
+                        "Invalid Iroh node ID length: expected 32 bytes, got {}",
+                        bytes.len()
+                    ),
+                })?;
 
-        let node_id = iroh::NodeId::from_bytes(&node_id_array)
-            .map_err(|e| BlixardError::Internal {
+        let node_id =
+            iroh::NodeId::from_bytes(&node_id_array).map_err(|e| BlixardError::Internal {
                 message: format!("Invalid Iroh node ID: {}", e),
             })?;
 
         // Parse direct addresses, converting wildcard addresses to localhost
-        let direct_addrs: Vec<std::net::SocketAddr> = entry.direct_addresses
+        let direct_addrs: Vec<std::net::SocketAddr> = entry
+            .direct_addresses
             .iter()
             .filter_map(|addr| {
                 match addr.parse::<std::net::SocketAddr>() {
@@ -140,19 +150,21 @@ impl NodeDiscovery {
                             socket_addr.set_ip(if socket_addr.is_ipv4() {
                                 std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1))
                             } else {
-                                std::net::IpAddr::V6(std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))
+                                std::net::IpAddr::V6(std::net::Ipv6Addr::new(
+                                    0, 0, 0, 0, 0, 0, 0, 1,
+                                ))
                             });
                         }
                         Some(socket_addr)
                     }
-                    Err(_) => None
+                    Err(_) => None,
                 }
             })
             .collect();
 
         // Create NodeAddr
         let mut builder = iroh::NodeAddr::new(node_id);
-        
+
         // Add direct addresses
         if !direct_addrs.is_empty() {
             builder = builder.with_direct_addresses(direct_addrs);
@@ -171,10 +183,9 @@ impl NodeDiscovery {
 
 /// Save node registry entry to a file
 pub async fn save_node_registry(path: &str, entry: &NodeRegistryEntry) -> BlixardResult<()> {
-    let json = serde_json::to_string_pretty(entry)
-        .map_err(|e| BlixardError::Internal {
-            message: format!("Failed to serialize node registry: {}", e),
-        })?;
+    let json = serde_json::to_string_pretty(entry).map_err(|e| BlixardError::Internal {
+        message: format!("Failed to serialize node registry: {}", e),
+    })?;
 
     tokio::fs::write(path, json)
         .await

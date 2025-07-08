@@ -20,9 +20,9 @@
       imports = [
         inputs.blixard-modules.flakeModule
       ];
-      
+
       systems = [ "x86_64-linux" ];
-      
+
       perSystem = { config, self', inputs', pkgs, system, ... }: {
         # Define multiple VMs using the blixardVMs option
         blixardVMs = {
@@ -51,7 +51,7 @@
               };
             };
           };
-          
+
           # Database VM
           database = {
             hypervisor = "cloud-hypervisor";
@@ -89,10 +89,10 @@
               };
             };
           };
-          
+
           # Development VM with multiple services
           dev-env = {
-            hypervisor = "qemu";  # Use QEMU for development
+            hypervisor = "qemu"; # Use QEMU for development
             vcpus = 8;
             memory = 8192;
             networking = {
@@ -101,10 +101,10 @@
               macAddress = "02:00:00:00:03:01";
               ipAddress = "10.0.0.3";
             };
-            modules = [ 
-              "webserver" 
-              "database" 
-              "containerRuntime" 
+            modules = [
+              "webserver"
+              "database"
+              "containerRuntime"
               "monitoring"
             ];
             initCommand = ''
@@ -119,10 +119,10 @@
                 htop
                 docker-compose
               ];
-              
+
               # Enable Docker
               virtualisation.docker.enable = true;
-              
+
               # Custom services for development
               services.code-server = {
                 enable = true;
@@ -132,7 +132,7 @@
             };
           };
         };
-        
+
         # Convenience apps for managing VMs
         apps = {
           start-all = {
@@ -145,7 +145,7 @@
               wait
             '');
           };
-          
+
           status = {
             type = "app";
             program = toString (pkgs.writeShellScript "status" ''
@@ -162,7 +162,7 @@
             '');
           };
         };
-        
+
         # Development shell with VM management tools
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
@@ -171,7 +171,7 @@
             socat
             tmux
           ];
-          
+
           shellHook = ''
             echo "Blixard VM Development Environment"
             echo "================================="

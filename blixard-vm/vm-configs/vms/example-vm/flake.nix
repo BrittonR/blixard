@@ -11,19 +11,20 @@
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
-    in {
+    in
+    {
       nixosConfigurations."example-vm" = nixpkgs.lib.nixosSystem {
         inherit system;
         modules = [
           microvm.nixosModules.microvm
           {
             networking.hostName = "example-vm";
-            
+
             microvm = {
               hypervisor = "qemu";
               vcpu = 2;
               mem = 1024;
-              
+
               interfaces = [
                 {
                   type = "user";
@@ -31,7 +32,7 @@
                   mac = "02:00:00:00:00:01";
                 }
               ];
-              
+
               volumes = [
                 {
                   image = "rootdisk.img";
@@ -40,11 +41,11 @@
                 }
               ];
             };
-            
+
             # Basic NixOS configuration
             services.getty.autologinUser = "root";
             users.users.root.password = "";
-            
+
             systemd.services.init-command = {
               description = "Run initialization command";
               wantedBy = [ "multi-user.target" ];
@@ -55,7 +56,7 @@
                 RemainAfterExit = true;
               };
             };
-            
+
             system.stateVersion = "23.11";
           }
         ];

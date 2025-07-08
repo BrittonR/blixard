@@ -4,13 +4,13 @@
 //! enabling direct connections between nodes for efficient data transfer.
 
 use crate::error::{BlixardError, BlixardResult};
+use iroh::endpoint::Connection;
+use iroh::{Endpoint, NodeAddr, SecretKey};
+use iroh_blobs::Hash;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use iroh::{Endpoint, SecretKey, NodeAddr};
-use iroh::endpoint::Connection;
-use iroh_blobs::Hash;
 use tracing::info;
 
 /// Types of data channels used in Blixard
@@ -38,7 +38,7 @@ impl DocumentType {
             DocumentType::FileTransfer => "file-transfer",
         }
     }
-    
+
     fn to_alpn(&self) -> &[u8] {
         self.as_str().as_bytes()
     }
@@ -66,7 +66,7 @@ impl IrohTransport {
 
         // Create secret key for this node
         let secret_key = SecretKey::generate(rand::thread_rng());
-        
+
         // Create endpoint with all document type ALPNs
         let alpns: Vec<Vec<u8>> = vec![
             DocumentType::ClusterConfig.to_alpn().to_vec(),
@@ -75,7 +75,7 @@ impl IrohTransport {
             DocumentType::Metrics.to_alpn().to_vec(),
             DocumentType::FileTransfer.to_alpn().to_vec(),
         ];
-        
+
         let endpoint = Endpoint::builder()
             .secret_key(secret_key)
             .alpns(alpns)
@@ -103,7 +103,7 @@ impl IrohTransport {
         // For now, just return NodeAddr with node_id
         Ok(NodeAddr::new(node_id))
     }
-    
+
     /// Get the underlying Iroh endpoint and node ID (for Raft transport)
     pub fn endpoint(&self) -> (Endpoint, iroh::NodeId) {
         let node_id = self.endpoint.node_id();
@@ -111,22 +111,27 @@ impl IrohTransport {
     }
 
     /// Connect to a peer
-    async fn connect_to_peer(&self, addr: &NodeAddr, doc_type: DocumentType) -> BlixardResult<Connection> {
+    async fn connect_to_peer(
+        &self,
+        addr: &NodeAddr,
+        doc_type: DocumentType,
+    ) -> BlixardResult<Connection> {
         let mut connections = self.connections.write().await;
-        
+
         if let Some(conn) = connections.get(&addr.node_id) {
             // For now, just reuse existing connections without checking if closed
             // TODO: Implement proper connection health checking
             return Ok(conn.clone());
         }
-        
-        let conn = self.endpoint
+
+        let conn = self
+            .endpoint
             .connect(addr.clone(), doc_type.to_alpn())
             .await
             .map_err(|e| BlixardError::Internal {
                 message: format!("Failed to connect to peer: {}", e),
             })?;
-            
+
         connections.insert(addr.node_id, conn.clone());
         Ok(conn)
     }
@@ -136,19 +141,20 @@ impl IrohTransport {
     /// In a real implementation, you would use iroh-blobs store API
     pub async fn share_file(&self, path: &Path) -> BlixardResult<Hash> {
         info!("Sharing file: {:?}", path);
-        
+
         // For now, we'll just compute a hash of the file
         // In a real implementation, this would import into a blob store
-        let content = tokio::fs::read(path).await
+        let content = tokio::fs::read(path)
+            .await
             .map_err(|e| BlixardError::IoError(e))?;
-            
+
         // TODO: Implement proper hash generation when iroh-blobs API is available
         // For now, return a dummy hash
         let dummy_hash = [0u8; 32];
         let hash = iroh_blobs::Hash::from(dummy_hash);
-        
+
         info!("File shared (stub implementation)");
-        
+
         Ok(hash)
     }
 
@@ -169,50 +175,63 @@ impl IrohTransport {
         data: &[u8],
     ) -> BlixardResult<()> {
         let conn = self.connect_to_peer(peer_addr, doc_type).await?;
-        
-        let mut stream = conn.open_uni().await
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Failed to open stream: {}", e),
-            })?;
-            
-        stream.write_all(data).await
+
+        let mut stream = conn.open_uni().await.map_err(|e| BlixardError::Internal {
+            message: format!("Failed to open stream: {}", e),
+        })?;
+
+        stream
+            .write_all(data)
+            .await
             .map_err(|e| BlixardError::Internal {
                 message: format!("Failed to write data: {}", e),
             })?;
-            
-        stream.finish()
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Failed to finish stream: {}", e),
-            })?;
-            
+
+        stream.finish().map_err(|e| BlixardError::Internal {
+            message: format!("Failed to finish stream: {}", e),
+        })?;
+
         Ok(())
     }
 
     // Stub methods for P2P document operations
-    pub async fn create_or_join_doc(&self, _doc_type: DocumentType, _create_new: bool) -> BlixardResult<()> {
+    pub async fn create_or_join_doc(
+        &self,
+        _doc_type: DocumentType,
+        _create_new: bool,
+    ) -> BlixardResult<()> {
         // For now, just return Ok to allow P2P manager to initialize
         // TODO: Implement document operations when needed
         Ok(())
     }
-    
-    pub async fn write_to_doc(&self, _doc_type: DocumentType, _key: &str, _value: &[u8]) -> BlixardResult<()> {
+
+    pub async fn write_to_doc(
+        &self,
+        _doc_type: DocumentType,
+        _key: &str,
+        _value: &[u8],
+    ) -> BlixardResult<()> {
         Err(BlixardError::NotImplemented {
             feature: "P2P document operations".to_string(),
         })
     }
-    
-    pub async fn read_from_doc(&self, _doc_type: DocumentType, _key: &str) -> BlixardResult<Vec<u8>> {
+
+    pub async fn read_from_doc(
+        &self,
+        _doc_type: DocumentType,
+        _key: &str,
+    ) -> BlixardResult<Vec<u8>> {
         Err(BlixardError::NotImplemented {
             feature: "P2P document operations".to_string(),
         })
     }
-    
+
     pub async fn get_doc_ticket(&self, _doc_type: DocumentType) -> BlixardResult<String> {
         Err(BlixardError::NotImplemented {
             feature: "P2P document operations".to_string(),
         })
     }
-    
+
     pub async fn join_doc_from_ticket(&self, _ticket: &str) -> BlixardResult<()> {
         Err(BlixardError::NotImplemented {
             feature: "P2P document operations".to_string(),
@@ -225,17 +244,17 @@ impl IrohTransport {
         F: Fn(DocumentType, Vec<u8>) + Send + Sync + 'static,
     {
         let handler = Arc::new(handler);
-        
+
         while let Some(incoming) = self.endpoint.accept().await {
             let handler = handler.clone();
-            
+
             tokio::spawn(async move {
                 // Accept the connection
                 let conn = match incoming.await {
                     Ok(conn) => conn,
                     Err(_) => return,
                 };
-                
+
                 // Get ALPN from the connection
                 let alpn = conn.alpn();
                 let doc_type = match alpn.as_deref() {
@@ -246,16 +265,18 @@ impl IrohTransport {
                     Some(b"file-transfer") => DocumentType::FileTransfer,
                     _ => return,
                 };
-                
+
                 while let Ok(mut recv_stream) = conn.accept_uni().await {
                     let mut data = Vec::new();
-                    if let Ok(_) = tokio::io::AsyncReadExt::read_to_end(&mut recv_stream, &mut data).await {
+                    if let Ok(_) =
+                        tokio::io::AsyncReadExt::read_to_end(&mut recv_stream, &mut data).await
+                    {
                         handler(doc_type.clone(), data);
                     }
                 }
             });
         }
-        
+
         Ok(())
     }
 
@@ -266,7 +287,6 @@ impl IrohTransport {
         Ok(())
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -286,15 +306,15 @@ mod tests {
     async fn test_file_operations() {
         let temp_dir = TempDir::new().unwrap();
         let transport = IrohTransport::new(1, temp_dir.path()).await.unwrap();
-        
+
         // Create a test file
         let test_file = temp_dir.path().join("test.txt");
         std::fs::write(&test_file, b"test content").unwrap();
-        
+
         // Share the file
         let hash = transport.share_file(&test_file).await.unwrap();
         assert!(!hash.to_string().is_empty());
-        
+
         transport.shutdown().await.unwrap();
     }
 }

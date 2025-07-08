@@ -1,14 +1,15 @@
 // Property-based testing for error types and conversions
 
-use proptest::prelude::*;
 use blixard_core::error::{BlixardError, BlixardResult};
+use proptest::prelude::*;
 use std::error::Error;
 
 mod common;
 
 // Strategy for generating error messages
 fn error_message_strategy() -> impl Strategy<Value = String> {
-    "[a-zA-Z0-9_\\s\\-\\.]{1,100}".prop_map(|s| s.trim().to_string())
+    "[a-zA-Z0-9_\\s\\-\\.]{1,100}"
+        .prop_map(|s| s.trim().to_string())
         .prop_filter("Non-empty message", |s| !s.is_empty())
 }
 
@@ -17,7 +18,7 @@ fn feature_name_strategy() -> impl Strategy<Value = String> {
     "[a-zA-Z0-9_\\-]{1,50}"
 }
 
-// Strategy for generating operation names  
+// Strategy for generating operation names
 fn operation_name_strategy() -> impl Strategy<Value = String> {
     "[a-zA-Z0-9_\\s]{1,100}"
 }
@@ -42,7 +43,7 @@ proptest! {
             BlixardError::Internal { message: message.clone() },
             BlixardError::NotImplemented { feature: feature.clone() },
         ];
-        
+
         for error in errors {
             let display_str = format!("{}", error);
             prop_assert!(!display_str.is_empty());
@@ -57,7 +58,7 @@ proptest! {
     fn test_not_implemented_contains_feature(feature in feature_name_strategy()) {
         let error = BlixardError::NotImplemented { feature: feature.clone() };
         let error_str = format!("{}", error);
-        
+
         prop_assert!(error_str.contains(&feature));
         prop_assert!(error_str.contains("not implemented"));
     }
@@ -69,10 +70,10 @@ proptest! {
     fn test_service_errors_contain_name(service_name in "[a-zA-Z0-9_\\-]{1,50}") {
         let not_found = BlixardError::ServiceNotFound(service_name.clone());
         let already_exists = BlixardError::ServiceAlreadyExists(service_name.clone());
-        
+
         let not_found_str = format!("{}", not_found);
         let already_exists_str = format!("{}", already_exists);
-        
+
         prop_assert!(not_found_str.contains(&service_name));
         prop_assert!(already_exists_str.contains(&service_name));
         prop_assert!(not_found_str.contains("not found"));
@@ -88,17 +89,17 @@ proptest! {
             operation: operation.clone(),
             source: Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, "test")),
         };
-        
+
         let raft_error = BlixardError::Raft {
             operation: operation.clone(),
             source: Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, "test")),
         };
-        
+
         let serialization_error = BlixardError::Serialization {
             operation: operation.clone(),
             source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, "test")),
         };
-        
+
         for error in [storage_error, raft_error, serialization_error] {
             let error_str = format!("{}", error);
             prop_assert!(error_str.contains(&operation));
@@ -121,7 +122,7 @@ proptest! {
     ) {
         let io_error = std::io::Error::new(kind, message.clone());
         let blixard_error: BlixardError = io_error.into();
-        
+
         match blixard_error {
             BlixardError::IoError(inner) => {
                 prop_assert_eq!(inner.kind(), kind);
@@ -142,17 +143,17 @@ proptest! {
         fn test_success(value: String) -> BlixardResult<String> {
             Ok(value)
         }
-        
+
         fn test_failure(msg: String) -> BlixardResult<String> {
             Err(BlixardError::SystemError(msg))
         }
-        
+
         let success_result = test_success(success_value.clone());
         let failure_result = test_failure(error_message.clone());
-        
+
         prop_assert!(success_result.is_ok());
         prop_assert_eq!(success_result.unwrap(), success_value);
-        
+
         prop_assert!(failure_result.is_err());
         let error = failure_result.unwrap_err();
         let error_str = format!("{}", error);
@@ -172,7 +173,7 @@ proptest! {
             BlixardError::Internal { message: message.clone() },
             BlixardError::SystemError(message.clone()),
         ];
-        
+
         for error in errors {
             let debug_str = format!("{:?}", error);
             prop_assert!(!debug_str.is_empty());
@@ -185,7 +186,7 @@ proptest! {
 proptest! {
     #[test]
     fn test_error_chaining_properties(operation in operation_name_strategy()) {
-        
+
         let errors = vec![
             BlixardError::Storage {
                 operation: operation.clone(),
@@ -200,7 +201,7 @@ proptest! {
                 source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, "ser error")),
             },
         ];
-        
+
         for error in errors {
             prop_assert!(error.source().is_some());
             let source = error.source().unwrap();

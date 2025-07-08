@@ -5,10 +5,10 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
-    node_shared::SharedNodeState,
     iroh_types::{HealthCheckRequest, HealthCheckResponse},
+    metrics_otel::{attributes, metrics, Timer},
+    node_shared::SharedNodeState,
     transport::config::TransportConfig,
-    metrics_otel::{metrics, Timer, attributes},
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -32,16 +32,16 @@ impl HealthServiceImpl {
     pub fn new(node: Arc<SharedNodeState>) -> Self {
         Self { node }
     }
-    
+
     /// Check if the node is healthy
     async fn is_node_healthy(&self) -> bool {
         // Check various health indicators
-        
+
         // 1. Check if we can get Raft status (indicates Raft is running)
         if self.node.get_raft_status().await.is_err() {
             return false;
         }
-        
+
         // 2. Check if we can access database
         if let Some(database) = self.node.get_database().await {
             // Try a simple operation to verify database is responsive
@@ -50,13 +50,13 @@ impl HealthServiceImpl {
         } else {
             return false;
         }
-        
+
         // 3. Check if peer connector is healthy (for networked nodes)
         if let Some(peer_connector) = self.node.get_peer_connector().await {
             // Could check connection health here
             let _ = peer_connector;
         }
-        
+
         true
     }
 }
@@ -70,11 +70,8 @@ impl HealthService for HealthServiceImpl {
         } else {
             format!("Node {} is unhealthy", self.node.get_id())
         };
-        
-        Ok(HealthCheckResponse {
-            healthy,
-            message,
-        })
+
+        Ok(HealthCheckResponse { healthy, message })
     }
 }
 
@@ -89,7 +86,7 @@ impl HealthProtocolHandler {
             service: HealthServiceImpl::new(node),
         }
     }
-    
+
     /// Handle a health check request over Iroh
     pub async fn handle_request(
         &self,
@@ -97,13 +94,13 @@ impl HealthProtocolHandler {
     ) -> BlixardResult<()> {
         // TODO: Implement proper protocol handling
         // For now, this is a placeholder
-        
+
         // 1. Read request from connection
         // 2. Deserialize HealthCheckRequest
         // 3. Call service.check_health()
         // 4. Serialize response
         // 5. Send response back
-        
+
         Err(BlixardError::NotImplemented {
             feature: "Iroh health protocol handler".to_string(),
         })

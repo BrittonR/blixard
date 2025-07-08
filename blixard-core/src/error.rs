@@ -4,63 +4,75 @@ use thiserror::Error;
 pub enum BlixardError {
     #[error("Service not found: {0}")]
     ServiceNotFound(String),
-    
+
     #[error("Service already exists: {0}")]
     ServiceAlreadyExists(String),
-    
+
     #[error("Failed to manage service: {0}")]
     ServiceManagementError(String),
-    
+
     #[error("Storage error: {0}")]
     StorageError(#[from] redb::Error),
-    
+
     #[error("Storage transaction error: {0}")]
     StorageTransactionError(String),
-    
+
     #[error("Storage table error: {0}")]
     StorageTableError(String),
-    
+
     #[error("Raft error: {0}")]
     RaftError(#[from] raft::Error),
-    
+
     #[error("Cluster error: {0}")]
     ClusterError(String),
-    
+
     #[error("Failed to join cluster: {reason}")]
     ClusterJoin { reason: String },
-    
+
     #[error("Node error: {0}")]
     NodeError(String),
-    
+
     #[error("Configuration error: {0}")]
     ConfigError(String),
-    
+
     #[error("Configuration error: {message}")]
     Configuration { message: String },
-    
+
     #[error("Connection error: {message}")]
     Connection { message: String },
-    
+
     #[error("Network error: {0}")]
     NetworkError(String),
-    
+
     #[error("Serialization error: {0}")]
     SerializationError(#[from] bincode::Error),
-    
+
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
-    
+
     #[error("System error: {0}")]
     SystemError(String),
 
     #[error("Storage operation '{operation}' failed")]
-    Storage { operation: String, #[source] source: Box<dyn std::error::Error + Send + Sync> },
+    Storage {
+        operation: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 
     #[error("Raft operation '{operation}' failed")]
-    Raft { operation: String, #[source] source: Box<dyn std::error::Error + Send + Sync> },
+    Raft {
+        operation: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 
     #[error("Serialization operation '{operation}' failed")]
-    Serialization { operation: String, #[source] source: Box<dyn std::error::Error + Send + Sync> },
+    Serialization {
+        operation: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 
     #[error("Internal error: {message}")]
     Internal { message: String },
@@ -76,33 +88,40 @@ pub enum BlixardError {
 
     #[error("Security error: {message}")]
     Security { message: String },
-    
+
     #[error("Authorization error: {message}")]
     AuthorizationError { message: String },
-    
+
     #[error("Resource not found: {resource}")]
     NotFound { resource: String },
-    
+
     #[error("Not initialized: {component}")]
     NotInitialized { component: String },
-    
+
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
-    
+
     #[error("gRPC error: {0}")]
     GrpcError(String),
-    
+
     #[error("P2P error: {0}")]
     P2PError(String),
-    
+
     #[error("Quota exceeded for {resource}: limit {limit}, requested {requested}")]
-    QuotaExceeded { resource: String, limit: u64, requested: u64 },
-    
+    QuotaExceeded {
+        resource: String,
+        limit: u64,
+        requested: u64,
+    },
+
     #[error("Node not found: {node_id}")]
     NodeNotFound { node_id: u64 },
-    
+
     #[error("Insufficient resources: requested {requested}, available {available}")]
-    InsufficientResources { requested: String, available: String },
+    InsufficientResources {
+        requested: String,
+        available: String,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, BlixardError>;

@@ -11,19 +11,20 @@
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
-    in {
+    in
+    {
       nixosConfigurations."test-vm" = nixpkgs.lib.nixosSystem {
         inherit system;
         modules = [
           microvm.nixosModules.microvm
           {
             networking.hostName = "test-vm";
-            
+
             microvm = {
               hypervisor = "qemu";
               vcpu = 1;
               mem = 512;
-              
+
               interfaces = [
                 {
                   type = "user";
@@ -31,7 +32,7 @@
                   mac = "02:00:00:00:00:01";
                 }
               ];
-              
+
               volumes = [
                 {
                   image = "rootdisk.img";
@@ -39,7 +40,7 @@
                   size = 2048;
                 }
               ];
-              
+
               # SSH port forwarding
               forwardPorts = [
                 {
@@ -49,7 +50,7 @@
                 }
               ];
             };
-            
+
             # Enable SSH with password authentication
             services.openssh = {
               enable = true;
@@ -59,18 +60,18 @@
                 PermitEmptyPasswords = true;
               };
             };
-            
+
             # Root user with no password
             users.users.root = {
               password = "";
             };
-            
+
             # Disable firewall for testing
             networking.firewall.enable = false;
-            
+
             # Auto-login on console
             services.getty.autologinUser = "root";
-            
+
             system.stateVersion = "23.11";
           }
         ];

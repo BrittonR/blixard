@@ -9,8 +9,8 @@
 use blixard_core::{
     error::BlixardResult,
     node::Node,
-    types::{NodeConfig, NodeTopology},
     transport::config::TransportConfig,
+    types::{NodeConfig, NodeTopology},
 };
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -26,10 +26,12 @@ async fn main() -> BlixardResult<()> {
 
     // Initialize global configuration with defaults
     blixard_core::config_global::init(blixard_core::config_v2::Config::default())?;
-    
+
     // Initialize metrics
-    blixard_core::metrics_otel::init_noop().map_err(|e| blixard_core::error::BlixardError::Internal {
-        message: format!("Failed to initialize metrics: {}", e),
+    blixard_core::metrics_otel::init_noop().map_err(|e| {
+        blixard_core::error::BlixardError::Internal {
+            message: format!("Failed to initialize metrics: {}", e),
+        }
     })?;
 
     info!("=== P2P Join Test ===");
@@ -49,7 +51,7 @@ async fn main() -> BlixardResult<()> {
     info!("Starting bootstrap node 1...");
     let mut node1 = Node::new(node1_config);
     node1.initialize().await?;
-    
+
     // Get node 1's P2P info
     let node1_shared = node1.shared();
     let node1_p2p_addr = node1_shared.get_p2p_node_addr().await;
@@ -72,14 +74,14 @@ async fn main() -> BlixardResult<()> {
 
     info!("Starting node 2 to join cluster...");
     let mut node2 = Node::new(node2_config);
-    
+
     // Note: The join will fail because we haven't implemented the full join logic yet
     // But we can still verify P2P addresses are available
     match node2.initialize().await {
         Ok(_) => info!("Node 2 initialized successfully"),
         Err(e) => info!("Node 2 initialization error: {}", e),
     }
-    
+
     // Get node 2's P2P info
     let node2_shared = node2.shared();
     let node2_p2p_addr = node2_shared.get_p2p_node_addr().await;
@@ -88,14 +90,14 @@ async fn main() -> BlixardResult<()> {
     // Verify both nodes have P2P addresses
     if node1_p2p_addr.is_some() && node2_p2p_addr.is_some() {
         info!("✅ Both nodes have P2P addresses");
-        
+
         // Try to establish P2P connection manually
         if let (Some(p2p_manager1), Some(p2p_manager2)) = (
             node1_shared.get_p2p_manager().await,
             node2_shared.get_p2p_manager().await,
         ) {
             info!("Both nodes have P2P managers");
-            
+
             // Node 2 connects to node 1
             if let Some(node1_addr) = node1_p2p_addr {
                 info!("Node 2 attempting to connect to node 1...");
@@ -116,7 +118,7 @@ async fn main() -> BlixardResult<()> {
     for peer in &node1_peers {
         info!("  Peer {}: P2P={:?}", peer.id, peer.p2p_node_id);
     }
-    
+
     let node2_peers = node2_shared.get_peers().await;
     info!("Node 2 sees {} peers", node2_peers.len());
     for peer in &node2_peers {

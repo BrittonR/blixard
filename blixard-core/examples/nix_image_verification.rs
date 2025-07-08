@@ -6,7 +6,7 @@
 use blixard_core::{
     error::BlixardResult,
     nix_image_store::NixImageStore,
-    p2p_manager::{P2pManager, P2pConfig},
+    p2p_manager::{P2pConfig, P2pManager},
 };
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -27,16 +27,10 @@ async fn main() -> BlixardResult<()> {
     std::fs::create_dir_all(&nix_store_dir)?;
 
     // Create P2P manager and image store
-    let p2p_manager = Arc::new(
-        P2pManager::new(1, temp_dir.path(), P2pConfig::default()).await?
-    );
-    
-    let store = NixImageStore::new(
-        1, 
-        p2p_manager, 
-        temp_dir.path(), 
-        Some(nix_store_dir.clone())
-    ).await?;
+    let p2p_manager = Arc::new(P2pManager::new(1, temp_dir.path(), P2pConfig::default()).await?);
+
+    let store =
+        NixImageStore::new(1, p2p_manager, temp_dir.path(), Some(nix_store_dir.clone())).await?;
 
     // Demo 1: Import with NAR hash verification
     info!("\n--- Demo 1: Import with NAR Hash ---");
@@ -66,17 +60,15 @@ async fn demo_import_with_verification(
     let store_hash = "abc123def456ghi789jkl012mno345p";
     let nixos_path = nix_store_dir.join(format!("{}-nixos-system", store_hash));
     std::fs::create_dir_all(&nixos_path)?;
-    
+
     // Create some content
     let system_file = nixos_path.join("activate");
     tokio::fs::write(&system_file, b"#!/bin/sh\necho 'Activating NixOS system'\n").await?;
 
     // Import the system
-    let metadata = store.import_microvm(
-        "verified-system",
-        &nixos_path,
-        None,
-    ).await?;
+    let metadata = store
+        .import_microvm("verified-system", &nixos_path, None)
+        .await?;
 
     info!("Imported system with metadata:");
     info!("  ID: {}", metadata.id);
@@ -91,39 +83,39 @@ async fn demo_import_with_verification(
 async fn demo_verify_existing(store: &NixImageStore) -> BlixardResult<()> {
     // Get list of images
     let images = store.list_images().await?;
-    
+
     for image in images {
         info!("Verifying image: {}", image.name);
-        
+
         let is_valid = store.verify_image(&image.id).await?;
-        
+
         if is_valid {
             info!("  ✓ Image {} is valid", image.name);
         } else {
             info!("  ✗ Image {} verification failed", image.name);
         }
-        
+
         if let Some(nar_hash) = &image.nar_hash {
             info!("  NAR hash: {}", nar_hash);
         }
     }
-    
+
     Ok(())
 }
 
 async fn demo_detect_tampering(store: &NixImageStore) -> BlixardResult<()> {
     info!("Simulating image tampering detection...");
-    
+
     // In a real scenario, if someone modified the image after download,
     // the verification would fail because the NAR hash wouldn't match
-    
+
     // This demonstrates the security model:
     info!("Security properties:");
     info!("  1. NAR hash ensures bit-for-bit reproducibility");
     info!("  2. Derivation hash links to exact build instructions");
     info!("  3. P2P transfer preserves cryptographic verification");
     info!("  4. Any tampering is immediately detectable");
-    
+
     Ok(())
 }
 

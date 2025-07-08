@@ -1,5 +1,5 @@
 //! Jepsen-style linearizability testing framework for Blixard
-//! 
+//!
 //! This framework provides comprehensive linearizability testing inspired by:
 //! - Jepsen's Elle linearizability checker
 //! - FoundationDB's simulation testing
@@ -23,7 +23,11 @@ pub use history::{History, HistoryEntry, HistoryRecorder, Operation, Response};
 /// Re-export commonly used types
 pub mod prelude {
     pub use super::{
-        History, HistoryEntry, HistoryRecorder, Operation, Response,
+        History,
+        HistoryEntry,
+        HistoryRecorder,
+        Operation,
+        Response,
         // LinearizabilityChecker, CheckResult, ViolationType,
         // WorkloadGenerator, WorkloadConfig, OperationMix,
         // FailureInjector, FailureScenario,

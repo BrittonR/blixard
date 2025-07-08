@@ -16,44 +16,45 @@
       let
         overlays = [ rust-overlay.overlays.default ];
         pkgs = import nixpkgs { inherit system overlays; };
-        
+
         rust = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "rust-src" "rust-analyzer" ];
         };
-        
+
         inputs = with pkgs; [
           # Rust toolchain
           rust
           cargo-nextest
           cargo-watch
           cargo-edit
-          
+
           # Build dependencies
           pkg-config
           openssl.dev
           protobuf
-          
+
           # System dependencies
           systemd.dev
-          
+
           # Storage
           rocksdb
-          
+
           # Networking
           tailscale
-          
+
           # Development tools
           rust-analyzer
           ripgrep
           fd
-          
+
           # Testing
           microvm.packages.${system}.microvm
         ];
-      in {
+      in
+      {
         devShell = pkgs.mkShell {
           packages = inputs;
-          
+
           shellHook = ''
             echo "Blixard Development Environment"
             echo "================================"
@@ -112,31 +113,31 @@
               echo "Cluster started. Use 'pkill blixard' to stop."
             }
           '';
-          
+
           RUST_LOG = "blixard=debug,raft=info";
           RUST_BACKTRACE = "1";
         };
-        
+
         defaultPackage = pkgs.rustPlatform.buildRustPackage {
           pname = "blixard";
           version = "0.1.0";
-          
+
           src = ./.;
-          
+
           cargoLock = {
             lockFile = ./Cargo.lock;
           };
-          
+
           nativeBuildInputs = with pkgs; [
             pkg-config
             protobuf
           ];
-          
+
           buildInputs = with pkgs; [
             openssl
             systemd
           ];
-          
+
           # Tests require microvm.nix
           doCheck = false;
         };

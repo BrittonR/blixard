@@ -6,13 +6,13 @@
 use blixard_core::{
     error::BlixardResult,
     node::Node,
-    types::{NodeConfig, VmConfig, VmCommand},
-    vm_backend::VmBackendRegistry,
     transport::config::TransportConfig,
+    types::{NodeConfig, VmCommand, VmConfig},
+    vm_backend::VmBackendRegistry,
 };
 use std::path::PathBuf;
-use tracing::{info, error};
 use tempfile::TempDir;
+use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> BlixardResult<()> {
@@ -32,7 +32,7 @@ async fn main() -> BlixardResult<()> {
     info!("\n2. Starting Blixard node with P2P support...");
     let temp_dir = TempDir::new()?;
     let mut node = create_node_with_p2p(temp_dir.path()).await?;
-    
+
     // Step 3: Import the Nix image to P2P store
     info!("\n3. Importing Nix image to P2P store...");
     let image_id = import_nix_image(&node, &system_path, Some(&kernel_path)).await?;
@@ -41,16 +41,18 @@ async fn main() -> BlixardResult<()> {
     // Step 4: Create a VM configuration using the Nix image
     info!("\n4. Creating VM from Nix image...");
     let vm_config = create_vm_config_from_nix(image_id);
-    
+
     // Submit VM creation command
-    node.send_vm_command(VmCommand::Create(vm_config.clone())).await?;
+    node.send_vm_command(VmCommand::Create(vm_config.clone()))
+        .await?;
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-    
+
     // Step 5: Start the VM
     info!("\n5. Starting VM...");
-    node.send_vm_command(VmCommand::Start(vm_config.name.clone())).await?;
+    node.send_vm_command(VmCommand::Start(vm_config.name.clone()))
+        .await?;
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-    
+
     // Check VM status
     if let Ok(Some((config, status))) = node.get_vm_status(&vm_config.name).await {
         info!("VM Status: {:?}", status);
@@ -69,10 +71,12 @@ async fn main() -> BlixardResult<()> {
 
     // Cleanup
     info!("\n8. Cleaning up...");
-    node.send_vm_command(VmCommand::Stop(vm_config.name.clone())).await?;
+    node.send_vm_command(VmCommand::Stop(vm_config.name.clone()))
+        .await?;
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-    node.send_vm_command(VmCommand::Delete(vm_config.name)).await?;
-    
+    node.send_vm_command(VmCommand::Delete(vm_config.name))
+        .await?;
+
     node.stop().await?;
     info!("\n✅ Demo completed successfully!");
 
@@ -84,18 +88,18 @@ async fn build_nix_microvm() -> BlixardResult<(PathBuf, PathBuf)> {
     // In a real scenario, this would run:
     // nix build .#nixosConfigurations.my-microvm.config.system.build.toplevel
     // nix build .#nixosConfigurations.my-microvm.config.boot.kernelPackages.kernel
-    
+
     let temp_dir = TempDir::new()?;
     let system_path = temp_dir.path().join("system");
     let kernel_path = temp_dir.path().join("kernel");
-    
+
     // Create dummy files for demo
     tokio::fs::write(&system_path, include_bytes!("../../README.md")).await?;
     tokio::fs::write(&kernel_path, b"dummy kernel image").await?;
-    
+
     // Keep temp dir alive
     std::mem::forget(temp_dir);
-    
+
     Ok((system_path, kernel_path))
 }
 
@@ -112,12 +116,12 @@ async fn create_node_with_p2p(data_dir: &std::path::Path) -> BlixardResult<Node>
     };
 
     let mut node = Node::new(config);
-    
+
     // Register VM backend (in production, microvm.nix backend would be registered)
     let registry = VmBackendRegistry::default();
     node.initialize_with_vm_registry(registry).await?;
     node.start().await?;
-    
+
     Ok(node)
 }
 
@@ -128,30 +132,30 @@ async fn import_nix_image(
     kernel_path: Option<&PathBuf>,
 ) -> BlixardResult<String> {
     use blixard_core::transport::services::nix_vm_image::NixVmImageServiceImpl;
-    
+
     // Get the shared node state
     let shared = node.shared();
-    
+
     // Create image service
     let service = NixVmImageServiceImpl::new(shared).await?;
-    
+
     // Import the microVM
     let mut metadata = std::collections::HashMap::new();
     metadata.insert("build_host".to_string(), "local".to_string());
     metadata.insert("nixpkgs_rev".to_string(), "nixos-23.11".to_string());
-    
-    let response = service.import_microvm(
-        "demo-microvm",
-        system_path,
-        kernel_path,
-        metadata,
-    ).await?;
-    
+
+    let response = service
+        .import_microvm("demo-microvm", system_path, kernel_path, metadata)
+        .await?;
+
     info!("Import stats:");
     info!("  Size: {} MB", response.total_size as f64 / 1_048_576.0);
     info!("  Chunks: {}", response.chunk_count);
-    info!("  Deduplication: {:.1}%", response.deduplication_ratio * 100.0);
-    
+    info!(
+        "  Deduplication: {:.1}%",
+        response.deduplication_ratio * 100.0
+    );
+
     Ok(response.image_id)
 }
 
@@ -180,46 +184,56 @@ fn create_vm_config_from_nix(image_id: String) -> VmConfig {
 /// Simulate P2P transfer to another node
 async fn simulate_p2p_transfer(node: &Node, image_id: &str) -> BlixardResult<()> {
     use blixard_core::transport::services::nix_vm_image::NixVmImageServiceImpl;
-    
+
     // In a real scenario, this would:
     // 1. Connect to target node via Iroh
     // 2. Check which chunks the target already has
     // 3. Transfer only missing chunks
     // 4. Reassemble image on target
-    
+
     let shared = node.shared();
     let service = NixVmImageServiceImpl::new(shared).await?;
-    
+
     // Simulate download
-    match service.download_image(image_id, Some(&PathBuf::from("/tmp/vm-images"))).await {
+    match service
+        .download_image(image_id, Some(&PathBuf::from("/tmp/vm-images")))
+        .await
+    {
         Ok((path, stats)) => {
             info!("Transfer completed:");
             info!("  Local path: {:?}", path);
-            info!("  Transferred: {} MB", stats.bytes_transferred as f64 / 1_048_576.0);
-            info!("  Deduplicated: {} MB ({:.1}% saved)", 
-                  stats.bytes_deduplicated as f64 / 1_048_576.0,
-                  (stats.bytes_deduplicated as f64 / (stats.bytes_transferred + stats.bytes_deduplicated) as f64) * 100.0);
+            info!(
+                "  Transferred: {} MB",
+                stats.bytes_transferred as f64 / 1_048_576.0
+            );
+            info!(
+                "  Deduplicated: {} MB ({:.1}% saved)",
+                stats.bytes_deduplicated as f64 / 1_048_576.0,
+                (stats.bytes_deduplicated as f64
+                    / (stats.bytes_transferred + stats.bytes_deduplicated) as f64)
+                    * 100.0
+            );
             info!("  Duration: {:?}", stats.duration);
         }
         Err(e) => {
             info!("Transfer simulation failed (expected): {}", e);
         }
     }
-    
+
     Ok(())
 }
 
 /// Pre-fetch image for upcoming migration
 async fn prefetch_for_migration(node: &Node, vm_name: &str) -> BlixardResult<()> {
     use blixard_core::transport::services::nix_vm_image::NixVmImageServiceImpl;
-    
+
     let shared = node.shared();
     let service = NixVmImageServiceImpl::new(shared).await?;
-    
+
     // Target node 2 for migration
     service.prefetch_for_migration(vm_name, 2).await?;
     info!("Pre-fetch initiated for migration of {} to node 2", vm_name);
-    
+
     Ok(())
 }
 

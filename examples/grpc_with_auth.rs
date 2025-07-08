@@ -2,12 +2,9 @@
 
 use blixard_core::{
     error::BlixardResult,
-    proto::{
-        cluster_service_client::ClusterServiceClient,
-        ListVmsRequest, CreateVmRequest,
-    },
+    proto::{cluster_service_client::ClusterServiceClient, CreateVmRequest, ListVmsRequest},
 };
-use tonic::{Request, metadata::MetadataValue};
+use tonic::{metadata::MetadataValue, Request};
 
 #[tokio::main]
 async fn main() -> BlixardResult<()> {
@@ -18,7 +15,8 @@ async fn main() -> BlixardResult<()> {
 
     // Connect to the gRPC server
     let addr = "http://127.0.0.1:7001";
-    let mut client = ClusterServiceClient::connect(addr).await
+    let mut client = ClusterServiceClient::connect(addr)
+        .await
         .expect("Failed to connect to gRPC server");
 
     println!("Connected to Blixard gRPC server at {}", addr);
@@ -46,7 +44,7 @@ async fn main() -> BlixardResult<()> {
         "authorization",
         MetadataValue::try_from("Bearer my-api-token-123").unwrap(),
     );
-    
+
     match client.list_vms(request_with_auth).await {
         Ok(response) => {
             let vms = response.into_inner().vms;
@@ -65,7 +63,7 @@ async fn main() -> BlixardResult<()> {
         vcpus: 2,
         memory_mb: 1024,
     });
-    
+
     // Set both authentication and tenant ID
     request_with_tenant.metadata_mut().insert(
         "authorization",
@@ -75,7 +73,7 @@ async fn main() -> BlixardResult<()> {
         "tenant-id",
         MetadataValue::try_from("customer-123").unwrap(),
     );
-    
+
     match client.create_vm(request_with_tenant).await {
         Ok(response) => {
             let resp = response.into_inner();
@@ -106,7 +104,7 @@ async fn main() -> BlixardResult<()> {
                 }
             }
         }
-        
+
         // Small delay between requests
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }

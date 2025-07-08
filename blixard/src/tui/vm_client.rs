@@ -1,10 +1,12 @@
-use crate::{BlixardResult, client::UnifiedClient};
-use super::app::{VmInfo, PlacementStrategy, ClusterInfo, ClusterResourceInfo, NodeResourceInfo, ClusterNodeInfo};
+use super::app::{
+    ClusterInfo, ClusterNodeInfo, ClusterResourceInfo, NodeResourceInfo, PlacementStrategy, VmInfo,
+};
+use crate::{client::UnifiedClient, BlixardResult};
 use blixard_core::{
     iroh_types::{
-        CreateVmRequest, CreateVmWithSchedulingRequest, StartVmRequest, StopVmRequest, DeleteVmRequest, 
-        GetVmStatusRequest, ListVmsRequest, ClusterStatusRequest, ClusterResourceSummaryRequest,
-        ScheduleVmPlacementRequest,
+        ClusterResourceSummaryRequest, ClusterStatusRequest, CreateVmRequest,
+        CreateVmWithSchedulingRequest, DeleteVmRequest, GetVmStatusRequest, ListVmsRequest,
+        ScheduleVmPlacementRequest, StartVmRequest, StopVmRequest,
     },
     types::VmStatus,
 };
@@ -38,7 +40,6 @@ impl Default for RetryConfig {
     }
 }
 
-
 /// VM client for TUI operations with retry support
 pub struct VmClient {
     client: UnifiedClient,
@@ -49,7 +50,7 @@ impl VmClient {
     pub async fn new(addr: &str) -> BlixardResult<Self> {
         Self::new_with_config(addr, RetryConfig::default()).await
     }
-    
+
     pub async fn new_with_config(addr: &str, retry_config: RetryConfig) -> BlixardResult<Self> {
         // Try to connect with retries
         let client = Self::retry_operation(
@@ -62,11 +63,15 @@ impl VmClient {
             },
             &retry_config,
             "connect",
-        ).await?;
+        )
+        .await?;
 
-        Ok(Self { client, retry_config })
+        Ok(Self {
+            client,
+            retry_config,
+        })
     }
-    
+
     /// Execute an operation with retry logic
     async fn retry_operation<F, Fut, T>(
         operation: F,
@@ -79,10 +84,10 @@ impl VmClient {
     {
         let mut attempt = 0;
         let mut delay = config.initial_delay;
-        
+
         loop {
             attempt += 1;
-            
+
             match tokio::time::timeout(config.request_timeout, operation()).await {
                 Ok(Ok(result)) => return Ok(result),
                 Ok(Err(e)) if attempt >= config.max_attempts => return Err(e),
@@ -99,8 +104,7 @@ impl VmClient {
                     return Err(crate::BlixardError::Internal {
                         message: format!(
                             "Operation '{}' timed out after {} attempts",
-                            operation_name,
-                            config.max_attempts
+                            operation_name, config.max_attempts
                         ),
                     });
                 }
@@ -113,7 +117,7 @@ impl VmClient {
                     );
                 }
             }
-            
+
             // Wait before retry with exponential backoff
             sleep(delay).await;
             delay = std::cmp::min(
@@ -125,21 +129,24 @@ impl VmClient {
 
     pub async fn list_vms(&mut self) -> BlixardResult<Vec<VmInfo>> {
         let request = ListVmsRequest {};
-        let resp = self.client.list_vms(request).await
-            .map_err(|e| crate::BlixardError::Internal {
-                message: format!("Failed to list VMs: {}", e),
-            })?;
+        let resp =
+            self.client
+                .list_vms(request)
+                .await
+                .map_err(|e| crate::BlixardError::Internal {
+                    message: format!("Failed to list VMs: {}", e),
+                })?;
         let mut vms = Vec::new();
 
         for vm in resp.vms {
             let status = match vm.state {
-                0 => VmStatus::Stopped,    // VM_STATE_UNKNOWN -> Stopped
-                1 => VmStatus::Creating,   // VM_STATE_CREATED -> Creating  
-                2 => VmStatus::Starting,   // VM_STATE_STARTING -> Starting
-                3 => VmStatus::Running,    // VM_STATE_RUNNING -> Running
-                4 => VmStatus::Stopping,   // VM_STATE_STOPPING -> Stopping
-                5 => VmStatus::Stopped,    // VM_STATE_STOPPED -> Stopped
-                6 => VmStatus::Failed,     // VM_STATE_FAILED -> Failed
+                0 => VmStatus::Stopped,  // VM_STATE_UNKNOWN -> Stopped
+                1 => VmStatus::Creating, // VM_STATE_CREATED -> Creating
+                2 => VmStatus::Starting, // VM_STATE_STARTING -> Starting
+                3 => VmStatus::Running,  // VM_STATE_RUNNING -> Running
+                4 => VmStatus::Stopping, // VM_STATE_STOPPING -> Stopping
+                5 => VmStatus::Stopped,  // VM_STATE_STOPPED -> Stopped
+                6 => VmStatus::Failed,   // VM_STATE_FAILED -> Failed
                 _ => VmStatus::Failed,
             };
 
@@ -149,13 +156,17 @@ impl VmClient {
                 vcpus: vm.vcpus,
                 memory: vm.memory_mb,
                 node_id: vm.node_id,
-                ip_address: if vm.ip_address.is_empty() { None } else { Some(vm.ip_address) },
-                uptime: None, // TODO: Get from VM status
-                cpu_usage: None, // TODO: Get from VM metrics
-                memory_usage: None, // TODO: Get from VM metrics
+                ip_address: if vm.ip_address.is_empty() {
+                    None
+                } else {
+                    Some(vm.ip_address)
+                },
+                uptime: None,             // TODO: Get from VM status
+                cpu_usage: None,          // TODO: Get from VM metrics
+                memory_usage: None,       // TODO: Get from VM metrics
                 placement_strategy: None, // TODO: Add to proto
-                created_at: None, // TODO: Add to proto
-                config_path: None, // TODO: Add to proto
+                created_at: None,         // TODO: Add to proto
+                config_path: None,        // TODO: Add to proto
             });
         }
 
@@ -170,10 +181,13 @@ impl VmClient {
             memory_mb: memory,
         };
 
-        let resp = self.client.create_vm(request).await
-            .map_err(|e| crate::BlixardError::Internal {
-                message: format!("Failed to create VM: {}", e),
-            })?;
+        let resp =
+            self.client
+                .create_vm(request)
+                .await
+                .map_err(|e| crate::BlixardError::Internal {
+                    message: format!("Failed to create VM: {}", e),
+                })?;
 
         if !resp.success {
             return Err(crate::BlixardError::Internal {
@@ -189,10 +203,13 @@ impl VmClient {
             name: name.to_string(),
         };
 
-        let resp = self.client.start_vm(request).await
-            .map_err(|e| crate::BlixardError::Internal {
-                message: format!("Failed to start VM: {}", e),
-            })?;
+        let resp =
+            self.client
+                .start_vm(request)
+                .await
+                .map_err(|e| crate::BlixardError::Internal {
+                    message: format!("Failed to start VM: {}", e),
+                })?;
 
         if !resp.success {
             return Err(crate::BlixardError::Internal {
@@ -208,10 +225,13 @@ impl VmClient {
             name: name.to_string(),
         };
 
-        let resp = self.client.stop_vm(request).await
-            .map_err(|e| crate::BlixardError::Internal {
-                message: format!("Failed to stop VM: {}", e),
-            })?;
+        let resp =
+            self.client
+                .stop_vm(request)
+                .await
+                .map_err(|e| crate::BlixardError::Internal {
+                    message: format!("Failed to stop VM: {}", e),
+                })?;
 
         if !resp.success {
             return Err(crate::BlixardError::Internal {
@@ -227,10 +247,13 @@ impl VmClient {
             name: name.to_string(),
         };
 
-        let resp = self.client.delete_vm(request).await
-            .map_err(|e| crate::BlixardError::Internal {
-                message: format!("Failed to delete VM: {}", e),
-            })?;
+        let resp =
+            self.client
+                .delete_vm(request)
+                .await
+                .map_err(|e| crate::BlixardError::Internal {
+                    message: format!("Failed to delete VM: {}", e),
+                })?;
 
         if !resp.success {
             return Err(crate::BlixardError::Internal {
@@ -247,10 +270,11 @@ impl VmClient {
             name: name.to_string(),
         };
 
-        let resp = self.client.get_vm_status(request).await
-            .map_err(|e| crate::BlixardError::Internal {
+        let resp = self.client.get_vm_status(request).await.map_err(|e| {
+            crate::BlixardError::Internal {
                 message: format!("Failed to get VM status: {}", e),
-            })?;
+            }
+        })?;
 
         if !resp.found {
             return Ok(None);
@@ -258,13 +282,13 @@ impl VmClient {
 
         let vm = resp.vm_info.unwrap();
         let status = match vm.state {
-            0 => VmStatus::Stopped,    // VM_STATE_UNKNOWN -> Stopped
-            1 => VmStatus::Creating,   // VM_STATE_CREATED -> Creating
-            2 => VmStatus::Starting,   // VM_STATE_STARTING -> Starting
-            3 => VmStatus::Running,    // VM_STATE_RUNNING -> Running
-            4 => VmStatus::Stopping,   // VM_STATE_STOPPING -> Stopping
-            5 => VmStatus::Stopped,    // VM_STATE_STOPPED -> Stopped
-            6 => VmStatus::Failed,     // VM_STATE_FAILED -> Failed
+            0 => VmStatus::Stopped,  // VM_STATE_UNKNOWN -> Stopped
+            1 => VmStatus::Creating, // VM_STATE_CREATED -> Creating
+            2 => VmStatus::Starting, // VM_STATE_STARTING -> Starting
+            3 => VmStatus::Running,  // VM_STATE_RUNNING -> Running
+            4 => VmStatus::Stopping, // VM_STATE_STOPPING -> Stopping
+            5 => VmStatus::Stopped,  // VM_STATE_STOPPED -> Stopped
+            6 => VmStatus::Failed,   // VM_STATE_FAILED -> Failed
             _ => VmStatus::Failed,
         };
 
@@ -274,31 +298,37 @@ impl VmClient {
             vcpus: vm.vcpus,
             memory: vm.memory_mb,
             node_id: vm.node_id,
-            ip_address: if vm.ip_address.is_empty() { None } else { Some(vm.ip_address) },
-            uptime: None, // TODO: Get from VM status
-            cpu_usage: None, // TODO: Get from VM metrics
-            memory_usage: None, // TODO: Get from VM metrics
+            ip_address: if vm.ip_address.is_empty() {
+                None
+            } else {
+                Some(vm.ip_address)
+            },
+            uptime: None,             // TODO: Get from VM status
+            cpu_usage: None,          // TODO: Get from VM metrics
+            memory_usage: None,       // TODO: Get from VM metrics
             placement_strategy: None, // TODO: Add to proto
-            created_at: None, // TODO: Add to proto
-            config_path: None, // TODO: Add to proto
+            created_at: None,         // TODO: Add to proto
+            config_path: None,        // TODO: Add to proto
         }))
     }
 
     pub async fn get_cluster_status(&mut self) -> BlixardResult<ClusterInfo> {
         let request = ClusterStatusRequest {};
-        
-        let status = self.client.get_cluster_status(request).await
-            .map_err(|e| crate::BlixardError::Internal {
+
+        let status = self.client.get_cluster_status(request).await.map_err(|e| {
+            crate::BlixardError::Internal {
                 message: format!("Failed to get cluster status: {}", e),
-            })?;
-        
+            }
+        })?;
+
         // Map all nodes with detailed info
-        let nodes: Vec<ClusterNodeInfo> = status.nodes
+        let nodes: Vec<ClusterNodeInfo> = status
+            .nodes
             .iter()
             .map(|node| {
                 let state_name = match node.state {
                     0 => "Unknown",
-                    1 => "Follower", 
+                    1 => "Follower",
                     2 => "Candidate",
                     3 => "Leader",
                     _ => "Invalid",
@@ -311,14 +341,14 @@ impl VmClient {
                 }
             })
             .collect();
-        
+
         // Find current node info
         let (current_node_id, current_node_state) = nodes
             .iter()
             .find(|node| node.id == status.leader_id || status.nodes.len() == 1)
             .map(|node| (node.id, node.state.clone()))
             .unwrap_or((0, "Unknown".to_string()));
-        
+
         Ok(ClusterInfo {
             leader_id: status.leader_id,
             term: status.term,
@@ -328,23 +358,23 @@ impl VmClient {
             nodes,
         })
     }
-    
+
     /// Create VM with intelligent scheduling
     #[allow(dead_code)]
     pub async fn create_vm_with_scheduling(
-        &mut self, 
-        name: &str, 
-        vcpus: u32, 
-        memory: u32, 
-        placement_strategy: PlacementStrategy
+        &mut self,
+        name: &str,
+        vcpus: u32,
+        memory: u32,
+        placement_strategy: PlacementStrategy,
     ) -> BlixardResult<(u64, String)> {
         let strategy_proto = match placement_strategy {
             PlacementStrategy::MostAvailable => 0, // PLACEMENT_STRATEGY_MOST_AVAILABLE
             PlacementStrategy::LeastAvailable => 1, // PLACEMENT_STRATEGY_LEAST_AVAILABLE
-            PlacementStrategy::RoundRobin => 2, // PLACEMENT_STRATEGY_ROUND_ROBIN
-            PlacementStrategy::Manual => 3, // PLACEMENT_STRATEGY_MANUAL
+            PlacementStrategy::RoundRobin => 2,    // PLACEMENT_STRATEGY_ROUND_ROBIN
+            PlacementStrategy::Manual => 3,        // PLACEMENT_STRATEGY_MANUAL
         };
-        
+
         let request = CreateVmWithSchedulingRequest {
             name: name.to_string(),
             config_path: String::new(),
@@ -353,7 +383,10 @@ impl VmClient {
             strategy: strategy_proto,
         };
 
-        let resp = self.client.create_vm_with_scheduling(request).await
+        let resp = self
+            .client
+            .create_vm_with_scheduling(request)
+            .await
             .map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to create VM with scheduling: {}", e),
             })?;
@@ -366,28 +399,32 @@ impl VmClient {
 
         Ok((resp.selected_node_id, resp.placement_reason))
     }
-    
+
     /// Get cluster resource summary
     #[allow(dead_code)]
     pub async fn get_cluster_resources(&mut self) -> BlixardResult<ClusterResourceInfo> {
         let request = ClusterResourceSummaryRequest {};
-        
-        let resp = self.client.get_cluster_resource_summary(request).await
+
+        let resp = self
+            .client
+            .get_cluster_resource_summary(request)
+            .await
             .map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to get cluster resources: {}", e),
             })?;
-            
+
         if !resp.success {
             return Err(crate::BlixardError::Internal {
                 message: format!("Failed to get cluster resources: {}", resp.message),
             });
         }
-        
+
         let summary = resp.summary.ok_or_else(|| crate::BlixardError::Internal {
             message: "No cluster resource summary in response".to_string(),
         })?;
-        
-        let nodes = summary.nodes
+
+        let nodes = summary
+            .nodes
             .into_iter()
             .map(|node| {
                 let capabilities = node.capabilities.unwrap_or_default();
@@ -404,7 +441,7 @@ impl VmClient {
                 }
             })
             .collect();
-        
+
         Ok(ClusterResourceInfo {
             total_nodes: summary.total_nodes,
             total_vcpus: summary.total_vcpus,
@@ -417,7 +454,7 @@ impl VmClient {
             nodes,
         })
     }
-    
+
     /// Schedule VM placement (dry run)
     #[allow(dead_code)]
     pub async fn schedule_vm_placement(
@@ -433,7 +470,7 @@ impl VmClient {
             PlacementStrategy::RoundRobin => 2,
             PlacementStrategy::Manual => 3,
         };
-        
+
         let request = ScheduleVmPlacementRequest {
             name: name.to_string(),
             config_path: String::new(),
@@ -441,72 +478,89 @@ impl VmClient {
             memory_mb: memory,
             strategy: strategy_proto,
         };
-        
-        let resp = self.client.schedule_vm_placement(request).await
+
+        let resp = self
+            .client
+            .schedule_vm_placement(request)
+            .await
             .map_err(|e| crate::BlixardError::Internal {
                 message: format!("Failed to schedule VM placement: {}", e),
             })?;
-            
+
         if !resp.success {
             return Err(crate::BlixardError::Internal {
                 message: format!("VM placement scheduling failed: {}", resp.message),
             });
         }
-        
-        Ok((resp.selected_node_id, resp.placement_reason, resp.alternative_nodes))
+
+        Ok((
+            resp.selected_node_id,
+            resp.placement_reason,
+            resp.alternative_nodes,
+        ))
     }
-    
+
     /// Join a node to the cluster
-    pub async fn join_cluster(&mut self, node_id: u64, bind_address: &str) -> BlixardResult<String> {
+    pub async fn join_cluster(
+        &mut self,
+        node_id: u64,
+        bind_address: &str,
+    ) -> BlixardResult<String> {
         use blixard_core::iroh_types::JoinRequest;
-        
+
         let request = JoinRequest {
             node_id,
             bind_address: bind_address.to_string(),
             p2p_node_addr: None,
         };
-        
-        let resp = self.client.join_cluster(request).await
-            .map_err(|e| crate::BlixardError::Internal {
-                message: format!("Failed to join cluster: {}", e),
-            })?;
-            
+
+        let resp =
+            self.client
+                .join_cluster(request)
+                .await
+                .map_err(|e| crate::BlixardError::Internal {
+                    message: format!("Failed to join cluster: {}", e),
+                })?;
+
         if !resp.success {
             return Err(crate::BlixardError::Internal {
                 message: format!("Join cluster failed: {}", resp.message),
             });
         }
-        
+
         Ok(resp.message)
     }
-    
+
     /// Migrate a VM to another node
     pub async fn migrate_vm(
-        &mut self, 
-        vm_name: &str, 
-        target_node_id: u64, 
-        live_migration: bool
+        &mut self,
+        vm_name: &str,
+        target_node_id: u64,
+        live_migration: bool,
     ) -> BlixardResult<(u64, u64, String)> {
         use blixard_core::iroh_types::MigrateVmRequest;
-        
+
         let request = MigrateVmRequest {
             vm_name: vm_name.to_string(),
             target_node_id,
             live_migration,
             force: false,
         };
-        
-        let resp = self.client.migrate_vm(request).await
-            .map_err(|e| crate::BlixardError::Internal {
-                message: format!("Failed to migrate VM: {}", e),
-            })?;
-        
+
+        let resp =
+            self.client
+                .migrate_vm(request)
+                .await
+                .map_err(|e| crate::BlixardError::Internal {
+                    message: format!("Failed to migrate VM: {}", e),
+                })?;
+
         if !resp.success {
             return Err(crate::BlixardError::Internal {
                 message: format!("VM migration failed: {}", resp.message),
             });
         }
-        
+
         Ok((resp.source_node_id, resp.target_node_id, resp.message))
     }
 }

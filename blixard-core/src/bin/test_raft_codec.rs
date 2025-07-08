@@ -1,14 +1,14 @@
 //! Standalone test for Raft message codec
-//! 
+//!
 //! This binary tests that Raft messages can be serialized and deserialized
 //! correctly, which is critical for Raft consensus over Iroh transport.
 
-use raft::prelude::*;
 use protobuf::Message as ProtobufMessage;
+use raft::prelude::*;
 
 fn main() {
     println!("Testing Raft message serialization for Iroh transport...\n");
-    
+
     // Test 1: Heartbeat message
     {
         println!("Test 1: Heartbeat message");
@@ -17,12 +17,12 @@ fn main() {
         msg.from = 1;
         msg.to = 2;
         msg.term = 5;
-        
+
         // Serialize using protobuf (required by raft-rs)
         match msg.write_to_bytes() {
             Ok(bytes) => {
                 println!("  ✅ Serialized: {} bytes", bytes.len());
-                
+
                 // Deserialize
                 let mut deserialized = Message::new();
                 match deserialized.merge_from_bytes(&bytes) {
@@ -44,7 +44,7 @@ fn main() {
             }
         }
     }
-    
+
     // Test 2: Vote request
     {
         println!("\nTest 2: Vote request");
@@ -55,11 +55,11 @@ fn main() {
         msg.term = 10;
         msg.log_term = 8;
         msg.index = 100;
-        
+
         match msg.write_to_bytes() {
             Ok(bytes) => {
                 println!("  ✅ Serialized: {} bytes", bytes.len());
-                
+
                 let mut deserialized = Message::new();
                 match deserialized.merge_from_bytes(&bytes) {
                     Ok(_) => {
@@ -82,7 +82,7 @@ fn main() {
             }
         }
     }
-    
+
     // Test 3: Append entries with data
     {
         println!("\nTest 3: Append entries with log data");
@@ -94,7 +94,7 @@ fn main() {
         msg.log_term = 6;
         msg.index = 50;
         msg.commit = 45;
-        
+
         // Add an entry with data
         let mut entry = Entry::default();
         entry.term = 7;
@@ -102,11 +102,11 @@ fn main() {
         entry.entry_type = EntryType::EntryNormal as i32;
         entry.data = b"test raft data".to_vec();
         msg.entries.push(entry);
-        
+
         match msg.write_to_bytes() {
             Ok(bytes) => {
                 println!("  ✅ Serialized: {} bytes", bytes.len());
-                
+
                 let mut deserialized = Message::new();
                 match deserialized.merge_from_bytes(&bytes) {
                     Ok(_) => {
@@ -125,7 +125,7 @@ fn main() {
             }
         }
     }
-    
+
     println!("\n🎉 Summary:");
     println!("  - Raft messages use protobuf serialization (required by raft-rs)");
     println!("  - All message types serialize/deserialize correctly");

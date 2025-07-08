@@ -12,20 +12,22 @@ use std::sync::Arc;
 static CONFIG: OnceCell<Arc<Config>> = OnceCell::new();
 
 /// Initialize the global configuration
-/// 
+///
 /// This should be called once at startup with the loaded configuration.
 /// If called multiple times, subsequent calls will return an error.
 pub fn init(config: Config) -> BlixardResult<()> {
-    CONFIG.set(Arc::new(config))
+    CONFIG
+        .set(Arc::new(config))
         .map_err(|_| BlixardError::ConfigError("Configuration already initialized".to_string()))
 }
 
 /// Get the global configuration instance
-/// 
+///
 /// # Panics
 /// Panics if configuration has not been initialized via `init()`.
 pub fn get() -> Arc<Config> {
-    CONFIG.get()
+    CONFIG
+        .get()
         .expect("Configuration not initialized. Call config_global::init() first")
         .clone()
 }
@@ -43,7 +45,7 @@ pub fn try_get() -> Option<Arc<Config>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_config_not_initialized() {
         // In tests, we can't guarantee CONFIG is uninitialized

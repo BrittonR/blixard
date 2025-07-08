@@ -15,18 +15,18 @@ impl Instant {
     pub fn from_micros(micros: u64) -> Self {
         Self(micros)
     }
-    
+
     /// Get microseconds value
     pub fn as_micros(&self) -> u64 {
         self.0
     }
-    
+
     /// Duration since another instant
     pub fn duration_since(&self, earlier: Instant) -> Duration {
         let micros = self.0.saturating_sub(earlier.0);
         Duration::from_micros(micros)
     }
-    
+
     /// Time elapsed since this instant
     pub fn elapsed(&self, now: Instant) -> Duration {
         now.duration_since(*self)
@@ -38,10 +38,10 @@ impl Instant {
 pub trait Clock: Send + Sync {
     /// Get current instant (monotonic)
     fn now(&self) -> Instant;
-    
+
     /// Get current system time
     fn system_time(&self) -> SystemTime;
-    
+
     /// Sleep for a duration
     async fn sleep(&self, duration: Duration);
 }
@@ -68,7 +68,7 @@ impl<C: Clock + ?Sized> ClockExt for C {
         let sleep_future = self.sleep(duration);
         tokio::pin!(sleep_future);
         tokio::pin!(future);
-        
+
         tokio::select! {
             result = future => Ok(result),
             _ = sleep_future => Err(()),
@@ -103,11 +103,11 @@ impl Clock for SystemClock {
         let micros = now.elapsed().as_micros() as u64;
         Instant::from_micros(micros)
     }
-    
+
     fn system_time(&self) -> SystemTime {
         SystemTime::now()
     }
-    
+
     async fn sleep(&self, duration: Duration) {
         tokio::time::sleep(duration).await;
     }
@@ -116,7 +116,7 @@ impl Clock for SystemClock {
 // Mock implementation for testing
 
 use std::sync::Arc;
-use tokio::sync::{RwLock, Notify};
+use tokio::sync::{Notify, RwLock};
 
 /// Mock clock for deterministic testing
 #[derive(Clone)]
@@ -135,7 +135,7 @@ impl MockClock {
             time_advanced: Arc::new(Notify::new()),
         }
     }
-    
+
     /// Create with specific starting time
     pub fn with_time(micros: u64) -> Self {
         Self {
@@ -143,20 +143,20 @@ impl MockClock {
             time_advanced: Arc::new(Notify::new()),
         }
     }
-    
+
     /// Advance time by duration
     pub async fn advance(&self, duration: Duration) {
         let micros = duration.as_micros() as u64;
         *self.current_micros.write().await += micros;
         self.time_advanced.notify_waiters();
     }
-    
+
     /// Set absolute time
     pub async fn set_time(&self, micros: u64) {
         *self.current_micros.write().await = micros;
         self.time_advanced.notify_waiters();
     }
-    
+
     /// Get current mock time
     pub async fn current_time(&self) -> u64 {
         *self.current_micros.read().await
@@ -173,42 +173,38 @@ impl Default for MockClock {
 impl Clock for MockClock {
     fn now(&self) -> Instant {
         // This is not async-safe but is the best we can do with the trait
-        let micros = futures::executor::block_on(async {
-            *self.current_micros.read().await
-        });
+        let micros = futures::executor::block_on(async { *self.current_micros.read().await });
         Instant::from_micros(micros)
     }
-    
+
     fn system_time(&self) -> SystemTime {
-        let micros = futures::executor::block_on(async {
-            *self.current_micros.read().await
-        });
+        let micros = futures::executor::block_on(async { *self.current_micros.read().await });
         UNIX_EPOCH + Duration::from_micros(micros)
     }
-    
+
     async fn sleep(&self, duration: Duration) {
         let target_micros = {
             let current = *self.current_micros.read().await;
             current + duration.as_micros() as u64
         };
-        
+
         // Wait until time advances past target
         loop {
             let current = *self.current_micros.read().await;
             if current >= target_micros {
                 break;
             }
-            
+
             // Wait for time to advance
             let notified = self.time_advanced.notified();
             tokio::pin!(notified);
-            
+
             // Check again in case time advanced while we were setting up
             let current = *self.current_micros.read().await;
             if current >= target_micros {
                 break;
             }
-            
+
             notified.await;
         }
     }
@@ -216,53 +212,49 @@ impl Clock for MockClock {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::ClockExt;
-    
+    use super::*;
+
     #[tokio::test]
     async fn test_mock_clock_sleep() {
         let clock = MockClock::new();
-        
+
         // Start sleep in background
         let clock_clone = clock.clone();
         let sleep_handle = tokio::spawn(async move {
             clock_clone.sleep(Duration::from_secs(5)).await;
         });
-        
+
         // Verify sleep doesn't complete immediately
         tokio::time::sleep(Duration::from_millis(10)).await;
         assert!(!sleep_handle.is_finished());
-        
+
         // Advance time
         clock.advance(Duration::from_secs(5)).await;
-        
+
         // Sleep should now complete
         sleep_handle.await.unwrap();
     }
-    
+
     #[tokio::test]
     async fn test_mock_clock_timeout() {
         let clock = MockClock::new();
-        
+
         // Test timeout succeeds
-        let result = clock.timeout(
-            Duration::from_secs(5),
-            async { 42 }
-        ).await;
+        let result = clock.timeout(Duration::from_secs(5), async { 42 }).await;
         assert_eq!(result, Ok(42));
-        
+
         // Test timeout fails
         let clock_clone = clock.clone();
         let handle = tokio::spawn(async move {
-            clock_clone.timeout(
-                Duration::from_secs(5),
-                std::future::pending::<()>()
-            ).await
+            clock_clone
+                .timeout(Duration::from_secs(5), std::future::pending::<()>())
+                .await
         });
-        
+
         // Advance time
         clock.advance(Duration::from_secs(6)).await;
-        
+
         // Timeout should fail
         let result = handle.await.unwrap();
         assert_eq!(result, Err(()));

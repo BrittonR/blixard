@@ -4,8 +4,8 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
-    node_shared::SharedNodeState,
     iroh_types,
+    node_shared::SharedNodeState,
     transport::{
         iroh_protocol::{deserialize_payload, serialize_payload},
         iroh_service::IrohService,
@@ -13,8 +13,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use bytes::Bytes;
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 // Wrapper types for serialization
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,32 +43,32 @@ impl IrohService for IrohHealthService {
     fn name(&self) -> &'static str {
         "health"
     }
-    
+
     fn methods(&self) -> Vec<&'static str> {
         vec!["check", "ping"]
     }
-    
+
     async fn handle_call(&self, method: &str, payload: Bytes) -> BlixardResult<Bytes> {
         match method {
             "check" => {
                 // Deserialize request
                 let _request: HealthCheckRequest = deserialize_payload(&payload)?;
-                
+
                 // Create response
                 let response = HealthCheckResponse {
                     healthy: true,
                     message: format!("Node {} is healthy", self.node.get_id()),
                 };
-                
+
                 // Serialize response
                 serialize_payload(&response)
             }
-            
+
             "ping" => {
                 // Simple ping/pong
                 Ok(Bytes::from_static(b"pong"))
             }
-            
+
             _ => Err(BlixardError::Internal {
                 message: format!("Unknown method: {}", method),
             }),
@@ -90,7 +90,7 @@ impl<'a> IrohHealthClient<'a> {
     ) -> Self {
         Self { client, node_addr }
     }
-    
+
     /// Perform health check
     pub async fn check(&self) -> BlixardResult<HealthCheckResponse> {
         let request = HealthCheckRequest {};
@@ -98,10 +98,11 @@ impl<'a> IrohHealthClient<'a> {
             .call(self.node_addr.clone(), "health", "check", request)
             .await
     }
-    
+
     /// Simple ping
     pub async fn ping(&self) -> BlixardResult<String> {
-        let response: Bytes = self.client
+        let response: Bytes = self
+            .client
             .call(self.node_addr.clone(), "health", "ping", ())
             .await?;
         Ok(String::from_utf8_lossy(&response).to_string())
@@ -112,7 +113,7 @@ impl<'a> IrohHealthClient<'a> {
 mod tests {
     use super::*;
     use crate::types::NodeConfig;
-    
+
     #[tokio::test]
     async fn test_health_service_creation() {
         let config = NodeConfig {
@@ -127,11 +128,11 @@ mod tests {
         };
         let node = Arc::new(SharedNodeState::new(config));
         let service = IrohHealthService::new(node);
-        
+
         assert_eq!(service.name(), "health");
         assert_eq!(service.methods(), vec!["check", "ping"]);
     }
-    
+
     #[tokio::test]
     async fn test_ping_method() {
         let config = NodeConfig {
@@ -146,7 +147,7 @@ mod tests {
         };
         let node = Arc::new(SharedNodeState::new(config));
         let service = IrohHealthService::new(node);
-        
+
         let result = service.handle_call("ping", Bytes::new()).await.unwrap();
         assert_eq!(&result[..], b"pong");
     }

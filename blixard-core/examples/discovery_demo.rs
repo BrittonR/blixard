@@ -1,6 +1,6 @@
 //! Example demonstrating the discovery module usage
 
-use blixard_core::discovery::{DiscoveryConfig, DiscoveryManager, DiscoveryEvent};
+use blixard_core::discovery::{DiscoveryConfig, DiscoveryEvent, DiscoveryManager};
 use iroh::NodeId;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -13,9 +13,7 @@ use tracing_subscriber;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Initialize logging
-    tracing_subscriber::fmt()
-        .with_max_level(Level::INFO)
-        .init();
+    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
     info!("Starting discovery demo");
 
@@ -25,25 +23,25 @@ async fn main() -> anyhow::Result<()> {
 
     // Configure static nodes for discovery
     let mut static_nodes = HashMap::new();
-    
+
     // Add some example static nodes
     let node2_id = NodeId::from_bytes(&[2u8; 32]).unwrap();
     let node3_id = NodeId::from_bytes(&[3u8; 32]).unwrap();
-    
+
     static_nodes.insert(
         node2_id.to_string(),
-        vec!["127.0.0.1:7001".to_string(), "192.168.1.100:7001".to_string()],
+        vec![
+            "127.0.0.1:7001".to_string(),
+            "192.168.1.100:7001".to_string(),
+        ],
     );
-    
-    static_nodes.insert(
-        node3_id.to_string(),
-        vec!["127.0.0.1:7002".to_string()],
-    );
+
+    static_nodes.insert(node3_id.to_string(), vec!["127.0.0.1:7002".to_string()]);
 
     // Create discovery configuration
     let config = DiscoveryConfig {
         enable_static: true,
-        enable_dns: false,  // DNS requires actual DNS records
+        enable_dns: false, // DNS requires actual DNS records
         enable_mdns: true,
         refresh_interval: 30,
         node_stale_timeout: 300,
@@ -69,11 +67,7 @@ async fn main() -> anyhow::Result<()> {
         while let Some(event) = event_receiver.recv().await {
             match event {
                 DiscoveryEvent::NodeDiscovered(info) => {
-                    info!(
-                        "Node discovered: {} at {:?}",
-                        info.node_id,
-                        info.addresses
-                    );
+                    info!("Node discovered: {} at {:?}", info.node_id, info.addresses);
                     if let Some(name) = &info.name {
                         info!("  Name: {}", name);
                     }
@@ -85,11 +79,7 @@ async fn main() -> anyhow::Result<()> {
                     info!("Node removed: {}", node_id);
                 }
                 DiscoveryEvent::NodeUpdated(info) => {
-                    info!(
-                        "Node updated: {} at {:?}",
-                        info.node_id,
-                        info.addresses
-                    );
+                    info!("Node updated: {} at {:?}", info.node_id, info.addresses);
                 }
             }
         }
