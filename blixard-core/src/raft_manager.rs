@@ -2042,39 +2042,38 @@ impl RaftManager {
                                             } else {
                                                 info!(self.logger, "[RAFT-CONF] Peer already exists in SharedNodeState"; "node_id" => cc.node_id);
                                             }
+                                            
+                                            // CRITICAL FIX: Ensure all existing peers know about each other
+                                            // When a new node joins, we need to share peer information
+                                            if self.node_id == 1 || node.raft.state == raft::StateRole::Leader {
+                                                // If we're the leader or bootstrap node, we should have all peer info
+                                                let all_peers = shared.get_peers().await;
+                                                info!(self.logger, "[RAFT-CONF] Ensuring peer information consistency";
+                                                    "total_peers" => all_peers.len(),
+                                                    "new_node" => cc.node_id
+                                                );
                                                 
-                                                // CRITICAL FIX: Ensure all existing peers know about each other
-                                                // When a new node joins, we need to share peer information
-                                                if self.node_id == 1 || node.raft.state == raft::StateRole::Leader {
-                                                    // If we're the leader or bootstrap node, we should have all peer info
-                                                    let all_peers = shared.get_peers().await;
-                                                    info!(self.logger, "[RAFT-CONF] Ensuring peer information consistency";
-                                                        "total_peers" => all_peers.len(),
-                                                        "new_node" => cc.node_id
-                                                    );
-                                                    
-                                                    // Make sure all peers are in our local list and SharedNodeState
-                                                    for peer in all_peers {
-                                                        if peer.id != self.node_id && peer.id != cc.node_id {
-                                                            // This peer should also know about the new node
-                                                            // The peer will learn about it when processing this same log entry
-                                                            info!(self.logger, "[RAFT-CONF] Peer {} will learn about new node {} from log",
-                                                                peer.id, cc.node_id);
-                                                        }
-                                                    }
-                                                }
-                                                
-                                                // Proactively connect to the new peer
-                                                if let Some(peer_connector) = shared.get_peer_connector().await {
-                                                    if let Some(peer_info) = shared.get_peer(cc.node_id).await {
-                                                        tracing::info!("[RAFT-CONF] Proactively connecting to new peer {} at {}", 
-                                                            peer_info.id, peer_info.address);
-                                                        self.connect_to_peer_with_p2p(peer_connector, &peer_info).await;
+                                                // Make sure all peers are in our local list and SharedNodeState
+                                                for peer in all_peers {
+                                                    if peer.id != self.node_id && peer.id != cc.node_id {
+                                                        // This peer should also know about the new node
+                                                        // The peer will learn about it when processing this same log entry
+                                                        info!(self.logger, "[RAFT-CONF] Peer {} will learn about new node {} from log",
+                                                            peer.id, cc.node_id);
                                                     }
                                                 }
                                             }
+                                            
+                                            // Proactively connect to the new peer
+                                            if let Some(peer_connector) = shared.get_peer_connector().await {
+                                                if let Some(peer_info) = shared.get_peer(cc.node_id).await {
+                                                    tracing::info!("[RAFT-CONF] Proactively connecting to new peer {} at {}", 
+                                                        peer_info.id, peer_info.address);
+                                                    self.connect_to_peer_with_p2p(peer_connector, &peer_info).await;
+                                                }
+                                            }
                                         } else {
-                                            error!(self.logger, "[RAFT-CONF] Failed to deserialize peer address from context";
+                                            error!(self.logger, "[RAFT-CONF] Failed to deserialize conf change context";
                                                 "node_id" => cc.node_id,
                                                 "context_len" => cc.context.len()
                                             );
@@ -2435,37 +2434,17 @@ impl RaftManager {
             );
         }
         
-        // Try to send with a timeout to avoid blocking forever
-        match self.outgoing_messages.try_send((to, msg)) {
-            Ok(_) => Ok(()),
-            Err(tokio::sync::mpsc::error::TrySendError::Full((to, msg))) => {
-                // Channel is full - this might happen during heavy load or cluster formation
-                warn!(self.logger, "[RAFT-MSG] Outgoing message channel full, message dropped";
-                    "to" => to,
-                    "msg_type" => ?msg.msg_type(),
-                    "from" => msg.from
-                );
-                // During cluster formation, it's better to drop messages than crash
-                // The Raft protocol will retry important messages like votes and heartbeats
-                Ok(())
-            }
-            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                // Channel is closed - this is more serious but can happen during shutdown/restart
+        // Use send() since this is an unbounded channel
+        self.outgoing_messages.send((to, msg))
+            .map_err(|_| {
                 error!(self.logger, "[RAFT-MSG] Outgoing message channel closed";
                     "to" => to
                 );
-                // Only return error if we're not shutting down
-                if self.cancel_token.is_cancelled() {
-                    // We're shutting down, so this is expected
-                    Ok(())
-                } else {
-                    // Unexpected closure - return error
-                    Err(BlixardError::Internal {
-                        message: "Outgoing Raft message channel closed unexpectedly".to_string(),
-                    })
+                BlixardError::Internal {
+                    message: "Failed to send outgoing Raft message - channel closed".to_string(),
                 }
-            }
-        }
+            })?;
+        Ok(())
     }
     
     /// Helper function to connect to a peer using P2P info
@@ -2612,6 +2591,9 @@ impl RaftManager {
             change_type,
             node_id,
             address,
+            p2p_node_id: None,
+            p2p_addresses: vec![],
+            p2p_relay_url: None,
             response_tx: Some(tx),
         };
         
