@@ -1,8 +1,58 @@
-# Cedar Policy Engine Migration Plan
+# Blixard Development Plan
 
-## Overview
+## Recent Accomplishments (January 2025)
 
-This plan outlines the migration from Blixard's current custom RBAC implementation to AWS Cedar Policy Engine, a purpose-built authorization language that provides fine-grained, attribute-based access control with formal verification capabilities.
+### ✅ Three-Node Cluster Formation Fixed
+
+Successfully resolved critical issues preventing proper three-node cluster formation:
+
+1. **Raft Message Channel Resilience** 
+   - Fixed "Failed to send outgoing Raft message" errors
+   - Always spawn outgoing message handler even if transport fails
+   - Proper error handling for unbounded channels
+
+2. **P2P Connection Info Propagation**
+   - Extended RaftConfChange to include full P2P details
+   - All nodes now receive peer node IDs, addresses, and relay URLs
+   - Enables proper peer discovery in distributed clusters
+
+3. **Worker Registration Timing**
+   - Wait for leader identification before registration
+   - Replace fixed delays with condition-based waiting
+   - Continue operation even if registration fails
+
+4. **Comprehensive Testing**
+   - Created three_node_cluster_comprehensive_test.rs
+   - Manual test script for cluster verification
+   - Documented fixes in CLUSTER_FIXES_TESTING_STATUS.md
+
+See commits: 60252f0, 89928b3, 5e41608, 7df723c, b6bc14e
+
+## Current Focus Areas
+
+### 1. Production Hardening
+- [ ] Fix remaining test suite compilation issues
+- [ ] Add integration tests for cluster scenarios
+- [ ] Implement graceful shutdown procedures
+- [ ] Add cluster health monitoring
+
+### 2. Performance Optimization
+- [ ] Connection pooling for Iroh P2P
+- [ ] Batch Raft proposals for efficiency
+- [ ] Optimize state machine operations
+- [ ] Profile and optimize hot paths
+
+### 3. Observability Enhancement
+- [ ] Complete distributed tracing implementation
+- [ ] Add cluster-wide metrics aggregation
+- [ ] Implement log correlation across nodes
+- [ ] Create operational dashboards
+
+## Upcoming Major Features
+
+### Cedar Policy Engine Migration
+
+This migration will replace Blixard's current custom RBAC implementation with AWS Cedar Policy Engine, providing fine-grained, attribute-based access control with formal verification capabilities.
 
 ## Why Cedar?
 
@@ -435,4 +485,26 @@ blixard policy test       # Test authorization scenarios
 
 ---
 
-*Last Updated: 2025-01-30*
+## Timeline
+
+### Q1 2025
+- ✅ Three-node cluster formation (COMPLETE)
+- [ ] Production hardening and testing
+- [ ] Cedar policy engine migration (Phases 1-3)
+- [ ] Performance optimization sprint
+
+### Q2 2025
+- [ ] Cedar migration completion (Phases 4-7)
+- [ ] Advanced scheduling features
+- [ ] Multi-datacenter support
+- [ ] Enterprise features (backup, DR)
+
+### Q3 2025
+- [ ] Cloud provider integrations
+- [ ] Kubernetes operator
+- [ ] Advanced networking features
+- [ ] Security certifications
+
+---
+
+*Last Updated: 2025-01-31*
