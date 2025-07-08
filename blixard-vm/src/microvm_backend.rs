@@ -241,15 +241,12 @@ impl MicrovmBackend {
     }
 
     /// Recover VMs from persisted state after node restart
+    /// 
+    /// Note: This method is deprecated. VM recovery is now handled by the VmManager
+    /// which has proper access to the Arc<dyn VmBackend> required by the persistence layer.
+    /// Use VmManager::recover_persisted_vms() instead.
     pub async fn recover_persisted_vms(&self) -> BlixardResult<()> {
-        info!("Starting VM recovery from persisted state");
-        
-        // TODO: Implement VM recovery - need to redesign to work with current architecture
-        // For now, just return success
-        // let recovery_report = self.vm_persistence.recover_vms(backend_arc).await?;
-        
-        info!("VM recovery completed successfully (temporarily disabled)");
-        
+        info!("VM recovery is now handled by VmManager - this method is deprecated");
         Ok(())
     }
 

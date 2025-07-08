@@ -512,6 +512,48 @@ impl VmManager {
 
         Ok(placement)
     }
+
+    /// Recover VMs from persisted state after node restart
+    ///
+    /// This method is called during node initialization to restore VMs that
+    /// were running before the node was restarted. It reads the persisted
+    /// VM state from the database and attempts to restart VMs that were
+    /// previously running.
+    pub async fn recover_persisted_vms(&self) -> BlixardResult<()> {
+        use crate::vm_state_persistence::{VmStatePersistence, VmPersistenceConfig};
+        
+        tracing::info!("Starting VM recovery from persisted state");
+        
+        // Create persistence manager with default config
+        let persistence_config = VmPersistenceConfig {
+            auto_recovery_enabled: true,
+            skip_failed_vms: true,
+            max_parallel_recovery: 3,
+            recovery_delay_secs: 2,
+        };
+        
+        let persistence = VmStatePersistence::new(self.database.clone(), persistence_config);
+        
+        // Call the recovery method with the Arc<dyn VmBackend>
+        let recovery_report = persistence.recover_vms(self.backend.clone()).await?;
+        
+        tracing::info!(
+            "VM recovery completed - Total: {}, Recovered: {}, Failed: {}, Skipped: {}",
+            recovery_report.total_vms,
+            recovery_report.recovered_vms.len(),
+            recovery_report.failed_recoveries.len(),
+            recovery_report.skipped_vms.len()
+        );
+        
+        if !recovery_report.failed_recoveries.is_empty() {
+            tracing::warn!(
+                "Some VMs failed to recover: {:?}",
+                recovery_report.failed_recoveries
+            );
+        }
+        
+        Ok(())
+    }
 }
 
 /// Mock VM backend for testing

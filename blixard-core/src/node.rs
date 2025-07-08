@@ -103,6 +103,14 @@ impl Node {
 
         self.shared.set_vm_manager(vm_manager.clone()).await;
 
+        // Recover VMs from persisted state after node restart
+        tracing::info!("Starting VM recovery process");
+        if let Err(e) = vm_manager.recover_persisted_vms().await {
+            tracing::error!("VM recovery failed: {}", e);
+            // Don't fail node initialization if recovery fails - continue with degraded functionality
+            tracing::warn!("Continuing node initialization despite VM recovery failure");
+        }
+
         // Initialize VM health monitor
         let health_check_interval = std::time::Duration::from_secs(30); // Check every 30 seconds
         self.health_monitor = Some(VmHealthMonitor::new(
