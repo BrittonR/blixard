@@ -2395,11 +2395,37 @@ impl RaftManager {
             );
         }
         
-        self.outgoing_messages.send((to, msg))
-            .map_err(|_| BlixardError::Internal {
-                message: "Failed to send outgoing Raft message".to_string(),
-            })?;
-        Ok(())
+        // Try to send with a timeout to avoid blocking forever
+        match self.outgoing_messages.try_send((to, msg)) {
+            Ok(_) => Ok(()),
+            Err(tokio::sync::mpsc::error::TrySendError::Full((to, msg))) => {
+                // Channel is full - this might happen during heavy load or cluster formation
+                warn!(self.logger, "[RAFT-MSG] Outgoing message channel full, message dropped";
+                    "to" => to,
+                    "msg_type" => ?msg.msg_type(),
+                    "from" => msg.from
+                );
+                // During cluster formation, it's better to drop messages than crash
+                // The Raft protocol will retry important messages like votes and heartbeats
+                Ok(())
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                // Channel is closed - this is more serious but can happen during shutdown/restart
+                error!(self.logger, "[RAFT-MSG] Outgoing message channel closed";
+                    "to" => to
+                );
+                // Only return error if we're not shutting down
+                if self.cancel_token.is_cancelled() {
+                    // We're shutting down, so this is expected
+                    Ok(())
+                } else {
+                    // Unexpected closure - return error
+                    Err(BlixardError::Internal {
+                        message: "Outgoing Raft message channel closed unexpectedly".to_string(),
+                    })
+                }
+            }
+        }
     }
     
     /// Helper function to connect to a peer using P2P info

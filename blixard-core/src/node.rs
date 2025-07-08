@@ -387,54 +387,59 @@ impl Node {
                         
                         // Create new Raft transport adapter
                         let (raft_msg_tx, _raft_msg_rx) = tokio::sync::mpsc::unbounded_channel();
-                        match crate::transport::raft_transport_adapter::RaftTransport::new(
+                        let transport_result = crate::transport::raft_transport_adapter::RaftTransport::new(
                             shared.clone(),
                             raft_msg_tx,
                             transport_config
-                        ).await {
-                            Ok(new_transport) => {
-                                // Start handling outgoing messages with new transport (with recovery)
-                                let transport_clone = new_transport.clone();
-                                let shared_weak_inner = Arc::downgrade(&shared);
-                                tokio::spawn(async move {
-                                    let mut outgoing_rx = outgoing_rx;
-                                    let mut consecutive_errors = 0;
-                                    const MAX_CONSECUTIVE_ERRORS: u32 = 100;
-                                    
-                                    loop {
-                                        match outgoing_rx.recv().await {
-                                            Some((to, msg)) => {
-                                                if let Err(e) = transport_clone.send_message(to, msg).await {
-                                                    tracing::warn!("Failed to send Raft message to {}: {}", to, e);
-                                                    consecutive_errors += 1;
-                                                    
-                                                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
-                                                        tracing::error!("Too many consecutive errors in restarted handler");
-                                                        if shared_weak_inner.upgrade().is_none() {
-                                                            break;
-                                                        }
-                                                        consecutive_errors = 0;
+                        ).await;
+                        
+                        // Always spawn the outgoing message handler, even if transport creation fails
+                        // This prevents the channel from closing and causing send failures
+                        let transport_opt = transport_result.ok();
+                        let transport_for_handler = transport_opt.clone();
+                        let shared_weak_inner = Arc::downgrade(&shared);
+                        
+                        tokio::spawn(async move {
+                            let mut outgoing_rx = outgoing_rx;
+                            let mut consecutive_errors = 0;
+                            const MAX_CONSECUTIVE_ERRORS: u32 = 100;
+                            
+                            loop {
+                                match outgoing_rx.recv().await {
+                                    Some((to, msg)) => {
+                                        if let Some(transport) = &transport_for_handler {
+                                            if let Err(e) = transport.send_message(to, msg).await {
+                                                tracing::warn!("Failed to send Raft message to {}: {}", to, e);
+                                                consecutive_errors += 1;
+                                                
+                                                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                                                    tracing::error!("Too many consecutive errors in restarted handler");
+                                                    if shared_weak_inner.upgrade().is_none() {
+                                                        break;
                                                     }
-                                                } else {
                                                     consecutive_errors = 0;
                                                 }
+                                            } else {
+                                                consecutive_errors = 0;
                                             }
-                                            None => {
-                                                tracing::info!("Outgoing channel closed in restarted handler");
-                                                break;
-                                            }
+                                        } else {
+                                            // No transport available, just drain the messages
+                                            tracing::debug!("Dropping Raft message to {} - no transport available", to);
                                         }
                                     }
-                                });
-                                
-                                // Start transport maintenance
-                                new_transport.start_maintenance().await;
+                                    None => {
+                                        tracing::info!("Outgoing channel closed in restarted handler");
+                                        break;
+                                    }
+                                }
                             }
-                            Err(e) => {
-                                tracing::error!("Failed to recreate Raft transport: {}", e);
-                                // Without RaftTransport, we can't send Raft messages
-                                tracing::error!("No transport available for Raft messages - node cannot participate in consensus");
-                            }
+                        });
+                        
+                        // Start transport maintenance if we have a transport
+                        if let Some(transport) = transport_opt {
+                            transport.start_maintenance().await;
+                        } else {
+                            tracing::error!("No transport available for Raft messages - node cannot participate in consensus");
                         }
                         
                         // Run the new Raft manager
