@@ -488,17 +488,43 @@ impl Node {
                 return Err(e);
             }
             
-            // After successfully joining the cluster, wait a bit for leader election
-            // and configuration to stabilize, then register as a worker
-            tracing::info!("Successfully joined cluster, waiting for configuration to stabilize");
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            // After successfully joining the cluster, wait for leader to be identified
+            // before attempting worker registration
+            tracing::info!("Successfully joined cluster, waiting for leader identification");
+            
+            // Wait up to 10 seconds for a leader to be identified
+            let start = tokio::time::Instant::now();
+            let timeout = tokio::time::Duration::from_secs(10);
+            let mut leader_found = false;
+            
+            while start.elapsed() < timeout {
+                if let Ok(status) = self.shared.get_raft_status().await {
+                    if status.leader_id.is_some() {
+                        tracing::info!("Leader identified: {:?}, proceeding with worker registration", status.leader_id);
+                        leader_found = true;
+                        break;
+                    }
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            }
+            
+            if !leader_found {
+                tracing::warn!("No leader identified after {:?}, attempting worker registration anyway", timeout);
+            }
             
             // Now register as a worker through Raft
-            if let Err(e) = self.register_as_worker().await {
-                tracing::error!("Failed to register as worker after joining cluster: {}", e);
-                // Don't fail initialization if worker registration fails - the node
-                // is still part of the cluster and can participate in consensus
-                tracing::warn!("Continuing without worker registration - node can still participate in cluster");
+            // Since we're a joining node, we'll need to wait for the leader to process our request
+            match self.register_as_worker().await {
+                Ok(_) => {
+                    tracing::info!("Successfully registered as worker after joining cluster");
+                }
+                Err(e) => {
+                    tracing::error!("Failed to register as worker after joining cluster: {}", e);
+                    // Don't fail initialization if worker registration fails - the node
+                    // is still part of the cluster and can participate in consensus
+                    tracing::warn!("Continuing without worker registration - node can still participate in cluster");
+                    // TODO: Implement a background task to retry worker registration
+                }
             }
         } else {
             // Bootstrap mode: register as worker immediately

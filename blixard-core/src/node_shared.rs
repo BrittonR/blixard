@@ -1336,6 +1336,8 @@ impl SharedNodeState {
         if !raft_status.is_leader {
             tracing::warn!("[NODE-SHARED] Worker registration attempted on non-leader node {}, leader is {:?}", 
                 raft_status.node_id, raft_status.leader_id);
+            // TODO: In the future, we should forward this request to the leader
+            // For now, joining nodes will retry until they can register
             return Err(BlixardError::ClusterError(
                 format!("Only the leader can register workers. Current leader: {:?}", raft_status.leader_id)
             ));
