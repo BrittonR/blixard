@@ -439,7 +439,7 @@ impl RaftStateMachine {
         let read_txn = self.database.begin_read()?;
         let worker_table = read_txn.open_table(WORKER_TABLE)?;
         
-        let worker_capabilities = if let Some(data) = worker_table.get(&node_id)? {
+        let worker_capabilities = if let Some(data) = worker_table.get(node_id.to_le_bytes().as_ref())? {
             bincode::deserialize::<WorkerCapabilities>(data.value())
                 .map_err(|e| BlixardError::Serialization {
                     operation: "deserialize worker capabilities".to_string(),

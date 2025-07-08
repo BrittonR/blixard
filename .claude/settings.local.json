@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(btop:*)",
+      "Bash(lazygit:*)",
+      "Bash(cargo check:*)",
+      "Bash(timeout 10s cargo run --bin blixard -- tui --help)",
+      "Bash(cargo build:*)",
+      "Bash(cargo test:*)"
+    ],
+    "deny": []
+  },
+  "enabledMcpjsonServers": [
+    "context7",
+    "fetch",
+    "filesystem",
+    "github",
+    "gitlab",
+    "puppeteer"
+  ]
+}

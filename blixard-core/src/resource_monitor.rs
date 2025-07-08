@@ -84,7 +84,7 @@ impl ResourceMonitor {
     /// Start resource monitoring
     pub async fn start(&mut self) -> BlixardResult<()> {
         if self.handle.is_some() {
-            return Err(BlixardError::InvalidState {
+            return Err(BlixardError::Internal {
                 message: "Resource monitor is already running".to_string(),
             });
         }
@@ -213,18 +213,18 @@ impl ResourceMonitor {
         let mut total_actual_disk_gb = 0u64;
         let mut vm_count = 0;
 
-        for vm in vms {
-            if vm.node_id == node_id && vm.status == VmStatus::Running {
+        for (vm_config, vm_status) in vms {
+            if vm_status == VmStatus::Running {
                 // Get actual resource usage (simplified - in production this would 
                 // query system metrics, container runtime, or hypervisor APIs)
-                let actual_cpu_percent = Self::get_vm_cpu_usage(&vm.name).await?;
-                let actual_memory_mb = Self::get_vm_memory_usage(&vm.name).await?;
-                let actual_disk_gb = Self::get_vm_disk_usage(&vm.name).await?;
+                let actual_cpu_percent = Self::get_vm_cpu_usage(&vm_config.name).await?;
+                let actual_memory_mb = Self::get_vm_memory_usage(&vm_config.name).await?;
+                let actual_disk_gb = Self::get_vm_disk_usage(&vm_config.name).await?;
 
                 let usage = VmResourceUsage {
-                    vm_name: vm.name.clone(),
-                    allocated_vcpus: vm.config.vcpus,
-                    allocated_memory_mb: vm.config.memory as u64,
+                    vm_name: vm_config.name.clone(),
+                    allocated_vcpus: vm_config.vcpus,
+                    allocated_memory_mb: vm_config.memory as u64,
                     allocated_disk_gb: 5, // Default disk allocation
                     actual_cpu_percent,
                     actual_memory_mb,
@@ -240,7 +240,7 @@ impl ResourceMonitor {
                 total_actual_disk_gb += usage.actual_disk_gb;
                 vm_count += 1;
 
-                new_vm_usage.insert(vm.name, usage);
+                new_vm_usage.insert(vm_config.name, usage);
             }
         }
 
@@ -291,7 +291,7 @@ impl ResourceMonitor {
         *node_utilization.write().await = Some(node_util.clone());
 
         // Record metrics for observability
-        metrics::record_resource_utilization(
+        metrics_otel::record_resource_utilization(
             node_id,
             total_actual_cpu_percent,
             total_actual_memory_mb,
