@@ -41,6 +41,8 @@ pub const RAFT_HARD_STATE_TABLE: TableDefinition<&str, &[u8]> =
     TableDefinition::new("raft_hard_state");
 pub const RAFT_CONF_STATE_TABLE: TableDefinition<&str, &[u8]> =
     TableDefinition::new("raft_conf_state");
+pub const RAFT_SNAPSHOT_TABLE: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("raft_snapshot");
 
 // Task management tables
 pub const TASK_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("tasks");

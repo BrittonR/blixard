@@ -259,6 +259,10 @@ impl DeterministicExecutor {
                                     hex::encode(&data),
                                 )])),
                                 anti_affinity: None,
+                                priority: 100,
+                                preemptible: false,
+                                locality_preference: Default::default(),
+                                health_check_config: None,
                             },
                             node_id,
                         };

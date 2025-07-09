@@ -8,10 +8,11 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
+use chrono::{DateTime, Utc};
 
 /// Operation types that can be performed on the distributed system
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -114,13 +115,13 @@ pub enum Response {
 pub struct HistoryEntry {
     pub process_id: u64,
     pub operation: Operation,
-    pub invocation_time: Instant,
-    pub response_time: Option<Instant>,
+    pub invocation_time: DateTime<Utc>,
+    pub response_time: Option<DateTime<Utc>>,
     pub response: Option<Response>,
 }
 
 /// Complete history of operations
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct History {
     entries: Vec<HistoryEntry>,
     next_process_id: AtomicU64,
@@ -140,7 +141,7 @@ impl History {
         self.entries.push(HistoryEntry {
             process_id,
             operation,
-            invocation_time: Instant::now(),
+            invocation_time: Utc::now(),
             response_time: None,
             response: None,
         });
@@ -150,7 +151,7 @@ impl History {
     /// Complete recording an operation
     pub fn end_operation(&mut self, process_id: u64, response: Response) {
         if let Some(entry) = self.entries.iter_mut().find(|e| e.process_id == process_id) {
-            entry.response_time = Some(Instant::now());
+            entry.response_time = Some(Utc::now());
             entry.response = Some(response);
         }
     }

@@ -383,6 +383,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_resource_efficiency_calculation() {
+        use crate::types::NodeConfig;
+        use crate::vm_backend::MockVmBackend;
+        use tempfile::TempDir;
+        
         let vm_usage = Arc::new(RwLock::new(HashMap::new()));
         
         // Add some test VM usage data
@@ -410,13 +414,40 @@ mod tests {
         
         *vm_usage.write().await = usage_map;
 
-        // Mock a simple resource monitor for testing
+        // Create test database and SharedNodeState
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let database = Arc::new(redb::Database::create(db_path).unwrap());
+        
+        let config = NodeConfig {
+            id: 1,
+            bind_addr: "127.0.0.1:9001".parse().unwrap(),
+            data_dir: temp_dir.path().to_string_lossy().to_string(),
+            join_addr: None,
+            use_tailscale: false,
+            vm_backend: "mock".to_string(),
+            transport_config: None,
+            topology: Default::default(),
+        };
+        
+        let node_state = Arc::new(crate::node_shared::SharedNodeState::new(config));
+        
+        // Note: get_worker_capabilities() returns hardcoded values:
+        // cpu_cores: 8, memory_mb: 16384, disk_gb: 100
+        // These match what we need for the test
+        
+        // Create VM backend and manager
+        let vm_backend = Arc::new(MockVmBackend::new(database.clone()));
+        let vm_manager = Arc::new(crate::vm_backend::VmManager::new(
+            database,
+            vm_backend,
+            node_state.clone(),
+        ));
+
+        // Create resource monitor for testing
         let monitor = ResourceMonitor {
-            node_state: Arc::new(crate::test_helpers::TestNode::new_with_id(1, 8, 16384, 100).to_shared()),
-            vm_manager: Arc::new(crate::vm_backend::VmManager::new(
-                Arc::new(crate::test_helpers::TestNode::new_with_id(1, 8, 16384, 100).to_shared()),
-                std::sync::Arc::new(crate::vm_backend::TestVmBackend::new()),
-            )),
+            node_state,
+            vm_manager,
             monitoring_interval: Duration::from_secs(60),
             handle: None,
             vm_usage,

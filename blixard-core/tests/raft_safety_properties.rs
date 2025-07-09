@@ -30,12 +30,12 @@ use tempfile::TempDir;
 use blixard_core::{
     error::{BlixardError, BlixardResult},
     raft_manager::{
-        ProposalData, ResourceRequirements, TaskResult, TaskSpec, VmCommand, WorkerCapabilities,
+        ProposalData, ResourceRequirements, TaskResult, TaskSpec, WorkerCapabilities,
         WorkerStatus,
     },
     storage::{RAFT_LOG_TABLE, RAFT_SNAPSHOT_TABLE},
     test_helpers::{timing, TestCluster, TestNode},
-    types::{NodeTopology, VmConfig, VmStatus},
+    types::{NodeTopology, VmCommand, VmConfig, VmStatus},
 };
 
 // Shared runtime for all property tests
