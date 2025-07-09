@@ -5,7 +5,6 @@
 
 use crate::config_v2::ObservabilityConfig;
 use crate::error::BlixardResult;
-use std::sync::Arc;
 use tracing::info;
 
 /// Unified observability manager

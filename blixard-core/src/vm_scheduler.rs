@@ -8,7 +8,7 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::metrics_otel;
 use crate::raft_manager::{WorkerCapabilities, WorkerStatus};
 use crate::resource_management::{
-    ClusterResourceManager, NodeResourceState, OvercommitPolicy, ResourceReservation,
+    ClusterResourceManager, OvercommitPolicy, ResourceReservation,
 };
 use crate::storage::{VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE};
 use crate::types::VmConfig;

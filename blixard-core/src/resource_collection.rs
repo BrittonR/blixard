@@ -3,10 +3,9 @@
 //! This module provides platform-specific implementations for collecting
 //! real resource usage metrics from the system, VMs, and containers.
 
-use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use tracing::{debug, error};
+use tracing;
 
 use crate::error::{BlixardError, BlixardResult};
 

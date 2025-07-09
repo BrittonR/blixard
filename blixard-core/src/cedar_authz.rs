@@ -4,7 +4,7 @@
 //! the simple RBAC implementation with a more powerful policy language.
 
 use cedar_policy::{
-    Authorizer, Context, Decision, Entities, Entity, EntityId, EntityTypeName, EntityUid,
+    Authorizer, Context, Decision, Entities, EntityUid,
     PolicySet, Request, Schema,
 };
 use serde_json::Value;
@@ -13,7 +13,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info};
 
 use crate::error::{BlixardError, BlixardResult};
 

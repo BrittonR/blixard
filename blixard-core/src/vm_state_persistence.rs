@@ -1,4 +1,4 @@
-use redb::{Database, ReadableTable, TableDefinition};
+use redb::{Database, ReadableTable};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -6,7 +6,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    error::{BlixardError, BlixardResult},
+    error::BlixardResult,
     storage::VM_STATE_TABLE,
     types::{VmConfig, VmState, VmStatus},
     vm_backend::VmBackend,

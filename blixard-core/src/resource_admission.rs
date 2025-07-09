@@ -5,7 +5,7 @@
 //! configurable overcommit policies.
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::resource_management::{ClusterResourceManager, NodeResourceState, OvercommitPolicy};
+use crate::resource_management::{ClusterResourceManager, OvercommitPolicy};
 use crate::raft_manager::WorkerCapabilities;
 use crate::types::{VmConfig, VmState, VmStatus};
 use redb::{Database, ReadableTable};

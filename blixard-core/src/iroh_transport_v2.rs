@@ -11,7 +11,7 @@ use crate::transport::BLIXARD_ALPN;
 #[cfg(feature = "failpoints")]
 use crate::fail_point;
 use iroh::{Endpoint, NodeAddr, SecretKey};
-use iroh_blobs::{BlobFormat, Hash, HashAndFormat};
+use iroh_blobs::Hash;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
