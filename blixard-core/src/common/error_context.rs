@@ -83,8 +83,8 @@ pub trait ResultContext<T> {
     /// Log error if it occurs but continue
     fn log_if_error(self, context: &str) -> BlixardResult<T>;
     
-    /// Convert to Status with proper error mapping
-    fn to_status(self) -> Result<T, tonic::Status>;
+    /// Convert to Status with proper error mapping (for gRPC services when available)
+    fn to_status_string(self) -> Result<T, String>;
 }
 
 impl<T> ResultContext<T> for BlixardResult<T> {
@@ -102,8 +102,8 @@ impl<T> ResultContext<T> for BlixardResult<T> {
         self
     }
     
-    fn to_status(self) -> Result<T, tonic::Status> {
-        self.map_err(crate::common::conversions::error_to_status)
+    fn to_status_string(self) -> Result<T, String> {
+        self.map_err(|e| e.to_string())
     }
 }
 

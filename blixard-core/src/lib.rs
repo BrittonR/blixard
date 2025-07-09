@@ -61,7 +61,7 @@ pub mod vm_health_monitor;
 pub mod vm_health_types;
 pub mod vm_network_isolation;
 // Temporarily disabled: uses gRPC/tonic which we're removing
-// pub mod common;
+pub mod common;
 pub mod discovery;
 
 // Test helpers are exposed for integration tests

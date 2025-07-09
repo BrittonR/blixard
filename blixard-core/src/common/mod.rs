@@ -4,14 +4,15 @@
 //! and ensure consistency across the application.
 
 pub mod error_context;
-pub mod conversions;
+// Temporarily disabled due to tonic dependencies
+// pub mod conversions;
 pub mod metrics;
-pub mod rate_limiting;
+// pub mod rate_limiting;
 
 #[cfg(test)]
-mod example_usage;
+// mod example_usage;
 
 pub use error_context::{ErrorContext, ResultContext};
-pub use conversions::{ToProto, FromProto};
+// pub use conversions::{ToProto, FromProto};
 pub use metrics::{MetricsRecorder, MetricTimer};
-pub use rate_limiting::RateLimiter;
+// pub use rate_limiting::RateLimiter;

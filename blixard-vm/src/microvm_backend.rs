@@ -8,6 +8,7 @@ use tracing::{debug, info, warn};
 
 use blixard_core::{
     error::{BlixardError, BlixardResult},
+    common::error_context::{StorageContext, VmContext},
     types::{VmConfig as CoreVmConfig, VmState, VmStatus},
     vm_backend::{VmBackend, VmBackendFactory},
     vm_health_types::{HealthCheckResult, HealthCheckType, VmHealthStatus},
@@ -77,16 +78,20 @@ impl MicrovmBackend {
         database: std::sync::Arc<redb::Database>,
     ) -> BlixardResult<Self> {
         // Ensure directories exist
-        std::fs::create_dir_all(&config_dir)?;
-        std::fs::create_dir_all(&data_dir)?;
+        std::fs::create_dir_all(&config_dir)
+            .storage_context("create config directory")?;
+        std::fs::create_dir_all(&data_dir)
+            .storage_context("create data directory")?;
 
         // Create runtime directory for process manager
         let runtime_dir = data_dir.join("runtime");
-        std::fs::create_dir_all(&runtime_dir)?;
+        std::fs::create_dir_all(&runtime_dir)
+            .storage_context("create runtime directory")?;
 
         // Create modules directory for flake generator
         let modules_dir = config_dir.join("modules");
-        std::fs::create_dir_all(&modules_dir)?;
+        std::fs::create_dir_all(&modules_dir)
+            .storage_context("create modules directory")?;
 
         let flake_generator = NixFlakeGenerator::new(config_dir.clone(), modules_dir)?;
 

@@ -5,6 +5,7 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
+    common::error_context::{NetworkContext, SerializationContext},
     transport::iroh_protocol::{
         deserialize_payload, generate_request_id, read_message, serialize_payload, write_message,
         MessageHeader, MessageType, RpcRequest, RpcResponse,
@@ -207,9 +208,8 @@ async fn handle_stream(
     .await?;
 
     // Close stream
-    send.finish().map_err(|e| BlixardError::Internal {
-        message: format!("Failed to finish stream: {}", e),
-    })?;
+    send.finish()
+        .iroh_context("finish response stream")?;
 
     Ok(())
 }
@@ -245,13 +245,8 @@ impl IrohRpcClient {
         let connection = self.get_or_create_connection(node_addr).await?;
 
         // Open bidirectional stream
-        let (mut send, mut recv) =
-            connection
-                .open_bi()
-                .await
-                .map_err(|e| BlixardError::Internal {
-                    message: format!("Failed to open stream: {}", e),
-                })?;
+        let (mut send, mut recv) = connection.open_bi().await
+            .iroh_context("open bidirectional stream")?;
 
         // Prepare request
         let request_bytes = serialize_payload(&request)?;
@@ -267,9 +262,8 @@ impl IrohRpcClient {
         write_message(&mut send, MessageType::Request, request_id, &rpc_bytes).await?;
 
         // Finish sending
-        send.finish().map_err(|e| BlixardError::Internal {
-            message: format!("Failed to finish send: {}", e),
-        })?;
+        send.finish()
+            .iroh_context("finish send stream")?;
 
         // Read response
         let (header, payload) = read_message(&mut recv).await?;
@@ -318,13 +312,10 @@ impl IrohRpcClient {
 
         // Create new connection
         info!("Connecting to {}", node_id);
-        let connection = self
-            .endpoint
+        let connection = self.endpoint
             .connect(node_addr, b"blixard/rpc/1")
             .await
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Failed to connect: {}", e),
-            })?;
+            .iroh_context("connect to peer")?;
 
         // Store connection
         {
