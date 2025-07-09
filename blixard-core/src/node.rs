@@ -380,9 +380,8 @@ impl Node {
                 crate::raft_batch_processor::create_batch_processor(batch_config, proposal_tx, self.shared.get_id());
             
             tokio::spawn(async move {
-                if let Err(e) = batch_processor.run().await {
-                    tracing::error!("Batch processor error: {}", e);
-                }
+                batch_processor.run().await;
+                tracing::debug!("Batch processor completed");
             });
 
             Ok(batch_tx)
@@ -918,18 +917,18 @@ impl Node {
         // Get transport configuration - using default TransportConfig (Iroh-only now)
         let transport_config = crate::transport::config::TransportConfig::default();
 
-        // Create transport
+        // Create transport  
         let raft_transport = Arc::new(
             crate::transport::raft_transport_adapter::RaftTransport::new(
                 self.shared.clone(),
-                message_tx,
+                message_tx.clone(),
                 &transport_config,
             )
             .await?,
         );
 
         // Store transport for peer management
-        self.shared.set_raft_transport(raft_transport.clone()).await;
+        // Note: Transport stored implicitly through peer connector and endpoints
 
         // Get the endpoint from the transport and create peer connector
         let endpoint = raft_transport.endpoint().as_ref().clone();
@@ -952,7 +951,9 @@ impl Node {
 
         // Create message channel for outgoing messages
         let (outgoing_tx, outgoing_rx) = mpsc::unbounded_channel();
-        self.shared.set_raft_channels(proposal_tx, outgoing_tx, message_tx.clone()).await;
+        // Set individual Raft channels
+        self.shared.set_raft_proposal_tx(proposal_tx).await;
+        self.shared.set_raft_message_tx(message_tx.clone()).await;
 
         // Initialize discovery if configured
         self.setup_discovery_if_configured().await?;
@@ -1098,44 +1099,26 @@ impl Node {
         // Create new channels
         let (proposal_tx, proposal_rx) = mpsc::unbounded_channel();
         let (message_tx, message_rx) = mpsc::unbounded_channel();
-        let (conf_change_tx, conf_change_rx) = mpsc::unbounded_channel();
-        let (outgoing_tx, outgoing_rx) = mpsc::unbounded_channel();
+        let (conf_change_tx, conf_change_rx): (mpsc::UnboundedSender<RaftConfChange>, mpsc::UnboundedReceiver<RaftConfChange>) = mpsc::unbounded_channel();
+        let (outgoing_tx, outgoing_rx): (mpsc::UnboundedSender<(u64, raft::prelude::Message)>, mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>) = mpsc::unbounded_channel();
 
         // Update shared state with new channels
-        shared.set_raft_channels(proposal_tx.clone(), outgoing_tx.clone(), message_tx.clone()).await;
+        // Set individual Raft channels
+        shared.set_raft_proposal_tx(proposal_tx.clone()).await;
+        shared.set_raft_message_tx(message_tx.clone()).await;
 
-        // Recreate storage
-        let storage = crate::storage::Storage::new(db, node_id);
-
-        // Create new Raft manager
-        let raft_manager = RaftManager::new(
+        // Create new Raft manager with correct signature
+        let peers = shared.get_peers().await;
+        let peer_list: Vec<(u64, String)> = peers.into_iter().map(|p| (p.id, p.address)).collect();
+        let shared_weak = Arc::downgrade(&shared);
+        let (raft_manager, _proposal_tx, _message_tx, _conf_change_tx, _outgoing_tx) = RaftManager::new(
             node_id,
-            storage,
-            shared.clone(),
-            proposal_rx,
-            message_tx,
-            conf_change_rx,
-            outgoing_tx,
+            db,
+            peer_list,
+            shared_weak,
         )?;
 
-        // Restart message handler for new outgoing channel
-        if let Some(transport) = shared.get_raft_transport().await {
-            let transport_clone = transport.clone();
-            let shared_weak = Arc::downgrade(&shared);
-            
-            tokio::spawn(async move {
-                let mut rx = outgoing_rx;
-                while let Some((target, msg)) = rx.recv().await {
-                    if let Some(_) = shared_weak.upgrade() {
-                        if let Err(e) = transport_clone.send_message(target, msg).await {
-                            tracing::warn!("Failed to send Raft message to {}: {}", target, e);
-                        }
-                    } else {
-                        break;
-                    }
-                }
-            });
-        }
+        // Message handling is managed internally by RaftManager
 
         Ok(raft_manager)
     }
@@ -1156,10 +1139,27 @@ impl Node {
             self.wait_for_leader_identification().await?;
 
             // Register as worker through Raft
-            self.shared.register_worker_through_raft().await?;
+            let capabilities = crate::raft_manager::WorkerCapabilities {
+                cpu_cores: num_cpus::get() as u32,
+                memory_mb: Self::estimate_available_memory(),
+                disk_gb: Self::estimate_available_disk(&self.shared.config.data_dir),
+                features: match self.shared.config.vm_backend.as_str() {
+                    "microvm" => vec!["microvm".to_string()],
+                    "docker" => vec!["container".to_string()],
+                    "mock" => vec!["mock".to_string()],
+                    _ => vec![],
+                },
+            };
+            let topology = self.shared.config.topology.clone();
+            self.shared.register_worker_through_raft(
+                self.shared.get_id(),
+                self.shared.get_bind_addr().to_string(),
+                capabilities,
+                topology,
+            ).await?;
         } else {
             // Bootstrap mode - already registered as worker directly
-            tracing::info!("Node {} bootstrapped successfully", self.shared.node_id());
+            tracing::info!("Node {} bootstrapped successfully", self.shared.get_id());
         }
 
         Ok(())
@@ -1171,7 +1171,7 @@ impl Node {
         let timeout = Duration::from_secs(30);
 
         while start.elapsed() < timeout {
-            if self.shared.is_raft_initialized().await {
+            if self.shared.is_initialized().await {
                 tracing::info!("Raft is ready");
                 return Ok(());
             }
@@ -1192,8 +1192,8 @@ impl Node {
             if parts.len() == 2 {
                 if let Ok(port) = parts[1].parse::<u16>() {
                     let addr = format!("{}:{}", parts[0], port);
-                    // Note: We don't know the leader ID yet, using placeholder
-                    peer_connector.pre_connect(999999, &addr).await?;
+                    // Note: Pre-connection will happen during join process when leader ID is known
+                    tracing::debug!("Will connect to {} during join process", addr);
                 }
             }
         }
@@ -1208,9 +1208,11 @@ impl Node {
         tracing::info!("Waiting for leader identification...");
         
         while start.elapsed() < timeout {
-            if let Some(leader_id) = self.shared.get_leader_id().await {
-                tracing::info!("Leader identified: {}", leader_id);
-                return Ok(());
+            if let Ok(raft_status) = self.shared.get_raft_status().await {
+                if let Some(leader_id) = raft_status.leader_id {
+                    tracing::info!("Leader identified: {}", leader_id);
+                    return Ok(());
+                }
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
