@@ -297,9 +297,11 @@ impl Node {
             source: Box::new(e),
         })?;
 
-        let mut worker_table = txn.open_table(crate::storage::WORKER_TABLE)?;
-        let key_bytes = self.shared.config.id.to_be_bytes();
-        worker_table.insert(key_bytes.as_slice(), worker_data.as_slice())?;
+        {
+            let mut worker_table = txn.open_table(crate::storage::WORKER_TABLE)?;
+            let key_bytes = self.shared.config.id.to_be_bytes();
+            worker_table.insert(key_bytes.as_slice(), worker_data.as_slice())?;
+        }
 
         txn.commit().map_err(|e| BlixardError::Storage {
             operation: "commit worker registration".to_string(),
@@ -375,7 +377,7 @@ impl Node {
 
         if batch_config.enabled {
             let (batch_tx, batch_processor) =
-                crate::raft_batch_processor::create_batch_processor(batch_config, proposal_tx);
+                crate::raft_batch_processor::create_batch_processor(batch_config, proposal_tx, self.shared.get_id());
             
             tokio::spawn(async move {
                 if let Err(e) = batch_processor.run().await {
@@ -395,24 +397,7 @@ impl Node {
             tracing::info!("Sending join request to {}", join_addr);
 
             // Get our P2P info if available
-            let (p2p_node_id, p2p_addresses, p2p_relay_url) =
-                if let Some(node_addr) = self.shared.get_p2p_node_addr().await {
-                    let p2p_id = node_addr.node_id.to_string();
-                    let p2p_addrs: Vec<String> = node_addr
-                        .direct_addresses()
-                        .map(|a| a.to_string())
-                        .collect();
-                    let relay_url = node_addr.relay_url().map(|u| u.to_string());
-                    tracing::info!(
-                        "Including our P2P info in join request: node_id={}, addresses={:?}",
-                        p2p_id,
-                        p2p_addrs
-                    );
-                    (Some(p2p_id), p2p_addrs, relay_url)
-                } else {
-                    tracing::warn!("No P2P node address available for join request");
-                    (None, Vec::new(), None)
-                };
+            let (p2p_node_id, p2p_addresses, p2p_relay_url) = self.gather_local_p2p_info().await;
 
             // Create Iroh client to contact the join address
             // Assume the join address is for node 1 (the bootstrap node)
@@ -427,252 +412,19 @@ impl Node {
                 // For bootstrapping, we need to make an initial connection to get the leader's P2P info
                 // We'll use the discovery mechanism if available, or create a temporary client
 
-                if let Some(discovery_manager) = self
-                    .shared
-                    .get_discovery_manager::<crate::discovery::DiscoveryManager>()
-                    .await
-                {
-                    // Try to find the leader's info via discovery
-                    let discovered_nodes = discovery_manager.get_nodes().await;
-
-                    // Look for a node that might be the leader (node ID 1 or at the join address)
-                    for node_info in discovered_nodes {
-                        if node_info
-                            .addresses
-                            .iter()
-                            .any(|addr| addr.to_string() == *join_addr)
-                        {
-                            tracing::info!(
-                                "Found leader's P2P info via discovery: {}",
-                                node_info.node_id
-                            );
-
-                            // Create NodeAddr from discovered info
-                            let mut node_addr = iroh::NodeAddr::new(node_info.node_id);
-                            for addr in &node_info.addresses {
-                                node_addr = node_addr.with_direct_addresses([*addr]);
-                            }
-
-                            // Store the leader's P2P info
-                            self.shared
-                                .add_peer_with_p2p(
-                                    leader_node_id,
-                                    join_addr.clone(),
-                                    Some(node_info.node_id.to_string()),
-                                    node_info.addresses.iter().map(|a| a.to_string()).collect(),
-                                    None, // TODO: Get relay URL from discovery
-                                )
-                                .await?;
-
-                            // Now we can make the P2P connection
-                            if let Some(p2p_manager) = self.shared.get_p2p_manager().await {
-                                tracing::info!(
-                                    "Connecting to leader via P2P at {}",
-                                    node_info.node_id
-                                );
-                                p2p_manager
-                                    .connect_p2p_peer(leader_node_id, &node_addr)
-                                    .await?;
-
-                                // Create P2P client and send join request
-                                let (endpoint, _our_node_id) =
-                                    self.shared.get_iroh_endpoint().await?;
-                                let transport_client =
-                                    crate::transport::iroh_client::IrohClusterServiceClient::new(
-                                        Arc::new(endpoint),
-                                        node_addr.clone(),
-                                    );
-
-                                let resp = transport_client
-                                    .join_cluster(
-                                        self.shared.get_id(),
-                                        self.shared.get_bind_addr().to_string(),
-                                        p2p_node_id.clone(),
-                                        p2p_addresses.clone(),
-                                        p2p_relay_url.clone(),
-                                    )
-                                    .await?;
-
-                                if resp.0 {
-                                    tracing::info!(
-                                        "Successfully joined cluster via P2P: {}",
-                                        resp.1
-                                    );
-
-                                    // Store all peer P2P info from the response and establish connections
-                                    for peer_info in &resp.2 {
-                                        if peer_info.id != self.shared.get_id()
-                                            && !peer_info.p2p_node_id.is_empty()
-                                        {
-                                            // Store peer info
-                                            self.shared
-                                                .add_peer_with_p2p(
-                                                    peer_info.id,
-                                                    peer_info.address.clone(),
-                                                    Some(peer_info.p2p_node_id.clone()),
-                                                    peer_info.p2p_addresses.clone(),
-                                                    if peer_info.p2p_relay_url.is_empty() {
-                                                        None
-                                                    } else {
-                                                        Some(peer_info.p2p_relay_url.clone())
-                                                    },
-                                                )
-                                                .await?;
-
-                                            // Establish P2P connection to this peer
-                                            if let Ok(node_id_parsed) =
-                                                peer_info.p2p_node_id.parse::<iroh::NodeId>()
-                                            {
-                                                let mut node_addr =
-                                                    iroh::NodeAddr::new(node_id_parsed);
-
-                                                // Add relay URL if available
-                                                if !peer_info.p2p_relay_url.is_empty() {
-                                                    if let Ok(relay_url) =
-                                                        peer_info.p2p_relay_url.parse()
-                                                    {
-                                                        node_addr =
-                                                            node_addr.with_relay_url(relay_url);
-                                                    }
-                                                }
-
-                                                // Add direct addresses
-                                                let addrs: Vec<SocketAddr> = peer_info
-                                                    .p2p_addresses
-                                                    .iter()
-                                                    .filter_map(|addr_str| addr_str.parse().ok())
-                                                    .collect();
-                                                if !addrs.is_empty() {
-                                                    node_addr =
-                                                        node_addr.with_direct_addresses(addrs);
-                                                }
-
-                                                // Try to connect
-                                                tracing::info!("Establishing P2P connection to peer {} after joining cluster", peer_info.id);
-                                                if let Some(p2p_manager) =
-                                                    self.shared.get_p2p_manager().await
-                                                {
-                                                    match p2p_manager
-                                                        .connect_p2p_peer(peer_info.id, &node_addr)
-                                                        .await
-                                                    {
-                                                        Ok(_) => {
-                                                            tracing::info!("✅ Successfully connected to P2P peer {}", peer_info.id);
-                                                        }
-                                                        Err(e) => {
-                                                            tracing::warn!("⚠️ Failed to establish P2P connection to peer {}: {}", peer_info.id, e);
-                                                        }
-                                                    }
-                                                } else {
-                                                    tracing::warn!("P2P manager not available for establishing connections");
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    return Ok(());
-                                } else {
-                                    return Err(BlixardError::ClusterJoin { reason: resp.1 });
-                                }
-                            }
-                        }
-                    }
+                // Try discovery-based join first
+                if let Ok(result) = self.attempt_discovery_based_join(join_addr, leader_node_id, &p2p_node_id, &p2p_addresses, &p2p_relay_url).await {
+                    return Ok(result);
                 }
 
                 // If discovery didn't work, use HTTP bootstrap mechanism
-                tracing::info!("Attempting HTTP bootstrap from {}", join_addr);
-
-                // Determine if join_addr is already an HTTP URL or a socket address
-                let bootstrap_url =
-                    if join_addr.starts_with("http://") || join_addr.starts_with("https://") {
-                        // Already an HTTP URL, append /bootstrap if not present
-                        if join_addr.ends_with("/bootstrap") {
-                            join_addr.clone()
-                        } else {
-                            format!("{}/bootstrap", join_addr.trim_end_matches('/'))
-                        }
-                    } else {
-                        // Parse as socket address and construct HTTP URL
-                        let addr: SocketAddr = join_addr.parse().map_err(|e| {
-                            BlixardError::ConfigError(format!(
-                                "Invalid join address '{}': {}",
-                                join_addr, e
-                            ))
-                        })?;
-
-                        // Get metrics port offset from config
-                        let config = crate::config_global::get()?;
-                        let bootstrap_port = addr.port() + config.network.metrics.port_offset;
-                        format!("http://{}:{}/bootstrap", addr.ip(), bootstrap_port)
-                    };
+                let bootstrap_url = self.build_bootstrap_url(join_addr).await?;
 
                 // Fetch bootstrap info
-                tracing::debug!("Fetching bootstrap info from {}", bootstrap_url);
-                let client = reqwest::Client::new();
-                let response = match client
-                    .get(&bootstrap_url)
-                    .timeout(Duration::from_secs(5))
-                    .send()
-                    .await
-                {
-                    Ok(resp) => resp,
-                    Err(e) => {
-                        return Err(BlixardError::NetworkError(format!(
-                            "Failed to connect to bootstrap endpoint {}: {}",
-                            bootstrap_url, e
-                        )));
-                    }
-                };
+                let bootstrap_info = self.fetch_bootstrap_info(&bootstrap_url).await?;
 
-                if !response.status().is_success() {
-                    return Err(BlixardError::ClusterJoin {
-                        reason: format!(
-                            "Bootstrap endpoint returned {}: {}",
-                            response.status(),
-                            response.text().await.unwrap_or_default()
-                        ),
-                    });
-                }
-
-                let bootstrap_info: crate::iroh_types::BootstrapInfo =
-                    response.json().await.map_err(|e| {
-                        BlixardError::NetworkError(format!("Invalid bootstrap response: {}", e))
-                    })?;
-
-                tracing::info!(
-                    "Got bootstrap info: node_id={}, p2p_node_id={}, addresses={:?}",
-                    bootstrap_info.node_id,
-                    bootstrap_info.p2p_node_id,
-                    bootstrap_info.p2p_addresses
-                );
-
-                // Parse the P2P node ID
-                let p2p_node_id =
-                    bootstrap_info
-                        .p2p_node_id
-                        .parse::<iroh::NodeId>()
-                        .map_err(|e| {
-                            BlixardError::ConfigError(format!("Invalid P2P node ID: {}", e))
-                        })?;
-
-                // Create NodeAddr with the bootstrap info
-                let mut node_addr = iroh::NodeAddr::new(p2p_node_id);
-                // Collect all valid addresses and add them at once
-                let addrs: Vec<SocketAddr> = bootstrap_info
-                    .p2p_addresses
-                    .iter()
-                    .filter_map(|addr_str| addr_str.parse().ok())
-                    .collect();
-                if !addrs.is_empty() {
-                    node_addr = node_addr.with_direct_addresses(addrs);
-                }
-
-                // Add relay URL if available
-                if let Some(relay_url) = &bootstrap_info.p2p_relay_url {
-                    if let Ok(url) = relay_url.parse() {
-                        node_addr = node_addr.with_relay_url(url);
-                    }
-                }
+                // Create NodeAddr from bootstrap info
+                let node_addr = self.create_p2p_node_addr(&bootstrap_info).await?;
 
                 // Store the leader's P2P info
                 self.shared
@@ -685,124 +437,8 @@ impl Node {
                     )
                     .await?;
 
-                // Now connect via P2P
-                if let Some(p2p_manager) = self.shared.get_p2p_manager().await {
-                    tracing::info!("Connecting to leader via P2P at {}", node_addr.node_id);
-                    p2p_manager
-                        .connect_p2p_peer(bootstrap_info.node_id, &node_addr)
-                        .await?;
-
-                    // Create P2P client and send join request
-                    let (endpoint, _our_node_id) = self.shared.get_iroh_endpoint().await?;
-                    let transport_client =
-                        crate::transport::iroh_client::IrohClusterServiceClient::new(
-                            Arc::new(endpoint),
-                            node_addr,
-                        );
-
-                    // Now proceed with the join request via P2P
-                    let our_node_id = self.shared.get_id();
-                    let our_bind_address = self.shared.get_bind_addr().to_string();
-                    let (our_p2p_node_id, our_p2p_addresses, our_p2p_relay_url) =
-                        if let Some(node_addr) = self.shared.get_p2p_node_addr().await {
-                            let p2p_id = node_addr.node_id.to_string();
-                            let p2p_addrs: Vec<String> = node_addr
-                                .direct_addresses()
-                                .map(|a| a.to_string())
-                                .collect();
-                            let relay_url = node_addr.relay_url().map(|u| u.to_string());
-                            (Some(p2p_id), p2p_addrs, relay_url)
-                        } else {
-                            (None, Vec::new(), None)
-                        };
-
-                    match transport_client
-                        .join_cluster(
-                            our_node_id,
-                            our_bind_address,
-                            our_p2p_node_id,
-                            our_p2p_addresses,
-                            our_p2p_relay_url,
-                        )
-                        .await
-                    {
-                        Ok((success, message, peers, voters)) => {
-                            if success {
-                                tracing::info!("Successfully joined cluster via P2P bootstrap");
-                                tracing::info!(
-                                    "Join response contains {} peers and {} voters",
-                                    peers.len(),
-                                    voters.len()
-                                );
-
-                                // Update local configuration state with current cluster voters
-                                if !voters.is_empty() {
-                                    tracing::info!(
-                                        "Updating local configuration with voters: {:?}",
-                                        voters
-                                    );
-                                    if let Some(db) = self.shared.get_database().await {
-                                        let storage =
-                                            crate::storage::RedbRaftStorage { database: db };
-                                        let mut conf_state = raft::prelude::ConfState::default();
-                                        conf_state.voters = voters.clone();
-                                        if let Err(e) = storage.save_conf_state(&conf_state) {
-                                            tracing::warn!(
-                                                "Failed to save initial configuration state: {}",
-                                                e
-                                            );
-                                        } else {
-                                            tracing::info!("Successfully saved initial configuration state with voters: {:?}", voters);
-                                        }
-                                    } else {
-                                        tracing::warn!(
-                                            "No database available to save configuration state"
-                                        );
-                                    }
-                                } else {
-                                    tracing::warn!("Join response contained empty voters list!");
-                                }
-
-                                // Store peer information (skip if already exists)
-                                for peer in peers {
-                                    // Check if peer already exists (e.g., the bootstrap node)
-                                    let existing_peers = self.shared.get_peers().await;
-                                    if !existing_peers.iter().any(|p| p.id == peer.id) {
-                                        self.shared
-                                            .add_peer_with_p2p(
-                                                peer.id,
-                                                peer.address.clone(),
-                                                Some(peer.p2p_node_id),
-                                                peer.p2p_addresses,
-                                                Some(peer.p2p_relay_url),
-                                            )
-                                            .await?;
-                                    } else {
-                                        tracing::debug!(
-                                            "Peer {} already exists, skipping",
-                                            peer.id
-                                        );
-                                    }
-                                }
-
-                                return Ok(());
-                            } else {
-                                return Err(BlixardError::ClusterJoin {
-                                    reason: format!("Join request failed: {}", message),
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            return Err(BlixardError::ClusterJoin {
-                                reason: format!("Failed to send join request via P2P: {}", e),
-                            });
-                        }
-                    }
-                } else {
-                    return Err(BlixardError::Internal {
-                        message: "P2P manager not available".to_string(),
-                    });
-                }
+                // Execute HTTP bootstrap join
+                self.execute_http_bootstrap_join(&bootstrap_info, &node_addr, &p2p_node_id, &p2p_addresses, &p2p_relay_url).await?;
             }
 
             /* Original commented code for reference
@@ -858,6 +494,416 @@ impl Node {
                 }
             }
             */
+        }
+        Ok(())
+    }
+
+    /// Gather local P2P info if available
+    async fn gather_local_p2p_info(&self) -> (Option<String>, Vec<String>, Option<String>) {
+        if let Some(node_addr) = self.shared.get_p2p_node_addr().await {
+            let p2p_id = node_addr.node_id.to_string();
+            let p2p_addrs: Vec<String> = node_addr
+                .direct_addresses()
+                .map(|a| a.to_string())
+                .collect();
+            let relay_url = node_addr.relay_url().map(|u| u.to_string());
+            (Some(p2p_id), p2p_addrs, relay_url)
+        } else {
+            (None, Vec::new(), None)
+        }
+    }
+
+    /// Build bootstrap URL from join address
+    async fn build_bootstrap_url(&self, join_addr: &str) -> BlixardResult<String> {
+        tracing::info!("Attempting HTTP bootstrap from {}", join_addr);
+        
+        // Determine if join_addr is already an HTTP URL or a socket address
+        let bootstrap_url = if join_addr.starts_with("http://") || join_addr.starts_with("https://") {
+            // Already an HTTP URL, append /bootstrap if not present
+            if join_addr.ends_with("/bootstrap") {
+                join_addr.to_string()
+            } else {
+                format!("{}/bootstrap", join_addr.trim_end_matches('/'))
+            }
+        } else {
+            // Parse as socket address and construct HTTP URL
+            let addr: SocketAddr = join_addr.parse().map_err(|e| {
+                BlixardError::ConfigError(format!(
+                    "Invalid join address '{}': {}",
+                    join_addr, e
+                ))
+            })?;
+
+            // Get metrics port offset from config
+            let config = crate::config_global::get()?;
+            let bootstrap_port = addr.port() + config.network.metrics.port_offset;
+            format!("http://{}:{}/bootstrap", addr.ip(), bootstrap_port)
+        };
+        
+        Ok(bootstrap_url)
+    }
+
+    /// Fetch bootstrap info from HTTP endpoint
+    async fn fetch_bootstrap_info(&self, bootstrap_url: &str) -> BlixardResult<crate::iroh_types::BootstrapInfo> {
+        tracing::debug!("Fetching bootstrap info from {}", bootstrap_url);
+        let client = reqwest::Client::new();
+        let response = match client
+            .get(bootstrap_url)
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await
+        {
+            Ok(resp) => resp,
+            Err(e) => {
+                return Err(BlixardError::NetworkError(format!(
+                    "Failed to connect to bootstrap endpoint {}: {}",
+                    bootstrap_url, e
+                )));
+            }
+        };
+
+        if !response.status().is_success() {
+            return Err(BlixardError::ClusterJoin {
+                reason: format!(
+                    "Bootstrap endpoint returned {}: {}",
+                    response.status(),
+                    response.text().await.unwrap_or_default()
+                ),
+            });
+        }
+
+        let bootstrap_info: crate::iroh_types::BootstrapInfo =
+            response.json().await.map_err(|e| {
+                BlixardError::NetworkError(format!("Invalid bootstrap response: {}", e))
+            })?;
+
+        tracing::info!(
+            "Got bootstrap info: node_id={}, p2p_node_id={}, addresses={:?}",
+            bootstrap_info.node_id,
+            bootstrap_info.p2p_node_id,
+            bootstrap_info.p2p_addresses
+        );
+        
+        Ok(bootstrap_info)
+    }
+
+    /// Create P2P NodeAddr from bootstrap info
+    async fn create_p2p_node_addr(&self, bootstrap_info: &crate::iroh_types::BootstrapInfo) -> BlixardResult<iroh::NodeAddr> {
+        // Parse the P2P node ID
+        let p2p_node_id = bootstrap_info
+            .p2p_node_id
+            .parse::<iroh::NodeId>()
+            .map_err(|e| {
+                BlixardError::ConfigError(format!("Invalid P2P node ID: {}", e))
+            })?;
+
+        // Create NodeAddr with the bootstrap info
+        let mut node_addr = iroh::NodeAddr::new(p2p_node_id);
+        // Collect all valid addresses and add them at once
+        let addrs: Vec<SocketAddr> = bootstrap_info
+            .p2p_addresses
+            .iter()
+            .filter_map(|addr_str| addr_str.parse().ok())
+            .collect();
+        if !addrs.is_empty() {
+            node_addr = node_addr.with_direct_addresses(addrs);
+        }
+
+        // Add relay URL if available
+        if let Some(relay_url) = &bootstrap_info.p2p_relay_url {
+            if let Ok(url) = relay_url.parse() {
+                node_addr = node_addr.with_relay_url(url);
+            }
+        }
+        
+        Ok(node_addr)
+    }
+
+    /// Attempt discovery-based join to cluster
+    async fn attempt_discovery_based_join(
+        &self,
+        join_addr: &str,
+        leader_node_id: u64,
+        p2p_node_id: &Option<String>,
+        p2p_addresses: &[String],
+        p2p_relay_url: &Option<String>,
+    ) -> BlixardResult<()> {
+        if let Some(discovery_manager) = self
+            .shared
+            .get_discovery_manager::<crate::discovery::DiscoveryManager>()
+            .await
+        {
+            // Try to find the leader's info via discovery
+            let discovered_nodes = discovery_manager.get_nodes().await;
+
+            // Look for a node that might be the leader (node ID 1 or at the join address)
+            for node_info in discovered_nodes {
+                if node_info
+                    .addresses
+                    .iter()
+                    .any(|addr| addr.to_string() == *join_addr)
+                {
+                    tracing::info!(
+                        "Found leader's P2P info via discovery: {}",
+                        node_info.node_id
+                    );
+
+                    // Create NodeAddr from discovered info
+                    let mut node_addr = iroh::NodeAddr::new(node_info.node_id);
+                    for addr in &node_info.addresses {
+                        node_addr = node_addr.with_direct_addresses([*addr]);
+                    }
+
+                    // Store the leader's P2P info
+                    self.shared
+                        .add_peer_with_p2p(
+                            leader_node_id,
+                            join_addr.to_string(),
+                            Some(node_info.node_id.to_string()),
+                            node_info.addresses.iter().map(|a| a.to_string()).collect(),
+                            None, // TODO: Get relay URL from discovery
+                        )
+                        .await?;
+
+                    // Now we can make the P2P connection
+                    if let Some(p2p_manager) = self.shared.get_p2p_manager().await {
+                        tracing::info!(
+                            "Connecting to leader via P2P at {}",
+                            node_info.node_id
+                        );
+                        p2p_manager
+                            .connect_p2p_peer(leader_node_id, &node_addr)
+                            .await?;
+
+                        // Execute the P2P join request
+                        let (success, message, peers, voters) = self.execute_p2p_join_request(
+                            &node_addr,
+                            p2p_node_id,
+                            p2p_addresses,
+                            p2p_relay_url,
+                        ).await?;
+
+                        if success {
+                            tracing::info!(
+                                "Successfully joined cluster via P2P: {}",
+                                message
+                            );
+
+                            // Update cluster configuration
+                            self.update_cluster_configuration(&voters).await?;
+
+                            // Store peer information from response
+                            self.store_peer_information(&peers).await?;
+
+                            return Ok(());
+                        } else {
+                            return Err(BlixardError::ClusterJoin { reason: message });
+                        }
+                    }
+                }
+            }
+        }
+        
+        Err(BlixardError::ClusterJoin {
+            reason: "Discovery-based join failed".to_string(),
+        })
+    }
+
+    /// Execute P2P join request
+    async fn execute_p2p_join_request(
+        &self,
+        node_addr: &iroh::NodeAddr,
+        p2p_node_id: &Option<String>,
+        p2p_addresses: &[String],
+        p2p_relay_url: &Option<String>,
+    ) -> BlixardResult<(bool, String, Vec<crate::iroh_types::NodeInfo>, Vec<u64>)> {
+        // Create P2P client and send join request
+        let (endpoint, _our_node_id) = self.shared.get_iroh_endpoint().await?;
+        let transport_client = crate::transport::iroh_client::IrohClusterServiceClient::new(
+            Arc::new(endpoint),
+            node_addr.clone(),
+        );
+
+        let resp = transport_client
+            .join_cluster(
+                self.shared.get_id(),
+                self.shared.get_bind_addr().to_string(),
+                p2p_node_id.clone(),
+                p2p_addresses.to_vec(),
+                p2p_relay_url.clone(),
+            )
+            .await?;
+
+        Ok(resp)
+    }
+
+    /// Store peer information from join response
+    async fn store_peer_information(&self, peers: &[crate::iroh_types::NodeInfo]) -> BlixardResult<()> {
+        // Store all peer P2P info from the response and establish connections
+        for peer_info in peers {
+            if peer_info.id != self.shared.get_id() && !peer_info.p2p_node_id.is_empty() {
+                // Store peer info
+                self.shared
+                    .add_peer_with_p2p(
+                        peer_info.id,
+                        peer_info.address.clone(),
+                        Some(peer_info.p2p_node_id.clone()),
+                        peer_info.p2p_addresses.clone(),
+                        if peer_info.p2p_relay_url.is_empty() {
+                            None
+                        } else {
+                            Some(peer_info.p2p_relay_url.clone())
+                        },
+                    )
+                    .await?;
+
+                // Establish P2P connection to this peer
+                if let Ok(node_id_parsed) = peer_info.p2p_node_id.parse::<iroh::NodeId>() {
+                    let mut node_addr = iroh::NodeAddr::new(node_id_parsed);
+
+                    // Add relay URL if available
+                    if !peer_info.p2p_relay_url.is_empty() {
+                        if let Ok(relay_url) = peer_info.p2p_relay_url.parse() {
+                            node_addr = node_addr.with_relay_url(relay_url);
+                        }
+                    }
+
+                    // Add direct addresses
+                    let addrs: Vec<SocketAddr> = peer_info
+                        .p2p_addresses
+                        .iter()
+                        .filter_map(|addr_str| addr_str.parse().ok())
+                        .collect();
+                    if !addrs.is_empty() {
+                        node_addr = node_addr.with_direct_addresses(addrs);
+                    }
+
+                    // Try to connect
+                    tracing::info!("Establishing P2P connection to peer {} after joining cluster", peer_info.id);
+                    if let Some(p2p_manager) = self.shared.get_p2p_manager().await {
+                        match p2p_manager.connect_p2p_peer(peer_info.id, &node_addr).await {
+                            Ok(_) => {
+                                tracing::info!("✅ Successfully connected to P2P peer {}", peer_info.id);
+                            }
+                            Err(e) => {
+                                tracing::warn!("⚠️ Failed to establish P2P connection to peer {}: {}", peer_info.id, e);
+                            }
+                        }
+                    } else {
+                        tracing::warn!("P2P manager not available for establishing connections");
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Execute HTTP bootstrap join process
+    async fn execute_http_bootstrap_join(
+        &self,
+        bootstrap_info: &crate::iroh_types::BootstrapInfo,
+        node_addr: &iroh::NodeAddr,
+        p2p_node_id: &Option<String>,
+        p2p_addresses: &[String],
+        p2p_relay_url: &Option<String>,
+    ) -> BlixardResult<()> {
+        // Now connect via P2P
+        if let Some(p2p_manager) = self.shared.get_p2p_manager().await {
+            tracing::info!("Connecting to leader via P2P at {}", node_addr.node_id);
+            p2p_manager
+                .connect_p2p_peer(bootstrap_info.node_id, node_addr)
+                .await?;
+
+            // Create P2P client and send join request
+            let (endpoint, _our_node_id) = self.shared.get_iroh_endpoint().await?;
+            let transport_client =
+                crate::transport::iroh_client::IrohClusterServiceClient::new(
+                    Arc::new(endpoint),
+                    node_addr.clone(),
+                );
+
+            // Now proceed with the join request via P2P
+            let our_node_id = self.shared.get_id();
+            let our_bind_address = self.shared.get_bind_addr().to_string();
+            let (our_p2p_node_id, our_p2p_addresses, our_p2p_relay_url) =
+                if let Some(node_addr) = self.shared.get_p2p_node_addr().await {
+                    let p2p_id = node_addr.node_id.to_string();
+                    let p2p_addrs: Vec<String> = node_addr
+                        .direct_addresses()
+                        .map(|a| a.to_string())
+                        .collect();
+                    let relay_url = node_addr.relay_url().map(|u| u.to_string());
+                    (Some(p2p_id), p2p_addrs, relay_url)
+                } else {
+                    (None, Vec::new(), None)
+                };
+
+            match transport_client
+                .join_cluster(
+                    our_node_id,
+                    our_bind_address,
+                    our_p2p_node_id,
+                    our_p2p_addresses,
+                    our_p2p_relay_url,
+                )
+                .await
+            {
+                Ok((success, message, peers, voters)) => {
+                    if success {
+                        tracing::info!("Successfully joined cluster via P2P bootstrap");
+                        tracing::info!(
+                            "Join response contains {} peers and {} voters",
+                            peers.len(),
+                            voters.len()
+                        );
+
+                        // Update local configuration state with current cluster voters
+                        self.update_cluster_configuration(&voters).await?;
+
+                        // Store peer information from response
+                        self.store_peer_information(&peers).await?;
+
+                        return Ok(());
+                    } else {
+                        return Err(BlixardError::ClusterJoin {
+                            reason: format!("Join request failed: {}", message),
+                        });
+                    }
+                }
+                Err(e) => {
+                    return Err(BlixardError::ClusterJoin {
+                        reason: format!("Failed to send join request via P2P: {}", e),
+                    });
+                }
+            }
+        } else {
+            return Err(BlixardError::Internal {
+                message: "P2P manager not available".to_string(),
+            });
+        }
+    }
+
+    /// Update cluster configuration with voters
+    async fn update_cluster_configuration(&self, voters: &[u64]) -> BlixardResult<()> {
+        if !voters.is_empty() {
+            tracing::info!("Updating local configuration with voters: {:?}", voters);
+            if let Some(db) = self.shared.get_database().await {
+                let storage = crate::storage::RedbRaftStorage { database: db };
+                let mut conf_state = raft::prelude::ConfState::default();
+                conf_state.voters = voters.to_vec();
+                if let Err(e) = storage.save_conf_state(&conf_state) {
+                    tracing::warn!(
+                        "Failed to save initial configuration state: {}",
+                        e
+                    );
+                } else {
+                    tracing::info!("Successfully saved initial configuration state with voters: {:?}", voters);
+                }
+            } else {
+                tracing::warn!("No database available to save configuration state");
+            }
+        } else {
+            tracing::warn!("Join response contained empty voters list!");
         }
         Ok(())
     }
@@ -961,8 +1007,8 @@ impl Node {
         raft_manager: RaftManager,
     ) -> tokio::task::JoinHandle<BlixardResult<()>> {
         let shared_weak = Arc::downgrade(&self.shared);
-        let node_id = self.shared.node_id();
-        let db = self.shared.get_database();
+        let node_id = self.shared.get_id();
+        let shared_for_db = self.shared.clone();
         
         tokio::spawn(async move {
             let mut restart_count = 0;
@@ -1005,6 +1051,7 @@ impl Node {
                     tokio::time::sleep(Duration::from_millis(delay)).await;
 
                     // Recreate storage and Raft manager
+                    let db = shared_for_db.get_database().await;
                     match Self::recreate_raft_manager(node_id, db.clone(), shared.clone()).await {
                         Ok(new_manager) => {
                             tracing::info!("Successfully recreated Raft manager");
