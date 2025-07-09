@@ -9,7 +9,7 @@ use tracing::{debug, info, warn};
 use blixard_core::{
     error::{BlixardError, BlixardResult},
     types::{VmConfig as CoreVmConfig, VmState, VmStatus},
-    vm_backend::VmBackend,
+    vm_backend::{VmBackend, VmBackendFactory},
     vm_health_types::{HealthCheckResult, HealthCheckType, VmHealthStatus},
     vm_state_persistence::{VmStatePersistence, VmPersistenceConfig},
 };

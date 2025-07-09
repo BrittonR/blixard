@@ -369,6 +369,7 @@ pub struct TestNodeBuilder {
     join_addr: Option<String>,
     data_dir: Option<String>,
     vm_backend: Option<String>,
+    vm_backend_registry: Option<crate::vm_backend::VmBackendRegistry>,
 }
 
 impl TestNodeBuilder {
@@ -399,6 +400,11 @@ impl TestNodeBuilder {
     
     pub fn with_vm_backend(mut self, backend: String) -> Self {
         self.vm_backend = Some(backend);
+        self
+    }
+    
+    pub fn with_custom_vm_registry(mut self, registry: crate::vm_backend::VmBackendRegistry) -> Self {
+        self.vm_backend_registry = Some(registry);
         self
     }
 
@@ -485,9 +491,14 @@ impl TestNodeBuilder {
         let (shutdown_tx, _shutdown_rx) = oneshot::channel();
         shared_state.set_shutdown_tx(shutdown_tx).await;
 
-        // Initialize the node - for tests we'll use mock backend
-        // Real microvm backend registration should be done in the main binary
-        node.initialize().await?;
+        // Initialize the node with custom registry if provided
+        if let Some(registry) = self.vm_backend_registry {
+            // Use the public method that accepts a custom registry
+            node.initialize_with_vm_registry(registry).await?;
+        } else {
+            // Use default initialization (mock backend)
+            node.initialize().await?;
+        }
 
         // Now start Iroh services AFTER node initialization
         // The P2P manager now exists and services can start properly
@@ -850,6 +861,8 @@ impl Drop for TestCluster {
 pub struct TestClusterBuilder {
     node_count: Option<usize>,
     convergence_timeout: Option<Duration>,
+    vm_backend: Option<String>,
+    vm_backend_registry: Option<crate::vm_backend::VmBackendRegistry>,
 }
 
 impl TestClusterBuilder {
@@ -860,6 +873,16 @@ impl TestClusterBuilder {
 
     pub fn with_convergence_timeout(mut self, timeout: Duration) -> Self {
         self.convergence_timeout = Some(timeout);
+        self
+    }
+    
+    pub fn with_vm_backend(mut self, backend: String) -> Self {
+        self.vm_backend = Some(backend);
+        self
+    }
+    
+    pub fn with_custom_vm_registry(mut self, registry: crate::vm_backend::VmBackendRegistry) -> Self {
+        self.vm_backend_registry = Some(registry);
         self
     }
 
@@ -877,13 +900,21 @@ impl TestClusterBuilder {
 
         let mut nodes = HashMap::new();
 
-        // Create bootstrap node
-        let bootstrap_node = TestNode::builder()
+        // Create bootstrap node with VM backend configuration
+        let mut bootstrap_builder = TestNode::builder()
             .with_id(1)
             .with_auto_port()
-            .await
-            .build()
-            .await?;
+            .await;
+        
+        // Apply VM backend configuration if provided
+        if let Some(backend) = self.vm_backend.clone() {
+            bootstrap_builder = bootstrap_builder.with_vm_backend(backend);
+        }
+        if let Some(registry) = self.vm_backend_registry.clone() {
+            bootstrap_builder = bootstrap_builder.with_custom_vm_registry(registry);
+        }
+        
+        let bootstrap_node = bootstrap_builder.build().await?;
 
         let bootstrap_addr = bootstrap_node.addr;
         nodes.insert(1, bootstrap_node);
@@ -899,13 +930,21 @@ impl TestClusterBuilder {
             for id in 2..=node_count as u64 {
                 eprintln!("Adding node {} to cluster", id);
 
-                let node = TestNode::builder()
+                let mut node_builder = TestNode::builder()
                     .with_id(id)
                     .with_auto_port()
                     .await
-                    .with_join_addr(Some(bootstrap_addr))
-                    .build()
-                    .await?;
+                    .with_join_addr(Some(bootstrap_addr));
+                
+                // Apply VM backend configuration if provided
+                if let Some(backend) = self.vm_backend.clone() {
+                    node_builder = node_builder.with_vm_backend(backend);
+                }
+                if let Some(registry) = self.vm_backend_registry.clone() {
+                    node_builder = node_builder.with_custom_vm_registry(registry);
+                }
+                
+                let node = node_builder.build().await?;
 
                 nodes.insert(id, node);
 
@@ -1061,13 +1100,21 @@ impl TestClusterBuilder {
         } else {
             // For small clusters (<=3 nodes), use the original parallel join
             for id in 2..=node_count as u64 {
-                let node = TestNode::builder()
+                let mut node_builder = TestNode::builder()
                     .with_id(id)
                     .with_auto_port()
                     .await
-                    .with_join_addr(Some(bootstrap_addr))
-                    .build()
-                    .await?;
+                    .with_join_addr(Some(bootstrap_addr));
+                
+                // Apply VM backend configuration if provided
+                if let Some(backend) = self.vm_backend.clone() {
+                    node_builder = node_builder.with_vm_backend(backend);
+                }
+                if let Some(registry) = self.vm_backend_registry.clone() {
+                    node_builder = node_builder.with_custom_vm_registry(registry);
+                }
+                
+                let node = node_builder.build().await?;
 
                 nodes.insert(id, node);
             }

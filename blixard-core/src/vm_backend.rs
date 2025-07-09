@@ -751,6 +751,7 @@ pub trait VmBackendFactory: Send + Sync {
 /// This provides a centralized way to register and discover VM backends.
 /// Backends register themselves at startup, and the Node can create
 /// the appropriate backend based on configuration.
+#[derive(Clone)]
 pub struct VmBackendRegistry {
     factories: HashMap<String, Arc<dyn VmBackendFactory>>,
 }
