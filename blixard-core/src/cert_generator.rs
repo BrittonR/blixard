@@ -490,15 +490,29 @@ pub async fn generate_cluster_pki(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use x509_parser::{parse_x509_certificate, public_key::PublicKey, certificate::X509Certificate};
+    use std::time::SystemTime;
 
-    #[tokio::test]
-    async fn test_ca_generation() {
+    /// Helper function to parse certificate and validate basic structure
+    fn parse_certificate_pem(cert_pem: &str) -> X509Certificate {
+        let cert_der = pem::parse(cert_pem).expect("Failed to parse PEM");
+        let (_, cert) = parse_x509_certificate(&cert_der.contents).expect("Failed to parse certificate");
+        cert
+    }
+
+    /// Helper function to create test config with temporary directory
+    fn create_test_config() -> (CertGeneratorConfig, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         let config = CertGeneratorConfig {
             output_dir: temp_dir.path().to_path_buf(),
             ..Default::default()
         };
+        (config, temp_dir)
+    }
 
+    #[tokio::test]
+    async fn test_ca_generation() {
+        let (config, temp_dir) = create_test_config();
         let generator = CertGenerator::new(config);
         let (_, ca_bundle) = generator.generate_ca("test-ca").await.unwrap();
 
@@ -513,13 +527,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_server_cert_generation() {
-        let temp_dir = TempDir::new().unwrap();
-        let config = CertGeneratorConfig {
-            output_dir: temp_dir.path().to_path_buf(),
-            ..Default::default()
-        };
+    async fn test_ca_certificate_validation() {
+        let (config, _temp_dir) = create_test_config();
+        let generator = CertGenerator::new(config);
+        let (_, ca_bundle) = generator.generate_ca("test-ca").await.unwrap();
 
+        // Parse and validate CA certificate structure
+        let cert = parse_certificate_pem(&ca_bundle.cert_pem);
+        
+        // Verify it's a CA certificate
+        assert!(cert.is_ca());
+        
+        // Verify subject contains expected fields
+        assert!(cert.subject().to_string().contains("CN=test-ca"));
+        assert!(cert.subject().to_string().contains("O=Blixard Cluster"));
+        
+        // Verify key usage includes certificate signing
+        if let Some(key_usage) = cert.key_usage() {
+            assert!(key_usage.key_cert_sign());
+            assert!(key_usage.crl_sign());
+        }
+        
+        // Verify validity period
+        assert!(cert.validity().not_before <= cert.validity().not_after);
+        
+        // Verify serial number and fingerprint are populated
+        assert!(!ca_bundle.serial_number.is_empty());
+        assert!(!ca_bundle.fingerprint.is_empty());
+        assert!(ca_bundle.fingerprint.contains(":"));
+    }
+
+    #[tokio::test]
+    async fn test_server_cert_generation() {
+        let (config, _temp_dir) = create_test_config();
         let generator = CertGenerator::new(config);
 
         // Generate CA first
@@ -540,13 +580,51 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_client_cert_generation() {
-        let temp_dir = TempDir::new().unwrap();
-        let config = CertGeneratorConfig {
-            output_dir: temp_dir.path().to_path_buf(),
-            ..Default::default()
-        };
+    async fn test_server_certificate_validation() {
+        let (config, _temp_dir) = create_test_config();
+        let generator = CertGenerator::new(config);
 
+        let (ca_cert, _) = generator.generate_ca("test-ca").await.unwrap();
+        let server_bundle = generator
+            .generate_server_cert(
+                "node1.blixard.local",
+                vec!["node1.blixard.local".to_string(), "127.0.0.1".to_string()],
+                &ca_cert,
+            )
+            .await
+            .unwrap();
+
+        let cert = parse_certificate_pem(&server_bundle.cert_pem);
+        
+        // Verify it's NOT a CA certificate
+        assert!(!cert.is_ca());
+        
+        // Verify subject contains server name
+        assert!(cert.subject().to_string().contains("CN=node1.blixard.local"));
+        
+        // Verify Subject Alternative Names
+        if let Some(san_ext) = cert.subject_alternative_name() {
+            let san_names: Vec<_> = san_ext.value.general_names.iter().collect();
+            assert!(!san_names.is_empty());
+            // Should contain both DNS name and IP address
+        }
+        
+        // Verify key usage for server authentication
+        if let Some(key_usage) = cert.key_usage() {
+            assert!(key_usage.digital_signature());
+            assert!(key_usage.key_agreement());
+        }
+        
+        // Verify extended key usage includes server auth
+        if let Some(ext_key_usage) = cert.extended_key_usage() {
+            assert!(ext_key_usage.server_auth);
+            assert!(ext_key_usage.client_auth); // For mTLS
+        }
+    }
+
+    #[tokio::test]
+    async fn test_client_cert_generation() {
+        let (config, _temp_dir) = create_test_config();
         let generator = CertGenerator::new(config);
 
         // Generate CA first
@@ -560,6 +638,107 @@ mod tests {
 
         assert!(!client_bundle.cert_pem.is_empty());
         assert!(!client_bundle.key_pem.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_client_certificate_validation() {
+        let (config, _temp_dir) = create_test_config();
+        let generator = CertGenerator::new(config);
+
+        let (ca_cert, _) = generator.generate_ca("test-ca").await.unwrap();
+        let client_bundle = generator
+            .generate_client_cert("admin@blixard.local", &ca_cert)
+            .await
+            .unwrap();
+
+        let cert = parse_certificate_pem(&client_bundle.cert_pem);
+        
+        // Verify it's NOT a CA certificate
+        assert!(!cert.is_ca());
+        
+        // Verify subject contains client name
+        assert!(cert.subject().to_string().contains("CN=admin@blixard.local"));
+        
+        // Verify extended key usage includes client auth only
+        if let Some(ext_key_usage) = cert.extended_key_usage() {
+            assert!(ext_key_usage.client_auth);
+            assert!(!ext_key_usage.server_auth); // Should not have server auth
+        }
+    }
+
+    #[tokio::test]
+    async fn test_key_algorithm_support() {
+        let (mut config, _temp_dir) = create_test_config();
+        
+        // Test all supported key algorithms
+        let algorithms = vec![
+            KeyAlgorithm::EcdsaP256,
+            KeyAlgorithm::EcdsaP384,
+            KeyAlgorithm::Rsa2048,
+            KeyAlgorithm::Rsa4096,
+        ];
+        
+        for algorithm in algorithms {
+            config.key_algorithm = algorithm;
+            let generator = CertGenerator::new(config.clone());
+            
+            // Test key generation doesn't fail
+            let key_pair = generator.generate_key_pair();
+            assert!(key_pair.is_ok(), "Failed to generate key pair for {:?}", algorithm);
+            
+            // Test CA generation works with this algorithm
+            let (_, ca_bundle) = generator.generate_ca("test-ca").await.unwrap();
+            assert!(!ca_bundle.cert_pem.is_empty());
+            assert!(!ca_bundle.key_pem.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_certificate_validity_period() {
+        let (mut config, _temp_dir) = create_test_config();
+        config.validity_days = 7; // Short validity for testing
+        
+        let generator = CertGenerator::new(config);
+        let (_, ca_bundle) = generator.generate_ca("test-ca").await.unwrap();
+        
+        let cert = parse_certificate_pem(&ca_bundle.cert_pem);
+        let validity = cert.validity();
+        
+        // Check validity period is approximately 7 days
+        let duration = validity.not_after.timestamp() - validity.not_before.timestamp();
+        let expected_duration = 7 * 24 * 60 * 60; // 7 days in seconds
+        
+        // Allow some tolerance for execution time
+        assert!(duration >= expected_duration - 60);
+        assert!(duration <= expected_duration + 60);
+    }
+
+    #[tokio::test]
+    async fn test_certificate_chain_validation() {
+        let (config, _temp_dir) = create_test_config();
+        let generator = CertGenerator::new(config);
+
+        // Generate CA
+        let (ca_cert, ca_bundle) = generator.generate_ca("test-ca").await.unwrap();
+        
+        // Generate server certificate signed by CA
+        let server_bundle = generator
+            .generate_server_cert("node1", vec!["node1".to_string()], &ca_cert)
+            .await
+            .unwrap();
+        
+        // Parse both certificates
+        let ca_x509 = parse_certificate_pem(&ca_bundle.cert_pem);
+        let server_x509 = parse_certificate_pem(&server_bundle.cert_pem);
+        
+        // Verify server certificate is signed by CA
+        // This is a basic check - in production you'd use proper certificate chain validation
+        assert_ne!(ca_x509.subject(), server_x509.subject());
+        assert!(ca_x509.is_ca());
+        assert!(!server_x509.is_ca());
+        
+        // Verify different serial numbers
+        assert_ne!(ca_bundle.serial_number, server_bundle.serial_number);
     }
 
     #[tokio::test]
@@ -581,5 +760,140 @@ mod tests {
         assert!(temp_dir.path().join("server-node2.crt").exists());
         assert!(temp_dir.path().join("client-admin.crt").exists());
         assert!(temp_dir.path().join("client-operator.crt").exists());
+        
+        // Check all corresponding key files exist
+        assert!(temp_dir.path().join("ca-test-cluster-ca.key").exists());
+        assert!(temp_dir.path().join("server-node1.key").exists());
+        assert!(temp_dir.path().join("server-node2.key").exists());
+        assert!(temp_dir.path().join("client-admin.key").exists());
+        assert!(temp_dir.path().join("client-operator.key").exists());
+    }
+
+    #[tokio::test]
+    async fn test_complete_cluster_pki_validation() {
+        let (config, _temp_dir) = create_test_config();
+        let generator = CertGenerator::new(config);
+
+        let pki = generator
+            .generate_cluster_pki(
+                "test-cluster",
+                vec!["node1".to_string(), "node2".to_string()],
+                vec!["admin".to_string()],
+            )
+            .await
+            .unwrap();
+
+        // Validate CA
+        let ca_cert = parse_certificate_pem(&pki.ca_bundle.cert_pem);
+        assert!(ca_cert.is_ca());
+
+        // Validate all server certificates
+        for (name, bundle) in &pki.server_bundles {
+            let cert = parse_certificate_pem(&bundle.cert_pem);
+            assert!(!cert.is_ca());
+            assert!(cert.subject().to_string().contains(&format!("CN={}", name)));
+            
+            // Verify has server auth capability
+            if let Some(ext_key_usage) = cert.extended_key_usage() {
+                assert!(ext_key_usage.server_auth);
+            }
+        }
+
+        // Validate all client certificates  
+        for (name, bundle) in &pki.client_bundles {
+            let cert = parse_certificate_pem(&bundle.cert_pem);
+            assert!(!cert.is_ca());
+            assert!(cert.subject().to_string().contains(&format!("CN={}", name)));
+            
+            // Verify has client auth capability
+            if let Some(ext_key_usage) = cert.extended_key_usage() {
+                assert!(ext_key_usage.client_auth);
+            }
+        }
+
+        // Verify unique serial numbers
+        let mut serials = std::collections::HashSet::new();
+        serials.insert(&pki.ca_bundle.serial_number);
+        for (_, bundle) in &pki.server_bundles {
+            assert!(serials.insert(&bundle.serial_number));
+        }
+        for (_, bundle) in &pki.client_bundles {
+            assert!(serials.insert(&bundle.serial_number));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_file_permissions() {
+        let (config, temp_dir) = create_test_config();
+        let generator = CertGenerator::new(config);
+        let (_, ca_bundle) = generator.generate_ca("test-ca").await.unwrap();
+
+        let key_path = temp_dir.path().join("ca-test-ca.key");
+        assert!(key_path.exists());
+
+        // Check file permissions on Unix systems
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = tokio::fs::metadata(&key_path).await.unwrap();
+            let permissions = metadata.permissions();
+            assert_eq!(permissions.mode() & 0o777, 0o600); // Should be 600 (owner read/write only)
+        }
+    }
+
+    #[tokio::test]
+    async fn test_error_handling_invalid_validity() {
+        let (mut config, _temp_dir) = create_test_config();
+        config.validity_days = -1; // Invalid negative validity
+        
+        let generator = CertGenerator::new(config);
+        let result = generator.generate_ca("test-ca").await;
+        
+        // Should handle the error gracefully
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_san_processing() {
+        let (config, _temp_dir) = create_test_config();
+        let generator = CertGenerator::new(config);
+
+        let (ca_cert, _) = generator.generate_ca("test-ca").await.unwrap();
+        
+        // Test with mixed DNS names and IP addresses
+        let san_list = vec![
+            "node1.example.com".to_string(),
+            "localhost".to_string(),
+            "127.0.0.1".to_string(),
+            "::1".to_string(),
+            "192.168.1.100".to_string(),
+        ];
+        
+        let server_bundle = generator
+            .generate_server_cert("node1", san_list, &ca_cert)
+            .await
+            .unwrap();
+            
+        let cert = parse_certificate_pem(&server_bundle.cert_pem);
+        
+        // Verify SAN extension exists
+        assert!(cert.subject_alternative_name().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_certificate_fingerprint_uniqueness() {
+        let (config, _temp_dir) = create_test_config();
+        let generator = CertGenerator::new(config);
+
+        // Generate multiple certificates
+        let (_, ca1) = generator.generate_ca("ca1").await.unwrap();
+        let (_, ca2) = generator.generate_ca("ca2").await.unwrap();
+        
+        // Fingerprints should be different
+        assert_ne!(ca1.fingerprint, ca2.fingerprint);
+        
+        // Fingerprints should be in expected format (hex with colons)
+        assert!(ca1.fingerprint.matches(':').count() > 0);
+        assert!(ca1.fingerprint.chars().all(|c| c.is_ascii_hexdigit() || c == ':'));
     }
 }

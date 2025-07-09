@@ -273,8 +273,8 @@ impl IrohVmService {
         vcpus: u32,
         memory_mb: u32,
         strategy: Option<String>,
-        constraints: Option<String>,
-        features: Vec<String>,
+        constraints: Option<Vec<String>>,
+        features: Option<Vec<String>>,
         priority: Option<u32>,
     ) -> BlixardResult<VmOperationResponse> {
         match self.vm_service.create_vm_with_scheduling(
@@ -310,8 +310,8 @@ impl IrohVmService {
         vcpus: u32,
         memory_mb: u32,
         strategy: Option<String>,
-        constraints: Option<String>,
-        features: Vec<String>,
+        constraints: Option<Vec<String>>,
+        features: Option<Vec<String>>,
     ) -> BlixardResult<VmOperationResponse> {
         match self.vm_service.schedule_vm_placement(&name, vcpus, memory_mb, strategy, constraints, features).await {
             Ok((node_id, score, reason, alternatives)) => Ok(VmOperationResponse::SchedulePlacement {
