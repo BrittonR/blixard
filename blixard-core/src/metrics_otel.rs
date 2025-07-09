@@ -109,319 +109,441 @@ pub struct Metrics {
 impl Metrics {
     /// Create new metrics instance with the given meter
     fn new(meter: Meter) -> Self {
+        let mut metrics = Metrics::with_meter(meter.clone());
+        
+        // Initialize all metric groups
+        metrics.init_raft_metrics(&meter);
+        metrics.init_network_metrics(&meter);
+        metrics.init_vm_metrics(&meter);
+        metrics.init_resource_metrics(&meter);
+        metrics.init_storage_metrics(&meter);
+        metrics.init_p2p_metrics(&meter);
+        metrics.init_connection_pool_metrics(&meter);
+        
+        metrics
+    }
+
+    /// Create a new metrics instance with the given meter (without initialization)
+    fn with_meter(meter: Meter) -> Self {
+        // Create temporary placeholders - these will be replaced during initialization
+        let temp_counter = meter.u64_counter("temp").init();
+        let temp_histogram = meter.f64_histogram("temp").init();
+        let temp_up_down = meter.i64_up_down_counter("temp").init();
+
         Self {
             // Raft metrics
-            raft_proposals_total: meter
-                .u64_counter("raft.proposals.total")
-                .with_description("Total number of Raft proposals")
-                .init(),
-            raft_proposals_failed: meter
-                .u64_counter("raft.proposals.failed")
-                .with_description("Number of failed Raft proposals")
-                .init(),
-            raft_committed_entries: meter
-                .u64_counter("raft.committed_entries.total")
-                .with_description("Total number of committed Raft entries")
-                .init(),
-            raft_applied_entries: meter
-                .u64_counter("raft.applied_entries.total")
-                .with_description("Total number of applied Raft entries")
-                .init(),
-            raft_leader_changes: meter
-                .u64_counter("raft.leader_changes.total")
-                .with_description("Number of leader changes")
-                .init(),
-            raft_term: meter
-                .i64_up_down_counter("raft.term")
-                .with_description("Current Raft term")
-                .init(),
-            raft_commit_index: meter
-                .i64_up_down_counter("raft.commit_index")
-                .with_description("Current Raft commit index")
-                .init(),
-            raft_proposal_duration: meter
-                .f64_histogram("raft.proposal.duration")
-                .with_description("Duration of Raft proposals in seconds")
-                .init(),
+            raft_proposals_total: temp_counter.clone(),
+            raft_proposals_failed: temp_counter.clone(),
+            raft_committed_entries: temp_counter.clone(),
+            raft_applied_entries: temp_counter.clone(),
+            raft_leader_changes: temp_counter.clone(),
+            raft_term: temp_up_down.clone(),
+            raft_commit_index: temp_up_down.clone(),
+            raft_proposal_duration: temp_histogram.clone(),
 
             // Raft batch processing metrics
-            raft_batches_total: meter
-                .u64_counter("raft.batches.total")
-                .with_description("Total number of Raft proposal batches")
-                .init(),
-            raft_batch_size: meter
-                .f64_histogram("raft.batch.size")
-                .with_description("Number of proposals in each batch")
-                .init(),
-            raft_batch_bytes: meter
-                .f64_histogram("raft.batch.bytes")
-                .with_description("Size of Raft batches in bytes")
-                .init(),
-            raft_batch_age_ms: meter
-                .f64_histogram("raft.batch.age_ms")
-                .with_description("Age of batches when flushed in milliseconds")
-                .init(),
+            raft_batches_total: temp_counter.clone(),
+            raft_batch_size: temp_histogram.clone(),
+            raft_batch_bytes: temp_histogram.clone(),
+            raft_batch_age_ms: temp_histogram.clone(),
 
             // Network metrics
-            grpc_requests_total: meter
-                .u64_counter("grpc.requests.total")
-                .with_description("Total number of gRPC requests")
-                .init(),
-            grpc_requests_failed: meter
-                .u64_counter("grpc.requests.failed")
-                .with_description("Number of failed gRPC requests")
-                .init(),
-            grpc_request_duration: meter
-                .f64_histogram("grpc.request.duration")
-                .with_description("Duration of gRPC requests in seconds")
-                .init(),
-            peer_connections_active: meter
-                .i64_up_down_counter("peer.connections.active")
-                .with_description("Number of active peer connections")
-                .init(),
-            peer_reconnect_attempts: meter
-                .u64_counter("peer.reconnect.attempts")
-                .with_description("Number of peer reconnection attempts")
-                .init(),
+            grpc_requests_total: temp_counter.clone(),
+            grpc_requests_failed: temp_counter.clone(),
+            grpc_request_duration: temp_histogram.clone(),
+            peer_connections_active: temp_up_down.clone(),
+            peer_reconnect_attempts: temp_counter.clone(),
 
             // VM metrics
-            vm_total: meter
-                .i64_up_down_counter("vm.total")
-                .with_description("Total number of VMs")
-                .init(),
-            vm_running: meter
-                .i64_up_down_counter("vm.running")
-                .with_description("Number of running VMs")
-                .init(),
-            vm_create_total: meter
-                .u64_counter("vm.create.total")
-                .with_description("Total number of VM create attempts")
-                .init(),
-            vm_create_failed: meter
-                .u64_counter("vm.create.failed")
-                .with_description("Number of failed VM creates")
-                .init(),
-            vm_create_duration: meter
-                .f64_histogram("vm.create.duration")
-                .with_description("Duration of VM creation in seconds")
-                .init(),
-            vm_start_total: meter
-                .u64_counter("vm.start.total")
-                .with_description("Total number of VM start attempts")
-                .init(),
-            vm_start_failed: meter
-                .u64_counter("vm.start.failed")
-                .with_description("Number of failed VM starts")
-                .init(),
-            vm_stop_total: meter
-                .u64_counter("vm.stop.total")
-                .with_description("Total number of VM stop attempts")
-                .init(),
-            vm_stop_failed: meter
-                .u64_counter("vm.stop.failed")
-                .with_description("Number of failed VM stops")
-                .init(),
-            vm_delete_total: meter
-                .u64_counter("vm.delete.total")
-                .with_description("Total number of VM delete attempts")
-                .init(),
-            vm_delete_failed: meter
-                .u64_counter("vm.delete.failed")
-                .with_description("Number of failed VM deletes")
-                .init(),
-            vm_health_checks_total: meter
-                .u64_counter("vm.health_checks.total")
-                .with_description("Total number of VM health checks performed")
-                .init(),
-            vm_health_check_failed: meter
-                .u64_counter("vm.health_check.failed")
-                .with_description("Number of failed VM health checks")
-                .init(),
-            vm_health_state: meter
-                .u64_counter("vm.health_state")
-                .with_description(
-                    "VM health state (labeled by state: healthy, degraded, unhealthy)",
-                )
-                .init(),
-            vm_unhealthy_total: meter
-                .u64_counter("vm.unhealthy.total")
-                .with_description("Total number of unhealthy VMs detected")
-                .init(),
-            vm_status_changes: meter
-                .u64_counter("vm.status_changes.total")
-                .with_description("Number of VM status changes detected by health monitoring")
-                .init(),
-            vm_recovery_success: meter
-                .u64_counter("vm.recovery.success")
-                .with_description("Number of successful VM recoveries")
-                .init(),
-            vm_recovery_failed: meter
-                .u64_counter("vm.recovery.failed")
-                .with_description("Number of failed VM recovery attempts")
-                .init(),
+            vm_total: temp_up_down.clone(),
+            vm_running: temp_up_down.clone(),
+            vm_create_total: temp_counter.clone(),
+            vm_create_failed: temp_counter.clone(),
+            vm_create_duration: temp_histogram.clone(),
+            vm_start_total: temp_counter.clone(),
+            vm_start_failed: temp_counter.clone(),
+            vm_stop_total: temp_counter.clone(),
+            vm_stop_failed: temp_counter.clone(),
+            vm_delete_total: temp_counter.clone(),
+            vm_delete_failed: temp_counter.clone(),
+            vm_health_checks_total: temp_counter.clone(),
+            vm_health_check_failed: temp_counter.clone(),
+            vm_health_state: temp_counter.clone(),
+            vm_unhealthy_total: temp_counter.clone(),
+            vm_status_changes: temp_counter.clone(),
+            vm_recovery_success: temp_counter.clone(),
+            vm_recovery_failed: temp_counter.clone(),
 
             // Resource monitoring metrics
-            cluster_nodes_total: meter
-                .i64_up_down_counter("cluster.nodes.total")
-                .with_description("Total number of nodes in cluster")
-                .init(),
-            cluster_nodes_healthy: meter
-                .i64_up_down_counter("cluster.nodes.healthy")
-                .with_description("Number of healthy nodes in cluster")
-                .init(),
-            cluster_vcpus_total: meter
-                .i64_up_down_counter("cluster.vcpus.total")
-                .with_description("Total vCPUs available in cluster")
-                .init(),
-            cluster_vcpus_used: meter
-                .i64_up_down_counter("cluster.vcpus.used")
-                .with_description("vCPUs currently used in cluster")
-                .init(),
-            cluster_memory_mb_total: meter
-                .i64_up_down_counter("cluster.memory_mb.total")
-                .with_description("Total memory in MB available in cluster")
-                .init(),
-            cluster_memory_mb_used: meter
-                .i64_up_down_counter("cluster.memory_mb.used")
-                .with_description("Memory in MB currently used in cluster")
-                .init(),
-            cluster_disk_gb_total: meter
-                .i64_up_down_counter("cluster.disk_gb.total")
-                .with_description("Total disk space in GB available in cluster")
-                .init(),
-            cluster_disk_gb_used: meter
-                .i64_up_down_counter("cluster.disk_gb.used")
-                .with_description("Disk space in GB currently used in cluster")
-                .init(),
-            node_vcpus_available: meter
-                .i64_up_down_counter("node.vcpus.available")
-                .with_description("vCPUs available on this node")
-                .init(),
-            node_memory_mb_available: meter
-                .i64_up_down_counter("node.memory_mb.available")
-                .with_description("Memory in MB available on this node")
-                .init(),
-            node_disk_gb_available: meter
-                .i64_up_down_counter("node.disk_gb.available")
-                .with_description("Disk space in GB available on this node")
-                .init(),
-            vm_placement_attempts: meter
-                .u64_counter("vm.placement.attempts")
-                .with_description("Total number of VM placement attempts")
-                .init(),
-            vm_placement_failures: meter
-                .u64_counter("vm.placement.failures")
-                .with_description("Number of failed VM placements")
-                .init(),
-            vm_placement_duration: meter
-                .f64_histogram("vm.placement.duration")
-                .with_description("Duration of VM placement decisions in seconds")
-                .init(),
-            vm_preemptions_total: meter
-                .u64_counter("vm.preemptions.total")
-                .with_description("Total number of VM preemptions")
-                .init(),
+            cluster_nodes_total: temp_up_down.clone(),
+            cluster_nodes_healthy: temp_up_down.clone(),
+            cluster_vcpus_total: temp_up_down.clone(),
+            cluster_vcpus_used: temp_up_down.clone(),
+            cluster_memory_mb_total: temp_up_down.clone(),
+            cluster_memory_mb_used: temp_up_down.clone(),
+            cluster_disk_gb_total: temp_up_down.clone(),
+            cluster_disk_gb_used: temp_up_down.clone(),
+            node_vcpus_available: temp_up_down.clone(),
+            node_memory_mb_available: temp_up_down.clone(),
+            node_disk_gb_available: temp_up_down.clone(),
+            vm_placement_attempts: temp_counter.clone(),
+            vm_placement_failures: temp_counter.clone(),
+            vm_placement_duration: temp_histogram.clone(),
+            vm_preemptions_total: temp_counter.clone(),
 
             // Storage metrics
-            storage_writes: meter
-                .u64_counter("storage.writes.total")
-                .with_description("Total number of storage writes")
-                .init(),
-            storage_reads: meter
-                .u64_counter("storage.reads.total")
-                .with_description("Total number of storage reads")
-                .init(),
-            storage_write_duration: meter
-                .f64_histogram("storage.write.duration")
-                .with_description("Duration of storage writes in seconds")
-                .init(),
-            storage_read_duration: meter
-                .f64_histogram("storage.read.duration")
-                .with_description("Duration of storage reads in seconds")
-                .init(),
+            storage_writes: temp_counter.clone(),
+            storage_reads: temp_counter.clone(),
+            storage_write_duration: temp_histogram.clone(),
+            storage_read_duration: temp_histogram.clone(),
 
             // P2P Image Transfer metrics
-            p2p_image_imports_total: meter
-                .u64_counter("p2p.image.imports.total")
-                .with_description("Total number of P2P image imports")
-                .init(),
-            p2p_image_imports_failed: meter
-                .u64_counter("p2p.image.imports.failed")
-                .with_description("Number of failed P2P image imports")
-                .init(),
-            p2p_image_downloads_total: meter
-                .u64_counter("p2p.image.downloads.total")
-                .with_description("Total number of P2P image downloads")
-                .init(),
-            p2p_image_downloads_failed: meter
-                .u64_counter("p2p.image.downloads.failed")
-                .with_description("Number of failed P2P image downloads")
-                .init(),
-            p2p_bytes_transferred: meter
-                .u64_counter("p2p.bytes_transferred.total")
-                .with_description("Total bytes transferred via P2P")
-                .init(),
-            p2p_chunks_transferred: meter
-                .u64_counter("p2p.chunks_transferred.total")
-                .with_description("Total chunks transferred via P2P")
-                .init(),
-            p2p_chunks_deduplicated: meter
-                .u64_counter("p2p.chunks_deduplicated.total")
-                .with_description("Number of chunks deduplicated during P2P transfers")
-                .init(),
-            p2p_transfer_duration: meter
-                .f64_histogram("p2p.transfer.duration")
-                .with_description("Duration of P2P transfers in seconds")
-                .init(),
-            p2p_verification_success: meter
-                .u64_counter("p2p.verification.success")
-                .with_description("Number of successful P2P image verifications")
-                .init(),
-            p2p_verification_failed: meter
-                .u64_counter("p2p.verification.failed")
-                .with_description("Number of failed P2P image verifications")
-                .init(),
-            p2p_cache_hits: meter
-                .u64_counter("p2p.cache.hits")
-                .with_description("Number of P2P cache hits")
-                .init(),
-            p2p_cache_misses: meter
-                .u64_counter("p2p.cache.misses")
-                .with_description("Number of P2P cache misses")
-                .init(),
-            p2p_active_transfers: meter
-                .i64_up_down_counter("p2p.transfers.active")
-                .with_description("Number of active P2P transfers")
-                .init(),
+            p2p_image_imports_total: temp_counter.clone(),
+            p2p_image_imports_failed: temp_counter.clone(),
+            p2p_image_downloads_total: temp_counter.clone(),
+            p2p_image_downloads_failed: temp_counter.clone(),
+            p2p_bytes_transferred: temp_counter.clone(),
+            p2p_chunks_transferred: temp_counter.clone(),
+            p2p_chunks_deduplicated: temp_counter.clone(),
+            p2p_transfer_duration: temp_histogram.clone(),
+            p2p_verification_success: temp_counter.clone(),
+            p2p_verification_failed: temp_counter.clone(),
+            p2p_cache_hits: temp_counter.clone(),
+            p2p_cache_misses: temp_counter.clone(),
+            p2p_active_transfers: temp_up_down.clone(),
 
             // Connection pool metrics
-            connection_pool_total: meter
-                .i64_up_down_counter("connection_pool.connections.total")
-                .with_description("Total number of connections in the pool")
-                .init(),
-            connection_pool_active: meter
-                .i64_up_down_counter("connection_pool.connections.active")
-                .with_description("Number of active connections in the pool")
-                .init(),
-            connection_pool_idle: meter
-                .i64_up_down_counter("connection_pool.connections.idle")
-                .with_description("Number of idle connections in the pool")
-                .init(),
-            connection_pool_created: meter
-                .u64_counter("connection_pool.connections.created")
-                .with_description("Total connections created by the pool")
-                .init(),
-            connection_pool_evicted: meter
-                .u64_counter("connection_pool.connections.evicted")
-                .with_description("Total connections evicted from the pool")
-                .init(),
-            connection_pool_reused: meter
-                .u64_counter("connection_pool.connections.reused")
-                .with_description("Total connection reuses from the pool")
-                .init(),
+            connection_pool_total: temp_up_down.clone(),
+            connection_pool_active: temp_up_down.clone(),
+            connection_pool_idle: temp_up_down.clone(),
+            connection_pool_created: temp_counter.clone(),
+            connection_pool_evicted: temp_counter.clone(),
+            connection_pool_reused: temp_counter.clone(),
 
             meter,
         }
+    }
+
+    /// Initialize Raft-related metrics
+    fn init_raft_metrics(&mut self, meter: &Meter) {
+        self.raft_proposals_total = meter
+            .u64_counter("raft.proposals.total")
+            .with_description("Total number of Raft proposals")
+            .init();
+        self.raft_proposals_failed = meter
+            .u64_counter("raft.proposals.failed")
+            .with_description("Number of failed Raft proposals")
+            .init();
+        self.raft_committed_entries = meter
+            .u64_counter("raft.committed_entries.total")
+            .with_description("Total number of committed Raft entries")
+            .init();
+        self.raft_applied_entries = meter
+            .u64_counter("raft.applied_entries.total")
+            .with_description("Total number of applied Raft entries")
+            .init();
+        self.raft_leader_changes = meter
+            .u64_counter("raft.leader_changes.total")
+            .with_description("Number of leader changes")
+            .init();
+        self.raft_term = meter
+            .i64_up_down_counter("raft.term")
+            .with_description("Current Raft term")
+            .init();
+        self.raft_commit_index = meter
+            .i64_up_down_counter("raft.commit_index")
+            .with_description("Current Raft commit index")
+            .init();
+        self.raft_proposal_duration = meter
+            .f64_histogram("raft.proposal.duration")
+            .with_description("Duration of Raft proposals in seconds")
+            .init();
+
+        // Raft batch processing metrics
+        self.raft_batches_total = meter
+            .u64_counter("raft.batches.total")
+            .with_description("Total number of Raft proposal batches")
+            .init();
+        self.raft_batch_size = meter
+            .f64_histogram("raft.batch.size")
+            .with_description("Number of proposals in each batch")
+            .init();
+        self.raft_batch_bytes = meter
+            .f64_histogram("raft.batch.bytes")
+            .with_description("Size of Raft batches in bytes")
+            .init();
+        self.raft_batch_age_ms = meter
+            .f64_histogram("raft.batch.age_ms")
+            .with_description("Age of batches when flushed in milliseconds")
+            .init();
+    }
+
+    /// Initialize network-related metrics
+    fn init_network_metrics(&mut self, meter: &Meter) {
+        self.grpc_requests_total = meter
+            .u64_counter("grpc.requests.total")
+            .with_description("Total number of gRPC requests")
+            .init();
+        self.grpc_requests_failed = meter
+            .u64_counter("grpc.requests.failed")
+            .with_description("Number of failed gRPC requests")
+            .init();
+        self.grpc_request_duration = meter
+            .f64_histogram("grpc.request.duration")
+            .with_description("Duration of gRPC requests in seconds")
+            .init();
+        self.peer_connections_active = meter
+            .i64_up_down_counter("peer.connections.active")
+            .with_description("Number of active peer connections")
+            .init();
+        self.peer_reconnect_attempts = meter
+            .u64_counter("peer.reconnect.attempts")
+            .with_description("Number of peer reconnection attempts")
+            .init();
+    }
+
+    /// Initialize VM-related metrics
+    fn init_vm_metrics(&mut self, meter: &Meter) {
+        self.vm_total = meter
+            .i64_up_down_counter("vm.total")
+            .with_description("Total number of VMs")
+            .init();
+        self.vm_running = meter
+            .i64_up_down_counter("vm.running")
+            .with_description("Number of running VMs")
+            .init();
+        self.vm_create_total = meter
+            .u64_counter("vm.create.total")
+            .with_description("Total number of VM create attempts")
+            .init();
+        self.vm_create_failed = meter
+            .u64_counter("vm.create.failed")
+            .with_description("Number of failed VM creates")
+            .init();
+        self.vm_create_duration = meter
+            .f64_histogram("vm.create.duration")
+            .with_description("Duration of VM creation in seconds")
+            .init();
+        self.vm_start_total = meter
+            .u64_counter("vm.start.total")
+            .with_description("Total number of VM start attempts")
+            .init();
+        self.vm_start_failed = meter
+            .u64_counter("vm.start.failed")
+            .with_description("Number of failed VM starts")
+            .init();
+        self.vm_stop_total = meter
+            .u64_counter("vm.stop.total")
+            .with_description("Total number of VM stop attempts")
+            .init();
+        self.vm_stop_failed = meter
+            .u64_counter("vm.stop.failed")
+            .with_description("Number of failed VM stops")
+            .init();
+        self.vm_delete_total = meter
+            .u64_counter("vm.delete.total")
+            .with_description("Total number of VM delete attempts")
+            .init();
+        self.vm_delete_failed = meter
+            .u64_counter("vm.delete.failed")
+            .with_description("Number of failed VM deletes")
+            .init();
+        self.vm_health_checks_total = meter
+            .u64_counter("vm.health_checks.total")
+            .with_description("Total number of VM health checks performed")
+            .init();
+        self.vm_health_check_failed = meter
+            .u64_counter("vm.health_check.failed")
+            .with_description("Number of failed VM health checks")
+            .init();
+        self.vm_health_state = meter
+            .u64_counter("vm.health_state")
+            .with_description("VM health state (labeled by state: healthy, degraded, unhealthy)")
+            .init();
+        self.vm_unhealthy_total = meter
+            .u64_counter("vm.unhealthy.total")
+            .with_description("Total number of unhealthy VMs detected")
+            .init();
+        self.vm_status_changes = meter
+            .u64_counter("vm.status_changes.total")
+            .with_description("Number of VM status changes detected by health monitoring")
+            .init();
+        self.vm_recovery_success = meter
+            .u64_counter("vm.recovery.success")
+            .with_description("Number of successful VM recoveries")
+            .init();
+        self.vm_recovery_failed = meter
+            .u64_counter("vm.recovery.failed")
+            .with_description("Number of failed VM recovery attempts")
+            .init();
+    }
+
+    /// Initialize resource monitoring metrics
+    fn init_resource_metrics(&mut self, meter: &Meter) {
+        self.cluster_nodes_total = meter
+            .i64_up_down_counter("cluster.nodes.total")
+            .with_description("Total number of nodes in cluster")
+            .init();
+        self.cluster_nodes_healthy = meter
+            .i64_up_down_counter("cluster.nodes.healthy")
+            .with_description("Number of healthy nodes in cluster")
+            .init();
+        self.cluster_vcpus_total = meter
+            .i64_up_down_counter("cluster.vcpus.total")
+            .with_description("Total vCPUs available in cluster")
+            .init();
+        self.cluster_vcpus_used = meter
+            .i64_up_down_counter("cluster.vcpus.used")
+            .with_description("vCPUs currently used in cluster")
+            .init();
+        self.cluster_memory_mb_total = meter
+            .i64_up_down_counter("cluster.memory_mb.total")
+            .with_description("Total memory in MB available in cluster")
+            .init();
+        self.cluster_memory_mb_used = meter
+            .i64_up_down_counter("cluster.memory_mb.used")
+            .with_description("Memory in MB currently used in cluster")
+            .init();
+        self.cluster_disk_gb_total = meter
+            .i64_up_down_counter("cluster.disk_gb.total")
+            .with_description("Total disk space in GB available in cluster")
+            .init();
+        self.cluster_disk_gb_used = meter
+            .i64_up_down_counter("cluster.disk_gb.used")
+            .with_description("Disk space in GB currently used in cluster")
+            .init();
+        self.node_vcpus_available = meter
+            .i64_up_down_counter("node.vcpus.available")
+            .with_description("vCPUs available on this node")
+            .init();
+        self.node_memory_mb_available = meter
+            .i64_up_down_counter("node.memory_mb.available")
+            .with_description("Memory in MB available on this node")
+            .init();
+        self.node_disk_gb_available = meter
+            .i64_up_down_counter("node.disk_gb.available")
+            .with_description("Disk space in GB available on this node")
+            .init();
+        self.vm_placement_attempts = meter
+            .u64_counter("vm.placement.attempts")
+            .with_description("Total number of VM placement attempts")
+            .init();
+        self.vm_placement_failures = meter
+            .u64_counter("vm.placement.failures")
+            .with_description("Number of failed VM placements")
+            .init();
+        self.vm_placement_duration = meter
+            .f64_histogram("vm.placement.duration")
+            .with_description("Duration of VM placement decisions in seconds")
+            .init();
+        self.vm_preemptions_total = meter
+            .u64_counter("vm.preemptions.total")
+            .with_description("Total number of VM preemptions")
+            .init();
+    }
+
+    /// Initialize storage-related metrics
+    fn init_storage_metrics(&mut self, meter: &Meter) {
+        self.storage_writes = meter
+            .u64_counter("storage.writes.total")
+            .with_description("Total number of storage writes")
+            .init();
+        self.storage_reads = meter
+            .u64_counter("storage.reads.total")
+            .with_description("Total number of storage reads")
+            .init();
+        self.storage_write_duration = meter
+            .f64_histogram("storage.write.duration")
+            .with_description("Duration of storage writes in seconds")
+            .init();
+        self.storage_read_duration = meter
+            .f64_histogram("storage.read.duration")
+            .with_description("Duration of storage reads in seconds")
+            .init();
+    }
+
+    /// Initialize P2P-related metrics
+    fn init_p2p_metrics(&mut self, meter: &Meter) {
+        self.p2p_image_imports_total = meter
+            .u64_counter("p2p.image.imports.total")
+            .with_description("Total number of P2P image imports")
+            .init();
+        self.p2p_image_imports_failed = meter
+            .u64_counter("p2p.image.imports.failed")
+            .with_description("Number of failed P2P image imports")
+            .init();
+        self.p2p_image_downloads_total = meter
+            .u64_counter("p2p.image.downloads.total")
+            .with_description("Total number of P2P image downloads")
+            .init();
+        self.p2p_image_downloads_failed = meter
+            .u64_counter("p2p.image.downloads.failed")
+            .with_description("Number of failed P2P image downloads")
+            .init();
+        self.p2p_bytes_transferred = meter
+            .u64_counter("p2p.bytes_transferred.total")
+            .with_description("Total bytes transferred via P2P")
+            .init();
+        self.p2p_chunks_transferred = meter
+            .u64_counter("p2p.chunks_transferred.total")
+            .with_description("Total chunks transferred via P2P")
+            .init();
+        self.p2p_chunks_deduplicated = meter
+            .u64_counter("p2p.chunks_deduplicated.total")
+            .with_description("Number of chunks deduplicated during P2P transfers")
+            .init();
+        self.p2p_transfer_duration = meter
+            .f64_histogram("p2p.transfer.duration")
+            .with_description("Duration of P2P transfers in seconds")
+            .init();
+        self.p2p_verification_success = meter
+            .u64_counter("p2p.verification.success")
+            .with_description("Number of successful P2P image verifications")
+            .init();
+        self.p2p_verification_failed = meter
+            .u64_counter("p2p.verification.failed")
+            .with_description("Number of failed P2P image verifications")
+            .init();
+        self.p2p_cache_hits = meter
+            .u64_counter("p2p.cache.hits")
+            .with_description("Number of P2P cache hits")
+            .init();
+        self.p2p_cache_misses = meter
+            .u64_counter("p2p.cache.misses")
+            .with_description("Number of P2P cache misses")
+            .init();
+        self.p2p_active_transfers = meter
+            .i64_up_down_counter("p2p.transfers.active")
+            .with_description("Number of active P2P transfers")
+            .init();
+    }
+
+    /// Initialize connection pool metrics
+    fn init_connection_pool_metrics(&mut self, meter: &Meter) {
+        self.connection_pool_total = meter
+            .i64_up_down_counter("connection_pool.connections.total")
+            .with_description("Total number of connections in the pool")
+            .init();
+        self.connection_pool_active = meter
+            .i64_up_down_counter("connection_pool.connections.active")
+            .with_description("Number of active connections in the pool")
+            .init();
+        self.connection_pool_idle = meter
+            .i64_up_down_counter("connection_pool.connections.idle")
+            .with_description("Number of idle connections in the pool")
+            .init();
+        self.connection_pool_created = meter
+            .u64_counter("connection_pool.connections.created")
+            .with_description("Total connections created by the pool")
+            .init();
+        self.connection_pool_evicted = meter
+            .u64_counter("connection_pool.connections.evicted")
+            .with_description("Total connections evicted from the pool")
+            .init();
+        self.connection_pool_reused = meter
+            .u64_counter("connection_pool.connections.reused")
+            .with_description("Total connection reuses from the pool")
+            .init();
     }
 }
 
