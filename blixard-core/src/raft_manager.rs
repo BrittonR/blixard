@@ -12,6 +12,7 @@ use tokio::time::{interval, Duration};
 
 use crate::config_global;
 use crate::error::{BlixardError, BlixardResult};
+use crate::common::error_context::StorageContext;
 use crate::metrics_otel::{attributes, metrics, Timer};
 use crate::storage::{
     RedbRaftStorage, SnapshotData, CLUSTER_STATE_TABLE, TASK_ASSIGNMENT_TABLE, TASK_RESULT_TABLE,
@@ -1204,6 +1205,96 @@ impl RaftStateMachine {
 
     /// Apply a snapshot to the state machine
     /// This is called when the Raft layer receives a snapshot from the leader
+    /// Helper function to clear and restore a table with String keys
+    fn clear_and_restore_string_table(
+        &self,
+        write_txn: &WriteTransaction,
+        table_def: redb::TableDefinition<&str, &[u8]>,
+        snapshot_data: &Vec<(String, Vec<u8>)>,
+        table_name: &str,
+    ) -> BlixardResult<()> {
+        let mut table = write_txn.open_table(table_def)
+            .storage_context(&format!("open {} table", table_name))?;
+        
+        // Clear existing entries
+        let keys_to_remove: Vec<String> = table
+            .iter()
+            .storage_context(&format!("iterate {} table", table_name))?
+            .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
+            .collect();
+        for key in keys_to_remove {
+            table.remove(key.as_str())
+                .storage_context(&format!("remove from {} table", table_name))?;
+        }
+        
+        // Apply new entries
+        for (key, value) in snapshot_data {
+            table.insert(key.as_str(), value.as_slice())
+                .storage_context(&format!("insert into {} table", table_name))?;
+        }
+        Ok(())
+    }
+
+    /// Helper function to clear and restore a table with Vec<u8> keys  
+    fn clear_and_restore_binary_table(
+        &self,
+        write_txn: &WriteTransaction,
+        table_def: redb::TableDefinition<&[u8], &[u8]>,
+        snapshot_data: &Vec<(Vec<u8>, Vec<u8>)>,
+        table_name: &str,
+    ) -> BlixardResult<()> {
+        let mut table = write_txn.open_table(table_def)
+            .storage_context(&format!("open {} table", table_name))?;
+        
+        // Clear existing entries
+        let keys_to_remove: Vec<Vec<u8>> = table
+            .iter()
+            .storage_context(&format!("iterate {} table", table_name))?
+            .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_vec()))
+            .collect();
+        for key in keys_to_remove {
+            table.remove(key.as_slice())
+                .storage_context(&format!("remove from {} table", table_name))?;
+        }
+        
+        // Apply new entries
+        for (key, value) in snapshot_data {
+            table.insert(key.as_slice(), value.as_slice())
+                .storage_context(&format!("insert into {} table", table_name))?;
+        }
+        Ok(())
+    }
+
+    /// Helper function to clear and restore a table with u64 keys
+    fn clear_and_restore_u64_table(
+        &self,
+        write_txn: &WriteTransaction,
+        table_def: redb::TableDefinition<u64, &[u8]>,
+        snapshot_data: &Vec<(u64, Vec<u8>)>,
+        table_name: &str,
+    ) -> BlixardResult<()> {
+        let mut table = write_txn.open_table(table_def)
+            .storage_context(&format!("open {} table", table_name))?;
+        
+        // Clear existing entries
+        let keys_to_remove: Vec<u64> = table
+            .iter()
+            .storage_context(&format!("iterate {} table", table_name))?
+            .filter_map(|entry| entry.ok().map(|(k, _)| k.value()))
+            .collect();
+        for key in keys_to_remove {
+            table.remove(&key)
+                .storage_context(&format!("remove from {} table", table_name))?;
+        }
+        
+        // Apply new entries
+        for (key, value) in snapshot_data {
+            table.insert(key, value.as_slice())
+                .storage_context(&format!("insert into {} table", table_name))?;
+        }
+        Ok(())
+    }
+
     pub fn apply_snapshot(&self, snapshot_data: &[u8]) -> BlixardResult<()> {
         // Deserialize the snapshot data
         let snapshot: SnapshotData =
@@ -1221,159 +1312,28 @@ impl RaftStateMachine {
                 source: Box::new(e),
             })?;
 
-        // Clear and restore VM states
-        {
-            let mut table = write_txn.open_table(VM_STATE_TABLE)?;
-            // Clear existing entries
-            let keys_to_remove: Vec<String> = table
-                .iter()?
-                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
-                .collect();
-            for key in keys_to_remove {
-                table.remove(key.as_str())?;
-            }
-            // Apply new entries
-            for (key, value) in &snapshot.vm_states {
-                table.insert(key.as_str(), value.as_slice())?;
-            }
-        }
+        // Restore all string-keyed tables
+        self.clear_and_restore_string_table(&write_txn, VM_STATE_TABLE, &snapshot.vm_states, "VM_STATE")?;
+        self.clear_and_restore_string_table(&write_txn, CLUSTER_STATE_TABLE, &snapshot.cluster_state, "CLUSTER_STATE")?;
+        self.clear_and_restore_string_table(&write_txn, TASK_TABLE, &snapshot.tasks, "TASK")?;
+        self.clear_and_restore_string_table(&write_txn, TASK_ASSIGNMENT_TABLE, &snapshot.task_assignments, "TASK_ASSIGNMENT")?;
+        self.clear_and_restore_string_table(&write_txn, TASK_RESULT_TABLE, &snapshot.task_results, "TASK_RESULT")?;
 
-        // Clear and restore cluster state
-        {
-            let mut table = write_txn.open_table(CLUSTER_STATE_TABLE)?;
-            let keys_to_remove: Vec<String> = table
-                .iter()?
-                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
-                .collect();
-            for key in keys_to_remove {
-                table.remove(key.as_str())?;
-            }
-            for (key, value) in &snapshot.cluster_state {
-                table.insert(key.as_str(), value.as_slice())?;
-            }
-        }
+        // Restore binary-keyed tables
+        self.clear_and_restore_binary_table(&write_txn, WORKER_TABLE, &snapshot.workers, "WORKER")?;
+        self.clear_and_restore_binary_table(&write_txn, WORKER_STATUS_TABLE, &snapshot.worker_status, "WORKER_STATUS")?;
 
-        // Clear and restore tasks
-        {
-            let mut table = write_txn.open_table(TASK_TABLE)?;
-            let keys_to_remove: Vec<String> = table
-                .iter()?
-                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
-                .collect();
-            for key in keys_to_remove {
-                table.remove(key.as_str())?;
-            }
-            for (key, value) in &snapshot.tasks {
-                table.insert(key.as_str(), value.as_slice())?;
-            }
-        }
-
-        // Clear and restore task assignments
-        {
-            let mut table = write_txn.open_table(TASK_ASSIGNMENT_TABLE)?;
-            let keys_to_remove: Vec<String> = table
-                .iter()?
-                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
-                .collect();
-            for key in keys_to_remove {
-                table.remove(key.as_str())?;
-            }
-            for (key, value) in &snapshot.task_assignments {
-                table.insert(key.as_str(), value.as_slice())?;
-            }
-        }
-
-        // Clear and restore task results
-        {
-            let mut table = write_txn.open_table(TASK_RESULT_TABLE)?;
-            let keys_to_remove: Vec<String> = table
-                .iter()?
-                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
-                .collect();
-            for key in keys_to_remove {
-                table.remove(key.as_str())?;
-            }
-            for (key, value) in &snapshot.task_results {
-                table.insert(key.as_str(), value.as_slice())?;
-            }
-        }
-
-        // Clear and restore workers
-        {
-            let mut table = write_txn.open_table(WORKER_TABLE)?;
-            let keys_to_remove: Vec<Vec<u8>> = table
-                .iter()?
-                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_vec()))
-                .collect();
-            for key in keys_to_remove {
-                table.remove(key.as_slice())?;
-            }
-            for (key, value) in &snapshot.workers {
-                table.insert(key.as_slice(), value.as_slice())?;
-            }
-        }
-
-        // Clear and restore worker status
-        {
-            let mut table = write_txn.open_table(WORKER_STATUS_TABLE)?;
-            let keys_to_remove: Vec<Vec<u8>> = table
-                .iter()?
-                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_vec()))
-                .collect();
-            for key in keys_to_remove {
-                table.remove(key.as_slice())?;
-            }
-            for (key, value) in &snapshot.worker_status {
-                table.insert(key.as_slice(), value.as_slice())?;
-            }
-        }
-
-        // Clear and restore IP pools
+        // Restore u64-keyed tables
         {
             use crate::storage::IP_POOL_TABLE;
-            let mut table = write_txn.open_table(IP_POOL_TABLE)?;
-            let keys_to_remove: Vec<u64> = table
-                .iter()?
-                .filter_map(|entry| entry.ok().map(|(k, _)| k.value()))
-                .collect();
-            for key in keys_to_remove {
-                table.remove(&key)?;
-            }
-            for (key, value) in &snapshot.ip_pools {
-                table.insert(key, value.as_slice())?;
-            }
+            self.clear_and_restore_u64_table(&write_txn, IP_POOL_TABLE, &snapshot.ip_pools, "IP_POOL")?;
         }
 
-        // Clear and restore IP allocations
+        // Restore remaining string-keyed tables with import requirements
         {
-            use crate::storage::IP_ALLOCATION_TABLE;
-            let mut table = write_txn.open_table(IP_ALLOCATION_TABLE)?;
-            let keys_to_remove: Vec<String> = table
-                .iter()?
-                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
-                .collect();
-            for key in keys_to_remove {
-                table.remove(key.as_str())?;
-            }
-            for (key, value) in &snapshot.ip_allocations {
-                table.insert(key.as_str(), value.as_slice())?;
-            }
-        }
-
-        // Clear and restore VM IP mappings
-        {
-            use crate::storage::VM_IP_MAPPING_TABLE;
-            let mut table = write_txn.open_table(VM_IP_MAPPING_TABLE)?;
-            let keys_to_remove: Vec<String> = table
-                .iter()?
-                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
-                .collect();
-            for key in keys_to_remove {
-                table.remove(key.as_str())?;
-            }
-            for (key, value) in &snapshot.vm_ip_mappings {
-                table.insert(key.as_str(), value.as_slice())?;
-            }
+            use crate::storage::{IP_ALLOCATION_TABLE, VM_IP_MAPPING_TABLE};
+            self.clear_and_restore_string_table(&write_txn, IP_ALLOCATION_TABLE, &snapshot.ip_allocations, "IP_ALLOCATION")?;
+            self.clear_and_restore_string_table(&write_txn, VM_IP_MAPPING_TABLE, &snapshot.vm_ip_mappings, "VM_IP_MAPPING")?;
         }
 
         // Commit all changes atomically
