@@ -10,6 +10,69 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::SystemTime;
 
+/// Default quota configuration constants
+mod constants {
+    /// Default maximum VMs per tenant
+    pub const DEFAULT_MAX_VMS: u32 = 50;
+    
+    /// Default maximum VCPUs per tenant
+    pub const DEFAULT_MAX_VCPUS: u32 = 200;
+    
+    /// Default maximum memory per tenant (200GB in MB)
+    pub const DEFAULT_MAX_MEMORY_MB: u64 = 204800;
+    
+    /// Default maximum disk space per tenant (2TB in GB)
+    pub const DEFAULT_MAX_DISK_GB: u64 = 2048;
+    
+    /// Default maximum VMs per node
+    pub const DEFAULT_MAX_VMS_PER_NODE: u32 = 25;
+    
+    /// Default overcommit ratio
+    pub const DEFAULT_OVERCOMMIT_RATIO: f32 = 1.2;
+    
+    /// Default priority level
+    pub const DEFAULT_PRIORITY: u8 = 100;
+    
+    /// Default API requests per second
+    pub const DEFAULT_REQUESTS_PER_SECOND: u32 = 100;
+    
+    /// Default burst capacity
+    pub const DEFAULT_BURST_CAPACITY: u32 = 200;
+    
+    /// Default maximum concurrent requests
+    pub const DEFAULT_MAX_CONCURRENT_REQUESTS: u32 = 50;
+    
+    /// Default VM creation requests per minute
+    pub const DEFAULT_VM_CREATE_PER_MINUTE: u32 = 10;
+    
+    /// Default VM deletion requests per minute
+    pub const DEFAULT_VM_DELETE_PER_MINUTE: u32 = 20;
+    
+    /// Default cluster join requests per hour
+    pub const DEFAULT_CLUSTER_JOIN_PER_HOUR: u32 = 5;
+    
+    /// Default status query requests per second
+    pub const DEFAULT_STATUS_QUERY_PER_SECOND: u32 = 50;
+    
+    /// Default config change requests per hour
+    pub const DEFAULT_CONFIG_CHANGE_PER_HOUR: u32 = 10;
+    
+    /// Default maximum storage per tenant (1TB in GB)
+    pub const DEFAULT_MAX_STORAGE_GB: u64 = 1024;
+    
+    /// Default maximum disk images per tenant
+    pub const DEFAULT_MAX_DISK_IMAGES: u32 = 100;
+    
+    /// Default maximum image size per tenant (100GB)
+    pub const DEFAULT_MAX_IMAGE_SIZE_GB: u64 = 100;
+    
+    /// Default maximum backup storage per tenant (512GB)
+    pub const DEFAULT_MAX_BACKUP_STORAGE_GB: u64 = 512;
+    
+    /// Default maximum IOPS per tenant
+    pub const DEFAULT_MAX_IOPS: u32 = 10000;
+}
+
 /// Tenant identifier for resource quota management
 pub type TenantId = String;
 
@@ -321,13 +384,13 @@ impl std::fmt::Display for ApiOperation {
 impl Default for VmResourceLimits {
     fn default() -> Self {
         Self {
-            max_vms: 50,
-            max_vcpus: 200,
-            max_memory_mb: 204800, // 200GB
-            max_disk_gb: 2048,     // 2TB
-            max_vms_per_node: 25,
-            overcommit_ratio: 1.2,
-            priority: 100, // Default priority
+            max_vms: constants::DEFAULT_MAX_VMS,
+            max_vcpus: constants::DEFAULT_MAX_VCPUS,
+            max_memory_mb: constants::DEFAULT_MAX_MEMORY_MB,
+            max_disk_gb: constants::DEFAULT_MAX_DISK_GB,
+            max_vms_per_node: constants::DEFAULT_MAX_VMS_PER_NODE,
+            overcommit_ratio: constants::DEFAULT_OVERCOMMIT_RATIO,
+            priority: constants::DEFAULT_PRIORITY,
         }
     }
 }
@@ -335,9 +398,9 @@ impl Default for VmResourceLimits {
 impl Default for ApiRateLimits {
     fn default() -> Self {
         Self {
-            requests_per_second: 100,
-            burst_capacity: 200,
-            max_concurrent_requests: 50,
+            requests_per_second: constants::DEFAULT_REQUESTS_PER_SECOND,
+            burst_capacity: constants::DEFAULT_BURST_CAPACITY,
+            max_concurrent_requests: constants::DEFAULT_MAX_CONCURRENT_REQUESTS,
             operation_limits: OperationLimits::default(),
         }
     }
@@ -346,11 +409,11 @@ impl Default for ApiRateLimits {
 impl Default for OperationLimits {
     fn default() -> Self {
         Self {
-            vm_create_per_minute: 10,
-            vm_delete_per_minute: 20,
-            cluster_join_per_hour: 5,
-            status_query_per_second: 50,
-            config_change_per_hour: 10,
+            vm_create_per_minute: constants::DEFAULT_VM_CREATE_PER_MINUTE,
+            vm_delete_per_minute: constants::DEFAULT_VM_DELETE_PER_MINUTE,
+            cluster_join_per_hour: constants::DEFAULT_CLUSTER_JOIN_PER_HOUR,
+            status_query_per_second: constants::DEFAULT_STATUS_QUERY_PER_SECOND,
+            config_change_per_hour: constants::DEFAULT_CONFIG_CHANGE_PER_HOUR,
         }
     }
 }
@@ -358,11 +421,11 @@ impl Default for OperationLimits {
 impl Default for StorageLimits {
     fn default() -> Self {
         Self {
-            max_storage_gb: 1024, // 1TB
-            max_disk_images: 100,
-            max_image_size_gb: 100,
-            max_backup_storage_gb: 512, // 512GB
-            max_iops: 10000,
+            max_storage_gb: constants::DEFAULT_MAX_STORAGE_GB,
+            max_disk_images: constants::DEFAULT_MAX_DISK_IMAGES,
+            max_image_size_gb: constants::DEFAULT_MAX_IMAGE_SIZE_GB,
+            max_backup_storage_gb: constants::DEFAULT_MAX_BACKUP_STORAGE_GB,
+            max_iops: constants::DEFAULT_MAX_IOPS,
         }
     }
 }

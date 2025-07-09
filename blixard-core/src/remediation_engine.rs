@@ -19,6 +19,26 @@ use crate::metrics_otel::{
 };
 use tracing::{info, warn, error, debug};
 
+/// Default configuration constants
+mod constants {
+    use std::time::Duration;
+
+    /// Default maximum remediation attempts per issue
+    pub const DEFAULT_MAX_ATTEMPTS: u32 = 3;
+    
+    /// Default cooldown period between remediation attempts (5 minutes)
+    pub const DEFAULT_COOLDOWN_PERIOD: Duration = Duration::from_secs(300);
+    
+    /// Default circuit breaker threshold (failures before disabling)
+    pub const DEFAULT_CIRCUIT_BREAKER_THRESHOLD: u32 = 10;
+    
+    /// Default circuit breaker reset time (1 hour)
+    pub const DEFAULT_CIRCUIT_BREAKER_RESET: Duration = Duration::from_secs(3600);
+    
+    /// Default remediation monitoring interval (30 seconds)
+    pub const DEFAULT_MONITORING_INTERVAL: Duration = Duration::from_secs(30);
+}
+
 /// Types of issues that can be detected and remediated
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum IssueType {
@@ -141,11 +161,11 @@ impl Default for RemediationPolicy {
     fn default() -> Self {
         Self {
             enabled: true,
-            max_attempts: 3,
-            cooldown_period: Duration::from_secs(300), // 5 minutes
+            max_attempts: constants::DEFAULT_MAX_ATTEMPTS,
+            cooldown_period: constants::DEFAULT_COOLDOWN_PERIOD,
             require_approval_for_destructive: true,
-            circuit_breaker_threshold: 10,
-            circuit_breaker_reset: Duration::from_secs(3600), // 1 hour
+            circuit_breaker_threshold: constants::DEFAULT_CIRCUIT_BREAKER_THRESHOLD,
+            circuit_breaker_reset: constants::DEFAULT_CIRCUIT_BREAKER_RESET,
             auto_remediate_types: vec![
                 IssueType::VmFailure,
                 IssueType::ServiceDegradation,
@@ -268,7 +288,7 @@ impl RemediationEngine {
         let active = self.active_remediations.clone();
         
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            let mut interval = tokio::time::interval(constants::DEFAULT_MONITORING_INTERVAL);
             
             loop {
                 tokio::select! {
