@@ -2,6 +2,56 @@ use crate::anti_affinity::AntiAffinityRules;
 use crate::vm_health_types::VmHealthCheckConfig;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use uuid::Uuid;
+
+/// Unique identifier for a VM
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct VmId(pub Uuid);
+
+impl VmId {
+    /// Create a new random VM ID
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+    
+    /// Create a VM ID from a string (deterministic based on input)
+    pub fn from_string(s: &str) -> Self {
+        use std::hash::{Hash, Hasher};
+        use std::collections::hash_map::DefaultHasher;
+        
+        let mut hasher = DefaultHasher::new();
+        s.hash(&mut hasher);
+        let hash = hasher.finish();
+        
+        // Create a deterministic UUID v4 from the hash
+        let bytes = [
+            (hash >> 56) as u8,
+            (hash >> 48) as u8,
+            (hash >> 40) as u8,
+            (hash >> 32) as u8,
+            (hash >> 24) as u8,
+            (hash >> 16) as u8,
+            0x40 | ((hash >> 12) & 0x0f) as u8, // Version 4
+            (hash >> 8) as u8,
+            0x80 | ((hash >> 4) & 0x3f) as u8, // Variant bits
+            hash as u8,
+            (hash >> 32) as u8,
+            (hash >> 24) as u8,
+            (hash >> 16) as u8,
+            (hash >> 8) as u8,
+            hash as u8,
+            (hash >> 56) as u8,
+        ];
+        
+        Self(Uuid::from_bytes(bytes))
+    }
+}
+
+impl std::fmt::Display for VmId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 /// Node topology information for multi-datacenter awareness
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]

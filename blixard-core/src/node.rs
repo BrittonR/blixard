@@ -126,6 +126,42 @@ impl Node {
         let quota_manager = Arc::new(crate::quota_manager::QuotaManager::new(storage).await?);
         self.shared.set_quota_manager(quota_manager).await;
 
+        // Initialize IP pool manager
+        let ip_pool_manager = Arc::new(crate::ip_pool_manager::IpPoolManager::new());
+        
+        // Load existing pools and allocations from storage
+        let read_txn = db_arc.begin_read()?;
+        let mut pools = Vec::new();
+        let mut allocations = Vec::new();
+        
+        // Load IP pools
+        if let Ok(pool_table) = read_txn.open_table(crate::storage::IP_POOL_TABLE) {
+            for entry in pool_table.iter()? {
+                let (_, value) = entry?;
+                if let Ok(config) = bincode::deserialize::<crate::ip_pool::IpPoolConfig>(value.value()) {
+                    pools.push(config);
+                }
+            }
+        }
+        
+        // Load IP allocations
+        if let Ok(alloc_table) = read_txn.open_table(crate::storage::IP_ALLOCATION_TABLE) {
+            for entry in alloc_table.iter()? {
+                let (_, value) = entry?;
+                if let Ok(allocation) = bincode::deserialize::<crate::ip_pool::IpAllocation>(value.value()) {
+                    allocations.push(allocation);
+                }
+            }
+        }
+        
+        drop(read_txn);
+        
+        // Initialize the IP pool manager with loaded data
+        ip_pool_manager.load_from_storage(pools, allocations).await?;
+        self.shared.set_ip_pool_manager(ip_pool_manager).await;
+        
+        tracing::info!("Initialized IP pool manager");
+
         // Initialize security manager
         let config = crate::config_global::get();
         let security_manager =

@@ -29,6 +29,12 @@ pub struct SnapshotData {
     pub workers: Vec<(Vec<u8>, Vec<u8>)>,
     /// Worker status
     pub worker_status: Vec<(Vec<u8>, Vec<u8>)>,
+    /// IP pools
+    pub ip_pools: Vec<(u64, Vec<u8>)>,
+    /// IP allocations
+    pub ip_allocations: Vec<(String, Vec<u8>)>,
+    /// VM IP mappings
+    pub vm_ip_mappings: Vec<(String, Vec<u8>)>,
 }
 
 // Database table definitions
@@ -59,6 +65,11 @@ pub const NODE_TOPOLOGY_TABLE: TableDefinition<&[u8], &[u8]> =
 
 // Quota management tables
 pub const TENANT_QUOTA_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("tenant_quotas");
+
+// IP pool management tables
+pub const IP_POOL_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("ip_pools");
+pub const IP_ALLOCATION_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("ip_allocations");
+pub const VM_IP_MAPPING_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vm_ip_mappings");
 
 #[derive(Clone, Debug)]
 pub struct RedbRaftStorage {
@@ -460,6 +471,9 @@ impl RedbRaftStorage {
             task_results: Vec::new(),
             workers: Vec::new(),
             worker_status: Vec::new(),
+            ip_pools: Vec::new(),
+            ip_allocations: Vec::new(),
+            vm_ip_mappings: Vec::new(),
         };
 
         // Read VM states
@@ -529,6 +543,36 @@ impl RedbRaftStorage {
                 snapshot_data
                     .worker_status
                     .push((key.value().to_vec(), value.value().to_vec()));
+            }
+        }
+
+        // Read IP pools
+        if let Ok(table) = read_txn.open_table(IP_POOL_TABLE) {
+            for entry in table.iter()? {
+                let (key, value) = entry?;
+                snapshot_data
+                    .ip_pools
+                    .push((key.value(), value.value().to_vec()));
+            }
+        }
+
+        // Read IP allocations
+        if let Ok(table) = read_txn.open_table(IP_ALLOCATION_TABLE) {
+            for entry in table.iter()? {
+                let (key, value) = entry?;
+                snapshot_data
+                    .ip_allocations
+                    .push((key.value().to_string(), value.value().to_vec()));
+            }
+        }
+
+        // Read VM IP mappings
+        if let Ok(table) = read_txn.open_table(VM_IP_MAPPING_TABLE) {
+            for entry in table.iter()? {
+                let (key, value) = entry?;
+                snapshot_data
+                    .vm_ip_mappings
+                    .push((key.value().to_string(), value.value().to_vec()));
             }
         }
 
@@ -661,6 +705,57 @@ impl RedbRaftStorage {
             // Insert new entries
             for (key, value) in snapshot_data.worker_status {
                 table.insert(key.as_slice(), value.as_slice())?;
+            }
+        }
+
+        // Clear and restore IP pools
+        {
+            let mut table = write_txn.open_table(IP_POOL_TABLE)?;
+            // Clear all existing entries
+            let keys_to_remove: Vec<u64> = table
+                .iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(&key)?;
+            }
+            // Insert new entries
+            for (key, value) in snapshot_data.ip_pools {
+                table.insert(&key, value.as_slice())?;
+            }
+        }
+
+        // Clear and restore IP allocations
+        {
+            let mut table = write_txn.open_table(IP_ALLOCATION_TABLE)?;
+            // Clear all existing entries
+            let keys_to_remove: Vec<String> = table
+                .iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(key.as_str())?;
+            }
+            // Insert new entries
+            for (key, value) in snapshot_data.ip_allocations {
+                table.insert(key.as_str(), value.as_slice())?;
+            }
+        }
+
+        // Clear and restore VM IP mappings
+        {
+            let mut table = write_txn.open_table(VM_IP_MAPPING_TABLE)?;
+            // Clear all existing entries
+            let keys_to_remove: Vec<String> = table
+                .iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(key.as_str())?;
+            }
+            // Insert new entries
+            for (key, value) in snapshot_data.vm_ip_mappings {
+                table.insert(key.as_str(), value.as_slice())?;
             }
         }
 

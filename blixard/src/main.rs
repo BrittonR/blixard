@@ -83,6 +83,11 @@ enum Commands {
         #[command(subcommand)]
         command: SecurityCommands,
     },
+    /// IP pool management operations
+    IpPool {
+        #[command(subcommand)]
+        command: IpPoolCommands,
+    },
     /// Reset all data and VMs (clean slate)
     Reset {
         /// Data directory to clean
@@ -302,6 +307,11 @@ enum ClusterCommands {
         #[arg(long, default_value = "./data")]
         data_dir: String,
     },
+    /// IP pool management
+    IpPool {
+        #[command(subcommand)]
+        command: IpPoolCommands,
+    },
 }
 
 #[derive(clap::Subcommand)]
@@ -350,6 +360,98 @@ enum SecurityCommands {
         #[arg(long, default_value = "30")]
         validity_days: u64,
 
+        /// Node address to connect to
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        addr: String,
+    },
+}
+
+#[derive(clap::Subcommand)]
+enum IpPoolCommands {
+    /// Create a new IP pool
+    Create {
+        /// Pool name
+        #[arg(short, long)]
+        name: String,
+        
+        /// Subnet (e.g., 10.0.0.0/24)
+        #[arg(short, long)]
+        subnet: String,
+        
+        /// Gateway IP address
+        #[arg(short, long)]
+        gateway: String,
+        
+        /// DNS servers (comma-separated)
+        #[arg(long, default_value = "8.8.8.8,8.8.4.4")]
+        dns: String,
+        
+        /// Start of allocation range
+        #[arg(long)]
+        start_ip: String,
+        
+        /// End of allocation range
+        #[arg(long)]
+        end_ip: String,
+        
+        /// VLAN ID (optional)
+        #[arg(long)]
+        vlan: Option<u16>,
+        
+        /// Topology hint (e.g., datacenter/zone)
+        #[arg(long)]
+        topology: Option<String>,
+        
+        /// Node address to connect to
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        addr: String,
+    },
+    /// List IP pools
+    List {
+        /// Node address to connect to
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        addr: String,
+    },
+    /// Show IP pool details
+    Show {
+        /// Pool ID
+        #[arg(short, long)]
+        id: u64,
+        
+        /// Node address to connect to
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        addr: String,
+    },
+    /// Delete an IP pool
+    Delete {
+        /// Pool ID
+        #[arg(short, long)]
+        id: u64,
+        
+        /// Node address to connect to
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        addr: String,
+    },
+    /// Enable or disable a pool
+    Enable {
+        /// Pool ID
+        #[arg(short, long)]
+        id: u64,
+        
+        /// Enable (true) or disable (false)
+        #[arg(long)]
+        enable: bool,
+        
+        /// Node address to connect to
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        addr: String,
+    },
+    /// Show pool statistics
+    Stats {
+        /// Pool ID (optional, show all if not specified)
+        #[arg(short, long)]
+        id: Option<u64>,
+        
         /// Node address to connect to
         #[arg(long, default_value = "127.0.0.1:7001")]
         addr: String,
@@ -1456,6 +1558,9 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
                     .await?;
             }
         }
+        ClusterCommands::IpPool { command } => {
+            handle_ip_pool_command(command).await?;
+        }
     }
 
     Ok(())
@@ -1464,6 +1569,159 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
 #[cfg(madsim)]
 async fn handle_cluster_command(_command: ClusterCommands) -> BlixardResult<()> {
     eprintln!("Cluster commands are not available in simulation mode");
+    std::process::exit(1);
+}
+
+#[cfg(not(madsim))]
+async fn handle_ip_pool_command(command: IpPoolCommands) -> BlixardResult<()> {
+    use crate::client::UnifiedClient;
+    use blixard_core::ip_pool::{IpPoolCommand, IpPoolConfig, IpPoolId};
+    use blixard_core::raft_manager::ProposalData;
+    use std::collections::{BTreeSet, HashMap};
+    use std::net::IpAddr;
+    use std::str::FromStr;
+    
+    // Check for BLIXARD_NODE_ADDR environment variable first
+    let node_addr =
+        std::env::var("BLIXARD_NODE_ADDR").unwrap_or_else(|_| command_addr(&command));
+    
+    // Connect to the node
+    let mut client = UnifiedClient::new(&node_addr)
+        .await
+        .map_err(|e| BlixardError::Internal {
+            message: format!("Failed to connect to node at {}: {}", node_addr, e),
+        })?;
+    
+    match command {
+        IpPoolCommands::Create {
+            name,
+            subnet,
+            gateway,
+            dns,
+            start_ip,
+            end_ip,
+            vlan,
+            topology,
+            addr: _,
+        } => {
+            // Parse subnet
+            let subnet_net = ipnet::IpNet::from_str(&subnet)
+                .map_err(|e| BlixardError::ConfigError(format!("Invalid subnet: {}", e)))?;
+            
+            // Parse IPs
+            let gateway_ip = IpAddr::from_str(&gateway)
+                .map_err(|e| BlixardError::ConfigError(format!("Invalid gateway IP: {}", e)))?;
+            let start_addr = IpAddr::from_str(&start_ip)
+                .map_err(|e| BlixardError::ConfigError(format!("Invalid start IP: {}", e)))?;
+            let end_addr = IpAddr::from_str(&end_ip)
+                .map_err(|e| BlixardError::ConfigError(format!("Invalid end IP: {}", e)))?;
+            
+            // Parse DNS servers
+            let dns_servers: Vec<IpAddr> = dns
+                .split(',')
+                .map(|s| IpAddr::from_str(s.trim()))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| BlixardError::ConfigError(format!("Invalid DNS server: {}", e)))?;
+            
+            // Create pool config
+            let pool_id = IpPoolId(rand::random());
+            let config = IpPoolConfig {
+                id: pool_id,
+                name,
+                subnet: subnet_net,
+                vlan_id: vlan,
+                gateway: gateway_ip,
+                dns_servers,
+                allocation_start: start_addr,
+                allocation_end: end_addr,
+                topology_hint: topology,
+                reserved_ips: BTreeSet::new(),
+                enabled: true,
+                tags: HashMap::new(),
+            };
+            
+            // Validate the config
+            config.validate()?;
+            
+            // Submit through Raft
+            println!("Creating IP pool '{}'...", config.name);
+            
+            // Create the IP pool command
+            let command = IpPoolCommand::CreatePool(config.clone());
+            let proposal = ProposalData::IpPoolCommand(command);
+            
+            // Submit the proposal through cluster operations
+            // Note: This requires a proper cluster operation method to be added
+            eprintln!("Note: IP pool creation through CLI requires cluster operation support");
+            eprintln!("Pool configuration validated successfully:");
+            eprintln!("  ID: {}", pool_id);
+            eprintln!("  Subnet: {}", subnet_net);
+            eprintln!("  Gateway: {}", gateway_ip);
+            eprintln!("  Range: {} - {}", start_addr, end_addr);
+            eprintln!("  Total IPs: {}", config.total_capacity());
+            
+            // TODO: Add cluster operation to submit proposal
+            // Example: client.submit_proposal(proposal).await?;
+        }
+        IpPoolCommands::List { addr: _ } => {
+            println!("Listing IP pools...");
+            // TODO: Implement a cluster operation to query IP pools from state
+            // This would query the IP pool manager state through Raft
+            eprintln!("Note: IP pool listing requires cluster state query support");
+        }
+        IpPoolCommands::Show { id, addr: _ } => {
+            println!("Showing IP pool {}...", id);
+            eprintln!("Note: IP pool details through CLI is not yet fully implemented");
+        }
+        IpPoolCommands::Delete { id, addr: _ } => {
+            println!("Deleting IP pool {}...", id);
+            
+            let command = IpPoolCommand::DeletePool(IpPoolId(id));
+            let proposal = ProposalData::IpPoolCommand(command);
+            
+            // TODO: Submit proposal through cluster operation
+            eprintln!("Note: IP pool deletion requires cluster operation support");
+        }
+        IpPoolCommands::Enable { id, enable, addr: _ } => {
+            let action = if enable { "Enabling" } else { "Disabling" };
+            println!("{} IP pool {}...", action, id);
+            
+            let command = IpPoolCommand::SetPoolEnabled { 
+                pool_id: IpPoolId(id), 
+                enabled: enable 
+            };
+            let proposal = ProposalData::IpPoolCommand(command);
+            
+            // TODO: Submit proposal through cluster operation
+            eprintln!("Note: IP pool enable/disable requires cluster operation support");
+        }
+        IpPoolCommands::Stats { id, addr: _ } => {
+            if let Some(pool_id) = id {
+                println!("Getting statistics for IP pool {}...", pool_id);
+            } else {
+                println!("Getting statistics for all IP pools...");
+            }
+            eprintln!("Note: IP pool statistics through CLI is not yet fully implemented");
+        }
+    }
+    
+    Ok(())
+}
+
+fn command_addr(command: &IpPoolCommands) -> String {
+    match command {
+        IpPoolCommands::Create { addr, .. } |
+        IpPoolCommands::List { addr } |
+        IpPoolCommands::Show { addr, .. } |
+        IpPoolCommands::Delete { addr, .. } |
+        IpPoolCommands::Enable { addr, .. } |
+        IpPoolCommands::Stats { addr, .. } => addr.clone(),
+    }
+}
+
+#[cfg(madsim)]
+async fn handle_ip_pool_command(_command: IpPoolCommands) -> BlixardResult<()> {
+    eprintln!("IP pool commands are not available in simulation mode");
     std::process::exit(1);
 }
 

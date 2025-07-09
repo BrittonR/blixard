@@ -285,8 +285,25 @@ impl MicrovmBackend {
         &self,
         core_config: &CoreVmConfig,
     ) -> BlixardResult<vm_types::VmConfig> {
-        // Allocate IP address and generate network config for the VM
-        let (vm_ip, mac_address, gateway, subnet) = self.allocate_vm_ip(&core_config.name).await?;
+        // Use centrally allocated IP if provided, otherwise fallback to local allocation
+        let (vm_ip, mac_address, gateway, subnet) = if let Some(ip) = &core_config.ip_address {
+            // Parse the IP to verify it's valid
+            let ip_addr = ip.parse::<std::net::Ipv4Addr>()
+                .map_err(|e| BlixardError::Internal {
+                    message: format!("Invalid IP address format: {}", e),
+                })?;
+            
+            // For centrally managed IPs, we need to determine the network config
+            // TODO: This should come from the IP pool manager or be passed in the config
+            let mac_address = self.ip_pool.read().await.generate_mac_address(&core_config.name);
+            let gateway = "10.0.0.1".to_string();
+            let subnet = "10.0.0.0/24".to_string();
+            
+            (ip.clone(), mac_address, gateway, subnet)
+        } else {
+            // Fallback to local allocation for backward compatibility
+            self.allocate_vm_ip(&core_config.name).await?
+        };
 
         // Extract VM index from IP address (last octet of 10.0.0.x)
         let vm_index = vm_ip
@@ -792,10 +809,15 @@ impl VmBackend for MicrovmBackend {
             let mut configs = self.vm_configs.write().await;
             configs.insert(config.name.clone(), vm_config);
 
-            if let Some(metadata) = &config.metadata {
-                let mut vm_metadata = self.vm_metadata.write().await;
-                vm_metadata.insert(config.name.clone(), metadata.clone());
+            let mut vm_metadata = self.vm_metadata.write().await;
+            let mut metadata = config.metadata.clone().unwrap_or_default();
+            
+            // Track if IP was centrally allocated
+            if config.ip_address.is_some() {
+                metadata.insert("centrally_allocated_ip".to_string(), "true".to_string());
             }
+            
+            vm_metadata.insert(config.name.clone(), metadata);
         }
 
         // Persist VM state to database
@@ -947,11 +969,20 @@ impl VmBackend for MicrovmBackend {
         {
             let mut configs = self.vm_configs.write().await;
             if let Some(vm_config) = configs.get(name) {
-                // Find and release IP address
-                for network in &vm_config.networks {
-                    if let vm_types::NetworkConfig::Routed { ip, .. } = network {
-                        self.release_vm_ip(ip).await;
-                        info!("Released IP address {} for VM '{}'", ip, name);
+                // Only release IP if it was locally allocated (not centrally managed)
+                // Check if this VM was created with a pre-allocated IP
+                let metadata = self.vm_metadata.read().await;
+                let has_central_ip = metadata.get(name)
+                    .and_then(|m| m.get("centrally_allocated_ip"))
+                    .is_some();
+                
+                if !has_central_ip {
+                    // Find and release locally allocated IP address
+                    for network in &vm_config.networks {
+                        if let vm_types::NetworkConfig::Routed { ip, .. } = network {
+                            self.release_vm_ip(ip).await;
+                            info!("Released locally allocated IP address {} for VM '{}'", ip, name);
+                        }
                     }
                 }
             }

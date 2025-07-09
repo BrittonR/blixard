@@ -114,6 +114,17 @@ pub enum ProposalData {
         to_node: u64,
     },
 
+    // IP pool operations
+    IpPoolCommand(crate::ip_pool::IpPoolCommand),
+    AllocateIp {
+        request: crate::ip_pool::IpAllocationRequest,
+        // Response sent through this channel
+        response_tx: Option<oneshot::Sender<BlixardResult<crate::ip_pool::IpAllocationResult>>>,
+    },
+    ReleaseVmIps {
+        vm_id: crate::types::VmId,
+    },
+
     // Batch processing
     Batch(Vec<ProposalData>),
 }
@@ -303,6 +314,98 @@ impl RaftStateMachine {
                 }
 
                 return Ok(());
+            }
+            ProposalData::IpPoolCommand(command) => {
+                self.apply_ip_pool_command(write_txn, command).await?;
+            }
+            ProposalData::AllocateIp { request, response_tx } => {
+                // Store the IP allocation in the database
+                use crate::storage::{IP_ALLOCATION_TABLE, VM_IP_MAPPING_TABLE};
+                
+                // Handle the allocation
+                if let Some(shared_state) = self.shared_state.upgrade() {
+                    if let Some(ip_pool_manager) = shared_state.get_ip_pool_manager().await {
+                        match ip_pool_manager.allocate_ip(request.clone()).await {
+                            Ok(allocation_result) => {
+                                // Store allocation in database
+                                let mut alloc_table = write_txn.open_table(IP_ALLOCATION_TABLE)?;
+                                let alloc_data = bincode::serialize(&allocation_result.allocation)
+                                    .map_err(|e| BlixardError::Serialization {
+                                        operation: "serialize ip allocation".to_string(),
+                                        source: Box::new(e),
+                                    })?;
+                                alloc_table.insert(
+                                    allocation_result.allocation.ip.to_string().as_str(), 
+                                    alloc_data.as_slice()
+                                )?;
+                                
+                                // Store VM->IP mapping
+                                let mut mapping_table = write_txn.open_table(VM_IP_MAPPING_TABLE)?;
+                                let mapping_data = bincode::serialize(&allocation_result.allocation.ip)
+                                    .map_err(|e| BlixardError::Serialization {
+                                        operation: "serialize ip address".to_string(),
+                                        source: Box::new(e),
+                                    })?;
+                                mapping_table.insert(
+                                    request.vm_id.to_string().as_str(),
+                                    mapping_data.as_slice()
+                                )?;
+                                
+                                write_txn.commit()?;
+                                
+                                if let Some(tx) = response_tx {
+                                    let _ = tx.send(Ok(allocation_result));
+                                }
+                            }
+                            Err(e) => {
+                                write_txn.commit()?;
+                                if let Some(tx) = response_tx {
+                                    let _ = tx.send(Err(e));
+                                }
+                            }
+                        }
+                    } else {
+                        write_txn.commit()?;
+                    }
+                } else {
+                    write_txn.commit()?;
+                }
+            }
+            ProposalData::ReleaseVmIps { vm_id } => {
+                use crate::storage::{IP_ALLOCATION_TABLE, VM_IP_MAPPING_TABLE};
+                
+                // Get the VM's IP from the mapping table
+                let vm_ip = {
+                    let mapping_table = write_txn.open_table(VM_IP_MAPPING_TABLE)?;
+                    if let Some(data) = mapping_table.get(vm_id.to_string().as_str())? {
+                        let ip: std::net::IpAddr = bincode::deserialize(data.value())
+                            .map_err(|e| BlixardError::Serialization {
+                                operation: "deserialize ip address".to_string(),
+                                source: Box::new(e),
+                            })?;
+                        Some(ip)
+                    } else {
+                        None
+                    }
+                };
+                
+                // Remove from database tables
+                if let Some(ip) = vm_ip {
+                    let mut alloc_table = write_txn.open_table(IP_ALLOCATION_TABLE)?;
+                    alloc_table.remove(ip.to_string().as_str())?;
+                }
+                
+                let mut mapping_table = write_txn.open_table(VM_IP_MAPPING_TABLE)?;
+                mapping_table.remove(vm_id.to_string().as_str())?;
+                
+                write_txn.commit()?;
+                
+                // Release in IP pool manager
+                if let Some(shared_state) = self.shared_state.upgrade() {
+                    if let Some(ip_pool_manager) = shared_state.get_ip_pool_manager().await {
+                        let _ = ip_pool_manager.release_vm_ips(vm_id).await;
+                    }
+                }
             }
             _ => {
                 // Handle other proposal types
@@ -542,9 +645,63 @@ impl RaftStateMachine {
                     // Perform admission control before creating VM
                     self.validate_vm_admission(config, *node_id)?;
                     
+                    // Allocate IP if IP pool manager is available
+                    let mut vm_config = config.clone();
+                    if let Some(shared_state) = self.shared_state.upgrade() {
+                        if let Some(ip_pool_manager) = shared_state.get_ip_pool_manager().await {
+                            let ip_request = crate::ip_pool::IpAllocationRequest {
+                                vm_id: crate::types::VmId::from_string(&config.name),
+                                preferred_pool: None,
+                                required_tags: HashMap::new(),
+                                topology_hint: None,
+                                selection_strategy: crate::ip_pool::IpPoolSelectionStrategy::RoundRobin,
+                                mac_address: format!("02:00:00:{:02x}:{:02x}:{:02x}", 
+                                    rand::random::<u8>(), rand::random::<u8>(), rand::random::<u8>()),
+                            };
+                            
+                            match ip_pool_manager.allocate_ip(ip_request).await {
+                                Ok(allocation_result) => {
+                                    vm_config.ip_address = Some(allocation_result.allocation.ip.to_string());
+                                    
+                                    // Store allocation in database
+                                    use crate::storage::{IP_ALLOCATION_TABLE, VM_IP_MAPPING_TABLE};
+                                    let mut alloc_table = txn.open_table(IP_ALLOCATION_TABLE)?;
+                                    let alloc_data = bincode::serialize(&allocation_result.allocation)
+                                        .map_err(|e| BlixardError::Serialization {
+                                            operation: "serialize ip allocation".to_string(),
+                                            source: Box::new(e),
+                                        })?;
+                                    alloc_table.insert(
+                                        allocation_result.allocation.ip.to_string().as_str(), 
+                                        alloc_data.as_slice()
+                                    )?;
+                                    
+                                    // Store VM->IP mapping
+                                    let mut mapping_table = txn.open_table(VM_IP_MAPPING_TABLE)?;
+                                    let mapping_data = bincode::serialize(&allocation_result.allocation.ip)
+                                        .map_err(|e| BlixardError::Serialization {
+                                            operation: "serialize ip address".to_string(),
+                                            source: Box::new(e),
+                                        })?;
+                                    mapping_table.insert(
+                                        config.name.as_str(),
+                                        mapping_data.as_slice()
+                                    )?;
+                                    
+                                    tracing::info!("Allocated IP {} for VM {}", 
+                                        allocation_result.allocation.ip, config.name);
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Failed to allocate IP for VM {}: {}", config.name, e);
+                                    // Continue without IP - VM can still be created
+                                }
+                            }
+                        }
+                    }
+                    
                     let vm_state = crate::types::VmState {
-                        name: config.name.clone(),
-                        config: config.clone(),
+                        name: vm_config.name.clone(),
+                        config: vm_config.clone(),
                         status: VmStatus::Creating,
                         node_id: *node_id,
                         created_at: Utc::now(),
@@ -645,6 +802,43 @@ impl RaftStateMachine {
                     }
                 }
                 VmCommand::Delete { name } => {
+                    // Release IP if allocated
+                    if let Some(shared_state) = self.shared_state.upgrade() {
+                        if let Some(ip_pool_manager) = shared_state.get_ip_pool_manager().await {
+                            use crate::storage::{IP_ALLOCATION_TABLE, VM_IP_MAPPING_TABLE};
+                            
+                            // Get the VM's IP from the mapping table
+                            let vm_ip = {
+                                let mapping_table = txn.open_table(VM_IP_MAPPING_TABLE)?;
+                                if let Some(data) = mapping_table.get(name.as_str())? {
+                                    let ip: std::net::IpAddr = bincode::deserialize(data.value())
+                                        .map_err(|e| BlixardError::Serialization {
+                                            operation: "deserialize ip address".to_string(),
+                                            source: Box::new(e),
+                                        })?;
+                                    Some(ip)
+                                } else {
+                                    None
+                                }
+                            };
+                            
+                            // Release from IP pool manager
+                            let vm_id = crate::types::VmId::from_string(name);
+                            let _ = ip_pool_manager.release_vm_ips(vm_id).await;
+                            
+                            // Remove from database tables
+                            if let Some(ip) = vm_ip {
+                                let mut alloc_table = txn.open_table(IP_ALLOCATION_TABLE)?;
+                                alloc_table.remove(ip.to_string().as_str())?;
+                                
+                                tracing::info!("Released IP {} from VM {}", ip, name);
+                            }
+                            
+                            let mut mapping_table = txn.open_table(VM_IP_MAPPING_TABLE)?;
+                            mapping_table.remove(name.as_str())?;
+                        }
+                    }
+                    
                     // Remove VM from database
                     table.remove(name.as_str())?;
                 }
@@ -791,6 +985,157 @@ impl RaftStateMachine {
         Ok(())
     }
 
+    /// Apply IP pool command to the state machine
+    async fn apply_ip_pool_command(
+        &self,
+        txn: WriteTransaction,
+        command: crate::ip_pool::IpPoolCommand,
+    ) -> BlixardResult<()> {
+        use crate::storage::{IP_POOL_TABLE, IP_ALLOCATION_TABLE, VM_IP_MAPPING_TABLE};
+        
+        match command {
+            crate::ip_pool::IpPoolCommand::CreatePool(config) => {
+                let pool_data = bincode::serialize(&config).map_err(|e| {
+                    BlixardError::Serialization {
+                        operation: "serialize ip pool config".to_string(),
+                        source: Box::new(e),
+                    }
+                })?;
+                
+                let mut table = txn.open_table(IP_POOL_TABLE)?;
+                table.insert(&config.id.0, pool_data.as_slice())?;
+            }
+            crate::ip_pool::IpPoolCommand::UpdatePool(config) => {
+                let pool_data = bincode::serialize(&config).map_err(|e| {
+                    BlixardError::Serialization {
+                        operation: "serialize ip pool config".to_string(),
+                        source: Box::new(e),
+                    }
+                })?;
+                
+                let mut table = txn.open_table(IP_POOL_TABLE)?;
+                table.insert(&config.id.0, pool_data.as_slice())?;
+            }
+            crate::ip_pool::IpPoolCommand::DeletePool(pool_id) => {
+                let mut table = txn.open_table(IP_POOL_TABLE)?;
+                table.remove(&pool_id.0)?;
+            }
+            crate::ip_pool::IpPoolCommand::SetPoolEnabled { pool_id, enabled } => {
+                // Read-modify-write the pool config
+                let mut table = txn.open_table(IP_POOL_TABLE)?;
+                if let Some(data) = table.get(&pool_id.0)? {
+                    let mut config: crate::ip_pool::IpPoolConfig =
+                        bincode::deserialize(data.value()).map_err(|e| {
+                            BlixardError::Serialization {
+                                operation: "deserialize ip pool config".to_string(),
+                                source: Box::new(e),
+                            }
+                        })?;
+                    config.enabled = enabled;
+                    
+                    let pool_data = bincode::serialize(&config).map_err(|e| {
+                        BlixardError::Serialization {
+                            operation: "serialize ip pool config".to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                    
+                    table.insert(&pool_id.0, pool_data.as_slice())?;
+                }
+            }
+            crate::ip_pool::IpPoolCommand::ReserveIps { pool_id, ips } => {
+                // Read-modify-write the pool config to add reserved IPs
+                let mut table = txn.open_table(IP_POOL_TABLE)?;
+                if let Some(data) = table.get(&pool_id.0)? {
+                    let mut config: crate::ip_pool::IpPoolConfig =
+                        bincode::deserialize(data.value()).map_err(|e| {
+                            BlixardError::Serialization {
+                                operation: "deserialize ip pool config".to_string(),
+                                source: Box::new(e),
+                            }
+                        })?;
+                    config.reserved_ips.extend(ips);
+                    
+                    let pool_data = bincode::serialize(&config).map_err(|e| {
+                        BlixardError::Serialization {
+                            operation: "serialize ip pool config".to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                    
+                    table.insert(&pool_id.0, pool_data.as_slice())?;
+                }
+            }
+            crate::ip_pool::IpPoolCommand::ReleaseReservedIps { pool_id, ips } => {
+                // Read-modify-write the pool config to remove reserved IPs
+                let mut table = txn.open_table(IP_POOL_TABLE)?;
+                if let Some(data) = table.get(&pool_id.0)? {
+                    let mut config: crate::ip_pool::IpPoolConfig =
+                        bincode::deserialize(data.value()).map_err(|e| {
+                            BlixardError::Serialization {
+                                operation: "deserialize ip pool config".to_string(),
+                                source: Box::new(e),
+                            }
+                        })?;
+                    for ip in ips {
+                        config.reserved_ips.remove(&ip);
+                    }
+                    
+                    let pool_data = bincode::serialize(&config).map_err(|e| {
+                        BlixardError::Serialization {
+                            operation: "serialize ip pool config".to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                    
+                    table.insert(&pool_id.0, pool_data.as_slice())?;
+                }
+            }
+        }
+        
+        txn.commit()?;
+        
+        // Update IP pool manager if available
+        if let Some(shared_state) = self.shared_state.upgrade() {
+            if let Some(ip_pool_manager) = shared_state.get_ip_pool_manager().await {
+                // Reload pools from storage
+                let read_txn = self.database.begin_read()?;
+                let pool_table = read_txn.open_table(IP_POOL_TABLE)?;
+                let allocation_table = read_txn.open_table(IP_ALLOCATION_TABLE)?;
+                
+                let mut pools = Vec::new();
+                for entry in pool_table.iter()? {
+                    let (_, value) = entry?;
+                    let config: crate::ip_pool::IpPoolConfig =
+                        bincode::deserialize(value.value()).map_err(|e| {
+                            BlixardError::Serialization {
+                                operation: "deserialize ip pool config".to_string(),
+                                source: Box::new(e),
+                            }
+                        })?;
+                    pools.push(config);
+                }
+                
+                let mut allocations = Vec::new();
+                for entry in allocation_table.iter()? {
+                    let (_, value) = entry?;
+                    let allocation: crate::ip_pool::IpAllocation =
+                        bincode::deserialize(value.value()).map_err(|e| {
+                            BlixardError::Serialization {
+                                operation: "deserialize ip allocation".to_string(),
+                                source: Box::new(e),
+                            }
+                        })?;
+                    allocations.push(allocation);
+                }
+                
+                ip_pool_manager.load_from_storage(pools, allocations).await?;
+            }
+        }
+        
+        Ok(())
+    }
+
     /// Apply a snapshot to the state machine
     /// This is called when the Raft layer receives a snapshot from the leader
     pub fn apply_snapshot(&self, snapshot_data: &[u8]) -> BlixardResult<()> {
@@ -914,6 +1259,54 @@ impl RaftStateMachine {
             }
             for (key, value) in &snapshot.worker_status {
                 table.insert(key.as_slice(), value.as_slice())?;
+            }
+        }
+
+        // Clear and restore IP pools
+        {
+            use crate::storage::IP_POOL_TABLE;
+            let mut table = write_txn.open_table(IP_POOL_TABLE)?;
+            let keys_to_remove: Vec<u64> = table
+                .iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(&key)?;
+            }
+            for (key, value) in &snapshot.ip_pools {
+                table.insert(key, value.as_slice())?;
+            }
+        }
+
+        // Clear and restore IP allocations
+        {
+            use crate::storage::IP_ALLOCATION_TABLE;
+            let mut table = write_txn.open_table(IP_ALLOCATION_TABLE)?;
+            let keys_to_remove: Vec<String> = table
+                .iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(key.as_str())?;
+            }
+            for (key, value) in &snapshot.ip_allocations {
+                table.insert(key.as_str(), value.as_slice())?;
+            }
+        }
+
+        // Clear and restore VM IP mappings
+        {
+            use crate::storage::VM_IP_MAPPING_TABLE;
+            let mut table = write_txn.open_table(VM_IP_MAPPING_TABLE)?;
+            let keys_to_remove: Vec<String> = table
+                .iter()?
+                .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+            for key in keys_to_remove {
+                table.remove(key.as_str())?;
+            }
+            for (key, value) in &snapshot.vm_ip_mappings {
+                table.insert(key.as_str(), value.as_slice())?;
             }
         }
 

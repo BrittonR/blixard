@@ -12,6 +12,8 @@ pub mod raft_manager;
 pub mod resource_management;
 pub mod resource_monitor;
 pub mod storage;
+pub mod ip_pool;
+pub mod ip_pool_manager;
 pub mod types;
 pub mod vm_backend;
 pub mod vm_scheduler;

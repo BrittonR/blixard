@@ -112,6 +112,9 @@ pub struct SharedNodeState {
     // Quota manager for resource enforcement
     quota_manager: RwLock<Option<Arc<crate::quota_manager::QuotaManager>>>,
 
+    // IP pool manager for network resource allocation
+    ip_pool_manager: RwLock<Option<Arc<crate::ip_pool_manager::IpPoolManager>>>,
+
     // Security manager for authentication and authorization
     security_manager: RwLock<Option<Arc<crate::security::SecurityManager>>>,
 
@@ -166,6 +169,7 @@ impl SharedNodeState {
             raft_conf_change_tx: Mutex::new(None),
             vm_manager: RwLock::new(None),
             quota_manager: RwLock::new(None),
+            ip_pool_manager: RwLock::new(None),
             security_manager: RwLock::new(None),
             observability_manager: RwLock::new(None),
             is_running: RwLock::new(false),
@@ -229,6 +233,16 @@ impl SharedNodeState {
     /// Get the quota manager
     pub async fn get_quota_manager(&self) -> Option<Arc<crate::quota_manager::QuotaManager>> {
         self.quota_manager.read().await.clone()
+    }
+
+    /// Set the IP pool manager
+    pub async fn set_ip_pool_manager(&self, ip_pool_manager: Arc<crate::ip_pool_manager::IpPoolManager>) {
+        *self.ip_pool_manager.write().await = Some(ip_pool_manager);
+    }
+
+    /// Get the IP pool manager
+    pub async fn get_ip_pool_manager(&self) -> Option<Arc<crate::ip_pool_manager::IpPoolManager>> {
+        self.ip_pool_manager.read().await.clone()
     }
 
     /// Set the security manager
