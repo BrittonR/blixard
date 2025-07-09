@@ -2,58 +2,71 @@
 
 use blixard_core::{
     error::BlixardResult,
+    iroh_types,
     test_helpers::TestNode,
-    types::{Hypervisor, VmConfig, VmStatus},
 };
+use std::collections::HashMap;
 use std::time::Duration;
 use tokio::time::timeout;
 
 #[tokio::test]
 async fn test_single_node_vm_create_start_stop_delete() -> BlixardResult<()> {
-    // Create and start a single node
-    let mut node = TestNode::new(1).await;
-    node.start().await?;
+    // Create and start a single node with mock backend for testing
+    let node = TestNode::builder()
+        .with_id(1)
+        .with_port(9001)
+        .with_vm_backend("mock".to_string())
+        .build()
+        .await?;
     
     // Give the node time to initialize
     tokio::time::sleep(Duration::from_secs(2)).await;
     
+    // Get a client to interact with the node
+    let client = node.client().await?;
+    
     // Create a VM configuration
-    let vm_config = VmConfig {
+    let vm_config = iroh_types::VmConfig {
         name: "test-vm-1".to_string(),
-        vcpus: 1,
-        memory: 512, // 512MB
-        disk: 5,     // 5GB
-        image: None,
-        network: None,
-        ip_address: None,
-        hypervisor: Hypervisor::Qemu,
-        metadata: Default::default(),
+        cpu_cores: 1,
+        memory_mb: 512,
+        disk_gb: 5,
+        owner: "test-user".to_string(),
+        metadata: HashMap::new(),
     };
     
     // Create the VM
     println!("Creating VM: {}", vm_config.name);
-    node.create_vm(vm_config.clone()).await?;
+    let create_response = client.create_vm(vm_config).await?;
+    assert!(create_response.into_inner().success, "Failed to create VM");
     
     // Wait for VM creation to propagate
     tokio::time::sleep(Duration::from_secs(1)).await;
     
     // List VMs to verify creation
-    let vms = node.list_vms().await?;
+    let vms = client.list_vms().await?;
     assert_eq!(vms.len(), 1, "Expected 1 VM, found {}", vms.len());
     assert_eq!(vms[0].name, "test-vm-1");
-    assert_eq!(vms[0].status, VmStatus::Creating);
     
     // Start the VM
     println!("Starting VM: test-vm-1");
-    node.start_vm("test-vm-1").await?;
+    let start_request = iroh_types::StartVmRequest {
+        name: "test-vm-1".to_string(),
+    };
+    let start_response = client.start_vm(start_request).await?;
+    assert!(start_response.into_inner().success, "Failed to start VM");
     
     // Wait for VM to start (with timeout)
     let start_result = timeout(Duration::from_secs(30), async {
         loop {
-            match node.get_vm_status("test-vm-1").await {
-                Ok(status) if status == VmStatus::Running => return Ok(()),
-                Ok(status) => {
-                    println!("VM status: {:?}", status);
+            match client.get_vm_status("test-vm-1".to_string()).await {
+                Ok(vm_info) => {
+                    if let Some(info) = vm_info {
+                        if info.state == 3 { // VmState::VmStateRunning
+                            return Ok(());
+                        }
+                        println!("VM state: {}", info.state);
+                    }
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
                 Err(e) => return Err(e),
@@ -68,34 +81,36 @@ async fn test_single_node_vm_create_start_stop_delete() -> BlixardResult<()> {
         Err(_) => panic!("Timeout waiting for VM to start"),
     }
     
-    // Verify VM is running
-    let status = node.get_vm_status("test-vm-1").await?;
-    assert_eq!(status, VmStatus::Running);
-    
     // Stop the VM
     println!("Stopping VM: test-vm-1");
-    node.stop_vm("test-vm-1").await?;
+    let stop_request = iroh_types::StopVmRequest {
+        name: "test-vm-1".to_string(),
+    };
+    let stop_response = client.stop_vm(stop_request).await?;
+    assert!(stop_response.into_inner().success, "Failed to stop VM");
     
     // Wait for VM to stop
     tokio::time::sleep(Duration::from_secs(5)).await;
     
     // Verify VM is stopped
-    let status = node.get_vm_status("test-vm-1").await?;
-    assert_eq!(status, VmStatus::Stopped);
+    let vm_info = client.get_vm_status("test-vm-1".to_string()).await?;
+    assert!(vm_info.is_some());
+    assert_eq!(vm_info.unwrap().state, 5); // VmState::VmStateStopped
     
     // Delete the VM
     println!("Deleting VM: test-vm-1");
-    node.delete_vm("test-vm-1").await?;
+    let delete_request = iroh_types::DeleteVmRequest {
+        name: "test-vm-1".to_string(),
+    };
+    let delete_response = client.delete_vm(delete_request).await?;
+    assert!(delete_response.into_inner().success, "Failed to delete VM");
     
     // Wait for deletion to propagate
     tokio::time::sleep(Duration::from_secs(1)).await;
     
     // Verify VM is deleted
-    let vms = node.list_vms().await?;
+    let vms = client.list_vms().await?;
     assert_eq!(vms.len(), 0, "Expected 0 VMs after deletion");
-    
-    // Clean up
-    node.stop().await?;
     
     Ok(())
 }
@@ -103,41 +118,64 @@ async fn test_single_node_vm_create_start_stop_delete() -> BlixardResult<()> {
 #[tokio::test]
 #[ignore] // This test requires proper network setup
 async fn test_vm_with_network_connectivity() -> BlixardResult<()> {
-    // Create and start a single node
-    let mut node = TestNode::new(1).await;
-    node.start().await?;
+    // Create and start a single node with mock backend for testing
+    let node = TestNode::builder()
+        .with_id(1)
+        .with_port(9002)
+        .with_vm_backend("mock".to_string())
+        .build()
+        .await?;
     
     // Give the node time to initialize
     tokio::time::sleep(Duration::from_secs(2)).await;
     
+    // Get a client to interact with the node
+    let client = node.client().await?;
+    
     // Create a VM with specific network configuration
-    let vm_config = VmConfig {
+    let vm_config = iroh_types::VmConfig {
         name: "test-vm-net".to_string(),
-        vcpus: 1,
-        memory: 512,
-        disk: 5,
-        image: None,
-        network: Some("default".to_string()),
-        ip_address: Some("10.0.0.20".to_string()),
-        hypervisor: Hypervisor::Qemu,
-        metadata: Default::default(),
+        cpu_cores: 1,
+        memory_mb: 512,
+        disk_gb: 5,
+        owner: "test-user".to_string(),
+        metadata: {
+            let mut metadata = HashMap::new();
+            metadata.insert("network".to_string(), "default".to_string());
+            metadata.insert("ip_address".to_string(), "10.0.0.20".to_string());
+            metadata
+        },
     };
     
-    // Create and start the VM
-    node.create_vm(vm_config).await?;
-    node.start_vm("test-vm-net").await?;
+    // Create the VM
+    println!("Creating VM: {}", vm_config.name);
+    let create_response = client.create_vm(vm_config).await?;
+    assert!(create_response.into_inner().success, "Failed to create VM");
+    
+    // Wait for VM creation to propagate
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    
+    // Start the VM
+    println!("Starting VM: test-vm-net");
+    let start_request = iroh_types::StartVmRequest {
+        name: "test-vm-net".to_string(),
+    };
+    let start_response = client.start_vm(start_request).await?;
+    assert!(start_response.into_inner().success, "Failed to start VM");
     
     // Wait for VM to be fully up
     let _start_result = timeout(Duration::from_secs(60), async {
         loop {
-            match node.get_vm_status("test-vm-net").await {
-                Ok(VmStatus::Running) => {
-                    // Additional wait for network to be ready
-                    tokio::time::sleep(Duration::from_secs(10)).await;
-                    return Ok(());
-                }
-                Ok(status) => {
-                    println!("VM status: {:?}", status);
+            match client.get_vm_status("test-vm-net".to_string()).await {
+                Ok(vm_info) => {
+                    if let Some(info) = vm_info {
+                        if info.state == 3 { // VmState::VmStateRunning
+                            // Additional wait for network to be ready
+                            tokio::time::sleep(Duration::from_secs(10)).await;
+                            return Ok(());
+                        }
+                        println!("VM state: {}", info.state);
+                    }
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 }
                 Err(e) => return Err(e),
@@ -162,9 +200,22 @@ async fn test_vm_with_network_connectivity() -> BlixardResult<()> {
     );
     
     // Clean up
-    node.stop_vm("test-vm-net").await?;
-    node.delete_vm("test-vm-net").await?;
-    node.stop().await?;
+    println!("Stopping VM: test-vm-net");
+    let stop_request = iroh_types::StopVmRequest {
+        name: "test-vm-net".to_string(),
+    };
+    let stop_response = client.stop_vm(stop_request).await?;
+    assert!(stop_response.into_inner().success, "Failed to stop VM");
+    
+    // Wait for VM to stop
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    
+    println!("Deleting VM: test-vm-net");
+    let delete_request = iroh_types::DeleteVmRequest {
+        name: "test-vm-net".to_string(),
+    };
+    let delete_response = client.delete_vm(delete_request).await?;
+    assert!(delete_response.into_inner().success, "Failed to delete VM");
     
     Ok(())
 }

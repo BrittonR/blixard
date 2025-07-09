@@ -361,6 +361,7 @@ pub struct TestNodeBuilder {
     port: Option<u16>,
     join_addr: Option<String>,
     data_dir: Option<String>,
+    vm_backend: Option<String>,
 }
 
 impl TestNodeBuilder {
@@ -388,6 +389,11 @@ impl TestNodeBuilder {
         self.data_dir = Some(dir);
         self
     }
+    
+    pub fn with_vm_backend(mut self, backend: String) -> Self {
+        self.vm_backend = Some(backend);
+        self
+    }
 
     pub async fn build(self) -> BlixardResult<TestNode> {
         let id = self
@@ -410,21 +416,34 @@ impl TestNodeBuilder {
         };
 
         let addr: SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
+        
+        // Get VM backend or default to mock
+        let vm_backend = self.vm_backend.clone().unwrap_or_else(|| "mock".to_string());
 
         // Initialize global config for tests if not already done
         use crate::config_global;
         use crate::config_v2::ConfigBuilder;
 
         if !config_global::is_initialized() {
-            let test_config = ConfigBuilder::new()
+            let test_config = match ConfigBuilder::new()
                 .node_id(id)
                 .bind_address(addr.to_string())
                 .data_dir(&data_dir)
-                .vm_backend("mock")
-                .p2p_enabled(true) // Enable P2P for tests
-                .build()
-                .unwrap();
-            let _ = config_global::init(test_config); // Ignore error if already initialized
+                .vm_backend(&vm_backend)
+                .build() {
+                Ok(config) => config,
+                Err(e) => {
+                    eprintln!("Failed to build test config: {:?}", e);
+                    return Err(e);
+                }
+            };
+            if let Err(e) = config_global::init(test_config) {
+                eprintln!("Failed to init global config: {:?}", e);
+                // Only return error if it's not "already initialized"
+                if !e.to_string().contains("already initialized") {
+                    return Err(e);
+                }
+            }
         }
 
         // Create transport config for Iroh P2P
@@ -437,7 +456,7 @@ impl TestNodeBuilder {
             data_dir,
             join_addr: self.join_addr.clone(),
             use_tailscale: false,
-            vm_backend: "mock".to_string(), // Use mock backend for tests
+            vm_backend: vm_backend.clone(),
             transport_config: Some(transport_config), // Enable Iroh transport
             topology: Default::default(),   // Use default topology for tests
         };
@@ -450,8 +469,8 @@ impl TestNodeBuilder {
         let (shutdown_tx, _shutdown_rx) = oneshot::channel();
         shared_state.set_shutdown_tx(shutdown_tx).await;
 
-        // Initialize the node first - this creates the P2P manager
-        // which is required for starting Iroh services
+        // Initialize the node - for tests we'll use mock backend
+        // Real microvm backend registration should be done in the main binary
         node.initialize().await?;
 
         // Now start Iroh services AFTER node initialization
