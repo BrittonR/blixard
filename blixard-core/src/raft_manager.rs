@@ -480,11 +480,12 @@ impl RaftStateMachine {
         let worker_table = read_txn.open_table(WORKER_TABLE)?;
         
         let worker_capabilities = if let Some(data) = worker_table.get(node_id.to_le_bytes().as_ref())? {
-            bincode::deserialize::<WorkerCapabilities>(data.value())
+            let (_address, capabilities): (String, WorkerCapabilities) = bincode::deserialize(data.value())
                 .map_err(|e| BlixardError::Serialization {
                     operation: "deserialize worker capabilities".to_string(),
                     source: Box::new(e),
-                })?
+                })?;
+            capabilities
         } else {
             return Err(BlixardError::SchedulingError {
                 message: format!("Target node {} not found in worker registry", node_id),
@@ -733,12 +734,13 @@ impl RaftStateMachine {
         // Forward command to VM manager for actual execution (only on the target node)
         if let Some(shared) = self.shared_state.upgrade() {
             // Check if this command is for this node
-            let should_execute = match command {
-                VmCommand::Create { node_id, .. } => *node_id == shared.get_id(),
+            let node_id = shared.get_id();
+            let should_execute = match &command {
+                VmCommand::Create { node_id: target_node_id, .. } => *target_node_id == node_id,
                 VmCommand::Delete { .. } => {
                     // For delete commands, use the pre-stored ownership information
                     if let Some(owner_node_id) = delete_node_id {
-                        owner_node_id == shared.get_id()
+                        owner_node_id == node_id
                     } else {
                         // If we couldn't determine ownership, let any node try to clean up
                         // This is safe because only the node that actually has the VM can delete it
@@ -749,7 +751,7 @@ impl RaftStateMachine {
                     // For other commands, check if VM is assigned to this node
                     if let Ok(read_txn) = self.database.begin_read() {
                         if let Ok(table) = read_txn.open_table(VM_STATE_TABLE) {
-                            match command {
+                            match &command {
                                 VmCommand::Start { name } | VmCommand::Stop { name } => {
                                     if let Ok(Some(data)) = table.get(name.as_str()) {
                                         if let Ok(vm_state) =
@@ -757,7 +759,7 @@ impl RaftStateMachine {
                                                 data.value(),
                                             )
                                         {
-                                            vm_state.node_id == shared.get_id()
+                                            vm_state.node_id == node_id
                                         } else {
                                             false
                                         }
@@ -767,8 +769,8 @@ impl RaftStateMachine {
                                 }
                                 VmCommand::Migrate { task } => {
                                     // Migration needs to be executed on both source and target nodes
-                                    task.source_node_id == shared.get_id()
-                                        || task.target_node_id == shared.get_id()
+                                    task.source_node_id == node_id
+                                        || task.target_node_id == node_id
                                 }
                                 _ => false,
                             }
@@ -782,12 +784,18 @@ impl RaftStateMachine {
             };
 
             if should_execute {
-                // Use tokio::spawn to send the command asynchronously
+                // Get the VM manager and process the command directly
+                // (we're already in the Raft apply path, so this has consensus)
+                // Use tokio::spawn to process the command asynchronously
                 let command_clone = command.clone();
-                let shared_clone = shared.clone();
+                let shared_clone = Arc::clone(&shared);
                 tokio::spawn(async move {
-                    if let Err(e) = shared_clone.send_vm_command(command_clone).await {
-                        tracing::error!("Failed to forward VM command to VM manager: {}", e);
+                    if let Some(vm_manager) = shared_clone.get_vm_manager().await {
+                        if let Err(e) = vm_manager.process_command(command_clone).await {
+                            tracing::error!("Failed to process VM command: {}", e);
+                        }
+                    } else {
+                        tracing::warn!("VM manager not available to process command");
                     }
                 });
             }

@@ -284,15 +284,21 @@ impl TestNode {
     /// Get a client connected to this node
     pub async fn client(&self) -> BlixardResult<IrohClusterServiceClient> {
         // Get the node's Iroh NodeAddr from P2P manager
+        tracing::info!("Getting P2P manager for client creation");
         let node_addr = if let Some(p2p_manager) = self.shared_state.get_p2p_manager().await {
-            p2p_manager.get_node_addr().await?
+            tracing::info!("P2P manager found, getting node address");
+            let addr = p2p_manager.get_node_addr().await?;
+            tracing::info!("Got node address: {:?}", addr);
+            addr
         } else {
+            tracing::error!("P2P manager not available");
             return Err(BlixardError::Internal {
                 message: "P2P manager not available".to_string(),
             });
         };
 
         // Create a temporary endpoint for the client
+        tracing::info!("Creating client endpoint");
         let endpoint =
             iroh::Endpoint::builder()
                 .bind()
@@ -301,6 +307,7 @@ impl TestNode {
                     message: format!("Failed to create client endpoint: {}", e),
                 })?;
 
+        tracing::info!("Client endpoint created successfully");
         Ok(IrohClusterServiceClient::new(Arc::new(endpoint), node_addr))
     }
 
@@ -419,6 +426,14 @@ impl TestNodeBuilder {
         
         // Get VM backend or default to mock
         let vm_backend = self.vm_backend.clone().unwrap_or_else(|| "mock".to_string());
+        
+        // Initialize metrics for tests if not already done
+        if crate::metrics_otel::try_metrics().is_none() {
+            let _ = crate::metrics_otel::init_noop()
+                .map_err(|e| BlixardError::Internal {
+                    message: format!("Failed to initialize test metrics: {}", e),
+                })?;
+        }
 
         // Initialize global config for tests if not already done
         use crate::config_global;
@@ -430,6 +445,7 @@ impl TestNodeBuilder {
                 .bind_address(addr.to_string())
                 .data_dir(&data_dir)
                 .vm_backend(&vm_backend)
+                .p2p_enabled(true)  // Enable P2P for tests using Iroh transport
                 .build() {
                 Ok(config) => config,
                 Err(e) => {

@@ -11,6 +11,12 @@ use tokio::time::timeout;
 
 #[tokio::test]
 async fn test_single_node_vm_create_start_stop_delete() -> BlixardResult<()> {
+    // Initialize logging for debugging
+    let _ = tracing_subscriber::fmt()
+        .with_test_writer()
+        .with_env_filter("blixard_core=debug,iroh=debug")
+        .try_init();
+    
     // Create and start a single node with mock backend for testing
     let node = TestNode::builder()
         .with_id(1)
@@ -19,8 +25,13 @@ async fn test_single_node_vm_create_start_stop_delete() -> BlixardResult<()> {
         .build()
         .await?;
     
-    // Give the node time to initialize
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // Give the node time to initialize and elect itself as leader
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    
+    // Verify the node is ready and is the leader
+    let raft_status = node.shared_state.get_raft_status().await?;
+    println!("Raft status after initialization: is_leader={}, leader_id={:?}", 
+             raft_status.is_leader, raft_status.leader_id);
     
     // Get a client to interact with the node
     let client = node.client().await?;
@@ -56,20 +67,32 @@ async fn test_single_node_vm_create_start_stop_delete() -> BlixardResult<()> {
     let start_response = client.start_vm(start_request).await?;
     assert!(start_response.into_inner().success, "Failed to start VM");
     
+    // Give the monitoring task time to detect the status change
+    println!("VM start command sent, waiting for monitoring to update status...");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    
     // Wait for VM to start (with timeout)
     let start_result = timeout(Duration::from_secs(30), async {
         loop {
             match client.get_vm_status("test-vm-1".to_string()).await {
                 Ok(vm_info) => {
                     if let Some(info) = vm_info {
+                        println!("VM state: {} (expecting 3 for Running)", info.state);
+                        // VM states: 0=Unknown, 1=Creating, 2=Starting, 3=Running, 4=Stopping, 5=Stopped, 6=Failed
                         if info.state == 3 { // VmState::VmStateRunning
                             return Ok(());
+                        } else if info.state == 2 { // VmState::VmStateStarting
+                            println!("VM is in Starting state, waiting for transition to Running...");
                         }
-                        println!("VM state: {}", info.state);
+                    } else {
+                        println!("VM not found in status response");
                     }
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
-                Err(e) => return Err(e),
+                Err(e) => {
+                    println!("Error getting VM status: {}", e);
+                    return Err(e);
+                }
             }
         }
     })
