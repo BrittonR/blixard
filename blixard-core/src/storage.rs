@@ -71,6 +71,9 @@ pub const IP_POOL_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("ip_
 pub const IP_ALLOCATION_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("ip_allocations");
 pub const VM_IP_MAPPING_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vm_ip_mappings");
 
+// Resource management tables
+pub const RESOURCE_POLICY_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("resource_policies");
+
 #[derive(Clone, Debug)]
 pub struct RedbRaftStorage {
     pub database: Arc<Database>,

@@ -18,6 +18,8 @@ use crate::storage::{
     TASK_TABLE, VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE,
 };
 use crate::types::{VmCommand, VmConfig, VmStatus};
+use crate::resource_admission::{ResourceAdmissionController, AdmissionControlConfig};
+use crate::resource_management::{ClusterResourceManager, OvercommitPolicy};
 
 #[cfg(feature = "failpoints")]
 use crate::fail_point;
@@ -188,6 +190,8 @@ impl TryFrom<u8> for WorkerStatus {
 pub struct RaftStateMachine {
     database: Arc<Database>,
     shared_state: Weak<crate::node_shared::SharedNodeState>,
+    admission_controller: Option<Arc<ResourceAdmissionController>>,
+    ip_pool_manager: Arc<crate::ip_pool_manager::IpPoolManager>,
 }
 
 impl RaftStateMachine {
@@ -198,7 +202,22 @@ impl RaftStateMachine {
         Self {
             database,
             shared_state,
+            admission_controller: None,
+            ip_pool_manager: Arc::new(crate::ip_pool_manager::IpPoolManager::new()),
         }
+    }
+    
+    /// Configure the admission controller with custom settings
+    pub fn configure_admission_controller(&mut self, config: AdmissionControlConfig) {
+        let resource_manager = Arc::new(tokio::sync::RwLock::new(
+            ClusterResourceManager::new(config.default_overcommit_policy.clone())
+        ));
+        
+        self.admission_controller = Some(Arc::new(ResourceAdmissionController::new(
+            self.database.clone(),
+            config,
+            resource_manager,
+        )));
     }
 
     pub async fn apply_entry(&self, entry: &Entry) -> BlixardResult<()> {
@@ -320,20 +339,103 @@ impl RaftStateMachine {
 
                 return Ok(());
             }
-            ProposalData::IpPoolCommand(_command) => {
-                // TODO: IP pool commands should be handled synchronously
-                // For now, just commit the transaction
+            ProposalData::IpPoolCommand(command) => {
+                // Process IP pool command
+                let runtime = tokio::runtime::Handle::try_current()
+                    .map_err(|_| BlixardError::Internal {
+                        message: "No tokio runtime available".to_string(),
+                    })?;
+                
+                runtime.block_on(self.ip_pool_manager.process_command(command))?;
                 write_txn.commit()?;
                 return Ok(());
             }
-            ProposalData::AllocateIp { request: _ } => {
-                // TODO: IP allocation should be handled asynchronously
-                // For now, just commit the transaction
+            ProposalData::AllocateIp { request } => {
+                // Process IP allocation request
+                let runtime = tokio::runtime::Handle::try_current()
+                    .map_err(|_| BlixardError::Internal {
+                        message: "No tokio runtime available".to_string(),
+                    })?;
+                
+                let result = runtime.block_on(self.ip_pool_manager.allocate_ip(request));
+                
+                match result {
+                    Ok(allocation_result) => {
+                        // Store allocation in database
+                        let mut ip_alloc_table = write_txn.open_table(crate::storage::IP_ALLOCATION_TABLE)?;
+                        let alloc_data = bincode::serialize(&allocation_result.allocation)
+                            .map_err(|e| BlixardError::Serialization {
+                                operation: "serialize IP allocation".to_string(),
+                                source: Box::new(e),
+                            })?;
+                        
+                        let key = format!("{}:{}", allocation_result.allocation.pool_id, allocation_result.allocation.ip);
+                        ip_alloc_table.insert(key.as_str(), alloc_data.as_slice())?;
+                        
+                        // Update VM->IP mapping
+                        let mut vm_ip_table = write_txn.open_table(crate::storage::VM_IP_MAPPING_TABLE)?;
+                        let mut vm_ips = if let Some(data) = vm_ip_table.get(allocation_result.allocation.vm_id.to_string().as_str())? {
+                            bincode::deserialize::<Vec<std::net::IpAddr>>(data.value())
+                                .unwrap_or_else(|_| Vec::new())
+                        } else {
+                            Vec::new()
+                        };
+                        
+                        if !vm_ips.contains(&allocation_result.allocation.ip) {
+                            vm_ips.push(allocation_result.allocation.ip);
+                        }
+                        
+                        let ip_data = bincode::serialize(&vm_ips)
+                            .map_err(|e| BlixardError::Serialization {
+                                operation: "serialize VM IPs".to_string(),
+                                source: Box::new(e),
+                            })?;
+                        
+                        vm_ip_table.insert(allocation_result.allocation.vm_id.to_string().as_str(), ip_data.as_slice())?;
+                        
+                        tracing::info!(
+                            "Allocated IP {} from pool {} to VM {}",
+                            allocation_result.allocation.ip,
+                            allocation_result.allocation.pool_id,
+                            allocation_result.allocation.vm_id
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to allocate IP: {}", e);
+                        // Don't fail the transaction, just log the error
+                    }
+                }
+                
                 write_txn.commit()?;
                 return Ok(());
             }
             ProposalData::ReleaseVmIps { vm_id } => {
                 use crate::storage::{VM_IP_MAPPING_TABLE};
+                
+                // Get VM's allocated IPs
+                let vm_ips = {
+                    let mapping_table = write_txn.open_table(VM_IP_MAPPING_TABLE)?;
+                    if let Some(data) = mapping_table.get(vm_id.to_string().as_str())? {
+                        bincode::deserialize::<Vec<std::net::IpAddr>>(data.value())
+                            .unwrap_or_else(|_| Vec::new())
+                    } else {
+                        Vec::new()
+                    }
+                };
+                
+                // Release each IP back to its pool
+                let runtime = tokio::runtime::Handle::try_current()
+                    .map_err(|_| BlixardError::Internal {
+                        message: "No tokio runtime available".to_string(),
+                    })?;
+                
+                for ip in vm_ips {
+                    if let Err(e) = runtime.block_on(self.ip_pool_manager.release_ip(vm_id.clone(), ip)) {
+                        tracing::error!("Failed to release IP {} for VM {}: {}", ip, vm_id, e);
+                    } else {
+                        tracing::info!("Released IP {} for VM {}", ip, vm_id);
+                    }
+                }
                 
                 // Remove VM->IP mapping
                 {
@@ -341,7 +443,6 @@ impl RaftStateMachine {
                     mapping_table.remove(vm_id.to_string().as_str())?;
                 }
                 
-                // TODO: IP deallocation should be handled asynchronously
                 write_txn.commit()?;
                 return Ok(());
             }
@@ -475,8 +576,21 @@ impl RaftStateMachine {
     /// Validates that a VM can be admitted to the specified node
     /// This is critical admission control that prevents resource overcommit
     fn validate_vm_admission(&self, config: &VmConfig, node_id: u64) -> BlixardResult<()> {
-        // Get worker capabilities for the target node
+        // Try to load overcommit policy for the node
         let read_txn = self.database.begin_read()?;
+        let overcommit_policy = if let Ok(policy_table) = read_txn.open_table(crate::storage::RESOURCE_POLICY_TABLE) {
+            if let Ok(Some(policy_data)) = policy_table.get(node_id.to_le_bytes().as_ref()) {
+                bincode::deserialize::<OvercommitPolicy>(policy_data.value()).ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
+        // Use moderate overcommit by default if no policy is set
+        let policy = overcommit_policy.unwrap_or_else(OvercommitPolicy::moderate);
+        // Get worker capabilities for the target node
         let worker_table = read_txn.open_table(WORKER_TABLE)?;
         
         let worker_capabilities = if let Some(data) = worker_table.get(node_id.to_le_bytes().as_ref())? {
@@ -510,33 +624,65 @@ impl RaftStateMachine {
             }
         }
 
-        // Check if the new VM would exceed node capacity
-        let new_total_vcpus = used_vcpus + config.vcpus;
-        let new_total_memory_mb = used_memory_mb + config.memory as u64;
+        // Apply overcommit policy and system reserve
+        let reserve_factor = 1.0 - policy.system_reserve_percentage;
+        
+        let effective_cpu_capacity = ((worker_capabilities.cpu_cores as f64) * policy.cpu_overcommit_ratio * reserve_factor) as u32;
+        let effective_memory_capacity = ((worker_capabilities.memory_mb as f64) * policy.memory_overcommit_ratio * reserve_factor) as u64;
+        let effective_disk_capacity = ((worker_capabilities.disk_gb as f64) * policy.disk_overcommit_ratio * reserve_factor) as u64;
+        
+        // Apply preemptible discount if configured
+        let (cpu_required, memory_required) = if config.preemptible {
+            // Preemptible VMs use 75% of resources by default
+            ((config.vcpus as f64 * 0.75) as u32, (config.memory as f64 * 0.75) as u64)
+        } else {
+            (config.vcpus, config.memory as u64)
+        };
+        
+        // Check if the new VM would exceed effective capacity
+        let new_total_vcpus = used_vcpus + cpu_required;
+        let new_total_memory_mb = used_memory_mb + memory_required;
         let new_total_disk_gb = used_disk_gb + 5; // Default disk for new VM
 
-        if new_total_vcpus > worker_capabilities.cpu_cores {
-            return Err(BlixardError::InsufficientResources {
-                requested: format!("{}vCPU (total would be {})", config.vcpus, new_total_vcpus),
-                available: format!("{}vCPU ({} already used)", 
-                    worker_capabilities.cpu_cores.saturating_sub(used_vcpus), used_vcpus),
-            });
-        }
+        if policy.enforce_hard_limits {
+            // Check against effective capacity with overcommit
+            if new_total_vcpus > effective_cpu_capacity {
+                return Err(BlixardError::InsufficientResources {
+                    requested: format!("{}vCPU (total would be {})", cpu_required, new_total_vcpus),
+                    available: format!("{}vCPU effective capacity ({} already used, {}x overcommit)", 
+                        effective_cpu_capacity.saturating_sub(used_vcpus), used_vcpus, policy.cpu_overcommit_ratio),
+                });
+            }
 
-        if new_total_memory_mb > worker_capabilities.memory_mb {
-            return Err(BlixardError::InsufficientResources {
-                requested: format!("{}MB memory (total would be {})", config.memory, new_total_memory_mb),
-                available: format!("{}MB memory ({} already used)", 
-                    worker_capabilities.memory_mb.saturating_sub(used_memory_mb), used_memory_mb),
-            });
-        }
+            if new_total_memory_mb > effective_memory_capacity {
+                return Err(BlixardError::InsufficientResources {
+                    requested: format!("{}MB memory (total would be {})", memory_required, new_total_memory_mb),
+                    available: format!("{}MB effective capacity ({} already used, {}x overcommit)", 
+                        effective_memory_capacity.saturating_sub(used_memory_mb), used_memory_mb, policy.memory_overcommit_ratio),
+                });
+            }
 
-        if new_total_disk_gb > worker_capabilities.disk_gb {
-            return Err(BlixardError::InsufficientResources {
-                requested: format!("5GB disk (total would be {})", new_total_disk_gb),
-                available: format!("{}GB disk ({} already used)", 
-                    worker_capabilities.disk_gb.saturating_sub(used_disk_gb), used_disk_gb),
-            });
+            if new_total_disk_gb > effective_disk_capacity {
+                return Err(BlixardError::InsufficientResources {
+                    requested: format!("5GB disk (total would be {})", new_total_disk_gb),
+                    available: format!("{}GB effective capacity ({} already used, {}x overcommit)", 
+                        effective_disk_capacity.saturating_sub(used_disk_gb), used_disk_gb, policy.disk_overcommit_ratio),
+                });
+            }
+        } else {
+            // Soft limits - just warn if overcommitted
+            if new_total_vcpus > effective_cpu_capacity {
+                tracing::warn!(
+                    "Node {} CPU will be overcommitted: {} vCPUs allocated on {} effective capacity",
+                    node_id, new_total_vcpus, effective_cpu_capacity
+                );
+            }
+            if new_total_memory_mb > effective_memory_capacity {
+                tracing::warn!(
+                    "Node {} memory will be overcommitted: {}MB allocated on {}MB effective capacity",
+                    node_id, new_total_memory_mb, effective_memory_capacity
+                );
+            }
         }
 
         // Check required features
@@ -583,9 +729,8 @@ impl RaftStateMachine {
                     // Perform admission control before creating VM
                     self.validate_vm_admission(config, *node_id)?;
                     
-                    // TODO: IP allocation should be handled asynchronously after VM creation
-                    // For now, we'll create the VM without an IP and allocate it later
                     let vm_config = config.clone();
+                    let needs_ip = !vm_config.networks.is_empty();
                     
                     let vm_state = crate::types::VmState {
                         name: vm_config.name.clone(),
@@ -602,6 +747,23 @@ impl RaftStateMachine {
                             source: Box::new(e),
                         })?;
                     table.insert(config.name.as_str(), vm_data.as_slice())?;
+                    
+                    // Mark IP allocation as pending if VM needs networking
+                    if needs_ip {
+                        let mut ip_pending_table = txn.open_table(crate::storage::IP_ALLOCATION_TABLE)?;
+                        let pending_marker = bincode::serialize(&("pending", *node_id)).unwrap();
+                        ip_pending_table.insert(config.name.as_str(), pending_marker.as_slice())?;
+                        
+                        tracing::info!(
+                            "VM {} created on node {} with IP allocation pending",
+                            vm_config.name, node_id
+                        );
+                    } else {
+                        tracing::info!(
+                            "VM {} created on node {} without networking",
+                            vm_config.name, node_id
+                        );
+                    }
                 }
                 VmCommand::UpdateStatus { name, status } => {
                     let serialized = {
@@ -690,11 +852,35 @@ impl RaftStateMachine {
                     }
                 }
                 VmCommand::Delete { name } => {
-                    // TODO: IP release should be handled asynchronously after VM deletion
-                    // For now, we'll just clean up the database entries
+                    // Get VM state before deletion to check if it has networking
+                    let vm_data = table.get(name.as_str())?;
+                    let has_networking = if let Some(data) = vm_data {
+                        if let Ok(vm_state) = bincode::deserialize::<crate::types::VmState>(data.value()) {
+                            !vm_state.config.networks.is_empty()
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
                     
                     // Remove VM from database
                     table.remove(name.as_str())?;
+                    
+                    // Mark IP for release if VM had networking
+                    if has_networking {
+                        let mut ip_allocation_table = txn.open_table(crate::storage::IP_ALLOCATION_TABLE)?;
+                        // Remove any existing allocation entry for this VM
+                        ip_allocation_table.remove(name.as_str())?;
+                        
+                        // Also remove from VM->IP mapping table
+                        let mut vm_ip_table = txn.open_table(crate::storage::VM_IP_MAPPING_TABLE)?;
+                        vm_ip_table.remove(name.as_str())?;
+                        
+                        tracing::info!("VM {} deleted with IP cleanup", name);
+                    } else {
+                        tracing::info!("VM {} deleted (no networking)", name);
+                    }
                 }
                 VmCommand::Migrate { task } => {
                     // Update VM's node assignment
