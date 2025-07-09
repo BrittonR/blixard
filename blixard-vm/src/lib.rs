@@ -56,6 +56,7 @@
 //!
 //! See `docs/FLAKE_PARTS_GUIDE.md` for detailed documentation.
 
+pub mod config_converter;
 pub mod ip_pool;
 pub mod microvm_backend;
 pub mod nix_generator;

@@ -16,6 +16,7 @@ use blixard_core::{
 use chrono::Utc;
 
 use crate::{
+    config_converter::VmConfigConverter,
     ip_pool::{IpAddressPool, constants as ip_constants},
     nix_generator::NixFlakeGenerator, 
     process_manager::VmProcessManager, 
@@ -51,6 +52,8 @@ pub struct MicrovmBackend {
     flake_generator: NixFlakeGenerator,
     /// VM process manager for lifecycle operations
     process_manager: VmProcessManager,
+    /// Configuration converter for VM configs
+    config_converter: VmConfigConverter,
     /// In-memory cache of VM configurations
     vm_configs: Arc<RwLock<HashMap<String, vm_types::VmConfig>>>,
     /// Original VM metadata from core config
@@ -91,14 +94,19 @@ impl MicrovmBackend {
         // Initialize VM state persistence
         let vm_persistence = VmStatePersistence::new(database, VmPersistenceConfig::default());
 
+        // Initialize IP pool and config converter
+        let ip_pool = Arc::new(RwLock::new(IpAddressPool::new()));
+        let config_converter = VmConfigConverter::new(ip_pool.clone());
+
         Ok(Self {
             config_dir,
             data_dir,
             flake_generator,
             process_manager,
+            config_converter,
             vm_configs: Arc::new(RwLock::new(HashMap::new())),
             vm_metadata: Arc::new(RwLock::new(HashMap::new())),
-            ip_pool: Arc::new(RwLock::new(IpAddressPool::new())),
+            ip_pool,
             nix_image_store: None,
             vm_health_status: Arc::new(RwLock::new(HashMap::new())),
             vm_persistence,
@@ -121,125 +129,6 @@ impl MicrovmBackend {
     pub async fn recover_persisted_vms(&self) -> BlixardResult<()> {
         info!("VM recovery is now handled by VmManager - this method is deprecated");
         Ok(())
-    }
-
-    /// Allocate a unique IP address for a VM
-    async fn allocate_vm_ip(
-        &self,
-        vm_name: &str,
-    ) -> BlixardResult<(String, String, String, String)> {
-        let mut ip_pool = self.ip_pool.write().await;
-
-        // Allocate IP address
-        let vm_ip = ip_pool.allocate_ip()?;
-
-        // Generate MAC address
-        let mac_address = ip_pool.generate_mac_address(vm_name);
-
-        // Get network configuration
-        let gateway = ip_pool.gateway().to_string();
-        let subnet = ip_pool.subnet().to_string();
-
-        Ok((vm_ip.to_string(), mac_address, gateway, subnet))
-    }
-
-    /// Release an allocated IP address
-    async fn release_vm_ip(&self, ip: &str) {
-        if let Ok(ip_addr) = ip.parse::<Ipv4Addr>() {
-            let mut ip_pool = self.ip_pool.write().await;
-            ip_pool.release_ip(ip_addr);
-        } else {
-            warn!("Invalid IP address format for release: {}", ip);
-        }
-    }
-
-    /// Convert core VM config to our enhanced VM config with routed networking
-    async fn convert_config(
-        &self,
-        core_config: &CoreVmConfig,
-    ) -> BlixardResult<vm_types::VmConfig> {
-        // Use centrally allocated IP if provided, otherwise fallback to local allocation
-        let (vm_ip, mac_address, gateway, subnet) = if let Some(ip) = &core_config.ip_address {
-            // Parse the IP to verify it's valid
-            let ip_addr = ip.parse::<std::net::Ipv4Addr>()
-                .map_err(|e| BlixardError::Internal {
-                    message: format!("Invalid IP address format: {}", e),
-                })?;
-            
-            // For centrally managed IPs, we need to determine the network config
-            // TODO: This should come from the IP pool manager or be passed in the config
-            let mac_address = self.ip_pool.read().await.generate_mac_address(&core_config.name);
-            let gateway = ip_constants::DEFAULT_GATEWAY.to_string();
-            let subnet = ip_constants::DEFAULT_SUBNET.to_string();
-            
-            (ip.clone(), mac_address, gateway, subnet)
-        } else {
-            // Fallback to local allocation for backward compatibility
-            self.allocate_vm_ip(&core_config.name).await?
-        };
-
-        // Extract VM index from IP address (last octet of 10.0.0.x)
-        let vm_index = vm_ip
-            .parse::<std::net::Ipv4Addr>()
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Invalid IP address format: {}", e),
-            })?
-            .octets()[3] as u32;
-
-        // Generate interface ID based on VM name
-        let interface_id = format!("vm-{}", core_config.name);
-
-        // Check if this VM is using a Nix image
-        let (nixos_modules, kernel) = if let Some(metadata) = &core_config.metadata {
-            if let Some(nix_image_id) = metadata.get("nix_image_id") {
-                // This VM is using a P2P-distributed Nix image
-                info!(
-                    "VM {} is using Nix image: {}",
-                    core_config.name, nix_image_id
-                );
-
-                // The actual download/preparation would happen in start_vm
-                // For now, we'll set up the module to reference the image
-                let nixos_module = vm_types::NixModule::Inline(format!(
-                    r#"
-                    # Reference P2P-distributed Nix image
-                    # Image ID: {}
-                    # This will be resolved to actual paths during VM start
-                    boot.loader.grub.enable = false;
-                    boot.isContainer = true;
-                "#,
-                    nix_image_id
-                ));
-
-                (vec![nixos_module], None)
-            } else {
-                (vec![], None)
-            }
-        } else {
-            (vec![], None)
-        };
-
-        Ok(vm_types::VmConfig {
-            name: core_config.name.clone(),
-            vm_index,
-            hypervisor: vm_types::Hypervisor::Qemu,
-            vcpus: core_config.vcpus,
-            memory: core_config.memory,
-            networks: vec![vm_types::NetworkConfig::Routed {
-                id: interface_id,
-                mac: mac_address,
-                ip: vm_ip,
-                gateway,
-                subnet,
-            }],
-            volumes: vec![vm_types::VolumeConfig::RootDisk {
-                size: 10240, // 10GB default
-            }],
-            nixos_modules,
-            flake_modules: vec![],
-            kernel,
-            init_command: None,
-        })
     }
 
     /// Get the flake directory for a VM
@@ -671,7 +560,7 @@ impl VmBackend for MicrovmBackend {
         }
 
         // Convert to our enhanced config with allocated IP address
-        let vm_config = self.convert_config(config).await?;
+        let vm_config = self.config_converter.convert_config(config).await?;
 
         // Generate and write the flake
         let flake_dir = self.get_vm_flake_dir(&config.name);
@@ -853,7 +742,7 @@ impl VmBackend for MicrovmBackend {
                     // Find and release locally allocated IP address
                     for network in &vm_config.networks {
                         if let vm_types::NetworkConfig::Routed { ip, .. } = network {
-                            self.release_vm_ip(ip).await;
+                            self.config_converter.release_vm_ip(ip).await;
                             info!("Released locally allocated IP address {} for VM '{}'", ip, name);
                         }
                     }

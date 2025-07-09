@@ -14,6 +14,29 @@ use blixard_core::{
     error::{BlixardError, BlixardResult},
 };
 
+/// Console reader configuration constants
+mod constants {
+    use std::time::Duration;
+    
+    /// Default buffer size for console reading (8KB)
+    pub const DEFAULT_BUFFER_SIZE: usize = 8192;
+    
+    /// Default socket path prefix for VM consoles
+    pub const SOCKET_PATH_PREFIX: &str = "/tmp";
+    
+    /// Default socket path suffix
+    pub const SOCKET_PATH_SUFFIX: &str = "-console.sock";
+    
+    /// Server startup delay in tests
+    pub const TEST_SERVER_STARTUP_DELAY: Duration = Duration::from_millis(10);
+    
+    /// Server connection hold time in tests
+    pub const TEST_SERVER_HOLD_TIME: Duration = Duration::from_millis(100);
+    
+    /// Default pattern check timeout
+    pub const DEFAULT_PATTERN_CHECK_TIMEOUT: Duration = Duration::from_secs(1);
+}
+
 /// Console reader for monitoring VM output
 pub struct ConsoleReader {
     socket_path: String,
@@ -24,8 +47,8 @@ impl ConsoleReader {
     /// Create a new console reader for a VM
     pub fn new(vm_name: &str) -> Self {
         Self {
-            socket_path: format!("/tmp/{}-console.sock", vm_name),
-            buffer_size: 8192,
+            socket_path: format!("{}/{}{}", constants::SOCKET_PATH_PREFIX, vm_name, constants::SOCKET_PATH_SUFFIX),
+            buffer_size: constants::DEFAULT_BUFFER_SIZE,
         }
     }
 
@@ -33,7 +56,7 @@ impl ConsoleReader {
     pub fn with_socket_path(socket_path: String) -> Self {
         Self {
             socket_path,
-            buffer_size: 8192,
+            buffer_size: constants::DEFAULT_BUFFER_SIZE,
         }
     }
 
@@ -248,17 +271,17 @@ mod tests {
             stream.flush().await.unwrap();
             
             // Keep connection open briefly
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(constants::TEST_SERVER_HOLD_TIME).await;
         });
 
         // Create reader and check patterns
         let reader = ConsoleReader::with_socket_path(socket_path_str);
         
         // Give server time to start
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        tokio::time::sleep(constants::TEST_SERVER_STARTUP_DELAY).await;
         
         let (is_healthy, message) = reader
-            .check_patterns("System ready", None, Duration::from_secs(1))
+            .check_patterns("System ready", None, constants::DEFAULT_PATTERN_CHECK_TIMEOUT)
             .await
             .unwrap();
         
@@ -288,17 +311,17 @@ mod tests {
             stream.flush().await.unwrap();
             
             // Keep connection open briefly
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(constants::TEST_SERVER_HOLD_TIME).await;
         });
 
         // Create reader and check patterns
         let reader = ConsoleReader::with_socket_path(socket_path_str);
         
         // Give server time to start
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        tokio::time::sleep(constants::TEST_SERVER_STARTUP_DELAY).await;
         
         let (is_healthy, message) = reader
-            .check_patterns("System ready", Some("PANIC"), Duration::from_secs(1))
+            .check_patterns("System ready", Some("PANIC"), constants::DEFAULT_PATTERN_CHECK_TIMEOUT)
             .await
             .unwrap();
         
