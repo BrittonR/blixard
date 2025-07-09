@@ -9,7 +9,7 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::{
     error::{BlixardError, BlixardResult},

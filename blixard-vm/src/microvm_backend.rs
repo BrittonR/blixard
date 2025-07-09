@@ -16,139 +16,12 @@ use blixard_core::{
 use chrono::Utc;
 
 use crate::{
-    nix_generator::NixFlakeGenerator, process_manager::VmProcessManager, types as vm_types,
+    ip_pool::{IpAddressPool, constants as ip_constants},
+    nix_generator::NixFlakeGenerator, 
+    process_manager::VmProcessManager, 
+    types as vm_types,
 };
 
-/// IP address pool manager for routed VM networking
-///
-/// Manages IP address allocation within a subnet for VM instances.
-/// Default subnet is 10.0.0.0/24 with gateway at 10.0.0.1.
-/// VM IPs are allocated from 10.0.0.10 onwards.
-#[derive(Debug, Clone)]
-struct IpAddressPool {
-    /// The subnet CIDR (e.g., "10.0.0.0/24")
-    subnet: String,
-    /// Gateway IP address (e.g., "10.0.0.1")
-    gateway: Ipv4Addr,
-    /// Network base address (e.g., 10.0.0.0)
-    network_base: Ipv4Addr,
-    /// Subnet mask bits (e.g., 24 for /24)
-    prefix_len: u8,
-    /// Start of VM allocation range (e.g., 10.0.0.10)
-    allocation_start: Ipv4Addr,
-    /// Currently allocated IP addresses
-    allocated_ips: HashSet<Ipv4Addr>,
-    /// Next IP to try for allocation
-    next_ip: Ipv4Addr,
-}
-
-impl IpAddressPool {
-    /// Create a new IP address pool with default subnet 10.0.0.0/24
-    fn new() -> Self {
-        let gateway = Ipv4Addr::new(10, 0, 0, 1);
-        let network_base = Ipv4Addr::new(10, 0, 0, 0);
-        let allocation_start = Ipv4Addr::new(10, 0, 0, 10);
-
-        Self {
-            subnet: "10.0.0.0/24".to_string(),
-            gateway,
-            network_base,
-            prefix_len: 24,
-            allocation_start,
-            allocated_ips: HashSet::new(),
-            next_ip: allocation_start,
-        }
-    }
-
-    /// Allocate a new IP address from the pool
-    fn allocate_ip(&mut self) -> BlixardResult<Ipv4Addr> {
-        let max_attempts = 254; // Maximum IPs in /24 subnet
-        let mut attempts = 0;
-
-        while attempts < max_attempts {
-            let candidate_ip = self.next_ip;
-
-            // Check if IP is available
-            if !self.allocated_ips.contains(&candidate_ip)
-                && candidate_ip != self.gateway
-                && self.is_ip_in_subnet(candidate_ip)
-            {
-                self.allocated_ips.insert(candidate_ip);
-                self.advance_next_ip();
-                info!("Allocated IP address: {}", candidate_ip);
-                return Ok(candidate_ip);
-            }
-
-            self.advance_next_ip();
-            attempts += 1;
-        }
-
-        Err(BlixardError::VmOperationFailed {
-            operation: "allocate_ip".to_string(),
-            details: format!("No available IP addresses in subnet {}", self.subnet),
-        })
-    }
-
-    /// Release an IP address back to the pool
-    fn release_ip(&mut self, ip: Ipv4Addr) {
-        if self.allocated_ips.remove(&ip) {
-            info!("Released IP address: {}", ip);
-        } else {
-            warn!("Attempted to release unallocated IP: {}", ip);
-        }
-    }
-
-    /// Generate a unique MAC address for a VM
-    fn generate_mac_address(&self, vm_name: &str) -> String {
-        // Generate a deterministic MAC address based on VM name
-        // Use a hash of the VM name to ensure uniqueness
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
-        let mut hasher = DefaultHasher::new();
-        vm_name.hash(&mut hasher);
-        let hash = hasher.finish();
-
-        // Use hash to generate last 3 octets of MAC
-        // First 3 octets are 02:00:00 (locally administered)
-        format!(
-            "02:00:00:{:02x}:{:02x}:{:02x}",
-            (hash >> 16) & 0xff,
-            (hash >> 8) & 0xff,
-            hash & 0xff
-        )
-    }
-
-    /// Check if an IP address is within the subnet range
-    fn is_ip_in_subnet(&self, ip: Ipv4Addr) -> bool {
-        let ip_num = u32::from(ip);
-        let network_num = u32::from(self.network_base);
-        let mask = !0u32 << (32 - self.prefix_len);
-
-        (ip_num & mask) == (network_num & mask) && ip_num > u32::from(self.allocation_start)
-    }
-
-    /// Advance to the next IP address candidate
-    fn advance_next_ip(&mut self) {
-        let next_num = u32::from(self.next_ip) + 1;
-        self.next_ip = Ipv4Addr::from(next_num);
-
-        // Wrap around if we go past the allocation range
-        if !self.is_ip_in_subnet(self.next_ip) {
-            self.next_ip = self.allocation_start;
-        }
-    }
-
-    /// Get the gateway IP address
-    fn gateway(&self) -> Ipv4Addr {
-        self.gateway
-    }
-
-    /// Get the subnet CIDR string
-    fn subnet(&self) -> &str {
-        &self.subnet
-    }
-}
 
 /// VM backend implementation using microvm.nix
 ///
@@ -296,8 +169,8 @@ impl MicrovmBackend {
             // For centrally managed IPs, we need to determine the network config
             // TODO: This should come from the IP pool manager or be passed in the config
             let mac_address = self.ip_pool.read().await.generate_mac_address(&core_config.name);
-            let gateway = "10.0.0.1".to_string();
-            let subnet = "10.0.0.0/24".to_string();
+            let gateway = ip_constants::DEFAULT_GATEWAY.to_string();
+            let subnet = ip_constants::DEFAULT_SUBNET.to_string();
             
             (ip.clone(), mac_address, gateway, subnet)
         } else {
