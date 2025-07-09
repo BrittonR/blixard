@@ -2,6 +2,7 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
+    common::error_context::VmContext,
     metrics_otel::{attributes, metrics, Timer},
     node_shared::SharedNodeState,
     transport::{
@@ -107,6 +108,7 @@ impl IrohVmService {
     }
 
     /// Handle VM operation request
+    /// Main dispatcher for VM operations - delegates to specific handlers
     pub async fn handle_vm_operation(
         &self,
         request: VmOperationRequest,
@@ -117,120 +119,18 @@ impl IrohVmService {
                 config_path: _,
                 vcpus,
                 memory_mb,
-            } => {
-                match self
-                    .vm_service
-                    .create_vm(name.clone(), vcpus, memory_mb)
-                    .await
-                {
-                    Ok(vm_id) => Ok(VmOperationResponse::Create {
-                        success: true,
-                        message: format!("VM '{}' created successfully", name),
-                        vm_id,
-                    }),
-                    Err(e) => Ok(VmOperationResponse::Create {
-                        success: false,
-                        message: e.to_string(),
-                        vm_id: String::new(),
-                    }),
-                }
-            }
-            VmOperationRequest::Start { name } => match self.vm_service.start_vm(&name).await {
-                Ok(()) => Ok(VmOperationResponse::Start {
-                    success: true,
-                    message: format!("VM '{}' started", name),
-                }),
-                Err(e) => Ok(VmOperationResponse::Start {
-                    success: false,
-                    message: e.to_string(),
-                }),
-            },
-            VmOperationRequest::Stop { name } => match self.vm_service.stop_vm(&name).await {
-                Ok(()) => Ok(VmOperationResponse::Stop {
-                    success: true,
-                    message: format!("VM '{}' stopped", name),
-                }),
-                Err(e) => Ok(VmOperationResponse::Stop {
-                    success: false,
-                    message: e.to_string(),
-                }),
-            },
-            VmOperationRequest::Delete { name } => match self.vm_service.delete_vm(&name).await {
-                Ok(()) => Ok(VmOperationResponse::Delete {
-                    success: true,
-                    message: format!("VM '{}' deleted", name),
-                }),
-                Err(e) => Ok(VmOperationResponse::Delete {
-                    success: false,
-                    message: e.to_string(),
-                }),
-            },
-            VmOperationRequest::List => match self.vm_service.list_vms().await {
-                Ok(vms) => {
-                    let vm_infos = vms
-                        .into_iter()
-                        .map(|(config, status)| VmInfoData {
-                            name: config.name,
-                            state: format!("{:?}", status),
-                            vcpus: config.vcpus,
-                            memory_mb: config.memory,
-                            node_id: self.node.get_id(),
-                            ip_address: config.ip_address.unwrap_or_default(),
-                        })
-                        .collect();
-                    Ok(VmOperationResponse::List { vms: vm_infos })
-                }
-                Err(e) => Err(e),
-            },
-            VmOperationRequest::GetStatus { name } => {
-                match self.vm_service.get_vm_status(&name).await {
-                    Ok(Some((config, status))) => Ok(VmOperationResponse::GetStatus {
-                        found: true,
-                        vm_info: Some(VmInfoData {
-                            name: config.name,
-                            state: format!("{:?}", status),
-                            vcpus: config.vcpus,
-                            memory_mb: config.memory,
-                            node_id: self.node.get_id(),
-                            ip_address: config.ip_address.unwrap_or_default(),
-                        }),
-                    }),
-                    Ok(None) => Ok(VmOperationResponse::GetStatus {
-                        found: false,
-                        vm_info: None,
-                    }),
-                    Err(e) => Err(e),
-                }
-            }
+            } => self.handle_create_vm(name, vcpus, memory_mb).await,
+            VmOperationRequest::Start { name } => self.handle_start_vm(name).await,
+            VmOperationRequest::Stop { name } => self.handle_stop_vm(name).await,
+            VmOperationRequest::Delete { name } => self.handle_delete_vm(name).await,
+            VmOperationRequest::List => self.handle_list_vms().await,
+            VmOperationRequest::GetStatus { name } => self.handle_get_vm_status(name).await,
             VmOperationRequest::Migrate {
                 vm_name,
                 target_node_id,
                 live_migration,
                 force,
-            } => {
-                match self
-                    .vm_service
-                    .migrate_vm(&vm_name, target_node_id, live_migration, force)
-                    .await
-                {
-                    Ok(()) => Ok(VmOperationResponse::Migrate {
-                        success: true,
-                        message: format!("Migration of VM '{}' started", vm_name),
-                        source_node_id: self.node.get_id(),
-                        target_node_id,
-                        status: 1, // MIGRATION_STATUS_PREPARING
-                        duration_ms: 0,
-                    }),
-                    Err(e) => Ok(VmOperationResponse::Migrate {
-                        success: false,
-                        message: e.to_string(),
-                        source_node_id: self.node.get_id(),
-                        target_node_id: 0,
-                        status: 5, // MIGRATION_STATUS_FAILED
-                        duration_ms: 0,
-                    }),
-                }
-            }
+            } => self.handle_migrate_vm(vm_name, target_node_id, live_migration, force).await,
             VmOperationRequest::CreateWithScheduling {
                 name,
                 vcpus,
@@ -239,36 +139,7 @@ impl IrohVmService {
                 constraints,
                 features,
                 priority,
-            } => {
-                match self
-                    .vm_service
-                    .create_vm_with_scheduling(
-                        name.clone(),
-                        vcpus,
-                        memory_mb,
-                        strategy,
-                        constraints,
-                        features,
-                        priority,
-                    )
-                    .await
-                {
-                    Ok((vm_id, node_id, reason)) => Ok(VmOperationResponse::CreateWithScheduling {
-                        success: true,
-                        message: format!("VM '{}' created successfully on node {}", name, node_id),
-                        vm_id,
-                        assigned_node_id: node_id,
-                        placement_decision: reason,
-                    }),
-                    Err(e) => Ok(VmOperationResponse::CreateWithScheduling {
-                        success: false,
-                        message: e.to_string(),
-                        vm_id: String::new(),
-                        assigned_node_id: 0,
-                        placement_decision: String::new(),
-                    }),
-                }
-            }
+            } => self.handle_create_vm_with_scheduling(name, vcpus, memory_mb, strategy, constraints, features, priority).await,
             VmOperationRequest::SchedulePlacement {
                 name,
                 vcpus,
@@ -276,30 +147,199 @@ impl IrohVmService {
                 strategy,
                 constraints,
                 features,
-            } => {
-                match self
-                    .vm_service
-                    .schedule_vm_placement(&name, vcpus, memory_mb, strategy, constraints, features)
-                    .await
-                {
-                    Ok((node_id, score, reason, alternatives)) => {
-                        Ok(VmOperationResponse::SchedulePlacement {
-                            success: true,
-                            assigned_node_id: node_id,
-                            placement_score: score,
-                            placement_reason: reason,
-                            alternative_nodes: alternatives,
-                        })
-                    }
-                    Err(e) => Ok(VmOperationResponse::SchedulePlacement {
-                        success: false,
-                        assigned_node_id: 0,
-                        placement_score: 0.0,
-                        placement_reason: e.to_string(),
-                        alternative_nodes: vec![],
-                    }),
-                }
+            } => self.handle_schedule_placement(name, vcpus, memory_mb, strategy, constraints, features).await,
+        }
+    }
+
+    /// Handle VM creation operation
+    async fn handle_create_vm(&self, name: String, vcpus: u32, memory_mb: u32) -> BlixardResult<VmOperationResponse> {
+        match self.vm_service.create_vm(name.clone(), vcpus, memory_mb).await {
+            Ok(vm_id) => Ok(VmOperationResponse::Create {
+                success: true,
+                message: format!("VM '{}' created successfully", name),
+                vm_id,
+            }),
+            Err(e) => Ok(VmOperationResponse::Create {
+                success: false,
+                message: e.to_string(),
+                vm_id: String::new(),
+            }),
+        }
+    }
+
+    /// Handle VM start operation
+    async fn handle_start_vm(&self, name: String) -> BlixardResult<VmOperationResponse> {
+        match self.vm_service.start_vm(&name).await {
+            Ok(()) => Ok(VmOperationResponse::Start {
+                success: true,
+                message: format!("VM '{}' started", name),
+            }),
+            Err(e) => Ok(VmOperationResponse::Start {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    /// Handle VM stop operation
+    async fn handle_stop_vm(&self, name: String) -> BlixardResult<VmOperationResponse> {
+        match self.vm_service.stop_vm(&name).await {
+            Ok(()) => Ok(VmOperationResponse::Stop {
+                success: true,
+                message: format!("VM '{}' stopped", name),
+            }),
+            Err(e) => Ok(VmOperationResponse::Stop {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    /// Handle VM deletion operation
+    async fn handle_delete_vm(&self, name: String) -> BlixardResult<VmOperationResponse> {
+        match self.vm_service.delete_vm(&name).await {
+            Ok(()) => Ok(VmOperationResponse::Delete {
+                success: true,
+                message: format!("VM '{}' deleted", name),
+            }),
+            Err(e) => Ok(VmOperationResponse::Delete {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    /// Handle VM listing operation
+    async fn handle_list_vms(&self) -> BlixardResult<VmOperationResponse> {
+        match self.vm_service.list_vms().await {
+            Ok(vms) => {
+                let vm_infos = vms
+                    .into_iter()
+                    .map(|(config, status)| self.config_to_vm_info(config, status))
+                    .collect();
+                Ok(VmOperationResponse::List { vms: vm_infos })
             }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Handle VM status query operation
+    async fn handle_get_vm_status(&self, name: String) -> BlixardResult<VmOperationResponse> {
+        match self.vm_service.get_vm_status(&name).await {
+            Ok(Some((config, status))) => Ok(VmOperationResponse::GetStatus {
+                found: true,
+                vm_info: Some(self.config_to_vm_info(config, status)),
+            }),
+            Ok(None) => Ok(VmOperationResponse::GetStatus {
+                found: false,
+                vm_info: None,
+            }),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Handle VM migration operation
+    async fn handle_migrate_vm(
+        &self, 
+        vm_name: String, 
+        target_node_id: u64, 
+        live_migration: bool, 
+        force: bool
+    ) -> BlixardResult<VmOperationResponse> {
+        match self.vm_service.migrate_vm(&vm_name, target_node_id, live_migration, force).await {
+            Ok(()) => Ok(VmOperationResponse::Migrate {
+                success: true,
+                message: format!("Migration of VM '{}' started", vm_name),
+                source_node_id: self.node.get_id(),
+                target_node_id,
+                status: 1, // MIGRATION_STATUS_PREPARING
+                duration_ms: 0,
+            }),
+            Err(e) => Ok(VmOperationResponse::Migrate {
+                success: false,
+                message: e.to_string(),
+                source_node_id: self.node.get_id(),
+                target_node_id: 0,
+                status: 5, // MIGRATION_STATUS_FAILED
+                duration_ms: 0,
+            }),
+        }
+    }
+
+    /// Handle VM creation with scheduling operation
+    async fn handle_create_vm_with_scheduling(
+        &self,
+        name: String,
+        vcpus: u32,
+        memory_mb: u32,
+        strategy: Option<String>,
+        constraints: Option<String>,
+        features: Vec<String>,
+        priority: Option<u32>,
+    ) -> BlixardResult<VmOperationResponse> {
+        match self.vm_service.create_vm_with_scheduling(
+            name.clone(),
+            vcpus,
+            memory_mb,
+            strategy,
+            constraints,
+            features,
+            priority,
+        ).await {
+            Ok((vm_id, node_id, reason)) => Ok(VmOperationResponse::CreateWithScheduling {
+                success: true,
+                message: format!("VM '{}' created successfully on node {}", name, node_id),
+                vm_id,
+                assigned_node_id: node_id,
+                placement_decision: reason,
+            }),
+            Err(e) => Ok(VmOperationResponse::CreateWithScheduling {
+                success: false,
+                message: e.to_string(),
+                vm_id: String::new(),
+                assigned_node_id: 0,
+                placement_decision: String::new(),
+            }),
+        }
+    }
+
+    /// Handle VM placement scheduling operation
+    async fn handle_schedule_placement(
+        &self,
+        name: String,
+        vcpus: u32,
+        memory_mb: u32,
+        strategy: Option<String>,
+        constraints: Option<String>,
+        features: Vec<String>,
+    ) -> BlixardResult<VmOperationResponse> {
+        match self.vm_service.schedule_vm_placement(&name, vcpus, memory_mb, strategy, constraints, features).await {
+            Ok((node_id, score, reason, alternatives)) => Ok(VmOperationResponse::SchedulePlacement {
+                success: true,
+                assigned_node_id: node_id,
+                placement_score: score,
+                placement_reason: reason,
+                alternative_nodes: alternatives,
+            }),
+            Err(e) => Ok(VmOperationResponse::SchedulePlacement {
+                success: false,
+                assigned_node_id: 0,
+                placement_score: 0.0,
+                placement_reason: e.to_string(),
+                alternative_nodes: vec![],
+            }),
+        }
+    }
+
+    /// Helper function to convert VM config and status to VmInfoData
+    fn config_to_vm_info(&self, config: crate::types::VmConfig, status: crate::types::VmStatus) -> VmInfoData {
+        VmInfoData {
+            name: config.name,
+            state: format!("{:?}", status),
+            vcpus: config.vcpus,
+            memory_mb: config.memory,
+            node_id: self.node.get_id(),
+            ip_address: config.ip_address.unwrap_or_default(),
         }
     }
 
