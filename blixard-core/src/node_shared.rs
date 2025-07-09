@@ -1,6 +1,7 @@
 use redb::Database;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 
 use crate::error::{BlixardError, BlixardResult};
@@ -524,12 +525,11 @@ impl SharedNodeState {
             }
 
             // Wait for response with a timeout
-            let timeout = crate::config_global::get()
+            let timeout = crate::config_global::get()?
                 .cluster
                 .raft
-                .proposal_timeout
-                .as_secs();
-            match tokio::time::timeout(tokio::time::Duration::from_secs(timeout), response_rx).await
+                .proposal_timeout;
+            match tokio::time::timeout(timeout, response_rx).await
             {
                 Ok(Ok(result)) => {
                     tracing::info!("Received VM proposal response: {:?}", result.is_ok());
@@ -542,9 +542,9 @@ impl SharedNodeState {
                     })
                 }
                 Err(_) => {
-                    tracing::error!("VM proposal timed out after {} seconds", timeout);
+                    tracing::error!("VM proposal timed out after {} seconds", timeout.as_secs());
                     Err(BlixardError::Internal {
-                        message: format!("VM proposal timed out after {} seconds", timeout),
+                        message: format!("VM proposal timed out after {} seconds", timeout.as_secs()),
                     })
                 }
             }
@@ -749,7 +749,7 @@ impl SharedNodeState {
 
                 tracing::info!("Waiting for VM proposal response...");
                 // Wait for response with a timeout
-                let timeout = crate::config_global::get()
+                let timeout = crate::config_global::get()?
                     .cluster
                     .raft
                     .proposal_timeout
@@ -932,7 +932,7 @@ impl SharedNodeState {
             }
 
             // Wait for response
-            let timeout = crate::config_global::get()
+            let timeout = crate::config_global::get()?
                 .cluster
                 .raft
                 .proposal_timeout
@@ -1096,7 +1096,7 @@ impl SharedNodeState {
 
                 tracing::info!("Waiting for proposal response...");
                 // Wait for response with a timeout
-                let timeout = crate::config_global::get()
+                let timeout = crate::config_global::get()?
                     .cluster
                     .raft
                     .proposal_timeout
@@ -1412,7 +1412,7 @@ impl SharedNodeState {
                 }
             }
 
-            let timeout = crate::config_global::get()
+            let timeout = crate::config_global::get()?
                 .cluster
                 .raft
                 .conf_change_timeout
@@ -1576,7 +1576,7 @@ impl SharedNodeState {
             }
 
             // Wait for the proposal to be committed
-            let timeout = crate::config_global::get()
+            let timeout = crate::config_global::get()?
                 .cluster
                 .raft
                 .proposal_timeout
@@ -1698,7 +1698,7 @@ impl SharedNodeState {
 
                 tracing::info!("Waiting for VM status update proposal response...");
                 // Wait for response with a timeout
-                let timeout = crate::config_global::get()
+                let timeout = crate::config_global::get()?
                     .cluster
                     .raft
                     .proposal_timeout

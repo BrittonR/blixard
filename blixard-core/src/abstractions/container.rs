@@ -169,10 +169,11 @@ impl ServiceContainerBuilder {
     }
     
     /// Build production container
-    pub fn build_production(self) -> ServiceContainer {
-        let database = self.database.expect("Database required for production container");
+    pub fn build_production(self) -> crate::error::BlixardResult<ServiceContainer> {
+        let database = self.database.ok_or_else(|| 
+            crate::error::BlixardError::ConfigError("Database required for production container".to_string()))?;
         
-        ServiceContainer {
+        Ok(ServiceContainer {
             vm_repo: self.vm_repo.unwrap_or_else(|| 
                 Arc::new(RedbVmRepository::new(database.clone()))),
             task_repo: self.task_repo.unwrap_or_else(|| 
@@ -189,7 +190,7 @@ impl ServiceContainerBuilder {
                 Arc::new(TonicNetworkClient::new())),
             clock: self.clock.unwrap_or_else(|| 
                 Arc::new(SystemClock::new())),
-        }
+        })
     }
     
     /// Build test container

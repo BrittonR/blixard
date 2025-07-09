@@ -23,13 +23,15 @@ pub fn init(config: Config) -> BlixardResult<()> {
 
 /// Get the global configuration instance
 ///
-/// # Panics
-/// Panics if configuration has not been initialized via `init()`.
-pub fn get() -> Arc<Config> {
+/// # Errors
+/// Returns an error if configuration has not been initialized via `init()`.
+pub fn get() -> BlixardResult<Arc<Config>> {
     CONFIG
         .get()
-        .expect("Configuration not initialized. Call config_global::init() first")
-        .clone()
+        .ok_or_else(|| BlixardError::ConfigError(
+            "Configuration not initialized. Call config_global::init() first".to_string()
+        ))
+        .map(|config| config.clone())
 }
 
 /// Check if configuration has been initialized

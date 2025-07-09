@@ -462,7 +462,7 @@ impl IrohPeerConnector {
         // Check connection pool limit
         {
             let count = self.connection_count.lock().await;
-            let max_connections = config_global::get().cluster.peer.max_connections;
+            let max_connections = config_global::get()?.cluster.peer.max_connections;
             if *count >= max_connections {
                 return Err(BlixardError::ClusterError(format!(
                     "Connection pool limit reached ({})",
@@ -472,9 +472,10 @@ impl IrohPeerConnector {
         }
 
         // Check circuit breaker
+        let failure_threshold = config_global::get()?.cluster.peer.failure_threshold;
         let mut breaker = self.circuit_breakers.entry(peer_id).or_insert_with(|| {
             CircuitBreaker::new(
-                config_global::get().cluster.peer.failure_threshold,
+                failure_threshold,
                 Duration::from_secs(30),
             )
         });

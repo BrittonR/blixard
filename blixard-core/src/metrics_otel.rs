@@ -570,7 +570,7 @@ pub fn init_prometheus() -> Result<&'static Metrics, Box<dyn std::error::Error>>
         .set(metrics)
         .map_err(|_| "Metrics already initialized")?;
 
-    Ok(METRICS.get().expect("Metrics was just initialized"))
+    Ok(METRICS.get().ok_or("Metrics initialization failed")?)
 }
 
 /// Prometheus registry instance

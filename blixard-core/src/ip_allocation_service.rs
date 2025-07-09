@@ -67,20 +67,20 @@ impl IpAllocationService {
             
             // Get VM configuration
             let vm_state = self.get_vm_state(&vm_name)?;
-            if vm_state.is_none() {
+            let vm_state = if let Some(vm_state) = vm_state {
+                vm_state
+            } else {
                 warn!("VM {} not found, skipping IP allocation", vm_name);
                 continue;
-            }
+            };
             
-            let vm_state = vm_state.unwrap();
             let vm_id = VmId::from_string(&vm_name);
             
-            // Create IP allocation request based on VM network configuration
-            for (idx, network) in vm_state.config.networks.iter().enumerate() {
+            // Create IP allocation request if VM has IP address configured
+            if let Some(ip_address) = &vm_state.config.ip_address {
                 let mac_address = format!(
-                    "02:00:00:00:{:02x}:{:02x}",
-                    (self.node_id & 0xFF) as u8,
-                    (idx & 0xFF) as u8
+                    "02:00:00:00:{:02x}:01",
+                    (self.node_id & 0xFF) as u8
                 );
                 
                 let allocation_request = IpAllocationRequest {
@@ -107,8 +107,8 @@ impl IpAllocationService {
                 }
                 
                 info!(
-                    "Submitted IP allocation request for VM {} network {}",
-                    vm_name, idx
+                    "Submitted IP allocation request for VM {}",
+                    vm_name
                 );
             }
             
@@ -128,11 +128,7 @@ impl IpAllocationService {
         
         for entry in allocation_table.iter()? {
             let (key, value) = entry?;
-            let vm_name = std::str::from_utf8(key.value())
-                .map_err(|_| BlixardError::Internal {
-                    message: "Invalid VM name in allocation table".to_string(),
-                })?
-                .to_string();
+            let vm_name = key.value().to_string();
             
             // Check if this is a pending allocation
             if let Ok((status, node_id)) = bincode::deserialize::<(String, u64)>(value.value()) {
@@ -165,26 +161,31 @@ impl IpAllocationService {
     /// Update allocation status in database
     fn update_allocation_status(&self, vm_name: &str, status: &str) -> BlixardResult<()> {
         let write_txn = self.database.begin_write()?;
-        let mut allocation_table = write_txn.open_table(IP_ALLOCATION_TABLE)?;
         
-        // Get current node_id
-        let node_id = if let Some(data) = allocation_table.get(vm_name)? {
-            if let Ok((_, node_id)) = bincode::deserialize::<(String, u64)>(data.value()) {
-                node_id
+        // Get current node_id and update allocation status
+        {
+            let mut allocation_table = write_txn.open_table(IP_ALLOCATION_TABLE)?;
+            
+            // Get current node_id
+            let node_id = if let Some(data) = allocation_table.get(vm_name)? {
+                if let Ok((_, node_id)) = bincode::deserialize::<(String, u64)>(data.value()) {
+                    node_id
+                } else {
+                    self.node_id
+                }
             } else {
                 self.node_id
-            }
-        } else {
-            self.node_id
-        };
+            };
+            
+            let status_data = bincode::serialize(&(status.to_string(), node_id))
+                .map_err(|e| BlixardError::Serialization {
+                    operation: "serialize allocation status".to_string(),
+                    source: Box::new(e),
+                })?;
+            
+            allocation_table.insert(vm_name, status_data.as_slice())?;
+        }
         
-        let status_data = bincode::serialize(&(status.to_string(), node_id))
-            .map_err(|e| BlixardError::Serialization {
-                operation: "serialize allocation status".to_string(),
-                source: Box::new(e),
-            })?;
-        
-        allocation_table.insert(vm_name, status_data.as_slice())?;
         write_txn.commit()?;
         
         Ok(())
@@ -201,32 +202,36 @@ pub async fn handle_ip_allocation_result(
     let write_txn = database.begin_write()?;
     
     // Update VM IP mapping
-    let mut vm_ip_table = write_txn.open_table(crate::storage::VM_IP_MAPPING_TABLE)?;
-    
-    // Get existing IPs for this VM
-    let mut vm_ips = if let Some(data) = vm_ip_table.get(vm_id.to_string().as_str())? {
-        bincode::deserialize::<Vec<std::net::IpAddr>>(data.value())
-            .unwrap_or_else(|_| Vec::new())
-    } else {
-        Vec::new()
-    };
-    
-    // Add new IP if not already present
-    if !vm_ips.contains(&allocated_ip) {
-        vm_ips.push(allocated_ip);
+    {
+        let mut vm_ip_table = write_txn.open_table(crate::storage::VM_IP_MAPPING_TABLE)?;
+        
+        // Get existing IPs for this VM
+        let mut vm_ips = if let Some(data) = vm_ip_table.get(vm_id.to_string().as_str())? {
+            bincode::deserialize::<Vec<std::net::IpAddr>>(data.value())
+                .unwrap_or_else(|_| Vec::new())
+        } else {
+            Vec::new()
+        };
+        
+        // Add new IP if not already present
+        if !vm_ips.contains(&allocated_ip) {
+            vm_ips.push(allocated_ip);
+        }
+        
+        let ip_data = bincode::serialize(&vm_ips)
+            .map_err(|e| BlixardError::Serialization {
+                operation: "serialize VM IPs".to_string(),
+                source: Box::new(e),
+            })?;
+        
+        vm_ip_table.insert(vm_id.to_string().as_str(), ip_data.as_slice())?;
     }
     
-    let ip_data = bincode::serialize(&vm_ips)
-        .map_err(|e| BlixardError::Serialization {
-            operation: "serialize VM IPs".to_string(),
-            source: Box::new(e),
-        })?;
-    
-    vm_ip_table.insert(vm_id.to_string().as_str(), ip_data.as_slice())?;
-    
     // Update allocation status
-    let mut allocation_table = write_txn.open_table(IP_ALLOCATION_TABLE)?;
-    allocation_table.remove(vm_id.to_string().as_str())?;
+    {
+        let mut allocation_table = write_txn.open_table(IP_ALLOCATION_TABLE)?;
+        allocation_table.remove(vm_id.to_string().as_str())?;
+    }
     
     write_txn.commit()?;
     

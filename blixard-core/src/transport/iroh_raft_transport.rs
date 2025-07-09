@@ -323,7 +323,7 @@ impl IrohRaftTransport {
         queue.insert(insert_pos, buffered);
 
         // Limit buffer size
-        let max_buffered = config_global::get().cluster.peer.max_buffered_messages;
+        let max_buffered = config_global::get()?.cluster.peer.max_buffered_messages;
         while queue.len() > max_buffered {
             queue.pop_back();
         }

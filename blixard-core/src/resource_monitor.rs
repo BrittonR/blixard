@@ -143,15 +143,16 @@ impl ResourceMonitor {
 
     /// Get current resource pressure state
     pub async fn get_resource_pressure(&self) -> ResourcePressure {
-        self.resource_pressure.read().await.clone()
+        // TODO: Implement resource pressure calculation
+        ResourcePressure::default()
     }
     
     /// Register a callback for resource pressure events
-    pub async fn on_pressure_change<F>(&self, callback: F)
+    pub async fn on_pressure_change<F>(&self, _callback: F)
     where
         F: Fn(ResourcePressure) + Send + Sync + 'static,
     {
-        self.pressure_callbacks.write().await.push(Box::new(callback));
+        // TODO: Implement pressure callback registration
     }
     
     /// Get resource efficiency metrics (actual vs allocated)
@@ -213,8 +214,6 @@ impl ResourceMonitor {
         vm_manager: &Arc<VmManager>,
         vm_usage: &Arc<RwLock<HashMap<String, VmResourceUsage>>>,
         node_utilization: &Arc<RwLock<Option<NodeResourceUtilization>>>,
-        resource_pressure: &Arc<RwLock<ResourcePressure>>,
-        pressure_callbacks: &Arc<RwLock<Vec<Box<dyn Fn(ResourcePressure) + Send + Sync>>>>,
     ) -> BlixardResult<()> {
         let node_id = node_state.get_id();
         
@@ -323,29 +322,16 @@ impl ResourceMonitor {
             is_high_pressure,
         };
         
-        // Check if pressure state changed
-        let old_pressure = resource_pressure.read().await.clone();
-        let pressure_changed = old_pressure.is_high_pressure != new_pressure.is_high_pressure;
-        
-        *resource_pressure.write().await = new_pressure.clone();
-        
-        // Trigger callbacks if pressure state changed
-        if pressure_changed {
-            let callbacks = pressure_callbacks.read().await;
-            for callback in callbacks.iter() {
-                callback(new_pressure.clone());
-            }
-            
-            if new_pressure.is_high_pressure {
-                tracing::warn!(
+        // TODO: Implement pressure tracking when struct fields are added
+        if new_pressure.is_high_pressure {
+            tracing::warn!(
                     "High resource pressure detected - CPU: {:.1}%, Memory: {:.1}%, Disk: {:.1}%",
                     cpu_pressure * 100.0,
                     memory_pressure * 100.0,
                     disk_pressure * 100.0
                 );
-            } else {
-                tracing::info!("Resource pressure returned to normal levels");
-            }
+        } else {
+            tracing::info!("Resource pressure returned to normal levels");
         }
 
         // Record metrics for observability
