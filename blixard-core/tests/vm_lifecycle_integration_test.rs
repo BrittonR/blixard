@@ -139,6 +139,157 @@ async fn test_single_node_vm_create_start_stop_delete() -> BlixardResult<()> {
 }
 
 #[tokio::test]
+async fn test_three_node_cluster_vm_scheduling() -> BlixardResult<()> {
+    // Initialize logging for debugging
+    let _ = tracing_subscriber::fmt()
+        .with_test_writer()
+        .with_env_filter("blixard_core=debug")
+        .try_init();
+    
+    // Create a three-node cluster
+    let node1 = TestNode::builder()
+        .with_id(1)
+        .with_port(9001)
+        .with_vm_backend("mock".to_string())
+        .build()
+        .await?;
+    
+    // Give node1 time to become leader
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    
+    let node2 = TestNode::builder()
+        .with_id(2)
+        .with_port(9002)
+        .with_vm_backend("mock".to_string())
+        .with_join_addr(Some(node1.addr))
+        .build()
+        .await?;
+        
+    let node3 = TestNode::builder()
+        .with_id(3)
+        .with_port(9003)
+        .with_vm_backend("mock".to_string())
+        .with_join_addr(Some(node1.addr))
+        .build()
+        .await?;
+    
+    // Give cluster time to stabilize
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    
+    // Verify cluster formation
+    let client1 = node1.client().await?;
+    let (leader_id, nodes, _term) = client1.get_cluster_status().await?;
+    assert_eq!(nodes.len(), 3, "Expected 3 nodes in cluster");
+    println!("Cluster formed with leader: {}, nodes: {}", leader_id, nodes.len());
+    
+    // Create VMs - they will be created on the node we're connected to (node1)
+    let vm1_config = iroh_types::VmConfig {
+        name: "test-vm-1".to_string(),
+        cpu_cores: 1,
+        memory_mb: 512,
+        disk_gb: 5,
+        owner: "test-user".to_string(),
+        metadata: HashMap::new(),
+    };
+    
+    let vm2_config = iroh_types::VmConfig {
+        name: "test-vm-2".to_string(),
+        cpu_cores: 1,
+        memory_mb: 512,
+        disk_gb: 5,
+        owner: "test-user".to_string(),
+        metadata: HashMap::new(),
+    };
+    
+    let vm3_config = iroh_types::VmConfig {
+        name: "test-vm-3".to_string(),
+        cpu_cores: 1,
+        memory_mb: 512,
+        disk_gb: 5,
+        owner: "test-user".to_string(),
+        metadata: HashMap::new(),
+    };
+    
+    // Create VMs through leader (node1)
+    println!("Creating VMs through the cluster");
+    let create_response1 = client1.create_vm(vm1_config).await?;
+    assert!(create_response1.into_inner().success, "Failed to create VM 1");
+    
+    let create_response2 = client1.create_vm(vm2_config).await?;
+    assert!(create_response2.into_inner().success, "Failed to create VM 2");
+    
+    let create_response3 = client1.create_vm(vm3_config).await?;
+    assert!(create_response3.into_inner().success, "Failed to create VM 3");
+    
+    // Wait for VMs to be created
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    
+    // List VMs from different nodes - should see all VMs
+    let vms_from_node1 = client1.list_vms().await?;
+    assert_eq!(vms_from_node1.len(), 3, "Node1 should see all 3 VMs");
+    
+    let client2 = node2.client().await?;
+    let vms_from_node2 = client2.list_vms().await?;
+    assert_eq!(vms_from_node2.len(), 3, "Node2 should see all 3 VMs");
+    
+    let client3 = node3.client().await?;
+    let vms_from_node3 = client3.list_vms().await?;
+    assert_eq!(vms_from_node3.len(), 3, "Node3 should see all 3 VMs");
+    
+    // Start VMs
+    println!("Starting VMs");
+    let start1 = client1.start_vm(iroh_types::StartVmRequest { 
+        name: "test-vm-1".to_string() 
+    }).await?;
+    assert!(start1.into_inner().success);
+    
+    let start2 = client1.start_vm(iroh_types::StartVmRequest { 
+        name: "test-vm-2".to_string() 
+    }).await?;
+    assert!(start2.into_inner().success);
+    
+    let start3 = client1.start_vm(iroh_types::StartVmRequest { 
+        name: "test-vm-3".to_string() 
+    }).await?;
+    assert!(start3.into_inner().success);
+    
+    // Wait for VMs to start
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    
+    // Verify VM states from different nodes
+    let vm1_status = client2.get_vm_status("test-vm-1".to_string()).await?;
+    assert!(vm1_status.is_some());
+    assert_eq!(vm1_status.unwrap().state, 3); // Running
+    
+    let vm2_status = client3.get_vm_status("test-vm-2".to_string()).await?;
+    assert!(vm2_status.is_some());
+    assert_eq!(vm2_status.unwrap().state, 3); // Running
+    
+    let vm3_status = client1.get_vm_status("test-vm-3".to_string()).await?;
+    assert!(vm3_status.is_some());
+    assert_eq!(vm3_status.unwrap().state, 3); // Running
+    
+    // Clean up - delete VMs
+    println!("Cleaning up VMs");
+    let delete1 = client1.delete_vm(iroh_types::DeleteVmRequest { 
+        name: "test-vm-1".to_string() 
+    }).await?;
+    assert!(delete1.into_inner().success);
+    
+    let delete2 = client1.delete_vm(iroh_types::DeleteVmRequest { 
+        name: "test-vm-2".to_string() 
+    }).await?;
+    assert!(delete2.into_inner().success);
+    
+    let delete3 = client1.delete_vm(iroh_types::DeleteVmRequest { 
+        name: "test-vm-3".to_string() 
+    }).await?;
+    assert!(delete3.into_inner().success);
+    
+    Ok(())
+}
+
+#[tokio::test]
 #[ignore] // This test requires proper network setup
 async fn test_vm_with_network_connectivity() -> BlixardResult<()> {
     // Create and start a single node with mock backend for testing
