@@ -12,6 +12,7 @@ pub mod raft_manager;
 pub mod resource_management;
 pub mod resource_admission;
 pub mod resource_monitor;
+pub mod resource_collection;
 pub mod storage;
 pub mod ip_pool;
 pub mod ip_pool_manager;
