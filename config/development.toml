@@ -4,7 +4,7 @@
 [node]
 bind_address = "127.0.0.1:7001"
 data_dir = "./dev-data"
-vm_backend = "mock"
+vm_backend = "microvm"  # Use real VMs for development testing
 debug = true
 
 [cluster]

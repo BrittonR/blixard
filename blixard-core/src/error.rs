@@ -122,6 +122,18 @@ pub enum BlixardError {
         requested: String,
         available: String,
     },
+
+    #[error("Resource exhausted: {resource}")]
+    ResourceExhausted { resource: String },
+
+    #[error("Already exists: {resource}")]
+    AlreadyExists { resource: String },
+
+    #[error("Invalid operation '{operation}': {reason}")]
+    InvalidOperation { operation: String, reason: String },
+
+    #[error("Invalid configuration: {message}")]
+    InvalidConfiguration { message: String },
 }
 
 pub type Result<T> = std::result::Result<T, BlixardError>;

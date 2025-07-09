@@ -12,7 +12,7 @@ bind_address = "127.0.0.1:7001"
 data_dir = "./data"
 
 # VM backend type (mock, microvm, docker)
-vm_backend = "mock"
+vm_backend = "microvm"
 
 # Enable debug mode
 debug = false

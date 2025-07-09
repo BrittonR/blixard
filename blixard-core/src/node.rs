@@ -12,7 +12,7 @@ use crate::types::{NodeConfig, VmCommand};
 use crate::vm_backend::{VmBackendRegistry, VmManager};
 use crate::vm_health_monitor::VmHealthMonitor;
 
-use redb::Database;
+use redb::{Database, ReadableTable};
 
 /// A Blixard cluster node
 pub struct Node {

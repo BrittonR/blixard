@@ -483,7 +483,7 @@ impl VmProcessManager {
 
         // Replace template variables
         let cpu_quota = config.vcpus * 100; // 100% per vCPU
-        let _service_content = template
+        let service_content = template
             .replace("{{ vm_name }}", name)
             .replace("{{ flake_path }}", &flake_path.display().to_string())
             .replace("{{ memory_mb }}", &config.memory.to_string())
@@ -493,7 +493,8 @@ impl VmProcessManager {
                 "{{ user }}",
                 &std::env::var("USER").unwrap_or_else(|_| "user".to_string()),
             )
-            .replace("{{ home }}", &user_home);
+            .replace("{{ home }}", &user_home)
+            .replace("{{ hypervisor }}", &config.hypervisor.to_string().to_lowercase());
 
         // Ensure user systemd directory exists
         std::fs::create_dir_all(&format!("/home/{}/.config/systemd/user", user_name)).map_err(
@@ -504,7 +505,7 @@ impl VmProcessManager {
 
         // Write service file to temporary location first
         let temp_path = format!("/tmp/blixard-vm-{}.service", name);
-        fs::write(&temp_path, _service_content).await.map_err(|e| {
+        fs::write(&temp_path, service_content).await.map_err(|e| {
             BlixardError::VmOperationFailed {
                 operation: "create_service".to_string(),
                 details: format!("Failed to write temporary service file: {}", e),

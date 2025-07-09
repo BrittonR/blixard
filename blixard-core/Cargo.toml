@@ -11,6 +11,10 @@ name = "test_vm_scheduler"
 path = "examples/test_vm_scheduler.rs"
 
 [dependencies]
+# Local crates
+# NOTE: blixard-vm cannot be a dependency here due to circular dependency
+# The main binary must register VM backends
+
 # Consensus
 raft = { version = "0.7", default-features = false, features = ["prost-codec"] }
 raft-proto = { version = "0.7", default-features = false, features = ["prost-codec"] }
@@ -160,6 +164,7 @@ default = []
 failpoints = ["fail/failpoints"]
 test-helpers = []
 vopr = ["test-helpers"]
+# microvm-backend feature removed - backends must be registered by main binary
 
 [[bench]]
 name = "raft_transport_bench"

@@ -814,6 +814,9 @@ impl Default for VmBackendRegistry {
         // Register the built-in mock backend
         registry.register(Arc::new(MockVmBackendFactory));
 
+        // NOTE: Additional backends (like microvm) must be registered by the main binary
+        // to avoid circular dependencies
+
         registry
     }
 }
