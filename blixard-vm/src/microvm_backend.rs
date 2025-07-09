@@ -17,6 +17,7 @@ use chrono::Utc;
 
 use crate::{
     config_converter::VmConfigConverter,
+    health_check_helpers::health_check_result,
     ip_pool::{IpAddressPool, constants as ip_constants},
     nix_generator::NixFlakeGenerator, 
     process_manager::VmProcessManager, 
@@ -242,38 +243,25 @@ impl MicrovmBackend {
             Ok(response) => {
                 let status = response.status();
                 let success = status.as_u16() == expected_status;
+                let message = format!(
+                    "HTTP check returned status {} (expected {})",
+                    status.as_u16(),
+                    expected_status
+                );
+                let error = if !success {
+                    Some(format!("Unexpected status code: {}", status))
+                } else {
+                    None
+                };
 
-                Ok(HealthCheckResult {
-                    check_name: check_name.to_string(),
-                    success,
-                    message: format!(
-                        "HTTP check returned status {} (expected {})",
-                        status.as_u16(),
-                        expected_status
-                    ),
-                    duration_ms: start_time.elapsed().as_millis() as u64,
-                    timestamp_secs: timestamp
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs() as i64,
-                    error: if !success {
-                        Some(format!("Unexpected status code: {}", status))
-                    } else {
-                        None
-                    },
-                })
+                Ok(health_check_result(check_name, start_time, timestamp)
+                    .result(success, message, error))
             }
-            Err(e) => Ok(HealthCheckResult {
-                check_name: check_name.to_string(),
-                success: false,
-                message: format!("HTTP check failed: {}", e),
-                duration_ms: start_time.elapsed().as_millis() as u64,
-                timestamp_secs: timestamp
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs() as i64,
-                error: Some(e.to_string()),
-            }),
+            Err(e) => {
+                let message = format!("HTTP check failed: {}", e);
+                Ok(health_check_result(check_name, start_time, timestamp)
+                    .failure(message, Some(e.to_string())))
+            }
         }
     }
 
@@ -303,42 +291,23 @@ impl MicrovmBackend {
         let timeout = tokio::time::Duration::from_secs(timeout_secs);
 
         match tokio::time::timeout(timeout, tokio::net::TcpStream::connect(&vm_address)).await {
-            Ok(Ok(_stream)) => Ok(HealthCheckResult {
-                check_name: check_name.to_string(),
-                success: true,
-                message: format!("TCP connection to {} successful", vm_address),
-                duration_ms: start_time.elapsed().as_millis() as u64,
-                timestamp_secs: timestamp
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs() as i64,
-                error: None,
-            }),
-            Ok(Err(e)) => Ok(HealthCheckResult {
-                check_name: check_name.to_string(),
-                success: false,
-                message: format!("TCP connection to {} failed: {}", vm_address, e),
-                duration_ms: start_time.elapsed().as_millis() as u64,
-                timestamp_secs: timestamp
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs() as i64,
-                error: Some(e.to_string()),
-            }),
-            Err(_) => Ok(HealthCheckResult {
-                check_name: check_name.to_string(),
-                success: false,
-                message: format!(
+            Ok(Ok(_stream)) => {
+                let message = format!("TCP connection to {} successful", vm_address);
+                Ok(health_check_result(check_name, start_time, timestamp).success(message))
+            }
+            Ok(Err(e)) => {
+                let message = format!("TCP connection to {} failed: {}", vm_address, e);
+                Ok(health_check_result(check_name, start_time, timestamp)
+                    .failure(message, Some(e.to_string())))
+            }
+            Err(_) => {
+                let message = format!(
                     "TCP connection to {} timed out after {} seconds",
                     vm_address, timeout_secs
-                ),
-                duration_ms: start_time.elapsed().as_millis() as u64,
-                timestamp_secs: timestamp
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs() as i64,
-                error: Some("Connection timeout".to_string()),
-            }),
+                );
+                Ok(health_check_result(check_name, start_time, timestamp)
+                    .failure(message, Some("Connection timeout".to_string())))
+            }
         }
     }
 
