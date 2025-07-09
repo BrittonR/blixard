@@ -234,6 +234,29 @@ pub struct PreemptionCandidate {
     pub preemptible: bool,
 }
 
+/// Result type for placement request validation
+#[derive(Debug)]
+pub enum PlacementRequestResult {
+    /// Manual placement was successful
+    ManualPlacement(PlacementDecision),
+    /// Continue with automatic scheduling
+    ContinueScheduling {
+        requirements: VmResourceRequirements,
+        strategy_name: String,
+        start_time: std::time::Instant,
+    },
+}
+
+/// Intermediate state for scheduling operations
+#[derive(Debug, Clone)]
+pub struct SchedulingContext {
+    pub requirements: VmResourceRequirements,
+    pub strategy_name: String,
+    pub start_time: std::time::Instant,
+    pub node_usage: Vec<NodeResourceUsage>,
+    pub anti_affinity_checker: Option<AntiAffinityChecker>,
+}
+
 /// Network latency between datacenters (in milliseconds)
 pub type DatacenterLatencyMap = HashMap<(String, String), u32>;
 
@@ -279,6 +302,304 @@ impl VmScheduler {
     pub async fn get_datacenter_latency(&self, dc1: &str, dc2: &str) -> Option<u32> {
         let latencies = self.datacenter_latencies.read().await;
         latencies.get(&(dc1.to_string(), dc2.to_string())).copied()
+    }
+
+    /// Collect cluster state and prepare scheduling context
+    async fn collect_cluster_state(
+        &self,
+        requirements: VmResourceRequirements,
+        strategy_name: String,
+        start_time: std::time::Instant,
+        vm_config: &VmConfig,
+    ) -> BlixardResult<SchedulingContext> {
+        // Get current cluster resource usage
+        let node_usage = self.get_cluster_resource_usage().await?;
+
+        if node_usage.is_empty() {
+            return Err(BlixardError::SchedulingError {
+                message: "No healthy worker nodes available for VM placement".to_string(),
+            });
+        }
+
+        // Build anti-affinity checker if rules are specified
+        let anti_affinity_checker = if vm_config.anti_affinity.is_some() {
+            Some(self.build_anti_affinity_checker().await?)
+        } else {
+            None
+        };
+
+        Ok(SchedulingContext {
+            requirements,
+            strategy_name,
+            start_time,
+            node_usage,
+            anti_affinity_checker,
+        })
+    }
+
+    /// Filter candidate nodes based on resource requirements and anti-affinity
+    fn filter_candidate_nodes<'a>(
+        &self,
+        context: &'a SchedulingContext,
+        vm_config: &VmConfig,
+    ) -> Vec<&'a NodeResourceUsage> {
+        // Filter nodes that can accommodate the VM
+        let mut candidate_nodes: Vec<_> = context
+            .node_usage
+            .iter()
+            .filter(|usage| usage.can_accommodate(&context.requirements))
+            .collect();
+
+        // Apply anti-affinity hard constraints if present
+        if let (Some(rules), Some(checker)) =
+            (vm_config.anti_affinity.as_ref(), &context.anti_affinity_checker)
+        {
+            candidate_nodes.retain(|usage| {
+                match checker.check_hard_constraints(rules, usage.node_id) {
+                    Ok(()) => true,
+                    Err(reason) => {
+                        info!(
+                            "Node {} excluded by anti-affinity: {}",
+                            usage.node_id, reason
+                        );
+                        false
+                    }
+                }
+            });
+        }
+
+        candidate_nodes
+    }
+
+    /// Apply locality filtering based on strategy
+    async fn apply_locality_filtering<'a>(
+        &self,
+        candidate_nodes: Vec<&'a NodeResourceUsage>,
+        strategy: &PlacementStrategy,
+        vm_config: &VmConfig,
+    ) -> BlixardResult<Vec<&'a NodeResourceUsage>> {
+        if candidate_nodes.is_empty() {
+            return Ok(candidate_nodes);
+        }
+
+        match strategy {
+            PlacementStrategy::LocalityAware { strict, .. } => {
+                // For LocalityAware strategy, always apply VM's locality preferences
+                match self
+                    .apply_locality_preferences(
+                        candidate_nodes.clone(),
+                        &vm_config.locality_preference,
+                    )
+                    .await
+                {
+                    Ok(filtered) => Ok(filtered),
+                    Err(e) => {
+                        if *strict {
+                            // In strict mode, fail if no nodes match locality preferences
+                            Err(BlixardError::SchedulingError {
+                                message: format!("Strict locality requirement not met: {}", e),
+                            })
+                        } else {
+                            info!("Failed to apply locality preferences: {}", e);
+                            // Continue with unfiltered candidates if not strict
+                            Ok(candidate_nodes)
+                        }
+                    }
+                }
+            }
+            _ => {
+                // For other strategies, apply locality preferences if specified but don't fail
+                if !vm_config.locality_preference.preferred_datacenter.is_none()
+                    || !vm_config
+                        .locality_preference
+                        .excluded_datacenters
+                        .is_empty()
+                {
+                    match self
+                        .apply_locality_preferences(
+                            candidate_nodes.clone(),
+                            &vm_config.locality_preference,
+                        )
+                        .await
+                    {
+                        Ok(filtered) => Ok(filtered),
+                        Err(e) => {
+                            info!("Failed to apply locality preferences: {}", e);
+                            // Continue with unfiltered candidates
+                            Ok(candidate_nodes)
+                        }
+                    }
+                } else {
+                    Ok(candidate_nodes)
+                }
+            }
+        }
+    }
+
+    /// Handle preemption placement when no nodes are available
+    async fn handle_preemption_placement(
+        &self,
+        context: &SchedulingContext,
+        strategy: &PlacementStrategy,
+        vm_config: &VmConfig,
+    ) -> BlixardResult<PlacementDecision> {
+        // Check if this is a priority-based placement with preemption enabled
+        if let PlacementStrategy::PriorityBased {
+            enable_preemption: true,
+            ..
+        } = strategy
+        {
+            // Try to find nodes where preemption could make room
+            let mut preemption_options = Vec::new();
+
+            for usage in &context.node_usage {
+                // Check if node has the required features
+                if !context
+                    .requirements
+                    .required_features
+                    .iter()
+                    .all(|f| usage.capabilities.features.contains(f))
+                {
+                    continue;
+                }
+
+                // Find preemptible VMs on this node
+                let preemption_candidates = self
+                    .find_preemption_candidates(
+                        usage.node_id,
+                        context.requirements.vcpus,
+                        context.requirements.memory_mb,
+                        vm_config.priority,
+                    )
+                    .await?;
+
+                if !preemption_candidates.is_empty() {
+                    // Calculate if preempting these VMs would free enough resources
+                    let freed_vcpus: u32 = preemption_candidates.iter().map(|c| c.vcpus).sum();
+                    let freed_memory: u64 =
+                        preemption_candidates.iter().map(|c| c.memory as u64).sum();
+
+                    if usage.available_vcpus() + freed_vcpus >= context.requirements.vcpus
+                        && usage.available_memory_mb() + freed_memory >= context.requirements.memory_mb
+                    {
+                        preemption_options.push((usage, preemption_candidates));
+                    }
+                }
+            }
+
+            if !preemption_options.is_empty() {
+                // Select the best node for preemption (fewest VMs to preempt)
+                let (selected_node, preemption_candidates) = preemption_options
+                    .into_iter()
+                    .min_by_key(|(_, candidates)| candidates.len())
+                    .ok_or_else(|| BlixardError::Internal {
+                        message:
+                            "No preemption options available despite preemption being allowed"
+                                .to_string(),
+                    })?;
+
+                let reason = format!(
+                    "Selected node {} using {:?} strategy with preemption. Will preempt {} VMs to free resources",
+                    selected_node.node_id,
+                    strategy,
+                    preemption_candidates.len()
+                );
+
+                return Ok(PlacementDecision {
+                    selected_node_id: selected_node.node_id,
+                    reason,
+                    alternative_nodes: vec![],
+                    preemption_candidates,
+                });
+            }
+        }
+
+        Err(BlixardError::SchedulingError {
+            message: format!(
+                "No nodes can accommodate VM '{}' (requires: {}vCPU, {}MB RAM, {}GB disk, features: {:?}, anti-affinity: {})",
+                vm_config.name,
+                context.requirements.vcpus,
+                context.requirements.memory_mb,
+                context.requirements.disk_gb,
+                context.requirements.required_features,
+                vm_config.anti_affinity.is_some()
+            ),
+        })
+    }
+
+    /// Select optimal node from candidates
+    fn select_optimal_node<'a>(
+        &self,
+        candidate_nodes: Vec<&'a NodeResourceUsage>,
+        strategy: &PlacementStrategy,
+        vm_config: &VmConfig,
+        anti_affinity_checker: Option<&AntiAffinityChecker>,
+    ) -> BlixardResult<&'a NodeResourceUsage> {
+        self.select_best_node_with_anti_affinity(
+            candidate_nodes,
+            strategy,
+            vm_config.anti_affinity.as_ref(),
+            anti_affinity_checker,
+        )
+    }
+
+    /// Collect alternative nodes for the placement decision
+    fn collect_alternative_nodes(
+        &self,
+        context: &SchedulingContext,
+        selected_node_id: u64,
+        vm_config: &VmConfig,
+    ) -> Vec<u64> {
+        context
+            .node_usage
+            .iter()
+            .filter(|usage| {
+                usage.node_id != selected_node_id && 
+                usage.can_accommodate(&context.requirements) &&
+                // Check anti-affinity for alternatives too
+                if let (Some(rules), Some(checker)) = (vm_config.anti_affinity.as_ref(), &context.anti_affinity_checker) {
+                    checker.check_hard_constraints(rules, usage.node_id).is_ok()
+                } else {
+                    true
+                }
+            })
+            .map(|usage| usage.node_id)
+            .collect()
+    }
+
+    /// Create the final placement decision
+    fn create_placement_decision(
+        &self,
+        selected_node: &NodeResourceUsage,
+        alternative_nodes: Vec<u64>,
+        strategy: &PlacementStrategy,
+        vm_config: &VmConfig,
+        context: &SchedulingContext,
+    ) -> PlacementDecision {
+        let reason = format!(
+            "Selected node {} using {:?} strategy. Available: {}vCPU, {}MB RAM, {}GB disk{}",
+            selected_node.node_id,
+            strategy,
+            selected_node.available_vcpus(),
+            selected_node.available_memory_mb(),
+            selected_node.available_disk_gb(),
+            if vm_config.anti_affinity.is_some() {
+                " (anti-affinity rules applied)"
+            } else {
+                ""
+            }
+        );
+
+        // Record successful placement metrics
+        let duration = context.start_time.elapsed().as_secs_f64();
+        metrics_otel::record_vm_placement_attempt(&context.strategy_name, true, duration);
+
+        PlacementDecision {
+            selected_node_id: selected_node.node_id,
+            reason,
+            alternative_nodes,
+            preemption_candidates: vec![], // Will be populated for priority-based placement
+        }
     }
 
     /// Apply locality preferences to filter and score nodes
@@ -351,6 +672,67 @@ impl VmScheduler {
         vm_config: &VmConfig,
         strategy: PlacementStrategy,
     ) -> BlixardResult<PlacementDecision> {
+        // Phase 1: Validate and prepare placement request
+        let placement_request = self
+            .validate_and_prepare_placement_request(vm_config, strategy.clone())
+            .await?;
+
+        match placement_request {
+            PlacementRequestResult::ManualPlacement(decision) => Ok(decision),
+            PlacementRequestResult::ContinueScheduling {
+                requirements,
+                strategy_name,
+                start_time,
+            } => {
+                // Phase 2: Collect cluster state
+                let context = self
+                    .collect_cluster_state(requirements, strategy_name, start_time, vm_config)
+                    .await?;
+
+                // Phase 3: Filter candidate nodes
+                let candidate_nodes = self.filter_candidate_nodes(&context, vm_config);
+
+                // Phase 4: Apply locality filtering
+                let candidate_nodes = self
+                    .apply_locality_filtering(candidate_nodes, &strategy, vm_config)
+                    .await?;
+
+                if candidate_nodes.is_empty() {
+                    // Phase 5: Handle preemption placement if no candidates available
+                    return self
+                        .handle_preemption_placement(&context, &strategy, vm_config)
+                        .await;
+                }
+
+                // Phase 6: Select optimal node
+                let selected_node = self.select_optimal_node(
+                    candidate_nodes,
+                    &strategy,
+                    vm_config,
+                    context.anti_affinity_checker.as_ref(),
+                )?;
+
+                // Phase 7: Collect alternative nodes
+                let alternative_nodes = self.collect_alternative_nodes(&context, selected_node.node_id, vm_config);
+
+                // Phase 8: Create placement decision
+                Ok(self.create_placement_decision(
+                    selected_node,
+                    alternative_nodes,
+                    &strategy,
+                    vm_config,
+                    &context,
+                ))
+            }
+        }
+    }
+
+    /// Validate and prepare placement request, handling manual placement strategy
+    async fn validate_and_prepare_placement_request(
+        &self,
+        vm_config: &VmConfig,
+        strategy: PlacementStrategy,
+    ) -> BlixardResult<PlacementRequestResult> {
         let start_time = std::time::Instant::now();
         let requirements = VmResourceRequirements::from(vm_config);
         let strategy_name = format!("{:?}", strategy);
@@ -362,234 +744,14 @@ impl VmScheduler {
                 .await;
             let duration = start_time.elapsed().as_secs_f64();
             metrics_otel::record_vm_placement_attempt(&strategy_name, result.is_ok(), duration);
-            return result;
+            return Ok(PlacementRequestResult::ManualPlacement(result?));
         }
 
-        // Get current cluster resource usage
-        let node_usage = self.get_cluster_resource_usage().await?;
-
-        if node_usage.is_empty() {
-            return Err(BlixardError::SchedulingError {
-                message: "No healthy worker nodes available for VM placement".to_string(),
-            });
-        }
-
-        // Build anti-affinity checker if rules are specified
-        let anti_affinity_checker = if vm_config.anti_affinity.is_some() {
-            Some(self.build_anti_affinity_checker().await?)
-        } else {
-            None
-        };
-
-        // Filter nodes that can accommodate the VM
-        let mut candidate_nodes: Vec<_> = node_usage
-            .iter()
-            .filter(|usage| usage.can_accommodate(&requirements))
-            .collect();
-
-        // Apply anti-affinity hard constraints if present
-        if let (Some(rules), Some(checker)) =
-            (vm_config.anti_affinity.as_ref(), &anti_affinity_checker)
-        {
-            candidate_nodes.retain(|usage| {
-                match checker.check_hard_constraints(rules, usage.node_id) {
-                    Ok(()) => true,
-                    Err(reason) => {
-                        info!(
-                            "Node {} excluded by anti-affinity: {}",
-                            usage.node_id, reason
-                        );
-                        false
-                    }
-                }
-            });
-        }
-
-        // Apply locality preferences based on strategy
-        if !candidate_nodes.is_empty() {
-            match &strategy {
-                PlacementStrategy::LocalityAware { strict, .. } => {
-                    // For LocalityAware strategy, always apply VM's locality preferences
-                    match self
-                        .apply_locality_preferences(
-                            candidate_nodes.clone(),
-                            &vm_config.locality_preference,
-                        )
-                        .await
-                    {
-                        Ok(filtered) => candidate_nodes = filtered,
-                        Err(e) => {
-                            if *strict {
-                                // In strict mode, fail if no nodes match locality preferences
-                                return Err(BlixardError::SchedulingError {
-                                    message: format!("Strict locality requirement not met: {}", e),
-                                });
-                            } else {
-                                info!("Failed to apply locality preferences: {}", e);
-                                // Continue with unfiltered candidates if not strict
-                            }
-                        }
-                    }
-                }
-                _ => {
-                    // For other strategies, apply locality preferences if specified but don't fail
-                    if !vm_config.locality_preference.preferred_datacenter.is_none()
-                        || !vm_config
-                            .locality_preference
-                            .excluded_datacenters
-                            .is_empty()
-                    {
-                        match self
-                            .apply_locality_preferences(
-                                candidate_nodes.clone(),
-                                &vm_config.locality_preference,
-                            )
-                            .await
-                        {
-                            Ok(filtered) => candidate_nodes = filtered,
-                            Err(e) => {
-                                info!("Failed to apply locality preferences: {}", e);
-                                // Continue with unfiltered candidates
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if candidate_nodes.is_empty() {
-            // Check if this is a priority-based placement with preemption enabled
-            if let PlacementStrategy::PriorityBased {
-                enable_preemption: true,
-                ..
-            } = &strategy
-            {
-                // Try to find nodes where preemption could make room
-                let mut preemption_options = Vec::new();
-
-                for usage in &node_usage {
-                    // Check if node has the required features
-                    if !requirements
-                        .required_features
-                        .iter()
-                        .all(|f| usage.capabilities.features.contains(f))
-                    {
-                        continue;
-                    }
-
-                    // Find preemptible VMs on this node
-                    let preemption_candidates = self
-                        .find_preemption_candidates(
-                            usage.node_id,
-                            requirements.vcpus,
-                            requirements.memory_mb,
-                            vm_config.priority,
-                        )
-                        .await?;
-
-                    if !preemption_candidates.is_empty() {
-                        // Calculate if preempting these VMs would free enough resources
-                        let freed_vcpus: u32 = preemption_candidates.iter().map(|c| c.vcpus).sum();
-                        let freed_memory: u64 =
-                            preemption_candidates.iter().map(|c| c.memory as u64).sum();
-
-                        if usage.available_vcpus() + freed_vcpus >= requirements.vcpus
-                            && usage.available_memory_mb() + freed_memory >= requirements.memory_mb
-                        {
-                            preemption_options.push((usage, preemption_candidates));
-                        }
-                    }
-                }
-
-                if !preemption_options.is_empty() {
-                    // Select the best node for preemption (fewest VMs to preempt)
-                    let (selected_node, preemption_candidates) = preemption_options
-                        .into_iter()
-                        .min_by_key(|(_, candidates)| candidates.len())
-                        .ok_or_else(|| BlixardError::Internal {
-                            message:
-                                "No preemption options available despite preemption being allowed"
-                                    .to_string(),
-                        })?;
-
-                    let reason = format!(
-                        "Selected node {} using {:?} strategy with preemption. Will preempt {} VMs to free resources",
-                        selected_node.node_id,
-                        strategy,
-                        preemption_candidates.len()
-                    );
-
-                    return Ok(PlacementDecision {
-                        selected_node_id: selected_node.node_id,
-                        reason,
-                        alternative_nodes: vec![],
-                        preemption_candidates,
-                    });
-                }
-            }
-
-            return Err(BlixardError::SchedulingError {
-                message: format!(
-                    "No nodes can accommodate VM '{}' (requires: {}vCPU, {}MB RAM, {}GB disk, features: {:?}, anti-affinity: {})",
-                    vm_config.name,
-                    requirements.vcpus,
-                    requirements.memory_mb,
-                    requirements.disk_gb,
-                    requirements.required_features,
-                    vm_config.anti_affinity.is_some()
-                ),
-            });
-        }
-
-        // Select the best node based on strategy and anti-affinity soft constraints
-        let selected_node = self.select_best_node_with_anti_affinity(
-            candidate_nodes,
-            &strategy,
-            vm_config.anti_affinity.as_ref(),
-            anti_affinity_checker.as_ref(),
-        )?;
-
-        let alternative_nodes: Vec<u64> = node_usage
-            .iter()
-            .filter(|usage| {
-                usage.node_id != selected_node.node_id && 
-                usage.can_accommodate(&requirements) &&
-                // Check anti-affinity for alternatives too
-                if let (Some(rules), Some(checker)) = (vm_config.anti_affinity.as_ref(), &anti_affinity_checker) {
-                    checker.check_hard_constraints(rules, usage.node_id).is_ok()
-                } else {
-                    true
-                }
-            })
-            .map(|usage| usage.node_id)
-            .collect();
-
-        let reason = format!(
-            "Selected node {} using {:?} strategy. Available: {}vCPU, {}MB RAM, {}GB disk{}",
-            selected_node.node_id,
-            strategy,
-            selected_node.available_vcpus(),
-            selected_node.available_memory_mb(),
-            selected_node.available_disk_gb(),
-            if vm_config.anti_affinity.is_some() {
-                " (anti-affinity rules applied)"
-            } else {
-                ""
-            }
-        );
-
-        let decision = PlacementDecision {
-            selected_node_id: selected_node.node_id,
-            reason,
-            alternative_nodes,
-            preemption_candidates: vec![], // Will be populated for priority-based placement
-        };
-
-        // Record successful placement metrics
-        let duration = start_time.elapsed().as_secs_f64();
-        metrics_otel::record_vm_placement_attempt(&strategy_name, true, duration);
-
-        Ok(decision)
+        Ok(PlacementRequestResult::ContinueScheduling {
+            requirements,
+            strategy_name,
+            start_time,
+        })
     }
 
     /// Validate that a manual placement is feasible

@@ -120,6 +120,7 @@ impl AntiAffinityRules {
 }
 
 /// Anti-affinity constraint checker
+#[derive(Debug, Clone)]
 pub struct AntiAffinityChecker {
     /// Map of group_key -> node_id -> VM count
     group_distribution: HashMap<String, HashMap<u64, usize>>,
