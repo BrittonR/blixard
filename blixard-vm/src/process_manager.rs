@@ -493,8 +493,7 @@ impl VmProcessManager {
                 "{{ user }}",
                 &std::env::var("USER").unwrap_or_else(|_| "user".to_string()),
             )
-            .replace("{{ home }}", &user_home)
-            .replace("{{ hypervisor }}", &config.hypervisor.to_string().to_lowercase());
+            .replace("{{ home }}", &user_home);
 
         // Ensure user systemd directory exists
         std::fs::create_dir_all(&format!("/home/{}/.config/systemd/user", user_name)).map_err(

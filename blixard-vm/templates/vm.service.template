@@ -5,7 +5,7 @@ Wants=network.target
 
 [Service]
 Type=simple
-ExecStart=/run/current-system/sw/bin/nix run --extra-experimental-features "nix-command flakes" --impure --accept-flake-config "path:{{ flake_path }}#nixosConfigurations.{{ vm_name }}.config.microvm.runner.{{ hypervisor }}"
+ExecStart=/run/current-system/sw/bin/nix run --extra-experimental-features "nix-command flakes" --impure --accept-flake-config "path:{{ flake_path }}#nixosConfigurations.{{ vm_name }}.config.microvm.declaredRunner"
 ExecStop=/run/current-system/sw/bin/kill -TERM $MAINPID
 ExecReload=/run/current-system/sw/bin/kill -HUP $MAINPID
 
