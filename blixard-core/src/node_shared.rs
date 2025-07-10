@@ -960,173 +960,226 @@ impl SharedNodeState {
 
         // Check if we're the leader
         let raft_status = self.get_raft_status().await?;
-        if !raft_status.is_leader {
-            // Forward to leader if we know who it is
-            if let Some(leader_id) = raft_status.leader_id {
-                tracing::info!("Forwarding task submission to leader node {}", leader_id);
-
-                // Get leader address
-                let peers = self.get_peers().await;
-                let leader_addr = peers
-                    .iter()
-                    .find(|p| p.id == leader_id)
-                    .map(|p| p.address.clone())
-                    .ok_or_else(|| {
-                        BlixardError::ClusterError(format!(
-                            "Leader node {} address not found",
-                            leader_id
-                        ))
-                    })?;
-
-                // Forward the request to the leader using Iroh
-                use crate::transport::iroh_cluster_service::{
-                    ClusterRequest, ClusterResponse, TaskRequest,
-                };
-
-                // Get the peer connector
-                let peer_connector = self.get_peer_connector().await.ok_or_else(|| {
-                    BlixardError::NotInitialized {
-                        component: "Peer connector".to_string(),
-                    }
-                })?;
-
-                // Connect to leader
-                let iroh_client = peer_connector
-                    .connect_to_peer_by_id(leader_id)
-                    .await
-                    .map_err(|e| BlixardError::Internal {
-                        message: format!("Failed to connect to leader: {}", e),
-                    })?;
-
-                let request = ClusterRequest::SubmitTask(TaskRequest {
-                    task_id: task_id.to_string(),
-                    command: task.command,
-                    args: task.args,
-                    cpu_cores: task.resources.cpu_cores as u32,
-                    memory_mb: task.resources.memory_mb,
-                    disk_gb: task.resources.disk_gb,
-                    required_features: task.resources.required_features,
-                    timeout_secs: task.timeout_secs,
-                });
-
-                let response: ClusterResponse = iroh_client
-                    .rpc_client()
-                    .call(
-                        iroh_client.node_addr().clone(),
-                        "cluster",
-                        "submit_task",
-                        request,
-                    )
-                    .await
-                    .map_err(|e| BlixardError::Internal {
-                        message: format!("Failed to forward task to leader: {}", e),
-                    })?;
-
-                match response {
-                    ClusterResponse::SubmitTask(task_response) => {
-                        if task_response.accepted {
-                            Ok(task_response.assigned_node)
-                        } else {
-                            Err(BlixardError::ClusterError(task_response.message))
-                        }
-                    }
-                    _ => Err(BlixardError::Internal {
-                        message: "Unexpected response type".to_string(),
-                    }),
-                }
-            } else {
-                Err(BlixardError::ClusterError(
-                    "No leader elected yet".to_string(),
-                ))
-            }
-        } else {
+        
+        if raft_status.is_leader {
             // We are the leader, process locally
-            tracing::info!("Processing task submission locally as leader");
+            self.process_task_as_leader(task_id, task).await
+        } else {
+            // Not the leader, forward to leader if we know who it is
+            match raft_status.leader_id {
+                Some(leader_id) => self.forward_task_to_leader(leader_id, task_id, &task).await,
+                None => Err(BlixardError::ClusterError("No leader elected yet".to_string())),
+            }
+        }
+    }
 
-            let proposal_tx = self.raft_proposal_tx.lock().await;
+    /// Forward task submission to the leader node
+    async fn forward_task_to_leader(
+        &self,
+        leader_id: u64,
+        task_id: &str,
+        task: &TaskSpec,
+    ) -> BlixardResult<u64> {
+        tracing::info!("Forwarding task submission to leader node {}", leader_id);
 
-            let database = self.database.read().await;
-            if let (Some(tx), Some(db)) = (proposal_tx.as_ref(), database.as_ref()) {
-                tracing::info!("Checking if we can schedule the task...");
-                // Check if we can schedule the task
-                let assigned_node = crate::raft_manager::schedule_task(db.clone(), task_id, &task)
-                    .await?
-                    .ok_or_else(|| {
-                        tracing::error!("No suitable worker available for task {}", task_id);
-                        BlixardError::ClusterError("No suitable worker available".to_string())
-                    })?;
+        // Get leader address from peers
+        let peers = self.get_peers().await;
+        let leader_addr = peers
+            .iter()
+            .find(|p| p.id == leader_id)
+            .map(|p| p.address.clone())
+            .ok_or_else(|| {
+                BlixardError::ClusterError(format!(
+                    "Leader node {} address not found",
+                    leader_id
+                ))
+            })?;
 
-                tracing::info!("Task {} assigned to worker node {}", task_id, assigned_node);
+        // Connect to leader via Iroh
+        let iroh_client = self.connect_to_leader(leader_id).await?;
 
-                // Submit the task assignment through Raft
-                let proposal_data = crate::raft_manager::ProposalData::AssignTask {
-                    task_id: task_id.to_string(),
-                    node_id: assigned_node,
-                    task,
-                };
+        // Prepare and send request
+        use crate::transport::iroh_cluster_service::{
+            ClusterRequest, ClusterResponse, TaskRequest,
+        };
 
-                let (response_tx, response_rx) = oneshot::channel();
-                let proposal_id = uuid::Uuid::new_v4().as_bytes().to_vec();
-                tracing::info!(
-                    "Creating task proposal with id length: {}",
-                    proposal_id.len()
-                );
+        let request = ClusterRequest::SubmitTask(TaskRequest {
+            task_id: task_id.to_string(),
+            command: task.command.clone(),
+            args: task.args.clone(),
+            cpu_cores: task.resources.cpu_cores as u32,
+            memory_mb: task.resources.memory_mb,
+            disk_gb: task.resources.disk_gb,
+            required_features: task.resources.required_features.clone(),
+            timeout_secs: task.timeout_secs,
+        });
 
-                let proposal = RaftProposal {
-                    id: proposal_id.clone(),
-                    data: proposal_data,
-                    response_tx: Some(response_tx),
-                };
+        let response: ClusterResponse = iroh_client
+            .rpc_client()
+            .call(
+                iroh_client.node_addr().clone(),
+                "cluster",
+                "submit_task",
+                request,
+            )
+            .await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to forward task to leader: {}", e),
+            })?;
 
-                tracing::info!("Sending proposal to Raft manager");
-                match tx.send(proposal) {
-                    Ok(_) => {
-                        tracing::info!("Successfully sent proposal to Raft channel");
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            "Failed to send proposal: channel closed or full. Error: {:?}",
-                            e
-                        );
-                        return Err(BlixardError::Internal {
-                            message: "Failed to send task proposal - Raft channel closed"
-                                .to_string(),
-                        });
-                    }
+        // Handle response
+        match response {
+            ClusterResponse::SubmitTask(task_response) => {
+                if task_response.accepted {
+                    Ok(task_response.assigned_node)
+                } else {
+                    Err(BlixardError::ClusterError(task_response.message))
                 }
+            }
+            _ => Err(BlixardError::Internal {
+                message: "Unexpected response type".to_string(),
+            }),
+        }
+    }
 
-                tracing::info!("Waiting for proposal response...");
-                // Wait for response with a timeout
-                let timeout = crate::config_global::get()?
-                    .cluster
-                    .raft
-                    .proposal_timeout
-                    .as_secs();
-                match tokio::time::timeout(tokio::time::Duration::from_secs(timeout), response_rx)
-                    .await
-                {
-                    Ok(Ok(result)) => {
-                        tracing::info!("Received proposal response: {:?}", result.is_ok());
-                        result?;
-                    }
-                    Ok(Err(_)) => {
-                        tracing::error!("Proposal response channel closed without response");
-                        return Err(BlixardError::Internal {
-                            message: "Task proposal response channel closed".to_string(),
-                        });
-                    }
-                    Err(_) => {
-                        tracing::error!("Proposal timed out after 10 seconds");
-                        return Err(BlixardError::Internal {
-                            message: "Task proposal timed out".to_string(),
-                        });
-                    }
-                }
+    /// Connect to the leader node via Iroh
+    async fn connect_to_leader(&self, leader_id: u64) -> BlixardResult<crate::transport::iroh_peer_connector::IrohClient> {
+        let peer_connector = self.get_peer_connector().await.ok_or_else(|| {
+            BlixardError::NotInitialized {
+                component: "Peer connector".to_string(),
+            }
+        })?;
 
-                Ok(assigned_node)
-            } else {
-                Err(BlixardError::Internal {
+        peer_connector
+            .connect_to_peer_by_id(leader_id)
+            .await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to connect to leader: {}", e),
+            })
+    }
+
+    /// Process task submission as the leader
+    async fn process_task_as_leader(
+        &self,
+        task_id: &str,
+        task: TaskSpec,
+    ) -> BlixardResult<u64> {
+        tracing::info!("Processing task submission locally as leader");
+
+        let proposal_tx = self.raft_proposal_tx.lock().await;
+        let database = self.database.read().await;
+        
+        let (tx, db) = match (proposal_tx.as_ref(), database.as_ref()) {
+            (Some(tx), Some(db)) => (tx, db),
+            _ => {
+                return Err(BlixardError::Internal {
                     message: "Raft manager or database not initialized".to_string(),
+                })
+            }
+        };
+
+        // Schedule the task
+        let assigned_node = self.schedule_task_to_worker(db.clone(), task_id, &task).await?;
+        
+        // Submit through Raft consensus
+        self.submit_task_proposal_to_raft(tx, task_id, assigned_node, task).await?;
+        
+        Ok(assigned_node)
+    }
+
+    /// Schedule task to an available worker
+    async fn schedule_task_to_worker(
+        &self,
+        db: Arc<redb::Database>,
+        task_id: &str,
+        task: &TaskSpec,
+    ) -> BlixardResult<u64> {
+        tracing::info!("Checking if we can schedule the task...");
+        
+        crate::raft_manager::schedule_task(db, task_id, task)
+            .await?
+            .ok_or_else(|| {
+                tracing::error!("No suitable worker available for task {}", task_id);
+                BlixardError::ClusterError("No suitable worker available".to_string())
+            })
+            .map(|node_id| {
+                tracing::info!("Task {} assigned to worker node {}", task_id, node_id);
+                node_id
+            })
+    }
+
+    /// Submit task proposal through Raft consensus
+    async fn submit_task_proposal_to_raft(
+        &self,
+        tx: &mpsc::Sender<RaftProposal>,
+        task_id: &str,
+        assigned_node: u64,
+        task: TaskSpec,
+    ) -> BlixardResult<()> {
+        // Create proposal
+        let proposal_data = crate::raft_manager::ProposalData::AssignTask {
+            task_id: task_id.to_string(),
+            node_id: assigned_node,
+            task,
+        };
+
+        let (response_tx, response_rx) = oneshot::channel();
+        let proposal_id = uuid::Uuid::new_v4().as_bytes().to_vec();
+        
+        tracing::info!(
+            "Creating task proposal with id length: {}",
+            proposal_id.len()
+        );
+
+        let proposal = RaftProposal {
+            id: proposal_id.clone(),
+            data: proposal_data,
+            response_tx: Some(response_tx),
+        };
+
+        // Send proposal
+        tracing::info!("Sending proposal to Raft manager");
+        tx.send(proposal).map_err(|e| {
+            tracing::error!(
+                "Failed to send proposal: channel closed or full. Error: {:?}",
+                e
+            );
+            BlixardError::Internal {
+                message: "Failed to send task proposal - Raft channel closed".to_string(),
+            }
+        })?;
+
+        // Wait for response with timeout
+        tracing::info!("Waiting for proposal response...");
+        self.wait_for_proposal_response(response_rx).await
+    }
+
+    /// Wait for Raft proposal response with timeout
+    async fn wait_for_proposal_response(
+        &self,
+        response_rx: oneshot::Receiver<BlixardResult<()>>,
+    ) -> BlixardResult<()> {
+        let timeout = crate::config_global::get()?
+            .cluster
+            .raft
+            .proposal_timeout
+            .as_secs();
+            
+        match tokio::time::timeout(tokio::time::Duration::from_secs(timeout), response_rx).await {
+            Ok(Ok(result)) => {
+                tracing::info!("Received proposal response: {:?}", result.is_ok());
+                result
+            }
+            Ok(Err(_)) => {
+                tracing::error!("Proposal response channel closed without response");
+                Err(BlixardError::Internal {
+                    message: "Task proposal response channel closed".to_string(),
+                })
+            }
+            Err(_) => {
+                tracing::error!("Proposal timed out after {} seconds", timeout);
+                Err(BlixardError::Internal {
+                    message: "Task proposal timed out".to_string(),
                 })
             }
         }
