@@ -15,6 +15,8 @@ pub mod retry;
 pub mod resource_pool_examples;
 #[cfg(test)]
 pub mod retry_migration_example;
+#[cfg(test)]
+pub mod error_context_examples;
 
 pub use lifecycle::{
     LifecycleManager, BackgroundTaskManager, LifecycleState, HealthStatus, 
