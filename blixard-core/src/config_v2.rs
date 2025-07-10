@@ -79,7 +79,6 @@
 use crate::error::{BlixardError, BlixardResult};
 use crate::common::file_io::read_config_file;
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;

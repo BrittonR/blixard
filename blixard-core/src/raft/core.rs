@@ -396,7 +396,7 @@ impl RaftManager {
     /// Handle a proposal request
     #[instrument(skip(self, proposal), fields(proposal_id = %hex::encode(&proposal.id)))]
     async fn handle_proposal(&self, proposal: RaftProposal) -> BlixardResult<()> {
-        let _timer = Timer::new(&metrics::RAFT_PROPOSAL_DURATION, &[
+        let _timer = Timer::new(&metrics().raft_proposal_duration, &[
             attributes::operation("handle_proposal"),
         ]);
 
@@ -442,7 +442,7 @@ impl RaftManager {
     /// Handle a Raft message from another node
     #[instrument(skip(self, msg), fields(from, msg_type = ?msg.msg_type()))]
     async fn handle_raft_message(&self, from: u64, msg: raft::prelude::Message) -> BlixardResult<()> {
-        let _timer = Timer::new(&metrics::RAFT_MESSAGE_DURATION, &[
+        let _timer = Timer::new(&metrics().raft_message_duration, &[
             attributes::operation("handle_message"),
         ]);
 

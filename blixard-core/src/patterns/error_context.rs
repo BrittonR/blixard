@@ -103,34 +103,6 @@ where
     }
 }
 
-/// Specialized error context for BlixardResult
-impl<T> ErrorContext<T> for BlixardResult<T> {
-    fn with_context<F>(self, f: F) -> BlixardResult<T>
-    where
-        F: FnOnce() -> String,
-    {
-        self.map_err(|e| match e {
-            BlixardError::Internal { message, source } => {
-                BlixardError::Internal {
-                    message: format!("{}: {}", f(), message),
-                    source,
-                }
-            }
-            other => BlixardError::Internal {
-                message: f(),
-                source: Some(Box::new(other)),
-            },
-        })
-    }
-
-    fn context(self, msg: &'static str) -> BlixardResult<T> {
-        self.with_context(|| msg.to_string())
-    }
-
-    fn with_operation_context(self, operation: &str, details: &str) -> BlixardResult<T> {
-        self.with_context(|| format!("Failed to {}: {}", operation, details))
-    }
-}
 
 /// Error aggregation for collecting multiple errors
 #[derive(Debug, Clone)]

@@ -1,7 +1,6 @@
 //! Virtual machine configuration
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::time::Duration;
 use crate::error::{BlixardError, BlixardResult};
 use super::defaults::*;
