@@ -5,7 +5,8 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::raft_manager::{ConfChangeType, RaftConfChange, RaftProposal, TaskResult, TaskSpec};
+use crate::raft_manager::{ConfChangeType, RaftConfChange, TaskResult, TaskSpec};
+use crate::raft::messages::RaftProposal;
 use crate::types::{NodeConfig, VmCommand, VmConfig, VmStatus};
 use crate::vm_backend::VmManager;
 // Removed unused imports - VmRequest and VmResponse are no longer used directly
@@ -1521,7 +1522,8 @@ impl SharedNodeState {
         #[cfg(feature = "failpoints")]
         fail_point!("worker::register");
 
-        use crate::raft_manager::{ProposalData, RaftProposal};
+        use crate::raft_manager::ProposalData;
+        use crate::raft::messages::RaftProposal;
         use tokio::sync::oneshot;
 
         tracing::info!("[NODE-SHARED] Registering worker {} through Raft", node_id);

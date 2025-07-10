@@ -6,7 +6,8 @@ use tokio::task::JoinHandle;
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::node_shared::SharedNodeState;
-use crate::raft_manager::{ProposalData, RaftConfChange, RaftManager, RaftProposal};
+use crate::raft_manager::{ProposalData, RaftConfChange, RaftManager};
+use crate::raft::messages::RaftProposal;
 use crate::transport::iroh_peer_connector::IrohPeerConnector;
 use crate::types::{NodeConfig, VmCommand};
 use crate::vm_backend::{VmBackendRegistry, VmManager};

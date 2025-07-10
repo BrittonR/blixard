@@ -11,7 +11,8 @@ use tracing::{info, warn};
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::metrics_otel::{attributes, metrics};
-use crate::raft_manager::{ProposalData, RaftProposal};
+use crate::raft_manager::ProposalData;
+use crate::raft::messages::RaftProposal;
 
 /// Configuration for batch processing
 #[derive(Debug, Clone)]

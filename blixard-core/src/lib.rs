@@ -9,6 +9,7 @@ pub mod node_shared;
 pub mod raft_batch_processor;
 pub mod raft_codec;
 pub mod raft_manager;
+pub mod raft;
 pub mod resource_management;
 pub mod resource_admission;
 pub mod resource_monitor;
