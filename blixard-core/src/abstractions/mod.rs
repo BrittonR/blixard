@@ -5,7 +5,6 @@
 
 pub mod config;
 pub mod filesystem;
-pub mod process;
 pub mod command;
 pub mod storage;
 // Temporarily disabled: uses gRPC which we're removing
@@ -16,7 +15,6 @@ pub mod time;
 
 pub use config::ConfigProvider;
 pub use filesystem::FileSystem;
-pub use process::ProcessExecutor;
 pub use command::{CommandExecutor, CommandOptions, CommandOutput, TokioCommandExecutor, MockCommandExecutor};
 pub use storage::{NodeRepository, TaskRepository, VmRepository};
 // pub use network::NetworkClient;

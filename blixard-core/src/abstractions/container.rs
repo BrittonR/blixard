@@ -7,10 +7,12 @@ use std::sync::Arc;
 use crate::{
     abstractions::{
         VmRepository, TaskRepository, NodeRepository,
-        FileSystem, ProcessExecutor, ConfigProvider, Clock,
+        FileSystem, CommandExecutor, ConfigProvider, Clock,
         storage::{RedbVmRepository, MockVmRepository},
+        // TODO: Implement these when TaskRepository and NodeRepository implementations are added
+        // storage::{RedbTaskRepository, RedbNodeRepository, MockTaskRepository, MockNodeRepository},
         filesystem::{TokioFileSystem, MockFileSystem},
-        process::{TokioProcessExecutor, MockProcessExecutor},
+        command::{TokioCommandExecutor, MockCommandExecutor},
         config::{GlobalConfigProvider, MockConfigProvider},
         // network::{TonicNetworkClient, MockNetworkClient},
         time::{SystemClock, MockClock},
@@ -29,8 +31,8 @@ pub struct ServiceContainer {
     pub node_repo: Arc<dyn NodeRepository>,
     /// Filesystem abstraction
     pub filesystem: Arc<dyn FileSystem>,
-    /// Process executor
-    pub process_executor: Arc<dyn ProcessExecutor>,
+    /// Command executor
+    pub command_executor: Arc<dyn CommandExecutor>,
     /// Configuration provider
     pub config_provider: Arc<dyn ConfigProvider>,
     // /// Network client
@@ -45,11 +47,12 @@ impl ServiceContainer {
         Self {
             vm_repo: Arc::new(RedbVmRepository::new(database.clone())),
             // TODO: Implement RedbTaskRepository
-            task_repo: Arc::new(MockTaskRepository::new()),
-            // TODO: Implement RedbNodeRepository
-            node_repo: Arc::new(MockNodeRepository::new()),
+            // TODO: Implement RedbTaskRepository and MockTaskRepository
+            task_repo: Arc::new(MockVmRepository::new()) as Arc<dyn TaskRepository>,
+            // TODO: Implement RedbNodeRepository and MockNodeRepository
+            node_repo: Arc::new(MockVmRepository::new()) as Arc<dyn NodeRepository>,
             filesystem: Arc::new(TokioFileSystem::new()),
-            process_executor: Arc::new(TokioProcessExecutor::new()),
+            command_executor: Arc::new(TokioCommandExecutor::new()),
             config_provider: Arc::new(GlobalConfigProvider::new()),
             // network_client: Arc::new(TonicNetworkClient::new()),
             clock: Arc::new(SystemClock::new()),
@@ -60,10 +63,12 @@ impl ServiceContainer {
     pub fn new_test() -> Self {
         Self {
             vm_repo: Arc::new(MockVmRepository::new()),
-            task_repo: Arc::new(MockTaskRepository::new()),
-            node_repo: Arc::new(MockNodeRepository::new()),
+            // TODO: Use MockTaskRepository when implemented
+            task_repo: Arc::new(MockVmRepository::new()) as Arc<dyn TaskRepository>,
+            // TODO: Use MockNodeRepository when implemented
+            node_repo: Arc::new(MockVmRepository::new()) as Arc<dyn NodeRepository>,
             filesystem: Arc::new(MockFileSystem::new()),
-            process_executor: Arc::new(MockProcessExecutor::new()),
+            command_executor: Arc::new(MockCommandExecutor::new()),
             config_provider: Arc::new(MockConfigProvider::new()),
             // network_client: Arc::new(MockNetworkClient::new()),
             clock: Arc::new(MockClock::new()),
@@ -74,10 +79,12 @@ impl ServiceContainer {
     pub fn new_test_with_config(config: Config) -> Self {
         Self {
             vm_repo: Arc::new(MockVmRepository::new()),
-            task_repo: Arc::new(MockTaskRepository::new()),
-            node_repo: Arc::new(MockNodeRepository::new()),
+            // TODO: Use MockTaskRepository when implemented
+            task_repo: Arc::new(MockVmRepository::new()) as Arc<dyn TaskRepository>,
+            // TODO: Use MockNodeRepository when implemented
+            node_repo: Arc::new(MockVmRepository::new()) as Arc<dyn NodeRepository>,
             filesystem: Arc::new(MockFileSystem::new()),
-            process_executor: Arc::new(MockProcessExecutor::new()),
+            command_executor: Arc::new(MockCommandExecutor::new()),
             config_provider: Arc::new(MockConfigProvider::with_config(config)),
             // network_client: Arc::new(MockNetworkClient::new()),
             clock: Arc::new(MockClock::new()),
@@ -91,9 +98,9 @@ pub struct ServiceContainerBuilder {
     task_repo: Option<Arc<dyn TaskRepository>>,
     node_repo: Option<Arc<dyn NodeRepository>>,
     filesystem: Option<Arc<dyn FileSystem>>,
-    process_executor: Option<Arc<dyn ProcessExecutor>>,
+    command_executor: Option<Arc<dyn CommandExecutor>>,
     config_provider: Option<Arc<dyn ConfigProvider>>,
-    network_client: Option<Arc<dyn NetworkClient>>,
+    // network_client: Option<Arc<dyn NetworkClient>>,
     clock: Option<Arc<dyn Clock>>,
     database: Option<Arc<redb::Database>>,
 }
@@ -106,9 +113,9 @@ impl ServiceContainerBuilder {
             task_repo: None,
             node_repo: None,
             filesystem: None,
-            process_executor: None,
+            command_executor: None,
             config_provider: None,
-            network_client: None,
+            // network_client: None,
             clock: None,
             database: None,
         }
@@ -144,9 +151,9 @@ impl ServiceContainerBuilder {
         self
     }
     
-    /// Set process executor
-    pub fn with_process_executor(mut self, executor: Arc<dyn ProcessExecutor>) -> Self {
-        self.process_executor = Some(executor);
+    /// Set command executor
+    pub fn with_command_executor(mut self, executor: Arc<dyn CommandExecutor>) -> Self {
+        self.command_executor = Some(executor);
         self
     }
     
@@ -156,11 +163,11 @@ impl ServiceContainerBuilder {
         self
     }
     
-    /// Set network client
-    pub fn with_network_client(mut self, client: Arc<dyn NetworkClient>) -> Self {
-        self.network_client = Some(client);
-        self
-    }
+    // /// Set network client
+    // pub fn with_network_client(mut self, client: Arc<dyn NetworkClient>) -> Self {
+    //     self.network_client = Some(client);
+    //     self
+    // }
     
     /// Set clock
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
@@ -176,18 +183,20 @@ impl ServiceContainerBuilder {
         Ok(ServiceContainer {
             vm_repo: self.vm_repo.unwrap_or_else(|| 
                 Arc::new(RedbVmRepository::new(database.clone()))),
+            // TODO: Use RedbTaskRepository when implemented
             task_repo: self.task_repo.unwrap_or_else(|| 
-                Arc::new(RedbTaskRepository::new(database.clone()))),
+                Arc::new(MockVmRepository::new()) as Arc<dyn TaskRepository>),
+            // TODO: Use RedbNodeRepository when implemented  
             node_repo: self.node_repo.unwrap_or_else(|| 
-                Arc::new(RedbNodeRepository::new(database))),
+                Arc::new(MockVmRepository::new()) as Arc<dyn NodeRepository>),
             filesystem: self.filesystem.unwrap_or_else(|| 
                 Arc::new(TokioFileSystem::new())),
-            process_executor: self.process_executor.unwrap_or_else(|| 
-                Arc::new(TokioProcessExecutor::new())),
+            command_executor: self.command_executor.unwrap_or_else(|| 
+                Arc::new(TokioCommandExecutor::new())),
             config_provider: self.config_provider.unwrap_or_else(|| 
                 Arc::new(GlobalConfigProvider::new())),
-            network_client: self.network_client.unwrap_or_else(|| 
-                Arc::new(TonicNetworkClient::new())),
+            // network_client: self.network_client.unwrap_or_else(|| 
+            //     Arc::new(TonicNetworkClient::new())),
             clock: self.clock.unwrap_or_else(|| 
                 Arc::new(SystemClock::new())),
         })
@@ -198,18 +207,20 @@ impl ServiceContainerBuilder {
         ServiceContainer {
             vm_repo: self.vm_repo.unwrap_or_else(|| 
                 Arc::new(MockVmRepository::new())),
+            // TODO: Use MockTaskRepository when implemented
             task_repo: self.task_repo.unwrap_or_else(|| 
-                Arc::new(MockTaskRepository::new())),
+                Arc::new(MockVmRepository::new()) as Arc<dyn TaskRepository>),
+            // TODO: Use MockNodeRepository when implemented
             node_repo: self.node_repo.unwrap_or_else(|| 
-                Arc::new(MockNodeRepository::new())),
+                Arc::new(MockVmRepository::new()) as Arc<dyn NodeRepository>),
             filesystem: self.filesystem.unwrap_or_else(|| 
                 Arc::new(MockFileSystem::new())),
-            process_executor: self.process_executor.unwrap_or_else(|| 
-                Arc::new(MockProcessExecutor::new())),
+            command_executor: self.command_executor.unwrap_or_else(|| 
+                Arc::new(MockCommandExecutor::new())),
             config_provider: self.config_provider.unwrap_or_else(|| 
                 Arc::new(MockConfigProvider::new())),
-            network_client: self.network_client.unwrap_or_else(|| 
-                Arc::new(MockNetworkClient::new())),
+            // network_client: self.network_client.unwrap_or_else(|| 
+            //     Arc::new(MockNetworkClient::new())),
             clock: self.clock.unwrap_or_else(|| 
                 Arc::new(MockClock::new())),
         }
