@@ -67,3 +67,12 @@ console-vm.nix
 # Simulation build artifacts
 simulation/target/
 simulation/Cargo.lock
+
+# Cryptographic keys and secrets
+**/secret_key
+**/private_key
+**/id_rsa
+**/id_ed25519
+*.pem
+*.key
+*.crt

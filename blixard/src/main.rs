@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 use blixard::orchestrator::OrchestratorConfig;
 use blixard::{BlixardError, BlixardOrchestrator, BlixardResult, NodeConfig};
 use blixard_core::config_v2::{Config, ConfigBuilder};
+use daemonize::Daemonize;
 
 mod client;
 mod node_discovery;
@@ -569,81 +570,69 @@ async fn main() -> BlixardResult<()> {
             #[cfg(not(madsim))]
             {
                 if daemon {
-                    // Run in daemon mode (clone values for printing since they were moved)
+                    // Run in daemon mode (safe implementation)
                     println!("🚀 Starting node {} in background (daemon mode)", id);
                     println!("📍 Bind address: {}", config.node.bind_address);
                     println!("📂 Data directory: {}", config.node.data_dir.display());
                     println!("🔧 VM backend: {}", config.node.vm_backend);
 
-                    // Fork process to run in background
-                    match unsafe { libc::fork() } {
-                        -1 => {
+                    // Create PID file path in data directory
+                    let pid_file = config.node.data_dir.join(format!("blixard-node-{}.pid", id));
+                    let log_file = config.node.data_dir.join(format!("blixard-node-{}.log", id));
+                    
+                    // Create daemon configuration
+                    let daemonize = Daemonize::new()
+                        .pid_file(&pid_file)
+                        .working_directory(&config.node.data_dir)
+                        .umask(0o027)
+                        .stdout(std::fs::File::create(&log_file).map_err(|e| {
+                            BlixardError::Internal {
+                                message: format!("Failed to create log file: {}", e),
+                            }
+                        })?)
+                        .stderr(std::fs::File::create(&log_file).map_err(|e| {
+                            BlixardError::Internal {
+                                message: format!("Failed to create log file: {}", e),
+                            }
+                        })?);
+
+                    // Fork to daemon safely
+                    match daemonize.start() {
+                        Ok(_) => {
+                            // We're now in the daemon process
+                            println!("✅ Node {} started in background", id);
+                            println!("📝 PID file: {}", pid_file.display());
+                            println!("📝 Log file: {}", log_file.display());
+                            println!("🔍 To check status: cargo run -- cluster status --addr {}", config.node.bind_address);
+                        }
+                        Err(e) => {
                             return Err(BlixardError::Internal {
-                                message: "Failed to fork process".to_string(),
+                                message: format!("Failed to daemonize: {}", e),
                             });
                         }
-                        0 => {
-                            // Child process - detach from terminal and run server
-                            if unsafe { libc::setsid() } == -1 {
-                                eprintln!("Warning: Failed to create new session");
-                            }
-
-                            // Create and initialize the orchestrator
-                            let mut orchestrator =
-                                BlixardOrchestrator::new(orchestrator_config).await?;
-                            orchestrator.initialize(config.clone()).await?;
-                            orchestrator.start().await?;
-
-                            // Get shared state for gRPC server
-                            let shared_state = orchestrator.node().shared();
-                            let actual_bind_address = orchestrator.bind_address();
-
-                            // Keep orchestrator alive while running server
-                            let _orchestrator = orchestrator;
-
-                            // Start Iroh services
-                            let handle =
-                                start_iroh_services(shared_state, actual_bind_address).await?;
-
-                            // Wait for the service to complete
-                            match handle.await {
-                                Ok(()) => tracing::info!("Services shut down gracefully"),
-                                Err(e) => tracing::error!("Service error: {}", e),
-                            }
-                        }
-                        pid => {
-                            // Parent process - print info and exit
-                            println!("✅ Node {} started in background with PID {}", id, pid);
-                            println!(
-                                "🔍 To check status: cargo run -- cluster status --addr {}",
-                                config.node.bind_address
-                            );
-                            println!("🛑 To stop: kill {}", pid);
-                            return Ok(());
-                        }
                     }
-                } else {
-                    // Run in foreground (normal mode)
-                    // Create and initialize the orchestrator
-                    let mut orchestrator = BlixardOrchestrator::new(orchestrator_config).await?;
-                    orchestrator.initialize(config.clone()).await?;
-                    orchestrator.start().await?;
+                }
+                
+                // Run the server (both daemon and foreground modes end up here)
+                // Create and initialize the orchestrator
+                let mut orchestrator = BlixardOrchestrator::new(orchestrator_config).await?;
+                orchestrator.initialize(config.clone()).await?;
+                orchestrator.start().await?;
 
-                    // Get shared state for gRPC server
-                    let shared_state = orchestrator.node().shared();
-                    let actual_bind_address = orchestrator.bind_address();
+                // Get shared state for gRPC server
+                let shared_state = orchestrator.node().shared();
+                let actual_bind_address = orchestrator.bind_address();
 
-                    // Keep orchestrator alive while running server
-                    let _orchestrator = orchestrator;
+                // Keep orchestrator alive while running server
+                let _orchestrator = orchestrator;
 
-                    // Start Iroh services
-                    let handle = start_iroh_services(shared_state, actual_bind_address).await?;
+                // Start Iroh services
+                let handle = start_iroh_services(shared_state, actual_bind_address).await?;
 
-                    // Wait for the service to complete
-                    match handle.await {
-                        Ok(()) => tracing::info!("Services shut down gracefully"),
-                        Err(e) => tracing::error!("Service error: {}", e),
-                    }
+                // Wait for the service to complete
+                match handle.await {
+                    Ok(()) => tracing::info!("Services shut down gracefully"),
+                    Err(e) => tracing::error!("Service error: {}", e),
                 }
             }
 

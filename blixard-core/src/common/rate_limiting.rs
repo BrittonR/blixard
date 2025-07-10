@@ -160,7 +160,7 @@ impl RateLimiter for InMemoryRateLimiter {
 /// Rate limiting middleware for gRPC requests
 pub struct RateLimitingMiddleware<R: RateLimiter> {
     rate_limiter: Arc<R>,
-    extract_key: Box<dyn Fn(&tonic::Request<()>) -> String + Send + Sync>,
+    extract_key: Box<dyn Fn(&tonic::MetadataMap) -> String + Send + Sync>,
 }
 
 impl<R: RateLimiter> RateLimitingMiddleware<R> {
@@ -168,9 +168,9 @@ impl<R: RateLimiter> RateLimitingMiddleware<R> {
     pub fn new(rate_limiter: Arc<R>) -> Self {
         Self {
             rate_limiter,
-            extract_key: Box::new(|req| {
+            extract_key: Box::new(|metadata| {
                 // Default: extract tenant ID from metadata
-                req.metadata()
+                metadata
                     .get("tenant-id")
                     .and_then(|v| v.to_str().ok())
                     .unwrap_or("default")
@@ -182,7 +182,7 @@ impl<R: RateLimiter> RateLimitingMiddleware<R> {
     /// Set custom key extraction function
     pub fn with_key_extractor<F>(mut self, f: F) -> Self
     where
-        F: Fn(&tonic::Request<()>) -> String + Send + Sync + 'static,
+        F: Fn(&tonic::MetadataMap) -> String + Send + Sync + 'static,
     {
         self.extract_key = Box::new(f);
         self
@@ -194,12 +194,8 @@ impl<R: RateLimiter> RateLimitingMiddleware<R> {
         request: &tonic::Request<T>,
         operation: ApiOperation,
     ) -> Result<String, tonic::Status> {
-        // We need to work around the type system here
-        let empty_req = unsafe {
-            std::mem::transmute::<&tonic::Request<T>, &tonic::Request<()>>(request)
-        };
-        
-        let key = (self.extract_key)(empty_req);
+        // Safely extract metadata without type transmutation
+        let key = (self.extract_key)(request.metadata());
         
         self.rate_limiter
             .check_and_record(&key, &operation)
