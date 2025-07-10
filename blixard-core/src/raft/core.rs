@@ -13,6 +13,9 @@ use super::config_manager::RaftConfigManager;
 use super::messages::{RaftMessage, RaftConfChange, RaftProposal};
 use super::snapshot::RaftSnapshotManager;
 use super::state_machine::RaftStateMachine;
+use super::bootstrap::RaftBootstrapCoordinator;
+use super::event_loop::{EventLoopFactory, EventLoopConfig};
+use super::handlers::HandlerFactory;
 
 use raft::prelude::{Config, Entry, RawNode, Ready};
 use raft::{GetEntriesContext, StateRole};
@@ -231,14 +234,16 @@ impl RaftManager {
     pub async fn run(mut self) -> BlixardResult<()> {
         info!(self.logger, "[RAFT-RUN] Starting RaftManager::run() method");
 
-        // Check if we should bootstrap as a single-node cluster
-        let should_bootstrap = self.should_bootstrap().await;
+        // Create bootstrap coordinator
+        let bootstrap_coordinator = RaftBootstrapCoordinator::new(
+            self.node_id,
+            self.shared_state.clone(),
+            self.logger.clone(),
+        );
 
-        if should_bootstrap {
-            info!(
-                self.logger,
-                "No peers configured and no join address, bootstrapping as single-node cluster"
-            );
+        // Execute bootstrap if needed  
+        let peers = self.config_manager.get_peers().await;
+        if bootstrap_coordinator.should_bootstrap(&peers).await {
             match self.bootstrap_single_node().await {
                 Ok(_) => info!(self.logger, "[RAFT-RUN] Bootstrap succeeded"),
                 Err(e) => {
@@ -246,16 +251,66 @@ impl RaftManager {
                     return Err(e);
                 }
             }
-        } else {
-            let peer_ids: Vec<u64> = self.config_manager.get_peers().await.keys().cloned().collect();
-            let has_join_addr = self.has_join_address();
-            info!(self.logger, "Not bootstrapping"; "peers" => ?peer_ids, "has_join_addr" => has_join_addr);
         }
-
+        
+        // For now, use the legacy run_main_loop approach 
+        // TODO: Complete the event loop refactoring in a future iteration
+        info!(self.logger, "[RAFT-RUN] Using legacy event loop for now");
         self.run_main_loop().await
     }
 
-    /// Main event processing loop
+    /// Static method to process on_ready state
+    async fn process_on_ready(
+        raft_node: &Arc<RwLock<RawNode<RedbRaftStorage>>>,
+        snapshot_manager: &Arc<RaftSnapshotManager>,
+        state_machine: &Arc<RaftStateMachine>,
+        shared_state: &Weak<crate::node_shared::SharedNodeState>,
+        storage: &RedbRaftStorage,
+        logger: &Logger,
+    ) -> BlixardResult<()> {
+        // This is a simplified version - in practice we'd need to move the full on_ready logic here
+        // For now, return Ok to allow compilation
+        info!(logger, "[RAFT-READY] Processing ready state (simplified)");
+        Ok(())
+    }
+
+    /// Run with the new event loop architecture
+    async fn run_with_event_loop(
+        self,
+        raft_node: Arc<RwLock<RawNode<RedbRaftStorage>>>,
+        on_ready_fn: Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>> + Send + Sync>,
+    ) -> BlixardResult<()> {
+        info!(self.logger, "[RAFT-RUN] Starting event loop architecture");
+
+        // Create handlers
+        let (tick_handler, proposal_handler, message_handler, conf_change_handler) = 
+            HandlerFactory::create_handlers(
+                raft_node,
+                Arc::new(self.config_manager),
+                Arc::new(self.snapshot_manager),
+                self.pending_proposals.clone(),
+                on_ready_fn,
+                self.shared_state.clone(),
+                self.logger.clone(),
+            );
+
+        // Create event loop
+        let event_loop = EventLoopFactory::create_standard(
+            self.proposal_rx,
+            self.message_rx,
+            self.conf_change_rx,
+            tick_handler,
+            proposal_handler,
+            message_handler,
+            conf_change_handler,
+            self.logger.clone(),
+        );
+
+        // Run the event loop
+        event_loop.run().await
+    }
+
+    /// Main event processing loop (legacy - will be removed)
     async fn run_main_loop(mut self) -> BlixardResult<()> {
         let mut tick_timer = interval(Duration::from_millis(100));
         let mut tick_count = 0u64;

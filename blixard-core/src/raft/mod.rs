@@ -16,6 +16,9 @@ pub mod proposals;
 pub mod config_manager;
 pub mod snapshot;
 pub mod messages;
+pub mod bootstrap;
+pub mod event_loop;
+pub mod handlers;
 
 // Re-export commonly used types
 pub use self::core::RaftManager;
