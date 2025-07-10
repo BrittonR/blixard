@@ -14,6 +14,7 @@ use crate::vm_backend::VmBackend;
 use crate::vm_network_isolation::{
     check_firewall_privileges, NetworkIsolationConfig, NetworkIsolationManager,
 };
+use crate::abstractions::command::TokioCommandExecutor;
 
 /// A VM backend wrapper that adds network isolation
 pub struct NetworkIsolatedBackend {
@@ -32,7 +33,8 @@ impl NetworkIsolatedBackend {
         isolation_config: NetworkIsolationConfig,
     ) -> BlixardResult<Self> {
         // Check if we have privileges for firewall management
-        let enabled = match check_firewall_privileges() {
+        let command_executor = TokioCommandExecutor::new();
+        let enabled = match check_firewall_privileges(&command_executor).await {
             Ok(()) => {
                 info!("Network isolation enabled - sufficient privileges detected");
                 true
