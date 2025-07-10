@@ -126,6 +126,19 @@ pub enum BlixardError {
     #[error("Resource exhausted: {resource}")]
     ResourceExhausted { resource: String },
 
+    #[error("Resource unavailable: {resource_type} - {message}")]
+    ResourceUnavailable { 
+        resource_type: String,
+        message: String 
+    },
+
+    #[error("Lock poisoned during {operation}")]
+    LockPoisoned { 
+        operation: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
     #[error("Already exists: {resource}")]
     AlreadyExists { resource: String },
 

@@ -77,8 +77,12 @@ impl IpAddressFactory {
     }
     
     /// Find the next available IP in the allocation range
-    fn find_next_available_ip(&self) -> Option<IpAddr> {
-        let allocated = self.allocated_ips.read().unwrap();
+    fn find_next_available_ip(&self) -> crate::error::BlixardResult<Option<IpAddr>> {
+        let allocated = self.allocated_ips.read()
+            .map_err(|e| crate::error::BlixardError::LockPoisoned {
+                operation: "read allocated IPs".to_string(),
+                source: Box::new(e),
+            })?;
         
         match (self.config.allocation_start, self.config.allocation_end) {
             (IpAddr::V4(start), IpAddr::V4(end)) => {
@@ -88,10 +92,10 @@ impl IpAddressFactory {
                 for i in start_u32..=end_u32 {
                     let ip = IpAddr::V4(Ipv4Addr::from(i));
                     if self.is_ip_available(&ip, &allocated) {
-                        return Some(ip);
+                        return Ok(Some(ip));
                     }
                 }
-                None
+                Ok(None)
             }
             (IpAddr::V6(start), IpAddr::V6(end)) => {
                 let start_u128 = u128::from(start);
@@ -102,12 +106,12 @@ impl IpAddressFactory {
                 for i in 0..max_iterations.min(end_u128 - start_u128 + 1) {
                     let ip = IpAddr::V6(Ipv6Addr::from(start_u128 + i));
                     if self.is_ip_available(&ip, &allocated) {
-                        return Some(ip);
+                        return Ok(Some(ip));
                     }
                 }
-                None
+                Ok(None)
             }
-            _ => None,
+            _ => Ok(None),
         }
     }
     

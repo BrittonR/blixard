@@ -77,18 +77,27 @@ pub struct PooledResource<T: PoolableResource> {
 
 impl<T: PoolableResource> PooledResource<T> {
     /// Get a reference to the resource
-    pub fn get(&self) -> &T {
-        self.resource.as_ref().expect("Resource already taken")
+    pub fn get(&self) -> crate::error::BlixardResult<&T> {
+        self.resource.as_ref().ok_or_else(|| crate::error::BlixardError::ResourceUnavailable {
+            resource_type: std::any::type_name::<T>().to_string(),
+            message: "Resource already taken from pool".to_string(),
+        })
     }
     
     /// Get a mutable reference to the resource
-    pub fn get_mut(&mut self) -> &mut T {
-        self.resource.as_mut().expect("Resource already taken")
+    pub fn get_mut(&mut self) -> crate::error::BlixardResult<&mut T> {
+        self.resource.as_mut().ok_or_else(|| crate::error::BlixardError::ResourceUnavailable {
+            resource_type: std::any::type_name::<T>().to_string(),
+            message: "Resource already taken from pool".to_string(),
+        })
     }
     
     /// Take ownership of the resource (won't be returned to pool)
-    pub fn take(mut self) -> T {
-        self.resource.take().expect("Resource already taken")
+    pub fn take(mut self) -> crate::error::BlixardResult<T> {
+        self.resource.take().ok_or_else(|| crate::error::BlixardError::ResourceUnavailable {
+            resource_type: std::any::type_name::<T>().to_string(),
+            message: "Resource already taken from pool".to_string(),
+        })
     }
 }
 
@@ -108,13 +117,21 @@ impl<T: PoolableResource> std::ops::Deref for PooledResource<T> {
     type Target = T;
     
     fn deref(&self) -> &Self::Target {
-        self.get()
+        // For Deref, we must return a reference, so we'll use unwrap with clear message
+        // Users should prefer the safe get() method
+        self.resource.as_ref().unwrap_or_else(|| {
+            panic!("PooledResource accessed after being taken. Use get() method for safe access.")
+        })
     }
 }
 
 impl<T: PoolableResource> std::ops::DerefMut for PooledResource<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.get_mut()
+        // For DerefMut, we must return a reference, so we'll use unwrap with clear message
+        // Users should prefer the safe get_mut() method
+        self.resource.as_mut().unwrap_or_else(|| {
+            panic!("PooledResource accessed after being taken. Use get_mut() method for safe access.")
+        })
     }
 }
 

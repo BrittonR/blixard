@@ -446,8 +446,29 @@ impl AuthManager {
 impl SecretsManager {
     /// Create a new secrets manager
     fn new() -> BlixardResult<Self> {
-        // In production, this key should come from a secure source like HSM/KMS
-        let master_key = [0u8; 32]; // Placeholder - replace with proper key derivation
+        // Generate secure master key from environment or derive from password
+        let master_key = match std::env::var("BLIXARD_MASTER_KEY") {
+            Ok(key_hex) => {
+                let bytes = hex::decode(key_hex)
+                    .map_err(|_| BlixardError::Security { 
+                        message: "Invalid master key format - must be 64 hex characters".to_string() 
+                    })?;
+                if bytes.len() != 32 {
+                    return Err(BlixardError::Security { 
+                        message: "Master key must be exactly 32 bytes (64 hex characters)".to_string() 
+                    });
+                }
+                let mut key = [0u8; 32];
+                key.copy_from_slice(&bytes);
+                key
+            }
+            Err(_) => {
+                // For production, require explicit key
+                return Err(BlixardError::Security {
+                    message: "BLIXARD_MASTER_KEY environment variable required for secure secrets storage. Generate with: openssl rand -hex 32".to_string()
+                });
+            }
+        };
 
         Ok(Self {
             secrets: Arc::new(RwLock::new(HashMap::new())),

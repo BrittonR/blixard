@@ -237,7 +237,11 @@ impl BlixardOrchestrator {
         let data_dir = std::path::Path::new(&self.node_config.data_dir);
         let registry_path = data_dir.join(format!("node-{}-registry.json", node_id));
 
-        crate::node_discovery::save_node_registry(registry_path.to_str().unwrap(), &entry).await?;
+        let registry_path_str = registry_path.to_str()
+            .ok_or_else(|| blixard_core::error::BlixardError::InvalidConfiguration {
+                message: format!("Registry path contains invalid Unicode characters: {}", registry_path.display()),
+            })?;
+        crate::node_discovery::save_node_registry(registry_path_str, &entry).await?;
 
         tracing::info!("Node registry written to: {}", registry_path.display());
         Ok(())

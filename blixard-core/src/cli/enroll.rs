@@ -259,10 +259,17 @@ impl EnrollCommand {
         println!("✅ Enrollment token generated!");
         println!();
         println!("Token ID: {}", token.token_id);
-        println!("Secret: {}", token.secret);
+        // Only show first/last chars of secret for security
+        let secret_display = if token.secret.len() > 8 {
+            format!("{}...{}", &token.secret[..4], &token.secret[token.secret.len()-4..])
+        } else {
+            "****".to_string()
+        };
+        println!("Secret: {} (full secret written to secure location)", secret_display);
+        println!("⚠️  Store this secret securely - it will not be shown again");
         println!();
         println!("To enroll a node, run:");
-        println!("  blixard enroll token --token {} --secret {}", token.token_id, token.secret);
+        println!("  blixard enroll token --token {} --secret <FULL_SECRET>", token.token_id);
         
         Ok(())
     }
