@@ -9,9 +9,12 @@ pub mod builder;
 pub mod factory;
 pub mod error_context;
 pub mod resource_pool;
+pub mod retry;
 
 #[cfg(test)]
 pub mod resource_pool_examples;
+#[cfg(test)]
+pub mod retry_migration_example;
 
 pub use lifecycle::{
     LifecycleManager, BackgroundTaskManager, LifecycleState, HealthStatus, 
@@ -23,4 +26,7 @@ pub use error_context::ErrorContext;
 pub use resource_pool::{
     ResourcePool, PoolableResource, ResourceFactory, PooledResource, 
     PoolConfig, PoolStats
+};
+pub use retry::{
+    retry, RetryConfig, RetryBuilder, BackoffStrategy, Retryable
 };
