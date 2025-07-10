@@ -17,6 +17,7 @@ pub mod iroh_status_service;
 pub mod iroh_vm_service;
 pub mod metrics;
 pub mod raft_transport_adapter;
+pub mod service_builder;
 pub mod services;
 
 // Iroh security modules
