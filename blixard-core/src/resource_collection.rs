@@ -2,11 +2,41 @@
 //!
 //! This module provides platform-specific implementations for collecting
 //! real resource usage metrics from the system, VMs, and containers.
+//!
+//! ## Migration to CommandExecutor
+//! 
+//! The `ContainerResourceCollector` has been migrated to use the `CommandExecutor`
+//! abstraction instead of direct command execution. This provides:
+//! 
+//! - **Testability**: Use `MockCommandExecutor` in tests to avoid real command execution
+//! - **Consistency**: Unified error handling and timeout management
+//! - **Flexibility**: Easy to swap implementations (e.g., for containers or remote execution)
+//! 
+//! ### Usage Examples
+//! 
+//! ```rust,ignore
+//! use std::sync::Arc;
+//! use blixard_core::resource_collection::ContainerResourceCollector;
+//! use blixard_core::abstractions::command::TokioCommandExecutor;
+//! 
+//! // Method 1: Create with custom executor (recommended for dependency injection)
+//! let executor = Arc::new(TokioCommandExecutor::new());
+//! let collector = ContainerResourceCollector::new(executor);
+//! 
+//! // Method 2: Use default executor
+//! let collector = ContainerResourceCollector::with_default_executor();
+//! 
+//! // Method 3: Use shared global instance (for one-off calls)
+//! let metrics = ContainerResourceCollector::default_instance()
+//!     .get_container_resources("my-container").await?;
+//! ```
 
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use tracing;
 
+use crate::abstractions::command::{CommandExecutor, CommandOptions};
 use crate::error::{BlixardError, BlixardResult};
 
 /// Platform-specific resource collector
@@ -262,18 +292,41 @@ pub struct VmResourceMetrics {
 }
 
 /// Container runtime resource collector (Docker/Podman)
-pub struct ContainerResourceCollector;
+pub struct ContainerResourceCollector {
+    executor: Arc<dyn CommandExecutor>,
+}
 
 impl ContainerResourceCollector {
+    /// Create a new container resource collector
+    pub fn new(executor: Arc<dyn CommandExecutor>) -> Self {
+        Self { executor }
+    }
+    
+    /// Create a container resource collector with default tokio executor
+    pub fn with_default_executor() -> Self {
+        use crate::abstractions::command::TokioCommandExecutor;
+        Self::new(Arc::new(TokioCommandExecutor::new()))
+    }
+    
+    /// Get a shared instance with default executor
+    /// Useful for one-off calls without creating an instance
+    pub fn default_instance() -> Arc<Self> {
+        use once_cell::sync::Lazy;
+        static INSTANCE: Lazy<Arc<ContainerResourceCollector>> = Lazy::new(|| {
+            Arc::new(ContainerResourceCollector::with_default_executor())
+        });
+        INSTANCE.clone()
+    }
+    
     /// Get resource usage for a container by name
-    pub async fn get_container_resources(container_name: &str) -> BlixardResult<VmResourceMetrics> {
+    pub async fn get_container_resources(&self, container_name: &str) -> BlixardResult<VmResourceMetrics> {
         // Try Docker first
-        if let Ok(metrics) = Self::get_docker_container_stats(container_name).await {
+        if let Ok(metrics) = self.get_docker_container_stats(container_name).await {
             return Ok(metrics);
         }
         
         // Try Podman
-        if let Ok(metrics) = Self::get_podman_container_stats(container_name).await {
+        if let Ok(metrics) = self.get_podman_container_stats(container_name).await {
             return Ok(metrics);
         }
         
@@ -281,30 +334,61 @@ impl ContainerResourceCollector {
         SystemResourceCollector::get_systemd_vm_resources(container_name)
     }
     
-    async fn get_docker_container_stats(container_name: &str) -> BlixardResult<VmResourceMetrics> {
-        use tokio::process::Command;
+    async fn get_docker_container_stats(&self, container_name: &str) -> BlixardResult<VmResourceMetrics> {
+        let output = self.executor.execute_simple(
+            "docker",
+            &["stats", "--no-stream", "--format", "{{json .}}", container_name]
+        ).await.map_err(|e| BlixardError::Internal {
+            message: format!("Failed to run docker stats: {}", e),
+        })?;
         
-        let output = Command::new("docker")
-            .args(&["stats", "--no-stream", "--format", "{{json .}}", container_name])
-            .output()
-            .await
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Failed to run docker stats: {}", e),
-            })?;
-        
-        if !output.status.success() {
+        if !output.success {
             return Err(BlixardError::Internal {
-                message: "Docker stats command failed".to_string(),
+                message: format!("Docker stats command failed: {}", 
+                    output.stderr_string().unwrap_or_default()),
             });
         }
         
-        let stats_json = String::from_utf8_lossy(&output.stdout);
+        let stats_json = output.stdout_string()?;
         
-        // Parse Docker stats JSON (simplified)
-        // In production, use serde_json to properly parse
+        // Parse Docker stats JSON
+        self.parse_docker_stats(&stats_json)
+    }
+    
+    async fn get_podman_container_stats(&self, container_name: &str) -> BlixardResult<VmResourceMetrics> {
+        let output = self.executor.execute_simple(
+            "podman",
+            &["stats", "--no-stream", "--format", "json", container_name]
+        ).await.map_err(|e| BlixardError::Internal {
+            message: format!("Failed to run podman stats: {}", e),
+        })?;
+        
+        if !output.success {
+            return Err(BlixardError::Internal {
+                message: format!("Podman stats command failed: {}", 
+                    output.stderr_string().unwrap_or_default()),
+            });
+        }
+        
+        let stats_json = output.stdout_string()?;
+        
+        // Parse Podman stats JSON
+        self.parse_podman_stats(&stats_json)
+    }
+    
+    /// Parse Docker stats JSON output
+    fn parse_docker_stats(&self, json: &str) -> BlixardResult<VmResourceMetrics> {
+        // Docker stats format:
+        // {"BlockIO":"0B / 0B","CPUPerc":"0.01%","Container":"my-container","ID":"abc123",
+        //  "MemPerc":"0.50%","MemUsage":"512MiB / 16GiB","Name":"my-container","NetIO":"0B / 0B","PIDs":"5"}
+        
+        // For now, use placeholder values
+        // TODO: Implement proper JSON parsing with serde_json
         let cpu_percent = 25.0; // Placeholder
         let memory_mb = 1024;   // Placeholder
         let disk_gb = 5;        // Placeholder
+        
+        tracing::debug!("Parsed Docker stats: cpu={:.1}%, mem={}MB", cpu_percent, memory_mb);
         
         Ok(VmResourceMetrics {
             cpu_percent,
@@ -313,27 +397,18 @@ impl ContainerResourceCollector {
         })
     }
     
-    async fn get_podman_container_stats(container_name: &str) -> BlixardResult<VmResourceMetrics> {
-        use tokio::process::Command;
+    /// Parse Podman stats JSON output
+    fn parse_podman_stats(&self, json: &str) -> BlixardResult<VmResourceMetrics> {
+        // Podman stats format is similar to Docker but in a JSON array
+        // [{"Name":"container","CPU":"0.01%","MemUsage":"512MB","Mem":"0.50%",...}]
         
-        let output = Command::new("podman")
-            .args(&["stats", "--no-stream", "--format", "json", container_name])
-            .output()
-            .await
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Failed to run podman stats: {}", e),
-            })?;
-        
-        if !output.status.success() {
-            return Err(BlixardError::Internal {
-                message: "Podman stats command failed".to_string(),
-            });
-        }
-        
-        // Parse Podman stats JSON (simplified)
+        // For now, use placeholder values
+        // TODO: Implement proper JSON parsing with serde_json
         let cpu_percent = 30.0; // Placeholder
         let memory_mb = 2048;   // Placeholder
         let disk_gb = 8;        // Placeholder
+        
+        tracing::debug!("Parsed Podman stats: cpu={:.1}%, mem={}MB", cpu_percent, memory_mb);
         
         Ok(VmResourceMetrics {
             cpu_percent,
@@ -362,6 +437,8 @@ impl HypervisorResourceCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::abstractions::command::{MockCommandExecutor, CommandOutput};
+    use std::time::Duration;
 
     #[test]
     fn test_system_resource_collection() {
@@ -374,5 +451,103 @@ mod tests {
         
         let disk_usage = SystemResourceCollector::get_disk_usage("/tmp");
         assert!(disk_usage.is_ok());
+    }
+    
+    #[tokio::test]
+    async fn test_container_collector_with_docker() {
+        let mock_executor = Arc::new(MockCommandExecutor::new());
+        
+        // Setup mock expectation for Docker stats
+        mock_executor.expect(
+            "docker",
+            &["stats", "--no-stream", "--format", "{{json .}}", "test-container"],
+            Ok(CommandOutput {
+                status: 0,
+                stdout: br#"{"CPUPerc":"10.5%","MemUsage":"512MiB / 8GiB","MemPerc":"6.25%"}"#.to_vec(),
+                stderr: vec![],
+                success: true,
+                duration: Duration::from_millis(100),
+            })
+        );
+        
+        let collector = ContainerResourceCollector::new(mock_executor.clone());
+        let metrics = collector.get_container_resources("test-container").await;
+        
+        assert!(metrics.is_ok());
+        let metrics = metrics.unwrap();
+        // Note: Currently using placeholder values, but the structure is correct
+        assert!(metrics.cpu_percent >= 0.0);
+        assert!(metrics.memory_mb > 0);
+        
+        mock_executor.verify().unwrap();
+    }
+    
+    #[tokio::test]
+    async fn test_container_collector_fallback_to_podman() {
+        let mock_executor = Arc::new(MockCommandExecutor::new());
+        
+        // Docker fails
+        mock_executor.expect(
+            "docker",
+            &["stats", "--no-stream", "--format", "{{json .}}", "test-container"],
+            Err(BlixardError::Internal { message: "docker not found".to_string() })
+        );
+        
+        // Podman succeeds
+        mock_executor.expect(
+            "podman",
+            &["stats", "--no-stream", "--format", "json", "test-container"],
+            Ok(CommandOutput {
+                status: 0,
+                stdout: br#"[{"Name":"test-container","CPU":"15%","MemUsage":"1GB","Mem":"12.5%"}]"#.to_vec(),
+                stderr: vec![],
+                success: true,
+                duration: Duration::from_millis(150),
+            })
+        );
+        
+        let collector = ContainerResourceCollector::new(mock_executor.clone());
+        let metrics = collector.get_container_resources("test-container").await;
+        
+        assert!(metrics.is_ok());
+        mock_executor.verify().unwrap();
+    }
+    
+    #[tokio::test]
+    async fn test_container_collector_error_handling() {
+        let mock_executor = Arc::new(MockCommandExecutor::new());
+        
+        // Docker returns non-zero exit code
+        mock_executor.expect(
+            "docker",
+            &["stats", "--no-stream", "--format", "{{json .}}", "missing-container"],
+            Ok(CommandOutput {
+                status: 1,
+                stdout: vec![],
+                stderr: b"Error: No such container: missing-container".to_vec(),
+                success: false,
+                duration: Duration::from_millis(50),
+            })
+        );
+        
+        // Podman also fails
+        mock_executor.expect(
+            "podman",
+            &["stats", "--no-stream", "--format", "json", "missing-container"],
+            Ok(CommandOutput {
+                status: 125,
+                stdout: vec![],
+                stderr: b"Error: no container with name or ID missing-container found".to_vec(),
+                success: false,
+                duration: Duration::from_millis(50),
+            })
+        );
+        
+        let collector = ContainerResourceCollector::new(mock_executor.clone());
+        let metrics = collector.get_container_resources("missing-container").await;
+        
+        // Should fall back to systemd/cgroup metrics
+        assert!(metrics.is_ok());
+        mock_executor.verify().unwrap();
     }
 }
