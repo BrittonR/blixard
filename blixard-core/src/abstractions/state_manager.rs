@@ -5,7 +5,8 @@
 
 use crate::{
     error::BlixardResult,
-    types::{NodeConfig, PeerInfo, VmState},
+    node_shared::PeerInfo,
+    types::{NodeConfig, VmState},
 };
 use async_trait::async_trait;
 use redb::Database;
@@ -238,7 +239,7 @@ impl PeerManager for MockStateManager {
     
     async fn update_peer_connection_status(&self, peer_id: u64, connected: bool) -> BlixardResult<()> {
         if let Some(peer_info) = self.peers.write().await.get_mut(&peer_id) {
-            peer_info.connected = connected;
+            peer_info.is_connected = connected;
         }
         Ok(())
     }
@@ -248,7 +249,7 @@ impl PeerManager for MockStateManager {
             .read()
             .await
             .iter()
-            .filter(|(_, peer)| peer.connected)
+            .filter(|(_, peer)| peer.is_connected)
             .map(|(id, _)| *id)
             .collect()
     }
@@ -334,9 +335,11 @@ mod tests {
         
         // Test peer management
         let peer_info = PeerInfo {
+            id: 2,
             address: "127.0.0.1:7002".to_string(),
-            connected: true,
-            last_seen: chrono::Utc::now(),
+            is_connected: true,
+            p2p_node_id: None,
+            p2p_addresses: vec![],
         };
         
         state_manager.add_peer(2, peer_info.clone()).await.unwrap();

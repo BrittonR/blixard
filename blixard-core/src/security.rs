@@ -10,6 +10,7 @@
 use crate::cedar_authz::CedarAuthz;
 use crate::config_v2::{AuthConfig, SecurityConfig, TlsConfig};
 use crate::error::{BlixardError, BlixardResult};
+use crate::common::file_io::{read_config_file, write_config_file, file_exists};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -297,7 +298,7 @@ impl AuthManager {
 
     /// Load tokens from a file
     async fn load_tokens_from_file(&self, token_file: &Path) -> BlixardResult<()> {
-        if !token_file.exists() {
+        if !file_exists(token_file).await {
             warn!(
                 "Token file {:?} does not exist, creating empty token store",
                 token_file
@@ -305,17 +306,14 @@ impl AuthManager {
             return Ok(());
         }
 
-        let content =
-            tokio::fs::read_to_string(token_file)
-                .await
-                .map_err(|e| BlixardError::Security {
-                    message: format!("Failed to read token file {:?}: {}", token_file, e),
+        let tokens: HashMap<String, TokenInfo> = 
+            read_config_file(token_file, "tokens").await
+                .map_err(|e| match e {
+                    BlixardError::ConfigError(msg) => BlixardError::Security {
+                        message: format!("Failed to load token file: {}", msg),
+                    },
+                    other => other,
                 })?;
-
-        let tokens: HashMap<String, TokenInfo> =
-            serde_json::from_str(&content).map_err(|e| BlixardError::Security {
-                message: format!("Failed to parse token file: {}", e),
-            })?;
 
         let mut valid_tokens = self.valid_tokens.write().await;
         *valid_tokens = tokens;

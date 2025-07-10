@@ -6,6 +6,7 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
+    common::file_io::{read_config_file, write_config_file, file_exists},
     transport::iroh_middleware::NodeIdentityRegistry,
 };
 use iroh::NodeId;
@@ -109,12 +110,9 @@ impl IdentityEnrollmentManager {
     /// Load enrollment state from disk
     pub async fn load_state(&self) -> BlixardResult<()> {
         if let Some(ref path) = self.state_path {
-            if path.exists() {
-                let data = tokio::fs::read_to_string(path).await
-                    .map_err(|e| BlixardError::IoError(e))?;
-                
-                let tokens: HashMap<String, EnrollmentToken> = serde_json::from_str(&data)
-                    .map_err(|e| BlixardError::JsonError(e))?;
+            if file_exists(path).await {
+                let tokens: HashMap<String, EnrollmentToken> = 
+                    read_config_file(path, "enrollment state").await?;
                 
                 let mut token_store = self.tokens.write().await;
                 *token_store = tokens;
@@ -129,12 +127,7 @@ impl IdentityEnrollmentManager {
     pub async fn save_state(&self) -> BlixardResult<()> {
         if let Some(ref path) = self.state_path {
             let tokens = self.tokens.read().await;
-            let data = serde_json::to_string_pretty(&*tokens)
-                .map_err(|e| BlixardError::JsonError(e))?;
-            
-            tokio::fs::write(path, data).await
-                .map_err(|e| BlixardError::IoError(e))?;
-            
+            write_config_file(path, &*tokens, "enrollment state", true).await?;
             debug!("Saved enrollment state to disk");
         }
         Ok(())

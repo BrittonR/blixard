@@ -13,6 +13,10 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
 use crate::error::{BlixardError, BlixardResult};
+use crate::common::file_io::{
+    write_binary_file_with_context, write_config_file,
+    read_binary_file_with_context, read_config_file
+};
 use crate::raft_storage::{RedbRaftStorage, SnapshotData};
 use crate::types::VmState;
 use tracing::{info, warn, error};
@@ -174,24 +178,26 @@ impl BackupStorage for LocalBackupStorage {
     async fn store(&self, backup_id: &str, data: &[u8], metadata: &BackupMetadata) -> BlixardResult<()> {
         // Write backup data
         let backup_path = self.backup_path(backup_id);
-        tokio::fs::write(&backup_path, data).await
-            .map_err(|e| BlixardError::Storage {
-                operation: format!("write backup {}", backup_id),
-                source: Box::new(e),
+        write_binary_file_with_context(&backup_path, data, &format!("backup {}", backup_id))
+            .await
+            .map_err(|e| match e {
+                BlixardError::ConfigError(msg) => BlixardError::Storage {
+                    operation: format!("write backup {}", backup_id),
+                    source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, msg)),
+                },
+                other => other,
             })?;
         
         // Write metadata
-        let metadata_json = serde_json::to_vec_pretty(metadata)
-            .map_err(|e| BlixardError::Serialization {
-                operation: "serialize backup metadata".to_string(),
-                source: Box::new(e),
-            })?;
-        
         let metadata_path = self.metadata_path(backup_id);
-        tokio::fs::write(&metadata_path, metadata_json).await
-            .map_err(|e| BlixardError::Storage {
-                operation: format!("write backup metadata {}", backup_id),
-                source: Box::new(e),
+        write_config_file(&metadata_path, metadata, "backup metadata", true)
+            .await
+            .map_err(|e| match e {
+                BlixardError::ConfigError(msg) => BlixardError::Storage {
+                    operation: format!("write backup metadata {}", backup_id),
+                    source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, msg)),
+                },
+                other => other,
             })?;
         
         Ok(())
@@ -200,24 +206,26 @@ impl BackupStorage for LocalBackupStorage {
     async fn retrieve(&self, backup_id: &str) -> BlixardResult<(Vec<u8>, BackupMetadata)> {
         // Read backup data
         let backup_path = self.backup_path(backup_id);
-        let data = tokio::fs::read(&backup_path).await
-            .map_err(|e| BlixardError::Storage {
-                operation: format!("read backup {}", backup_id),
-                source: Box::new(e),
+        let data = read_binary_file_with_context(&backup_path, &format!("backup {}", backup_id))
+            .await
+            .map_err(|e| match e {
+                BlixardError::ConfigError(msg) => BlixardError::Storage {
+                    operation: format!("read backup {}", backup_id),
+                    source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, msg)),
+                },
+                other => other,
             })?;
         
         // Read metadata
         let metadata_path = self.metadata_path(backup_id);
-        let metadata_json = tokio::fs::read(&metadata_path).await
-            .map_err(|e| BlixardError::Storage {
-                operation: format!("read backup metadata {}", backup_id),
-                source: Box::new(e),
-            })?;
-        
-        let metadata: BackupMetadata = serde_json::from_slice(&metadata_json)
-            .map_err(|e| BlixardError::Serialization {
-                operation: "deserialize backup metadata".to_string(),
-                source: Box::new(e),
+        let metadata: BackupMetadata = read_config_file(&metadata_path, "backup metadata")
+            .await
+            .map_err(|e| match e {
+                BlixardError::ConfigError(msg) => BlixardError::Storage {
+                    operation: format!("read backup metadata {}", backup_id),
+                    source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, msg)),
+                },
+                other => other,
             })?;
         
         Ok((data, metadata))

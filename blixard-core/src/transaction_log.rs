@@ -264,18 +264,13 @@ impl TransactionLogReader {
         for log_path in log_files {
             let file = File::open(&log_path)
                 .await
-                .map_err(|e| BlixardError::Storage {
-                    operation: format!("open transaction log {:?}", log_path),
-                    source: Box::new(e),
-                })?;
+                .file_context("open transaction log", &log_path)?;
 
             let reader = BufReader::new(file);
             let mut lines = reader.lines();
 
-            while let Some(line) = lines.next_line().await.map_err(|e| BlixardError::Storage {
-                operation: "read transaction log line".to_string(),
-                source: Box::new(e),
-            })? {
+            while let Some(line) = lines.next_line().await
+                .storage_context("read transaction log line")? {
                 if line.trim().is_empty() {
                     continue;
                 }
@@ -311,18 +306,13 @@ impl TransactionLogReader {
         for log_path in log_files {
             let file = File::open(&log_path)
                 .await
-                .map_err(|e| BlixardError::Storage {
-                    operation: format!("open transaction log {:?}", log_path),
-                    source: Box::new(e),
-                })?;
+                .file_context("open transaction log", &log_path)?;
 
             let reader = BufReader::new(file);
             let mut lines = reader.lines();
 
-            while let Some(line) = lines.next_line().await.map_err(|e| BlixardError::Storage {
-                operation: "read transaction log line".to_string(),
-                source: Box::new(e),
-            })? {
+            while let Some(line) = lines.next_line().await
+                .storage_context("read transaction log line")? {
                 if line.trim().is_empty() {
                     continue;
                 }
@@ -350,18 +340,12 @@ impl TransactionLogReader {
         let mut entries =
             tokio::fs::read_dir(&self.log_dir)
                 .await
-                .map_err(|e| BlixardError::Storage {
-                    operation: "read transaction log directory".to_string(),
-                    source: Box::new(e),
-                })?;
+                .file_context("read transaction log directory", &self.log_dir)?;
 
         while let Some(entry) = entries
             .next_entry()
             .await
-            .map_err(|e| BlixardError::Storage {
-                operation: "read directory entry".to_string(),
-                source: Box::new(e),
-            })?
+            .storage_context("read directory entry")?
         {
             let path = entry.path();
             if let Some(name) = path.file_name().and_then(|s| s.to_str()) {

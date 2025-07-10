@@ -16,6 +16,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, info};
 
 use crate::error::{BlixardError, BlixardResult};
+use crate::common::file_io::{read_text_file_with_context, read_files_with_extension};
 
 /// Cedar authorization engine
 #[derive(Debug)]
@@ -34,9 +35,7 @@ impl CedarAuthz {
     /// Create a new Cedar authorization engine
     pub async fn new(schema_path: &Path, policies_dir: &Path) -> BlixardResult<Self> {
         // Load schema
-        let schema_str = tokio::fs::read_to_string(schema_path).await.map_err(|e| {
-            BlixardError::ConfigError(format!("Failed to read Cedar schema: {}", e))
-        })?;
+        let schema_str = read_text_file_with_context(schema_path, "Cedar schema").await?;
 
         // In Cedar 3.x, schema loading is done differently
         // For now, we'll store the schema as an option and use basic validation
@@ -64,39 +63,25 @@ impl CedarAuthz {
         let mut policy_set = PolicySet::new();
 
         // Read all .cedar files in the directory
-        let mut entries = tokio::fs::read_dir(policies_dir).await.map_err(|e| {
-            BlixardError::ConfigError(format!("Failed to read policies directory: {}", e))
-        })?;
+        let cedar_files = read_files_with_extension(policies_dir, "cedar", "Cedar policies").await?;
+        
+        for (path, policy_text) in cedar_files {
+            // Parse policies from text
+            let parsed_policies = PolicySet::from_str(&policy_text).map_err(|e| {
+                BlixardError::ConfigError(format!(
+                    "Failed to parse policy file {:?}: {}",
+                    path, e
+                ))
+            })?;
 
-        while let Some(entry) = entries.next_entry().await.map_err(|e| {
-            BlixardError::ConfigError(format!("Failed to read directory entry: {}", e))
-        })? {
-            let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("cedar") {
-                let policy_text = tokio::fs::read_to_string(&path).await.map_err(|e| {
-                    BlixardError::ConfigError(format!(
-                        "Failed to read policy file {:?}: {}",
-                        path, e
-                    ))
+            // Add policies to set
+            for policy in parsed_policies.policies() {
+                policy_set.add(policy.clone()).map_err(|e| {
+                    BlixardError::ConfigError(format!("Failed to add policy: {}", e))
                 })?;
-
-                // Parse policies from text
-                let parsed_policies = PolicySet::from_str(&policy_text).map_err(|e| {
-                    BlixardError::ConfigError(format!(
-                        "Failed to parse policy file {:?}: {}",
-                        path, e
-                    ))
-                })?;
-
-                // Add policies to set
-                for policy in parsed_policies.policies() {
-                    policy_set.add(policy.clone()).map_err(|e| {
-                        BlixardError::ConfigError(format!("Failed to add policy: {}", e))
-                    })?;
-                }
-
-                info!("Loaded Cedar policies from {:?}", path);
             }
+
+            info!("Loaded Cedar policies from {:?}", path);
         }
 
         Ok(policy_set)

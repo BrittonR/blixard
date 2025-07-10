@@ -4,6 +4,7 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
+    common::file_io::read_config_file,
     transport::{
         iroh_middleware::NodeIdentityRegistry,
         iroh_identity_enrollment::{
@@ -383,9 +384,5 @@ async fn get_local_node_id() -> BlixardResult<NodeId> {
 
 /// Load certificate configuration from file
 async fn load_cert_config(path: PathBuf) -> BlixardResult<CertificateEnrollmentConfig> {
-    let content = tokio::fs::read_to_string(&path).await
-        .map_err(|e| BlixardError::IoError(e))?;
-    
-    serde_json::from_str(&content)
-        .map_err(|e| BlixardError::JsonError(e))
+    read_config_file(&path, "certificate enrollment").await
 }

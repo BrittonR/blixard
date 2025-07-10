@@ -77,6 +77,7 @@
 //! ```
 
 use crate::error::{BlixardError, BlixardResult};
+use crate::common::file_io::read_config_file;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1060,12 +1061,21 @@ impl Default for MdnsDiscoveryConfig {
 impl Config {
     /// Load configuration from a TOML file
     pub fn from_file<P: AsRef<Path>>(path: P) -> BlixardResult<Self> {
-        let contents = fs::read_to_string(path.as_ref())
-            .map_err(|e| BlixardError::ConfigError(format!("Failed to read config file: {}", e)))?;
+        // Use blocking read since this is called from sync context
+        let runtime = tokio::runtime::Handle::try_current()
+            .map_err(|_| BlixardError::ConfigError("No tokio runtime available".to_string()))?;
+        
+        let config = runtime.block_on(async {
+            Self::from_file_async(path).await
+        })?;
 
-        let mut config: Config = toml::from_str(&contents)
-            .map_err(|e| BlixardError::ConfigError(format!("Failed to parse TOML: {}", e)))?;
-
+        Ok(config)
+    }
+    
+    /// Load configuration from a TOML file (async version)
+    pub async fn from_file_async<P: AsRef<Path>>(path: P) -> BlixardResult<Self> {
+        let mut config: Config = read_config_file(path, "blixard").await?;
+        
         // Apply environment variable overrides
         config.apply_env_overrides();
 
