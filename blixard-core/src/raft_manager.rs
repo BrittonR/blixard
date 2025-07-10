@@ -14,7 +14,7 @@ use crate::config_global;
 use crate::error::{BlixardError, BlixardResult};
 use crate::common::error_context::StorageContext;
 use crate::metrics_otel::{attributes, metrics, Timer};
-use crate::storage::{
+use crate::raft_storage::{
     RedbRaftStorage, SnapshotData, CLUSTER_STATE_TABLE, TASK_ASSIGNMENT_TABLE, TASK_RESULT_TABLE,
     TASK_TABLE, VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE,
 };
@@ -411,7 +411,7 @@ impl RaftStateMachine {
                 return Ok(());
             }
             ProposalData::ReleaseVmIps { vm_id } => {
-                use crate::storage::{VM_IP_MAPPING_TABLE};
+                use crate::raft_storage::{VM_IP_MAPPING_TABLE};
                 
                 // Get VM's allocated IPs
                 let mapping_table = write_txn.open_table(VM_IP_MAPPING_TABLE)?;
@@ -466,7 +466,7 @@ impl RaftStateMachine {
         node_id: u64,
         task: &TaskSpec,
     ) -> BlixardResult<()> {
-        use crate::storage::{TASK_ASSIGNMENT_TABLE, TASK_TABLE};
+        use crate::raft_storage::{TASK_ASSIGNMENT_TABLE, TASK_TABLE};
 
         {
             // Store task spec
@@ -492,7 +492,7 @@ impl RaftStateMachine {
         task_id: &str,
         result: &TaskResult,
     ) -> BlixardResult<()> {
-        use crate::storage::{TASK_ASSIGNMENT_TABLE, TASK_RESULT_TABLE};
+        use crate::raft_storage::{TASK_ASSIGNMENT_TABLE, TASK_RESULT_TABLE};
 
         {
             // Store result
@@ -521,7 +521,7 @@ impl RaftStateMachine {
         capabilities: &WorkerCapabilities,
         topology: &crate::types::NodeTopology,
     ) -> BlixardResult<()> {
-        use crate::storage::{NODE_TOPOLOGY_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE};
+        use crate::raft_storage::{NODE_TOPOLOGY_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE};
 
         let worker_data = bincode::serialize(&(address, capabilities)).map_err(|e| {
             BlixardError::Serialization {
@@ -563,7 +563,7 @@ impl RaftStateMachine {
         node_id: u64,
         status: WorkerStatus,
     ) -> BlixardResult<()> {
-        use crate::storage::WORKER_STATUS_TABLE;
+        use crate::raft_storage::WORKER_STATUS_TABLE;
 
         {
             let mut status_table = txn.open_table(WORKER_STATUS_TABLE)?;
@@ -700,7 +700,7 @@ impl RaftStateMachine {
 
     fn apply_vm_command(&self, txn: WriteTransaction, command: &VmCommand) -> BlixardResult<()> {
         tracing::info!("🔥 apply_vm_command called with command: {:?}", command);
-        use crate::storage::VM_STATE_TABLE;
+        use crate::raft_storage::VM_STATE_TABLE;
 
         // For delete commands, we need to check ownership BEFORE database removal
         let delete_node_id: Option<u64> = if let VmCommand::Delete { name } = command {
@@ -1004,7 +1004,7 @@ impl RaftStateMachine {
         status: VmStatus,
         node_id: u64,
     ) -> BlixardResult<()> {
-        use crate::storage::VM_STATE_TABLE;
+        use crate::raft_storage::VM_STATE_TABLE;
 
         {
             let mut table = txn.open_table(VM_STATE_TABLE)?;
@@ -1046,7 +1046,7 @@ impl RaftStateMachine {
         txn: WriteTransaction,
         command: crate::ip_pool::IpPoolCommand,
     ) -> BlixardResult<()> {
-        use crate::storage::{IP_POOL_TABLE, IP_ALLOCATION_TABLE, VM_IP_MAPPING_TABLE};
+        use crate::raft_storage::{IP_POOL_TABLE, IP_ALLOCATION_TABLE, VM_IP_MAPPING_TABLE};
         
         match command {
             crate::ip_pool::IpPoolCommand::CreatePool(config) => {
@@ -1325,13 +1325,13 @@ impl RaftStateMachine {
 
         // Restore u64-keyed tables
         {
-            use crate::storage::IP_POOL_TABLE;
+            use crate::raft_storage::IP_POOL_TABLE;
             self.clear_and_restore_u64_table(&write_txn, IP_POOL_TABLE, &snapshot.ip_pools, "IP_POOL")?;
         }
 
         // Restore remaining string-keyed tables with import requirements
         {
-            use crate::storage::{IP_ALLOCATION_TABLE, VM_IP_MAPPING_TABLE};
+            use crate::raft_storage::{IP_ALLOCATION_TABLE, VM_IP_MAPPING_TABLE};
             self.clear_and_restore_string_table(&write_txn, IP_ALLOCATION_TABLE, &snapshot.ip_allocations, "IP_ALLOCATION")?;
             self.clear_and_restore_string_table(&write_txn, VM_IP_MAPPING_TABLE, &snapshot.vm_ip_mappings, "VM_IP_MAPPING")?;
         }
@@ -2918,7 +2918,7 @@ pub async fn schedule_task(
     _task_id: &str,
     task: &TaskSpec,
 ) -> BlixardResult<Option<u64>> {
-    use crate::storage::{WORKER_STATUS_TABLE, WORKER_TABLE};
+    use crate::raft_storage::{WORKER_STATUS_TABLE, WORKER_TABLE};
 
     tracing::info!("Scheduling task with requirements: {:?}", task.resources);
 
