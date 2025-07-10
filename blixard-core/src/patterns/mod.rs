@@ -8,6 +8,10 @@ pub mod lifecycle;
 pub mod builder;
 pub mod factory;
 pub mod error_context;
+pub mod resource_pool;
+
+#[cfg(test)]
+pub mod resource_pool_examples;
 
 pub use lifecycle::{
     LifecycleManager, BackgroundTaskManager, LifecycleState, HealthStatus, 
@@ -16,3 +20,7 @@ pub use lifecycle::{
 pub use builder::{Builder, AsyncBuilder};
 pub use factory::{Factory, Registry};
 pub use error_context::ErrorContext;
+pub use resource_pool::{
+    ResourcePool, PoolableResource, ResourceFactory, PooledResource, 
+    PoolConfig, PoolStats
+};
