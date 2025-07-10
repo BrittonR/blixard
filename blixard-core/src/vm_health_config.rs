@@ -141,13 +141,11 @@ pub struct VmHealthMonitorDependencies {
     /// VM manager for backend operations
     pub vm_manager: std::sync::Arc<crate::vm_backend::VmManager>,
     /// Clock abstraction for testability
-    pub clock: std::sync::Arc<dyn crate::abstractions::Clock>,
-    /// Metrics collector for observability
-    pub metrics: std::sync::Arc<dyn crate::abstractions::MetricsCollector>,
+    pub clock: std::sync::Arc<dyn crate::abstractions::time::Clock>,
 }
 
 impl VmHealthMonitorDependencies {
-    /// Create new dependencies with default clock and metrics
+    /// Create new dependencies with default clock
     pub fn new(
         node_state: std::sync::Arc<crate::node_shared::SharedNodeState>,
         vm_manager: std::sync::Arc<crate::vm_backend::VmManager>,
@@ -155,8 +153,7 @@ impl VmHealthMonitorDependencies {
         Self {
             node_state,
             vm_manager,
-            clock: std::sync::Arc::new(crate::abstractions::SystemClock),
-            metrics: std::sync::Arc::new(crate::abstractions::OpenTelemetryMetrics),
+            clock: std::sync::Arc::new(crate::abstractions::time::SystemClock::new()),
         }
     }
     
@@ -164,13 +161,12 @@ impl VmHealthMonitorDependencies {
     pub fn with_clock(
         node_state: std::sync::Arc<crate::node_shared::SharedNodeState>,
         vm_manager: std::sync::Arc<crate::vm_backend::VmManager>,
-        clock: std::sync::Arc<dyn crate::abstractions::Clock>,
+        clock: std::sync::Arc<dyn crate::abstractions::time::Clock>,
     ) -> Self {
         Self {
             node_state,
             vm_manager,
             clock,
-            metrics: std::sync::Arc::new(crate::abstractions::OpenTelemetryMetrics),
         }
     }
 }

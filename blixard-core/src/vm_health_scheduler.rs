@@ -11,13 +11,12 @@ use tracing::{error, info, warn};
 use async_trait::async_trait;
 
 use crate::{
-    abstractions::{Clock, LifecycleManager, MetricsCollector},
+    abstractions::time::Clock,
     error::{BlixardError, BlixardResult},
     metrics_otel::{attributes, metrics},
-    node_shared::SharedNodeState,
+    patterns::LifecycleManager,
     types::VmStatus,
     vm_auto_recovery::VmAutoRecovery,
-    vm_backend::VmManager,
     vm_health_config::{HealthCheckSchedulerConfig, VmHealthMonitorDependencies},
     vm_health_types::{HealthState, VmHealthStatus},
 };
@@ -80,49 +79,47 @@ impl HealthCheckScheduler {
                 continue;
             }
 
-            // First check if VM process is running (if enabled)
-            if self.config.enable_process_checks {
-                let process_status = match self.deps.vm_manager.get_vm_status(&vm_config.name).await? {
-                    Some((_, status)) => status,
-                    None => {
-                        warn!(
-                            "VM '{}' not found in backend during health check",
-                            vm_config.name
-                        );
-                        VmStatus::Failed
-                    }
-                };
-
-                // If process is not running, handle the failure
-                if process_status != VmStatus::Running {
-                    if stored_status == VmStatus::Running {
-                        info!("VM '{}' process is no longer running", vm_config.name);
-
-                        // Update status through Raft
-                        if let Err(e) = self.deps.node_state
-                            .update_vm_status_through_raft(
-                                vm_config.name.clone(),
-                                process_status,
-                                node_id,
-                            )
-                            .await
-                        {
-                            error!("Failed to update VM '{}' status: {}", vm_config.name, e);
-                        }
-
-                        // Trigger auto-recovery
-                        if let Err(e) = self.auto_recovery
-                            .trigger_recovery(&vm_config.name, &vm_config)
-                            .await
-                        {
-                            error!("Auto-recovery failed for VM '{}': {}", vm_config.name, e);
-                        }
-                    }
-                    continue;
+            // Get VM process status
+            let process_status = match self.deps.vm_manager.get_vm_status(&vm_config.name).await? {
+                Some((_, status)) => status,
+                None => {
+                    warn!(
+                        "VM '{}' not found in backend during health check",
+                        vm_config.name
+                    );
+                    VmStatus::Failed
                 }
+            };
+
+            // If process checks are enabled and process is not running, handle the failure
+            if self.config.enable_process_checks && process_status != VmStatus::Running {
+                if stored_status == VmStatus::Running {
+                    info!("VM '{}' process is no longer running", vm_config.name);
+
+                    // Update status through Raft
+                    if let Err(e) = self.deps.node_state
+                        .update_vm_status_through_raft(
+                            vm_config.name.clone(),
+                            process_status,
+                            node_id,
+                        )
+                        .await
+                    {
+                        error!("Failed to update VM '{}' status: {}", vm_config.name, e);
+                    }
+
+                    // Trigger auto-recovery
+                    if let Err(e) = self.auto_recovery
+                        .trigger_recovery(&vm_config.name, &vm_config)
+                        .await
+                    {
+                        error!("Auto-recovery failed for VM '{}': {}", vm_config.name, e);
+                    }
+                }
+                continue;
             }
 
-            // Perform detailed health checks (if enabled)
+            // Perform detailed health checks (if enabled and VM is running)
             if self.config.enable_detailed_checks && process_status == VmStatus::Running {
                 match self.perform_vm_health_checks(&vm_config.name, &vm_config).await {
                     Ok(health_status) => {
@@ -391,7 +388,7 @@ impl Drop for HealthCheckScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::abstractions::{MockClock, MockMetricsCollector};
+    use crate::abstractions::time::MockClock;
     use crate::vm_auto_recovery::RecoveryPolicy;
     use std::time::SystemTime;
     use tempfile::TempDir;
@@ -421,15 +418,13 @@ mod tests {
             node_state.clone(),
         ));
 
-        let clock = Arc::new(MockClock::new(SystemTime::now()));
-        let metrics = Arc::new(MockMetricsCollector::new());
+        let clock = Arc::new(MockClock::new());
 
-        let deps = VmHealthMonitorDependencies {
+        let deps = VmHealthMonitorDependencies::with_clock(
             node_state,
             vm_manager,
             clock,
-            metrics,
-        };
+        );
 
         let recovery_policy = RecoveryPolicy::default();
         let auto_recovery = Arc::new(VmAutoRecovery::new(deps.node_state.clone(), recovery_policy));

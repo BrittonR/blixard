@@ -10,8 +10,9 @@ use tracing::{error, info, warn};
 use async_trait::async_trait;
 
 use crate::{
-    abstractions::{Clock, LifecycleManager, MetricsCollector},
+    abstractions::time::Clock,
     error::{BlixardError, BlixardResult},
+    patterns::LifecycleManager,
     types::VmConfig,
     vm_auto_recovery::VmAutoRecovery,
     vm_health_config::{RecoveryCoordinatorConfig, VmHealthMonitorDependencies},
@@ -310,7 +311,7 @@ impl LifecycleManager for RecoveryCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::abstractions::{MockClock, MockMetricsCollector};
+    use crate::abstractions::time::MockClock;
     use crate::vm_auto_recovery::RecoveryPolicy;
     use crate::types::Hypervisor;
     use std::time::{Duration, SystemTime};
@@ -341,15 +342,13 @@ mod tests {
             node_state.clone(),
         ));
 
-        let clock = Arc::new(MockClock::new(SystemTime::now()));
-        let metrics = Arc::new(MockMetricsCollector::new());
+        let clock = Arc::new(MockClock::new());
 
-        let deps = VmHealthMonitorDependencies {
+        let deps = VmHealthMonitorDependencies::with_clock(
             node_state,
             vm_manager,
             clock,
-            metrics,
-        };
+        );
 
         let recovery_policy = RecoveryPolicy::default();
         let auto_recovery = Arc::new(VmAutoRecovery::new(deps.node_state.clone(), recovery_policy));

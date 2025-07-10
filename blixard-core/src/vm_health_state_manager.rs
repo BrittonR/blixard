@@ -12,8 +12,9 @@ use tracing::{debug, error, info, warn};
 use async_trait::async_trait;
 
 use crate::{
-    abstractions::{Clock, LifecycleManager, MetricsCollector},
+    abstractions::time::Clock,
     error::{BlixardError, BlixardResult},
+    patterns::LifecycleManager,
     vm_health_config::{HealthStateManagerConfig, VmHealthMonitorDependencies},
     vm_health_types::{HealthCheck, VmHealthCheckConfig, VmHealthStatus},
 };
@@ -272,7 +273,7 @@ impl Drop for HealthStateManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::abstractions::{MockClock, MockMetricsCollector};
+    use crate::abstractions::time::MockClock;
     use crate::vm_health_types::{HealthCheckType, HealthState};
     use std::time::{Duration, SystemTime};
     use tempfile::TempDir;
@@ -302,15 +303,13 @@ mod tests {
             node_state.clone(),
         ));
 
-        let clock = Arc::new(MockClock::new(SystemTime::now()));
-        let metrics = Arc::new(MockMetricsCollector::new());
+        let clock = Arc::new(MockClock::new());
 
-        let deps = VmHealthMonitorDependencies {
+        let deps = VmHealthMonitorDependencies::with_clock(
             node_state,
             vm_manager,
             clock,
-            metrics,
-        };
+        );
 
         let state_config = HealthStateManagerConfig {
             max_state_age: Duration::from_hours(1),

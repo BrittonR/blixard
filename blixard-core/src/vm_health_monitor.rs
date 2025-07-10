@@ -9,14 +9,15 @@ use tracing::{error, info, warn};
 use async_trait::async_trait;
 
 use crate::{
-    abstractions::{Clock, LifecycleManager, MetricsCollector, SystemClock, OpenTelemetryMetrics},
+    abstractions::time::{Clock, SystemClock},
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
+    patterns::LifecycleManager,
     vm_auto_recovery::{RecoveryPolicy, VmAutoRecovery},
     vm_backend::VmManager,
     vm_health_config::{
         VmHealthMonitorConfig, VmHealthMonitorDependencies,
-        HealthCheckSchedulerConfig, HealthStateManagerConfig, RecoveryCoordinatorConfig,
+        HealthCheckSchedulerConfig, RecoveryCoordinatorConfig,
     },
     vm_health_recovery_coordinator::RecoveryCoordinator,
     vm_health_scheduler::HealthCheckScheduler,
@@ -273,6 +274,7 @@ impl VmHealthMonitor {
             is_running: self.is_running,
         }
     }
+}
 
 #[async_trait]
 impl LifecycleManager for VmHealthMonitor {
@@ -358,7 +360,7 @@ impl Drop for VmHealthMonitor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::abstractions::{MockClock, MockMetricsCollector};
+    use crate::abstractions::time::MockClock;
     use std::time::SystemTime;
     use tempfile::TempDir;
 
