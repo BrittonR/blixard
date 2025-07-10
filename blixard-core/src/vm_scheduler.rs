@@ -908,21 +908,34 @@ impl VmScheduler {
         // Iterate through all workers
         for worker_result in worker_table.iter()? {
             let (node_id_bytes, worker_data) = worker_result?;
-            let node_id =
-                u64::from_le_bytes(node_id_bytes.value()[..8].try_into().map_err(|_| {
+            let node_id = {
+                let key_bytes = node_id_bytes.value();
+                if key_bytes.len() < 8 {
+                    return Err(BlixardError::Storage {
+                        operation: "parse node ID".to_string(),
+                        source: Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("Node ID key too short: {} bytes, expected 8", key_bytes.len()),
+                        )),
+                    });
+                }
+                u64::from_le_bytes(key_bytes[..8].try_into().map_err(|_| {
                     BlixardError::Storage {
                         operation: "parse node ID".to_string(),
                         source: Box::new(std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
-                            "Invalid node ID",
+                            "Invalid node ID bytes",
                         )),
                     }
-                })?);
+                })?)
+            };
 
             // Check if worker is healthy
             let is_healthy = status_table
                 .get(node_id_bytes.value())?
-                .map(|status_data| status_data.value()[0] == WorkerStatus::Online as u8)
+                .and_then(|status_data| {
+                    status_data.value().first().map(|&b| b == WorkerStatus::Online as u8)
+                })
                 .unwrap_or(false);
 
             if !is_healthy {
@@ -981,7 +994,9 @@ impl VmScheduler {
         // Check if worker is healthy
         let is_healthy = status_table
             .get(node_id_bytes.as_slice())?
-            .map(|status_data| status_data.value()[0] == WorkerStatus::Online as u8)
+            .and_then(|status_data| {
+                status_data.value().first().map(|&b| b == WorkerStatus::Online as u8)
+            })
             .unwrap_or(false);
 
         if !is_healthy {
@@ -1099,10 +1114,17 @@ impl VmScheduler {
         // Sync all worker nodes
         for result in worker_table.iter()? {
             let (key, value) = result?;
-            let node_id =
-                u64::from_le_bytes(key.value().try_into().map_err(|_| BlixardError::Internal {
-                    message: "Invalid node ID bytes in database".to_string(),
-                })?);
+            let node_id = {
+                let key_bytes = key.value();
+                if key_bytes.len() != 8 {
+                    return Err(BlixardError::Internal {
+                        message: format!("Invalid node ID key length: {} bytes, expected 8", key_bytes.len()),
+                    });
+                }
+                u64::from_le_bytes(key_bytes.try_into().map_err(|_| BlixardError::Internal {
+                    message: "Failed to convert node ID bytes".to_string(),
+                })?)
+            };
 
             // Check if worker is online
             if let Ok(Some(status_data)) = status_table.get(key.value()) {
@@ -1529,11 +1551,17 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn create_test_database() -> (Arc<Database>, TempDir) {
-        let temp_dir = TempDir::new().unwrap();
+    fn create_test_database() -> BlixardResult<(Arc<Database>, TempDir)> {
+        let temp_dir = TempDir::new().map_err(|e| BlixardError::Storage {
+            operation: "create temp directory".to_string(),
+            source: Box::new(e),
+        })?;
         let db_path = temp_dir.path().join("test.db");
-        let database = Arc::new(Database::create(&db_path).unwrap());
-        (database, temp_dir)
+        let database = Arc::new(Database::create(&db_path).map_err(|e| BlixardError::Storage {
+            operation: "create test database".to_string(),
+            source: Box::new(e),
+        })?);
+        Ok((database, temp_dir))
     }
 
     #[tokio::test]

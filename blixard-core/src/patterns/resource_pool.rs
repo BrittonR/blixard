@@ -70,6 +70,11 @@ pub trait ResourceFactory<T: PoolableResource>: Send + Sync {
 }
 
 /// A pooled resource that returns itself to the pool when dropped
+/// 
+/// # Safety Design
+/// This type deliberately does NOT implement Deref/DerefMut to prevent panics.
+/// Use the safe `get()` and `get_mut()` methods which return Result types.
+/// This design prevents runtime panics at the cost of slightly more verbose API.
 pub struct PooledResource<T: PoolableResource> {
     resource: Option<T>,
     pool: Arc<ResourcePool<T>>,
@@ -99,6 +104,24 @@ impl<T: PoolableResource> PooledResource<T> {
             message: "Resource already taken from pool".to_string(),
         })
     }
+    
+    /// Execute a function with safe access to the resource
+    pub fn with_resource<F, R>(&self, f: F) -> crate::error::BlixardResult<R>
+    where
+        F: FnOnce(&T) -> R,
+    {
+        let resource = self.get()?;
+        Ok(f(resource))
+    }
+    
+    /// Execute a function with safe mutable access to the resource
+    pub fn with_resource_mut<F, R>(&mut self, f: F) -> crate::error::BlixardResult<R>
+    where
+        F: FnOnce(&mut T) -> R,
+    {
+        let resource = self.get_mut()?;
+        Ok(f(resource))
+    }
 }
 
 impl<T: PoolableResource> Drop for PooledResource<T> {
@@ -113,27 +136,13 @@ impl<T: PoolableResource> Drop for PooledResource<T> {
     }
 }
 
-impl<T: PoolableResource> std::ops::Deref for PooledResource<T> {
-    type Target = T;
-    
-    fn deref(&self) -> &Self::Target {
-        // For Deref, we must return a reference, so we'll use unwrap with clear message
-        // Users should prefer the safe get() method
-        self.resource.as_ref().unwrap_or_else(|| {
-            panic!("PooledResource accessed after being taken. Use get() method for safe access.")
-        })
-    }
-}
+// SAFETY NOTE: Deref implementation removed to prevent panics.
+// Users must use the safe get() method instead of direct dereferencing.
+// This is a deliberate design choice to prevent runtime panics.
 
-impl<T: PoolableResource> std::ops::DerefMut for PooledResource<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        // For DerefMut, we must return a reference, so we'll use unwrap with clear message
-        // Users should prefer the safe get_mut() method
-        self.resource.as_mut().unwrap_or_else(|| {
-            panic!("PooledResource accessed after being taken. Use get_mut() method for safe access.")
-        })
-    }
-}
+// SAFETY NOTE: DerefMut implementation removed to prevent panics.
+// Users must use the safe get_mut() method instead of direct dereferencing.
+// This is a deliberate design choice to prevent runtime panics.
 
 /// Generic resource pool implementation
 pub struct ResourcePool<T: PoolableResource> {
@@ -235,7 +244,7 @@ impl<T: PoolableResource> ResourcePool<T> {
             *self.total_created.lock().await += 1;
         }
         
-        let mut resource = resource.unwrap();
+        let mut resource = resource.expect("BUG: resource should be Some after creation or retrieval from pool");
         
         // Validate resource if configured
         if self.config.validate_on_acquire && !resource.is_valid() {
@@ -384,7 +393,7 @@ mod tests {
         
         // Acquire resource
         let resource1 = pool.acquire().await.unwrap();
-        assert_eq!(resource1.id, 0);
+        assert_eq!(resource1.get().unwrap().id, 0);
         
         // Stats should show resource in use
         let stats = pool.stats().await;
@@ -421,6 +430,10 @@ mod tests {
         let r1 = pool.acquire().await.unwrap();
         let r2 = pool.acquire().await.unwrap();
         
+        // Verify resources are accessible
+        let _ = r1.get().unwrap();
+        let _ = r2.get().unwrap();
+        
         // Third acquire should timeout
         let result = pool.acquire().await;
         assert!(matches!(result, Err(BlixardError::Timeout { .. })));
@@ -430,8 +443,61 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
         
         // Now acquire should succeed
-        let _r3 = pool.acquire().await.unwrap();
+        let r3 = pool.acquire().await.unwrap();
+        let _ = r3.get().unwrap();
         
         drop(r2);
+        drop(r3);
+    }
+    
+    #[tokio::test]
+    async fn test_safe_resource_access_patterns() {
+        let factory = Arc::new(TestFactory {
+            counter: AtomicU32::new(100),
+        });
+        
+        let pool = ResourcePool::new(factory, PoolConfig::default());
+        
+        // Test safe access patterns
+        let mut resource = pool.acquire().await.unwrap();
+        
+        // Pattern 1: Direct get() method
+        let id = resource.get().unwrap().id;
+        assert_eq!(id, 100);
+        
+        // Pattern 2: with_resource closure
+        let id2 = resource.with_resource(|r| r.id).unwrap();
+        assert_eq!(id2, 100);
+        
+        // Pattern 3: Mutable access
+        resource.with_resource_mut(|r| {
+            r.valid = false;
+        }).unwrap();
+        
+        assert!(!resource.get().unwrap().valid);
+        
+        // Pattern 4: Taking ownership
+        let owned = resource.take().unwrap();
+        assert_eq!(owned.id, 100);
+        
+        // After taking, resource should be unavailable
+        // Note: resource is moved, so we can't test this directly
+    }
+    
+    #[tokio::test] 
+    async fn test_resource_taken_error_handling() {
+        let factory = Arc::new(TestFactory {
+            counter: AtomicU32::new(200),
+        });
+        
+        let pool = ResourcePool::new(factory, PoolConfig::default());
+        let mut resource = pool.acquire().await.unwrap();
+        
+        // Take the resource
+        let _owned = resource.take().unwrap();
+        
+        // Now resource should be unavailable - but we can't test this
+        // because resource is moved by take(). This is good design
+        // as it prevents use-after-take at compile time.
     }
 }

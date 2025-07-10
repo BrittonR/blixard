@@ -594,14 +594,15 @@ mod tests {
     #[tokio::test]
     async fn test_security_manager_creation() {
         let config = default_dev_security_config();
-        let security_manager = SecurityManager::new(config).await.unwrap();
+        let security_manager = SecurityManager::new(config).await
+            .expect("Failed to create security manager with dev config");
 
         // Iroh handles transport security via QUIC/TLS - no separate TLS config needed
         // Verify that authentication is properly disabled in dev config
         let auth_result = security_manager
             .authenticate_token("any-token")
             .await
-            .unwrap();
+            .expect("Token authentication should not fail with dev config");
         assert!(auth_result.authenticated);
         assert_eq!(auth_result.user, Some("anonymous".to_string()));
         assert_eq!(auth_result.auth_method, "disabled");
@@ -615,7 +616,8 @@ mod tests {
         ];
         
         for token in test_tokens {
-            let result = security_manager.authenticate_token(token).await.unwrap();
+            let result = security_manager.authenticate_token(token).await
+                .expect("Authentication should not fail when disabled");
             assert!(result.authenticated, "Token '{}' should be accepted when auth is disabled", token);
         }
     }
@@ -637,44 +639,49 @@ mod tests {
             },
         };
 
-        let mut security_manager = SecurityManager::new(config).await.unwrap();
+        let mut security_manager = SecurityManager::new(config).await
+            .expect("Failed to create security manager with auth enabled");
 
         // Generate a token
         let token = security_manager
             .generate_token("test-user", Some(std::time::Duration::from_secs(3600)))
             .await
-            .unwrap();
+            .expect("Failed to generate token for test user");
 
         // Authenticate with the token
-        let auth_result = security_manager.authenticate_token(&token).await.unwrap();
+        let auth_result = security_manager.authenticate_token(&token).await
+            .expect("Failed to authenticate valid token");
         assert!(auth_result.authenticated);
-        assert_eq!(auth_result.user.unwrap(), "test-user");
+        assert_eq!(auth_result.user.expect("Authenticated user should have a name"), "test-user");
 
         // Test invalid token
         let invalid_result = security_manager
             .authenticate_token("invalid-token")
             .await
-            .unwrap();
+            .expect("Authentication check should not fail, even for invalid tokens");
         assert!(!invalid_result.authenticated);
     }
 
     #[tokio::test]
     async fn test_secrets_management() {
         let config = default_dev_security_config();
-        let mut security_manager = SecurityManager::new(config).await.unwrap();
+        let mut security_manager = SecurityManager::new(config).await
+            .expect("Failed to create security manager for secrets test");
 
         // Store a secret
         security_manager
             .store_secret("test-key", "secret-value")
             .await
-            .unwrap();
+            .expect("Failed to store secret");
 
         // Retrieve the secret
-        let retrieved = security_manager.get_secret("test-key").await.unwrap();
-        assert_eq!(retrieved.unwrap(), "secret-value");
+        let retrieved = security_manager.get_secret("test-key").await
+            .expect("Failed to retrieve stored secret");
+        assert_eq!(retrieved.expect("Retrieved secret should not be None"), "secret-value");
 
         // Non-existent secret
-        let missing = security_manager.get_secret("missing-key").await.unwrap();
+        let missing = security_manager.get_secret("missing-key").await
+            .expect("Getting missing secret should not fail");
         assert!(missing.is_none());
     }
 
