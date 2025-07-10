@@ -2,13 +2,39 @@
 //!
 //! This module provides a distributed VM image store that uses Iroh for
 //! efficient peer-to-peer sharing of VM images across the cluster.
+//!
+//! ## Migration to FileSystem Abstraction
+//!
+//! This module has been migrated to use the `FileSystem` trait instead of 
+//! direct `std::fs` operations. This provides:
+//!
+//! - **Testability**: Use `MockFileSystem` in tests to avoid real file I/O
+//! - **Dependency injection**: Easy to swap filesystem implementations
+//! - **Consistency**: Unified error handling across the codebase
+//!
+//! ### Usage Examples
+//!
+//! ```rust,ignore
+//! use std::sync::Arc;
+//! use blixard_core::p2p_image_store::P2pImageStore;
+//! use blixard_core::abstractions::filesystem::TokioFileSystem;
+//!
+//! // Method 1: With custom filesystem (recommended for testing)
+//! let filesystem = Arc::new(TokioFileSystem::new());
+//! let store = P2pImageStore::new(node_id, data_dir, filesystem).await?;
+//!
+//! // Method 2: With default filesystem (for production)
+//! let store = P2pImageStore::with_default_filesystem(node_id, data_dir).await?;
+//! ```
 
+use crate::abstractions::filesystem::FileSystem;
 use crate::error::{BlixardError, BlixardResult};
 use crate::iroh_transport_v2::{DocumentType, IrohTransportV2};
 use chrono::{DateTime, Utc};
 use iroh_blobs::Hash;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tracing::info;
 
 /// Metadata for a VM image
@@ -46,13 +72,19 @@ pub struct P2pImageStore {
     cache_dir: PathBuf,
     /// Node ID
     node_id: u64,
+    /// Filesystem abstraction
+    filesystem: Arc<dyn FileSystem>,
 }
 
 impl P2pImageStore {
-    /// Create a new P2P image store
-    pub async fn new(node_id: u64, data_dir: &Path) -> BlixardResult<Self> {
+    /// Create a new P2P image store with custom filesystem
+    pub async fn new(
+        node_id: u64, 
+        data_dir: &Path,
+        filesystem: Arc<dyn FileSystem>,
+    ) -> BlixardResult<Self> {
         let cache_dir = data_dir.join("image-cache");
-        std::fs::create_dir_all(&cache_dir)?;
+        filesystem.create_dir_all(&cache_dir).await?;
 
         let transport = IrohTransportV2::new(node_id, data_dir).await?;
 
@@ -66,7 +98,14 @@ impl P2pImageStore {
             transport,
             cache_dir,
             node_id,
+            filesystem,
         })
+    }
+    
+    /// Create a new P2P image store with default filesystem
+    pub async fn with_default_filesystem(node_id: u64, data_dir: &Path) -> BlixardResult<Self> {
+        use crate::abstractions::filesystem::TokioFileSystem;
+        Self::new(node_id, data_dir, Arc::new(TokioFileSystem::new())).await
     }
 
     /// Upload a VM image to the P2P network
@@ -86,8 +125,8 @@ impl P2pImageStore {
         );
 
         // Get file size
-        let file_metadata = std::fs::metadata(image_path)?;
-        let size = file_metadata.len();
+        let file_metadata = self.filesystem.metadata(image_path).await?;
+        let size = file_metadata.size;
 
         // Share the file via Iroh
         let content_hash = self.transport.share_file(image_path).await?;
@@ -175,7 +214,7 @@ impl P2pImageStore {
         let output_path = self.cache_dir.join(format!("{}-{}.img", name, version));
 
         // Check if already cached
-        if output_path.exists() {
+        if self.filesystem.exists(&output_path).await? {
             info!("Image {} v{} already cached", name, version);
             return Ok(output_path);
         }
@@ -191,19 +230,19 @@ impl P2pImageStore {
     }
 
     /// Check if an image is cached locally
-    pub fn is_cached(&self, name: &str, version: &str) -> bool {
+    pub async fn is_cached(&self, name: &str, version: &str) -> bool {
         let cache_path = self.cache_dir.join(format!("{}-{}.img", name, version));
-        cache_path.exists()
+        self.filesystem.exists(&cache_path).await.unwrap_or(false)
     }
 
     /// Clear the local cache
     pub async fn clear_cache(&self) -> BlixardResult<()> {
         info!("Clearing image cache");
 
-        for entry in std::fs::read_dir(&self.cache_dir)? {
-            let entry = entry?;
-            if entry.path().extension().map_or(false, |ext| ext == "img") {
-                std::fs::remove_file(entry.path())?;
+        let entries = self.filesystem.read_dir(&self.cache_dir).await?;
+        for entry_path in entries {
+            if entry_path.extension().map_or(false, |ext| ext == "img") {
+                self.filesystem.remove_file(&entry_path).await?;
             }
         }
 
@@ -211,15 +250,15 @@ impl P2pImageStore {
     }
 
     /// Get cache statistics
-    pub fn get_cache_stats(&self) -> BlixardResult<CacheStats> {
+    pub async fn get_cache_stats(&self) -> BlixardResult<CacheStats> {
         let mut total_size = 0u64;
         let mut image_count = 0u32;
 
-        for entry in std::fs::read_dir(&self.cache_dir)? {
-            let entry = entry?;
-            if entry.path().extension().map_or(false, |ext| ext == "img") {
-                let metadata = entry.metadata()?;
-                total_size += metadata.len();
+        let entries = self.filesystem.read_dir(&self.cache_dir).await?;
+        for entry_path in entries {
+            if entry_path.extension().map_or(false, |ext| ext == "img") {
+                let metadata = self.filesystem.metadata(&entry_path).await?;
+                total_size += metadata.size;
                 image_count += 1;
             }
         }

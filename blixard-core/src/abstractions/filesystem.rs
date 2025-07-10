@@ -6,6 +6,22 @@
 use crate::error::BlixardResult;
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+
+/// File metadata information
+#[derive(Debug, Clone)]
+pub struct FileMetadata {
+    /// File size in bytes
+    pub size: u64,
+    /// Whether this is a directory
+    pub is_dir: bool,
+    /// Whether this is a regular file
+    pub is_file: bool,
+    /// Last modified time
+    pub modified: Option<SystemTime>,
+    /// Creation time (if available)
+    pub created: Option<SystemTime>,
+}
 
 /// Abstraction for filesystem operations
 #[async_trait]
@@ -45,6 +61,12 @@ pub trait FileSystem: Send + Sync {
 
     /// Get canonical path
     async fn canonicalize(&self, path: &Path) -> BlixardResult<PathBuf>;
+
+    /// Read directory entries
+    async fn read_dir(&self, path: &Path) -> BlixardResult<Vec<PathBuf>>;
+
+    /// Get file metadata (size, modified time, etc.)
+    async fn metadata(&self, path: &Path) -> BlixardResult<FileMetadata>;
 }
 
 // Production implementation using tokio::fs
@@ -126,6 +148,29 @@ impl FileSystem for TokioFileSystem {
 
     async fn canonicalize(&self, path: &Path) -> BlixardResult<PathBuf> {
         Ok(tokio::fs::canonicalize(path).await?)
+    }
+
+    async fn read_dir(&self, path: &Path) -> BlixardResult<Vec<PathBuf>> {
+        let mut entries = tokio::fs::read_dir(path).await?;
+        let mut paths = Vec::new();
+        
+        while let Some(entry) = entries.next_entry().await? {
+            paths.push(entry.path());
+        }
+        
+        Ok(paths)
+    }
+
+    async fn metadata(&self, path: &Path) -> BlixardResult<FileMetadata> {
+        let metadata = tokio::fs::metadata(path).await?;
+        
+        Ok(FileMetadata {
+            size: metadata.len(),
+            is_dir: metadata.is_dir(),
+            is_file: metadata.is_file(),
+            modified: metadata.modified().ok(),
+            created: metadata.created().ok(),
+        })
     }
 }
 
@@ -269,6 +314,41 @@ impl FileSystem for MockFileSystem {
             Err(crate::error::BlixardError::IoError(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "Path not found",
+            )))
+        }
+    }
+
+    async fn read_dir(&self, path: &Path) -> BlixardResult<Vec<PathBuf>> {
+        let files = self.files.read().await;
+        
+        // Find all files that have this path as a parent
+        let mut entries = Vec::new();
+        for file_path in files.keys() {
+            if let Some(parent) = file_path.parent() {
+                if parent == path {
+                    entries.push(file_path.clone());
+                }
+            }
+        }
+        
+        Ok(entries)
+    }
+
+    async fn metadata(&self, path: &Path) -> BlixardResult<FileMetadata> {
+        let files = self.files.read().await;
+        
+        if let Some(content) = files.get(path) {
+            Ok(FileMetadata {
+                size: content.len() as u64,
+                is_dir: false, // Mock filesystem treats everything as files
+                is_file: true,
+                modified: Some(SystemTime::now()),
+                created: Some(SystemTime::now()),
+            })
+        } else {
+            Err(crate::error::BlixardError::IoError(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "File not found",
             )))
         }
     }
