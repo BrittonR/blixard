@@ -20,15 +20,15 @@ use crate::{
     error::{BlixardError, BlixardResult},
     ip_pool::{
         IpAllocation, IpAllocationRequest, IpAllocationResult, IpPoolCommand, IpPoolConfig,
-        IpPoolId, IpPoolSelectionStrategy, IpPoolState, NetworkConfig,
+        IpPoolId, IpPoolSelectionStrategy, IpPoolState, EnhancedIpPoolState, NetworkConfig,
     },
     types::VmId,
 };
 
 /// IP Pool Manager - manages all IP pools and allocations
 pub struct IpPoolManager {
-    /// All configured IP pools
-    pools: Arc<RwLock<HashMap<IpPoolId, IpPoolState>>>,
+    /// All configured IP pools with ResourcePool integration
+    pools: Arc<RwLock<HashMap<IpPoolId, EnhancedIpPoolState>>>,
     /// IP to allocation mapping for quick lookup
     allocations: Arc<RwLock<HashMap<IpAddr, IpAllocation>>>,
     /// VM to IP mapping for quick lookup
@@ -58,7 +58,7 @@ impl IpPoolManager {
         let mut allocations_map = self.allocations.write().await;
         let mut vm_allocations_map = self.vm_allocations.write().await;
 
-        // Load pools
+        // Load pools with ResourcePool integration
         for config in pools {
             config.validate()?;
             let mut state = IpPoolState::new(config);
@@ -71,7 +71,9 @@ impl IpPoolManager {
                 }
             }
             
-            pools_map.insert(state.config.id, state);
+            // Create enhanced state with ResourcePool
+            let enhanced_state = EnhancedIpPoolState::from_existing_state(state).await?;
+            pools_map.insert(enhanced_state.state.config.id, enhanced_state);
         }
 
         // Load allocations
@@ -123,8 +125,8 @@ impl IpPoolManager {
             });
         }
         
-        let state = IpPoolState::new(config.clone());
-        pools.insert(config.id, state);
+        let enhanced_state = EnhancedIpPoolState::new(config.clone()).await?;
+        pools.insert(config.id, enhanced_state);
         
         info!("Created IP pool {} ({})", config.id, config.name);
         Ok(())
@@ -136,20 +138,23 @@ impl IpPoolManager {
         
         let mut pools = self.pools.write().await;
         
-        let state = pools.get_mut(&config.id).ok_or_else(|| BlixardError::NotFound {
+        let enhanced_state = pools.get_mut(&config.id).ok_or_else(|| BlixardError::NotFound {
             resource: format!("IP pool {}", config.id),
         })?;
         
         // Preserve allocation state
-        let allocated_ips = state.allocated_ips.clone();
-        let total_allocated = state.total_allocated;
-        let last_allocation = state.last_allocation;
+        let allocated_ips = enhanced_state.state.allocated_ips.clone();
+        let total_allocated = enhanced_state.state.total_allocated;
+        let last_allocation = enhanced_state.state.last_allocation;
         
-        // Update config
-        state.config = config.clone();
-        state.allocated_ips = allocated_ips;
-        state.total_allocated = total_allocated;
-        state.last_allocation = last_allocation;
+        // Update config in the basic state
+        enhanced_state.state.config = config.clone();
+        enhanced_state.state.allocated_ips = allocated_ips;
+        enhanced_state.state.total_allocated = total_allocated;
+        enhanced_state.state.last_allocation = last_allocation;
+        
+        // Sync the enhanced state to reflect changes
+        enhanced_state.sync_state().await;
         
         info!("Updated IP pool {} ({})", config.id, config.name);
         Ok(())
@@ -163,13 +168,13 @@ impl IpPoolManager {
             resource: format!("IP pool {}", pool_id),
         })?;
         
-        if !state.allocated_ips.is_empty() {
+        if !state.state.allocated_ips.is_empty() {
             return Err(BlixardError::InvalidOperation {
                 operation: "delete pool".to_string(),
                 reason: format!(
                     "Pool {} has {} allocated IPs",
                     pool_id,
-                    state.allocated_ips.len()
+                    state.state.allocated_ips.len()
                 ),
             });
         }
@@ -187,7 +192,7 @@ impl IpPoolManager {
             resource: format!("IP pool {}", pool_id),
         })?;
         
-        state.config.enabled = enabled;
+        state.state.config.enabled = enabled;
         info!("Set IP pool {} enabled={}", pool_id, enabled);
         Ok(())
     }
@@ -202,14 +207,14 @@ impl IpPoolManager {
         
         // Check all IPs are in subnet and not allocated
         for ip in &ips {
-            if !state.config.subnet.contains(ip) {
+            if !state.state.config.subnet.contains(ip) {
                 return Err(BlixardError::InvalidOperation {
                     operation: "reserve IP".to_string(),
                     reason: format!("IP {} is not in pool subnet", ip),
                 });
             }
             
-            if state.allocated_ips.contains(ip) {
+            if state.state.allocated_ips.contains(ip) {
                 return Err(BlixardError::InvalidOperation {
                     operation: "reserve IP".to_string(),
                     reason: format!("IP {} is already allocated", ip),
@@ -217,7 +222,7 @@ impl IpPoolManager {
             }
         }
         
-        state.config.reserved_ips.extend(ips.iter().cloned());
+        state.state.config.reserved_ips.extend(ips.iter().cloned());
         info!("Reserved {} IPs in pool {}", ips.len(), pool_id);
         Ok(())
     }
@@ -235,14 +240,14 @@ impl IpPoolManager {
         })?;
         
         for ip in &ips {
-            state.config.reserved_ips.remove(ip);
+            state.state.config.reserved_ips.remove(ip);
         }
         
         info!("Released {} reserved IPs in pool {}", ips.len(), pool_id);
         Ok(())
     }
 
-    /// Allocate an IP address for a VM
+    /// Allocate an IP address for a VM using ResourcePool pattern
     pub async fn allocate_ip(
         &self,
         request: IpAllocationRequest,
@@ -252,11 +257,11 @@ impl IpPoolManager {
         // Select pool based on request
         let pool_id = if let Some(preferred) = request.preferred_pool {
             // Verify preferred pool exists and has capacity
-            let state = pools.get(&preferred).ok_or_else(|| BlixardError::NotFound {
+            let enhanced_state = pools.get(&preferred).ok_or_else(|| BlixardError::NotFound {
                 resource: format!("IP pool {}", preferred),
             })?;
             
-            if !state.has_capacity() {
+            if !enhanced_state.has_capacity().await {
                 return Err(BlixardError::ResourceExhausted {
                     resource: format!("IP pool {}", preferred),
                 });
@@ -270,23 +275,13 @@ impl IpPoolManager {
         
         drop(pools);
         
-        // Allocate IP from selected pool
+        // Allocate IP from selected pool using ResourcePool
         let mut pools = self.pools.write().await;
-        let state = pools.get_mut(&pool_id).unwrap();
+        let enhanced_state = pools.get_mut(&pool_id).unwrap();
         
-        let ip = state.next_available_ip().ok_or_else(|| BlixardError::ResourceExhausted {
-            resource: format!("IP pool {}", pool_id),
-        })?;
-        
-        // Mark IP as allocated
-        state.allocated_ips.insert(ip);
-        state.total_allocated += 1;
-        state.last_allocation = Some(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i64,
-        );
+        // Use ResourcePool for allocation
+        let ip_address = enhanced_state.allocate_ip().await?;
+        let ip = ip_address.ip;
         
         // Create allocation record
         let allocation = IpAllocation {
@@ -314,15 +309,15 @@ impl IpPoolManager {
         // Build network config
         let network_config = NetworkConfig {
             ip_address: ip,
-            subnet: state.config.subnet,
-            gateway: state.config.gateway,
-            dns_servers: state.config.dns_servers.clone(),
-            vlan_id: state.config.vlan_id,
+            subnet: enhanced_state.state.config.subnet,
+            gateway: enhanced_state.state.config.gateway,
+            dns_servers: enhanced_state.state.config.dns_servers.clone(),
+            vlan_id: enhanced_state.state.config.vlan_id,
             mac_address: request.mac_address,
         };
         
         info!(
-            "Allocated IP {} from pool {} to VM {}",
+            "Allocated IP {} from pool {} to VM {} using ResourcePool",
             ip, pool_id, request.vm_id
         );
         
@@ -332,7 +327,7 @@ impl IpPoolManager {
         })
     }
 
-    /// Release all IPs allocated to a VM
+    /// Release all IPs allocated to a VM using ResourcePool pattern
     pub async fn release_vm_ips(&self, vm_id: VmId) -> BlixardResult<()> {
         let mut allocations = self.allocations.write().await;
         let mut vm_allocations = self.vm_allocations.write().await;
@@ -348,11 +343,11 @@ impl IpPoolManager {
         
         for ip in ips {
             if let Some(allocation) = allocations.remove(&ip) {
-                // Update pool state
-                if let Some(state) = pools.get_mut(&allocation.pool_id) {
-                    state.allocated_ips.remove(&ip);
+                // Release IP using ResourcePool
+                if let Some(enhanced_state) = pools.get_mut(&allocation.pool_id) {
+                    enhanced_state.release_ip(ip).await?;
                     info!(
-                        "Released IP {} from pool {} (was allocated to VM {})",
+                        "Released IP {} from pool {} (was allocated to VM {}) using ResourcePool",
                         ip, allocation.pool_id, vm_id
                     );
                 }
@@ -365,37 +360,41 @@ impl IpPoolManager {
     /// Select a pool based on strategy and requirements
     async fn select_pool(
         &self,
-        pools: &HashMap<IpPoolId, IpPoolState>,
+        pools: &HashMap<IpPoolId, EnhancedIpPoolState>,
         request: &IpAllocationRequest,
     ) -> BlixardResult<IpPoolId> {
-        // Filter eligible pools
-        let mut eligible_pools: Vec<(&IpPoolId, &IpPoolState)> = pools
-            .iter()
-            .filter(|(_, state)| {
-                // Must have capacity and be enabled
-                if !state.has_capacity() {
-                    return false;
-                }
-                
-                // Check required tags
-                for (key, value) in &request.required_tags {
-                    if state.config.tags.get(key) != Some(value) {
-                        return false;
+        // Filter eligible pools - async capacity check
+        let mut eligible_pools: Vec<(&IpPoolId, &EnhancedIpPoolState)> = Vec::new();
+        
+        for (pool_id, enhanced_state) in pools.iter() {
+            // Must be enabled
+            if !enhanced_state.state.config.enabled {
+                continue;
+            }
+            
+            // Check required tags
+            let tags_match = request.required_tags.iter().all(|(key, value)| {
+                enhanced_state.state.config.tags.get(key) == Some(value)
+            });
+            
+            if !tags_match {
+                continue;
+            }
+            
+            // Check topology hint if specified
+            if let Some(hint) = &request.topology_hint {
+                if let Some(pool_hint) = &enhanced_state.state.config.topology_hint {
+                    if pool_hint != hint {
+                        continue;
                     }
                 }
-                
-                // Check topology hint if specified
-                if let Some(hint) = &request.topology_hint {
-                    if let Some(pool_hint) = &state.config.topology_hint {
-                        if pool_hint != hint {
-                            return false;
-                        }
-                    }
-                }
-                
-                true
-            })
-            .collect();
+            }
+            
+            // Check capacity using async method
+            if enhanced_state.has_capacity().await {
+                eligible_pools.push((pool_id, enhanced_state));
+            }
+        }
         
         if eligible_pools.is_empty() {
             return Err(BlixardError::ResourceExhausted {
@@ -403,60 +402,65 @@ impl IpPoolManager {
             });
         }
         
-        // Select based on strategy
+        // Select based on strategy using ResourcePool information
         let selected = match request.selection_strategy {
             IpPoolSelectionStrategy::LeastUtilized => {
-                eligible_pools.sort_by(|(_, a), (_, b)| {
-                    a.utilization_percent()
-                        .partial_cmp(&b.utilization_percent())
-                        .unwrap()
-                });
-                eligible_pools[0].0
+                // Get utilization for all pools and sort
+                let mut pool_utilizations = Vec::new();
+                for (pool_id, enhanced_state) in &eligible_pools {
+                    let utilization = enhanced_state.utilization_percent().await;
+                    pool_utilizations.push((*pool_id, utilization));
+                }
+                pool_utilizations.sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap());
+                *pool_utilizations[0].0
             }
             IpPoolSelectionStrategy::MostUtilized => {
-                eligible_pools.sort_by(|(_, a), (_, b)| {
-                    b.utilization_percent()
-                        .partial_cmp(&a.utilization_percent())
-                        .unwrap()
-                });
-                eligible_pools[0].0
+                // Get utilization for all pools and sort descending
+                let mut pool_utilizations = Vec::new();
+                for (pool_id, enhanced_state) in &eligible_pools {
+                    let utilization = enhanced_state.utilization_percent().await;
+                    pool_utilizations.push((*pool_id, utilization));
+                }
+                pool_utilizations.sort_by(|(_, a), (_, b)| b.partial_cmp(a).unwrap());
+                *pool_utilizations[0].0
             }
             IpPoolSelectionStrategy::RoundRobin => {
                 let mut counter = self.round_robin_counter.write().await;
                 let index = *counter % eligible_pools.len();
                 *counter = (*counter + 1) % eligible_pools.len();
-                eligible_pools[index].0
+                *eligible_pools[index].0
             }
             IpPoolSelectionStrategy::TopologyAware => {
                 // Prefer pools with matching topology, fall back to least utilized
                 if let Some(hint) = &request.topology_hint {
-                    if let Some((id, _)) = eligible_pools.iter().find(|(_, state)| {
-                        state.config.topology_hint.as_ref() == Some(hint)
+                    if let Some((id, _)) = eligible_pools.iter().find(|(_, enhanced_state)| {
+                        enhanced_state.state.config.topology_hint.as_ref() == Some(hint)
                     }) {
                         return Ok(**id);
                     }
                 }
                 // Fall back to least utilized
-                eligible_pools.sort_by(|(_, a), (_, b)| {
-                    a.utilization_percent()
-                        .partial_cmp(&b.utilization_percent())
-                        .unwrap()
-                });
-                eligible_pools[0].0
+                let mut pool_utilizations = Vec::new();
+                for (pool_id, enhanced_state) in &eligible_pools {
+                    let utilization = enhanced_state.utilization_percent().await;
+                    pool_utilizations.push((*pool_id, utilization));
+                }
+                pool_utilizations.sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap());
+                *pool_utilizations[0].0
             }
             IpPoolSelectionStrategy::Random => {
                 let mut rng = rand::thread_rng();
-                eligible_pools.choose(&mut rng).unwrap().0
+                *eligible_pools.choose(&mut rng).unwrap().0
             }
         };
         
-        Ok(*selected)
+        Ok(selected)
     }
 
     /// Get current state of all pools
     pub async fn get_pools(&self) -> Vec<IpPoolState> {
         let pools = self.pools.read().await;
-        pools.values().cloned().collect()
+        pools.values().map(|enhanced| enhanced.state.clone()).collect()
     }
 
     /// Get allocations for a specific VM
@@ -474,21 +478,26 @@ impl IpPoolManager {
             .unwrap_or_default()
     }
 
-    /// Get pool statistics
+    /// Get pool statistics with ResourcePool integration
     pub async fn get_pool_stats(&self, pool_id: IpPoolId) -> BlixardResult<PoolStats> {
         let pools = self.pools.read().await;
-        let state = pools.get(&pool_id).ok_or_else(|| BlixardError::NotFound {
+        let enhanced_state = pools.get(&pool_id).ok_or_else(|| BlixardError::NotFound {
             resource: format!("IP pool {}", pool_id),
         })?;
         
+        // Use ResourcePool stats if available, fall back to basic stats
+        let utilization_percent = enhanced_state.utilization_percent().await;
+        let available_ips = enhanced_state.state.config.total_capacity() 
+            - enhanced_state.state.allocated_ips.len() as u64;
+        
         Ok(PoolStats {
             pool_id,
-            total_ips: state.config.total_capacity(),
-            allocated_ips: state.allocated_ips.len() as u64,
-            reserved_ips: state.config.reserved_ips.len() as u64,
-            available_ips: state.config.total_capacity() - state.allocated_ips.len() as u64,
-            utilization_percent: state.utilization_percent(),
-            last_allocation: state.last_allocation,
+            total_ips: enhanced_state.state.config.total_capacity(),
+            allocated_ips: enhanced_state.state.allocated_ips.len() as u64,
+            reserved_ips: enhanced_state.state.config.reserved_ips.len() as u64,
+            available_ips,
+            utilization_percent,
+            last_allocation: enhanced_state.state.last_allocation,
         })
     }
 }

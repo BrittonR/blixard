@@ -14,8 +14,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     error::{BlixardError, BlixardResult},
+    patterns::resource_pool::{PoolableResource, ResourceFactory, ResourcePool, PoolConfig},
     types::VmId,
 };
+use async_trait::async_trait;
+use std::sync::Arc;
 
 /// Unique identifier for an IP pool
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -24,6 +27,126 @@ pub struct IpPoolId(pub u64);
 impl std::fmt::Display for IpPoolId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "pool-{}", self.0)
+    }
+}
+
+/// IP Address resource that can be pooled
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IpAddress {
+    /// The IP address
+    pub ip: IpAddr,
+    /// Pool this IP belongs to
+    pub pool_id: IpPoolId,
+    /// Whether this IP is currently valid for allocation
+    pub is_valid: bool,
+}
+
+impl PoolableResource for IpAddress {
+    fn is_valid(&self) -> bool {
+        self.is_valid
+    }
+    
+    fn reset(&mut self) -> BlixardResult<()> {
+        // Reset any temporary state - IP addresses don't need special reset
+        self.is_valid = true;
+        Ok(())
+    }
+}
+
+/// Factory for creating IP address resources within a pool
+pub struct IpAddressFactory {
+    /// Pool configuration
+    config: IpPoolConfig,
+    /// Currently allocated IPs (shared with pool state)
+    allocated_ips: Arc<std::sync::RwLock<BTreeSet<IpAddr>>>,
+    /// Next IP to try (for efficiency)
+    next_ip_hint: Arc<std::sync::RwLock<Option<IpAddr>>>,
+}
+
+impl IpAddressFactory {
+    /// Create a new IP address factory for a pool
+    pub fn new(
+        config: IpPoolConfig,
+        allocated_ips: Arc<std::sync::RwLock<BTreeSet<IpAddr>>>,
+    ) -> Self {
+        Self {
+            config,
+            allocated_ips,
+            next_ip_hint: Arc::new(std::sync::RwLock::new(None)),
+        }
+    }
+    
+    /// Find the next available IP in the allocation range
+    fn find_next_available_ip(&self) -> Option<IpAddr> {
+        let allocated = self.allocated_ips.read().unwrap();
+        
+        match (self.config.allocation_start, self.config.allocation_end) {
+            (IpAddr::V4(start), IpAddr::V4(end)) => {
+                let start_u32 = u32::from(start);
+                let end_u32 = u32::from(end);
+                
+                for i in start_u32..=end_u32 {
+                    let ip = IpAddr::V4(Ipv4Addr::from(i));
+                    if self.is_ip_available(&ip, &allocated) {
+                        return Some(ip);
+                    }
+                }
+                None
+            }
+            (IpAddr::V6(start), IpAddr::V6(end)) => {
+                let start_u128 = u128::from(start);
+                let end_u128 = u128::from(end);
+                
+                // For IPv6, limit iteration to prevent performance issues
+                let max_iterations = 10000;
+                for i in 0..max_iterations.min(end_u128 - start_u128 + 1) {
+                    let ip = IpAddr::V6(Ipv6Addr::from(start_u128 + i));
+                    if self.is_ip_available(&ip, &allocated) {
+                        return Some(ip);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+    
+    /// Check if an IP is available for allocation
+    fn is_ip_available(&self, ip: &IpAddr, allocated: &BTreeSet<IpAddr>) -> bool {
+        !allocated.contains(ip)
+            && !self.config.reserved_ips.contains(ip)
+            && self.config.subnet.contains(ip)
+            && *ip != self.config.gateway
+    }
+}
+
+#[async_trait]
+impl ResourceFactory<IpAddress> for IpAddressFactory {
+    async fn create(&self) -> BlixardResult<IpAddress> {
+        let ip = self.find_next_available_ip().ok_or_else(|| {
+            BlixardError::ResourceExhausted {
+                resource: format!("IP addresses in pool {}", self.config.id),
+            }
+        })?;
+        
+        // Mark IP as allocated
+        {
+            let mut allocated = self.allocated_ips.write().unwrap();
+            allocated.insert(ip);
+        }
+        
+        Ok(IpAddress {
+            ip,
+            pool_id: self.config.id,
+            is_valid: true,
+        })
+    }
+    
+    async fn destroy(&self, resource: IpAddress) -> BlixardResult<()> {
+        // Remove IP from allocated set
+        let mut allocated = self.allocated_ips.write().unwrap();
+        allocated.remove(&resource.ip);
+        Ok(())
     }
 }
 
@@ -203,6 +326,164 @@ pub struct IpPoolState {
     pub total_allocated: u64,
     /// Last allocation timestamp
     pub last_allocation: Option<i64>,
+}
+
+/// Enhanced IP pool state with ResourcePool integration
+pub struct EnhancedIpPoolState {
+    /// Basic pool state (serializable)
+    pub state: IpPoolState,
+    /// Resource pool for managed allocation
+    pub resource_pool: Option<ResourcePool<IpAddress>>,
+    /// Shared allocated IPs for factory coordination
+    allocated_ips_shared: Arc<std::sync::RwLock<BTreeSet<IpAddr>>>,
+}
+
+impl EnhancedIpPoolState {
+    /// Create a new enhanced pool state from configuration
+    pub async fn new(config: IpPoolConfig) -> BlixardResult<Self> {
+        let state = IpPoolState::new(config.clone());
+        let allocated_ips_shared = Arc::new(std::sync::RwLock::new(state.allocated_ips.clone()));
+        
+        // Create resource pool configuration
+        let pool_config = PoolConfig {
+            max_size: config.total_capacity() as usize,
+            min_size: 0,
+            acquire_timeout: std::time::Duration::from_secs(30),
+            validate_on_acquire: true,
+            reset_on_acquire: false,
+        };
+        
+        // Create factory and resource pool
+        let factory = Arc::new(IpAddressFactory::new(config, allocated_ips_shared.clone()));
+        let resource_pool = ResourcePool::new(factory, pool_config);
+        
+        // Initialize the resource pool
+        resource_pool.initialize().await?;
+        
+        Ok(Self {
+            state,
+            resource_pool: Some(resource_pool),
+            allocated_ips_shared,
+        })
+    }
+    
+    /// Create from existing state (for loading from storage)
+    pub async fn from_existing_state(state: IpPoolState) -> BlixardResult<Self> {
+        let allocated_ips_shared = Arc::new(std::sync::RwLock::new(state.allocated_ips.clone()));
+        
+        // Create resource pool configuration
+        let pool_config = PoolConfig {
+            max_size: state.config.total_capacity() as usize,
+            min_size: 0,
+            acquire_timeout: std::time::Duration::from_secs(30),
+            validate_on_acquire: true,
+            reset_on_acquire: false,
+        };
+        
+        // Create factory and resource pool
+        let factory = Arc::new(IpAddressFactory::new(state.config.clone(), allocated_ips_shared.clone()));
+        let resource_pool = ResourcePool::new(factory, pool_config);
+        
+        // Initialize the resource pool
+        resource_pool.initialize().await?;
+        
+        Ok(Self {
+            state,
+            resource_pool: Some(resource_pool),
+            allocated_ips_shared,
+        })
+    }
+    
+    /// Allocate an IP address using ResourcePool
+    pub async fn allocate_ip(&mut self) -> BlixardResult<IpAddress> {
+        let resource_pool = self.resource_pool.as_ref()
+            .ok_or_else(|| BlixardError::Internal {
+                message: "Resource pool not initialized".to_string(),
+            })?;
+        
+        let pooled_ip = resource_pool.acquire().await?;
+        let ip_address = pooled_ip.take(); // Take ownership, removing from pool
+        
+        // Update state tracking
+        self.state.allocated_ips.insert(ip_address.ip);
+        self.state.total_allocated += 1;
+        self.state.last_allocation = Some(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64,
+        );
+        
+        Ok(ip_address)
+    }
+    
+    /// Release an IP address back to the pool
+    pub async fn release_ip(&mut self, ip: IpAddr) -> BlixardResult<()> {
+        // Remove from tracking
+        if self.state.allocated_ips.remove(&ip) {
+            self.state.total_allocated = self.state.total_allocated.saturating_sub(1);
+        }
+        
+        // Remove from shared state
+        {
+            let mut allocated = self.allocated_ips_shared.write().unwrap();
+            allocated.remove(&ip);
+        }
+        
+        Ok(())
+    }
+    
+    /// Check if the pool has available capacity using ResourcePool
+    pub async fn has_capacity(&self) -> bool {
+        if !self.state.config.enabled {
+            return false;
+        }
+        
+        if let Some(resource_pool) = &self.resource_pool {
+            let stats = resource_pool.stats().await;
+            stats.in_use < stats.max_size
+        } else {
+            // Fallback to original logic
+            self.state.has_capacity()
+        }
+    }
+    
+    /// Get pool utilization using ResourcePool stats
+    pub async fn utilization_percent(&self) -> f64 {
+        if let Some(resource_pool) = &self.resource_pool {
+            let stats = resource_pool.stats().await;
+            if stats.max_size == 0 {
+                return 100.0;
+            }
+            (stats.in_use as f64 / stats.max_size as f64) * 100.0
+        } else {
+            // Fallback to original calculation
+            self.state.utilization_percent()
+        }
+    }
+    
+    /// Get current resource pool statistics
+    pub async fn get_pool_stats(&self) -> Option<crate::patterns::resource_pool::PoolStats> {
+        if let Some(resource_pool) = &self.resource_pool {
+            Some(resource_pool.stats().await)
+        } else {
+            None
+        }
+    }
+    
+    /// Sync state from ResourcePool to maintain consistency
+    pub async fn sync_state(&mut self) {
+        if let Some(resource_pool) = &self.resource_pool {
+            let _stats = resource_pool.stats().await;
+            
+            // Update allocated IPs from shared state
+            {
+                let allocated = self.allocated_ips_shared.read().unwrap();
+                self.state.allocated_ips = allocated.clone();
+                self.state.total_allocated = allocated.len() as u64;
+            }
+        }
+    }
 }
 
 impl IpPoolState {
