@@ -23,6 +23,8 @@ use crate::{
         IpPoolId, IpPoolSelectionStrategy, IpPoolState, EnhancedIpPoolState, NetworkConfig,
     },
     types::VmId,
+    unwrap_helpers::{time_since_epoch_safe, min_by_safe, max_by_safe, choose_random},
+    get_mut_or_not_found,
 };
 
 /// IP Pool Manager - manages all IP pools and allocations
@@ -277,7 +279,11 @@ impl IpPoolManager {
         
         // Allocate IP from selected pool using ResourcePool
         let mut pools = self.pools.write().await;
-        let enhanced_state = pools.get_mut(&pool_id).unwrap();
+        let enhanced_state = get_mut_or_not_found!(
+            pools.get_mut(&pool_id),
+            "IP Pool",
+            pool_id
+        );
         
         // Use ResourcePool for allocation
         let ip_address = enhanced_state.allocate_ip().await?;
@@ -289,10 +295,7 @@ impl IpPoolManager {
             pool_id,
             vm_id: request.vm_id,
             mac_address: request.mac_address.clone(),
-            allocated_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i64,
+            allocated_at: time_since_epoch_safe() as i64,
             expires_at: None,
         };
         
@@ -405,24 +408,30 @@ impl IpPoolManager {
         // Select based on strategy using ResourcePool information
         let selected = match request.selection_strategy {
             IpPoolSelectionStrategy::LeastUtilized => {
-                // Get utilization for all pools and sort
+                // Get utilization for all pools and find minimum
                 let mut pool_utilizations = Vec::new();
                 for (pool_id, enhanced_state) in &eligible_pools {
                     let utilization = enhanced_state.utilization_percent().await;
                     pool_utilizations.push((*pool_id, utilization));
                 }
-                pool_utilizations.sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap());
-                *pool_utilizations[0].0
+                let (pool_id, _) = min_by_safe(pool_utilizations.into_iter(), |(_, utilization)| {
+                    // Convert to integer for comparison (multiply by 1000 for precision)
+                    (utilization * 1000.0) as u64
+                })?;
+                pool_id
             }
             IpPoolSelectionStrategy::MostUtilized => {
-                // Get utilization for all pools and sort descending
+                // Get utilization for all pools and find maximum
                 let mut pool_utilizations = Vec::new();
                 for (pool_id, enhanced_state) in &eligible_pools {
                     let utilization = enhanced_state.utilization_percent().await;
                     pool_utilizations.push((*pool_id, utilization));
                 }
-                pool_utilizations.sort_by(|(_, a), (_, b)| b.partial_cmp(a).unwrap());
-                *pool_utilizations[0].0
+                let (pool_id, _) = max_by_safe(pool_utilizations.into_iter(), |(_, utilization)| {
+                    // Convert to integer for comparison (multiply by 1000 for precision)
+                    (utilization * 1000.0) as u64
+                })?;
+                pool_id
             }
             IpPoolSelectionStrategy::RoundRobin => {
                 let mut counter = self.round_robin_counter.write().await;
@@ -445,12 +454,15 @@ impl IpPoolManager {
                     let utilization = enhanced_state.utilization_percent().await;
                     pool_utilizations.push((*pool_id, utilization));
                 }
-                pool_utilizations.sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap());
-                *pool_utilizations[0].0
+                let (pool_id, _) = min_by_safe(pool_utilizations.into_iter(), |(_, utilization)| {
+                    // Convert to integer for comparison (multiply by 1000 for precision)
+                    (utilization * 1000.0) as u64
+                })?;
+                pool_id
             }
             IpPoolSelectionStrategy::Random => {
-                let mut rng = rand::thread_rng();
-                *eligible_pools.choose(&mut rng).unwrap().0
+                let pool_ids: Vec<_> = eligible_pools.iter().map(|(id, _)| *id).collect();
+                *choose_random(&pool_ids)?
             }
         };
         

@@ -4,6 +4,7 @@ pub mod config_global;
 pub mod config_v2;
 pub mod config_watcher;
 pub mod error;
+pub mod unwrap_helpers;
 pub mod network_isolated_backend;
 pub mod node;
 pub mod node_shared;

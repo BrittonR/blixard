@@ -8,6 +8,7 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::resource_management::{ClusterResourceManager, OvercommitPolicy};
 use crate::raft_manager::WorkerCapabilities;
 use crate::types::{VmConfig, VmState, VmStatus};
+use crate::try_into_bytes;
 use redb::{Database, ReadableTable};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -70,7 +71,11 @@ impl ResourceAdmissionController {
         // Update node capabilities
         for entry in worker_table.iter()? {
             let (key, value) = entry?;
-            let node_id = u64::from_le_bytes(key.value().try_into().unwrap());
+            let node_id = u64::from_le_bytes(try_into_bytes!(
+                key.value().try_into(),
+                "node_id key",
+                "8-byte array"
+            ));
             let (_address, capabilities): (String, WorkerCapabilities) = 
                 bincode::deserialize(value.value())
                     .map_err(|e| BlixardError::Serialization {
