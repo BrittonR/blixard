@@ -1,22 +1,13 @@
-//! Abstractions for testability and dependency injection
+//! Trait abstractions for breaking circular dependencies
 //!
-//! This module provides trait-based abstractions for external dependencies,
-//! enabling better testing through mocking and dependency injection.
+//! This module contains trait definitions that allow components to depend on
+//! interfaces rather than concrete implementations, breaking circular dependencies
+//! and improving testability.
 
-pub mod config;
-pub mod filesystem;
-pub mod command;
-pub mod storage;
-// Temporarily disabled: uses gRPC which we're removing
-// pub mod network;
-pub mod time;
-// Temporarily disabled: has dependencies on network module
-// pub mod container;
+pub mod node_events;
+pub mod raft_coordinator;
+pub mod state_manager;
 
-pub use config::ConfigProvider;
-pub use filesystem::FileSystem;
-pub use command::{CommandExecutor, CommandOptions, CommandOutput, TokioCommandExecutor, MockCommandExecutor};
-pub use storage::{NodeRepository, TaskRepository, VmRepository};
-// pub use network::NetworkClient;
-pub use time::Clock;
-// pub use container::{ServiceContainer, ServiceContainerBuilder};
+pub use node_events::*;
+pub use raft_coordinator::*;
+pub use state_manager::*;
