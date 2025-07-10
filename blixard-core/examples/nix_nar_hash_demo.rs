@@ -6,6 +6,7 @@
 //! - Handle both store paths and regular paths
 
 use blixard_core::{
+    abstractions::command::TokioCommandExecutor,
     error::BlixardResult,
     nix_image_store::NixImageStore,
     p2p_manager::{P2pConfig, P2pManager},
@@ -29,12 +30,14 @@ async fn main() -> BlixardResult<()> {
 
     // Set up P2P manager and image store
     let p2p_manager = Arc::new(P2pManager::new(1, data_dir, P2pConfig::default()).await?);
+    let command_executor = Arc::new(TokioCommandExecutor::new());
 
     let image_store = NixImageStore::new(
         1,
         p2p_manager,
         data_dir,
         None, // Use default /nix/store
+        command_executor,
     )
     .await?;
 

@@ -1,4 +1,5 @@
 use blixard_core::{
+    abstractions::command::TokioCommandExecutor,
     error::BlixardResult,
     nix_image_store::{NixArtifactType, NixImageStore},
     p2p_manager::{P2pConfig, P2pManager},
@@ -11,8 +12,9 @@ use tempfile::TempDir;
 async fn test_microvm_import_and_download() -> BlixardResult<()> {
     let temp_dir = TempDir::new()?;
     let p2p_manager = Arc::new(P2pManager::new(1, temp_dir.path(), P2pConfig::default()).await?);
+    let command_executor = Arc::new(TokioCommandExecutor::new());
 
-    let store = NixImageStore::new(1, p2p_manager, temp_dir.path(), None).await?;
+    let store = NixImageStore::new(1, p2p_manager, temp_dir.path(), None, command_executor).await?;
 
     // Create dummy microVM files
     let system_path = temp_dir.path().join("nixos-system");
@@ -59,8 +61,9 @@ async fn test_microvm_import_and_download() -> BlixardResult<()> {
 async fn test_container_import() -> BlixardResult<()> {
     let temp_dir = TempDir::new()?;
     let p2p_manager = Arc::new(P2pManager::new(1, temp_dir.path(), P2pConfig::default()).await?);
+    let command_executor = Arc::new(TokioCommandExecutor::new());
 
-    let store = NixImageStore::new(1, p2p_manager, temp_dir.path(), None).await?;
+    let store = NixImageStore::new(1, p2p_manager, temp_dir.path(), None, command_executor).await?;
 
     // Create dummy container tar
     let tar_path = temp_dir.path().join("container.tar");
@@ -82,8 +85,9 @@ async fn test_container_import() -> BlixardResult<()> {
 async fn test_chunk_deduplication() -> BlixardResult<()> {
     let temp_dir = TempDir::new()?;
     let p2p_manager = Arc::new(P2pManager::new(1, temp_dir.path(), P2pConfig::default()).await?);
+    let command_executor = Arc::new(TokioCommandExecutor::new());
 
-    let store = NixImageStore::new(1, p2p_manager, temp_dir.path(), None).await?;
+    let store = NixImageStore::new(1, p2p_manager, temp_dir.path(), None, command_executor).await?;
 
     // Create two files with some shared content
     let file1_path = temp_dir.path().join("file1");
@@ -133,8 +137,9 @@ async fn test_chunk_deduplication() -> BlixardResult<()> {
 async fn test_garbage_collection() -> BlixardResult<()> {
     let temp_dir = TempDir::new()?;
     let p2p_manager = Arc::new(P2pManager::new(1, temp_dir.path(), P2pConfig::default()).await?);
+    let command_executor = Arc::new(TokioCommandExecutor::new());
 
-    let store = NixImageStore::new(1, p2p_manager, temp_dir.path(), None).await?;
+    let store = NixImageStore::new(1, p2p_manager, temp_dir.path(), None, command_executor).await?;
 
     // Import an image
     let file_path = temp_dir.path().join("test-file");
@@ -162,8 +167,9 @@ async fn test_garbage_collection() -> BlixardResult<()> {
 async fn test_list_images() -> BlixardResult<()> {
     let temp_dir = TempDir::new()?;
     let p2p_manager = Arc::new(P2pManager::new(1, temp_dir.path(), P2pConfig::default()).await?);
+    let command_executor = Arc::new(TokioCommandExecutor::new());
 
-    let store = NixImageStore::new(1, p2p_manager, temp_dir.path(), None).await?;
+    let store = NixImageStore::new(1, p2p_manager, temp_dir.path(), None, command_executor).await?;
 
     // Initially empty
     let images = store.list_images().await?;
@@ -194,8 +200,9 @@ async fn test_list_images() -> BlixardResult<()> {
 async fn test_prefetch_for_migration() -> BlixardResult<()> {
     let temp_dir = TempDir::new()?;
     let p2p_manager = Arc::new(P2pManager::new(1, temp_dir.path(), P2pConfig::default()).await?);
+    let command_executor = Arc::new(TokioCommandExecutor::new());
 
-    let store = NixImageStore::new(1, p2p_manager, temp_dir.path(), None).await?;
+    let store = NixImageStore::new(1, p2p_manager, temp_dir.path(), None, command_executor).await?;
 
     // Import a VM image
     let file_path = temp_dir.path().join("vm-image");
@@ -218,9 +225,10 @@ async fn test_nix_verification() -> BlixardResult<()> {
     std::fs::create_dir_all(&nix_store_dir)?;
 
     let p2p_manager = Arc::new(P2pManager::new(1, temp_dir.path(), P2pConfig::default()).await?);
+    let command_executor = Arc::new(TokioCommandExecutor::new());
 
     let store =
-        NixImageStore::new(1, p2p_manager, temp_dir.path(), Some(nix_store_dir.clone())).await?;
+        NixImageStore::new(1, p2p_manager, temp_dir.path(), Some(nix_store_dir.clone()), command_executor).await?;
 
     // Create a Nix store path
     let store_hash = "abc123def456";

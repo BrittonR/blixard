@@ -5,6 +5,7 @@
 //! It handles content-addressed storage, derivation tracking, and efficient
 //! deduplication of Nix store paths.
 
+use crate::abstractions::command::{CommandExecutor, CommandOptions};
 use crate::error::{BlixardError, BlixardResult};
 use crate::metrics_otel::{
     record_p2p_cache_access, record_p2p_chunk_transfer, record_p2p_image_download,
@@ -155,6 +156,8 @@ pub struct NixImageStore {
     metadata_cache: Arc<RwLock<HashMap<String, NixImageMetadata>>>,
     /// Chunk deduplication index
     chunk_index: Arc<RwLock<HashMap<String, ChunkLocation>>>,
+    /// Command executor for running Nix commands
+    command_executor: Arc<dyn CommandExecutor>,
 }
 
 /// Location of a chunk
@@ -173,6 +176,7 @@ impl NixImageStore {
         p2p_manager: Arc<P2pManager>,
         data_dir: &Path,
         nix_store_dir: Option<PathBuf>,
+        command_executor: Arc<dyn CommandExecutor>,
     ) -> BlixardResult<Self> {
         let cache_dir = data_dir.join("nix-image-cache");
         std::fs::create_dir_all(&cache_dir)?;
@@ -186,6 +190,7 @@ impl NixImageStore {
             node_id,
             metadata_cache: Arc::new(RwLock::new(HashMap::new())),
             chunk_index: Arc::new(RwLock::new(HashMap::new())),
+            command_executor,
         })
     }
 
@@ -824,8 +829,6 @@ impl NixImageStore {
         &self,
         path: &Path,
     ) -> BlixardResult<(Option<String>, Option<u64>)> {
-        use tokio::process::Command;
-
         // Check if this is a Nix store path
         if !path.starts_with(&self.nix_store_dir) {
             debug!(
@@ -845,10 +848,12 @@ impl NixImageStore {
         }
 
         // Run nix path-info to get NAR hash and size
-        let output = Command::new("nix")
-            .args(&["path-info", "--json", &path.to_string_lossy()])
+        let options = CommandOptions::builder()
             .env("NIX_CONFIG", "experimental-features = nix-command")
-            .output()
+            .build();
+        
+        let output = self.command_executor
+            .execute("nix", &["path-info", "--json", &path.to_string_lossy()], options)
             .await
             .map_err(|e| BlixardError::Internal {
                 message: format!("Failed to run nix path-info: {}", e),
@@ -860,10 +865,12 @@ impl NixImageStore {
             if path.is_dir() || path.is_file() {
                 debug!("Path not in store database, trying nix store add-path");
 
-                let add_output = Command::new("nix")
-                    .args(&["store", "add-path", &path.to_string_lossy()])
+                let add_options = CommandOptions::builder()
                     .env("NIX_CONFIG", "experimental-features = nix-command")
-                    .output()
+                    .build();
+                    
+                let add_output = self.command_executor
+                    .execute("nix", &["store", "add-path", &path.to_string_lossy()], add_options)
                     .await
                     .map_err(|e| BlixardError::Internal {
                         message: format!("Failed to run nix store add-path: {}", e),
@@ -878,10 +885,12 @@ impl NixImageStore {
                 }
 
                 // Try path-info again
-                let retry_output = Command::new("nix")
-                    .args(&["path-info", "--json", &path.to_string_lossy()])
+                let retry_options = CommandOptions::builder()
                     .env("NIX_CONFIG", "experimental-features = nix-command")
-                    .output()
+                    .build();
+                    
+                let retry_output = self.command_executor
+                    .execute("nix", &["path-info", "--json", &path.to_string_lossy()], retry_options)
                     .await?;
 
                 if !retry_output.status.success() {
@@ -952,8 +961,6 @@ impl NixImageStore {
         metadata: &NixImageMetadata,
         path: &Path,
     ) -> BlixardResult<()> {
-        use tokio::process::Command;
-
         let expected_nar_hash =
             metadata
                 .nar_hash
@@ -969,10 +976,12 @@ impl NixImageStore {
 
         // First try to get the NAR hash if the path is already in the store
         if path.starts_with(&self.nix_store_dir) {
-            let output = Command::new("nix")
-                .args(&["path-info", "--json", &path.to_string_lossy()])
+            let options = CommandOptions::builder()
                 .env("NIX_CONFIG", "experimental-features = nix-command")
-                .output()
+                .build();
+                
+            let output = self.command_executor
+                .execute("nix", &["path-info", "--json", &path.to_string_lossy()], options)
                 .await?;
 
             if output.status.success() {
@@ -996,88 +1005,50 @@ impl NixImageStore {
         }
 
         // Otherwise, compute the NAR hash directly
-        let output = Command::new("nix")
-            .args(&[
-                "nar",
-                "dump-path",
-                &path.to_string_lossy(),
-                "|",
-                "nix",
-                "hash",
-                "file",
-                "--type",
-                "sha256",
-                "--base32",
-                "-",
-            ])
-            .env("NIX_CONFIG", "experimental-features = nix-command")
-            .output()
-            .await;
+        // First, dump the NAR
+        let dump_options = CommandOptions::builder().build();
+        let dump_output = self.command_executor
+            .execute("nix-store", &["--dump", &path.to_string_lossy()], dump_options)
+            .await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to run nix-store --dump: {}", e),
+            })?;
 
-        // If the above fails (due to shell pipe), try an alternative approach
-        let computed_hash = if output.as_ref().map(|o| !o.status.success()).unwrap_or(true) {
-            // Alternative: use nix-store --dump and pipe to nix-hash
-            let dump_output = Command::new("nix-store")
-                .args(&["--dump", &path.to_string_lossy()])
-                .output()
-                .await
-                .map_err(|e| BlixardError::Internal {
-                    message: format!("Failed to run nix-store --dump: {}", e),
-                })?;
+        if !dump_output.status.success() {
+            return Err(BlixardError::Internal {
+                message: format!(
+                    "Failed to dump NAR for {}: {}",
+                    path.display(),
+                    String::from_utf8_lossy(&dump_output.stderr)
+                ),
+            });
+        }
 
-            if !dump_output.status.success() {
-                return Err(BlixardError::Internal {
-                    message: format!(
-                        "Failed to dump NAR for {}: {}",
-                        path.display(),
-                        String::from_utf8_lossy(&dump_output.stderr)
-                    ),
-                });
-            }
+        // Hash the NAR output
+        let hash_options = CommandOptions::builder()
+            .stdin(dump_output.stdout)
+            .build();
+            
+        let hash_result = self.command_executor
+            .execute("nix-hash", &["--type", "sha256", "--base32", "--flat"], hash_options)
+            .await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to run nix-hash: {}", e),
+            })?;
 
-            // Hash the NAR output
-            let mut hash_cmd = Command::new("nix-hash")
-                .args(&["--type", "sha256", "--base32", "--flat"])
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .spawn()
-                .map_err(|e| BlixardError::Internal {
-                    message: format!("Failed to spawn nix-hash: {}", e),
-                })?;
+        if !hash_result.status.success() {
+            return Err(BlixardError::Internal {
+                message: format!(
+                    "Failed to hash NAR: {}",
+                    String::from_utf8_lossy(&hash_result.stderr)
+                ),
+            });
+        }
 
-            // Write NAR data to nix-hash stdin
-            use tokio::io::AsyncWriteExt;
-            if let Some(stdin) = hash_cmd.stdin.take() {
-                let mut stdin = tokio::io::BufWriter::new(stdin);
-                stdin.write_all(&dump_output.stdout).await?;
-                stdin.flush().await?;
-            }
-
-            let hash_result = hash_cmd.wait_with_output().await?;
-
-            if !hash_result.status.success() {
-                return Err(BlixardError::Internal {
-                    message: format!(
-                        "Failed to hash NAR: {}",
-                        String::from_utf8_lossy(&hash_result.stderr)
-                    ),
-                });
-            }
-
-            format!(
-                "sha256:{}",
-                String::from_utf8_lossy(&hash_result.stdout).trim()
-            )
-        } else {
-            match output {
-                Ok(o) => format!("sha256:{}", String::from_utf8_lossy(&o.stdout).trim()),
-                Err(e) => {
-                    return Err(BlixardError::Internal {
-                        message: format!("Failed to compute NAR hash: {}", e),
-                    })
-                }
-            }
-        };
+        let computed_hash = format!(
+            "sha256:{}",
+            String::from_utf8_lossy(&hash_result.stdout).trim()
+        );
 
         // Compare the computed hash with the expected hash
         if computed_hash == *expected_nar_hash {

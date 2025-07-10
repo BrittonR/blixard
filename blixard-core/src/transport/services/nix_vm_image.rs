@@ -5,6 +5,7 @@
 //! efficient chunked transfers.
 
 use crate::{
+    abstractions::command::TokioCommandExecutor,
     error::{BlixardError, BlixardResult},
     iroh_types,
     nix_image_store::{NixArtifactType, NixImageMetadata, NixImageStore, TransferStats},
@@ -66,6 +67,7 @@ impl NixVmImageServiceImpl {
 
         // Get data directory
         let data_dir = PathBuf::from(&node.config.data_dir);
+        let command_executor = Arc::new(TokioCommandExecutor::new());
 
         // Create Nix image store
         let image_store = Arc::new(
@@ -74,6 +76,7 @@ impl NixVmImageServiceImpl {
                 p2p_manager,
                 &data_dir,
                 None, // Use default /nix/store
+                command_executor,
             )
             .await?,
         );

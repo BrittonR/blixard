@@ -4,6 +4,7 @@
 //! to ensure image integrity during P2P distribution.
 
 use blixard_core::{
+    abstractions::command::TokioCommandExecutor,
     error::BlixardResult,
     nix_image_store::NixImageStore,
     p2p_manager::{P2pConfig, P2pManager},
@@ -28,9 +29,10 @@ async fn main() -> BlixardResult<()> {
 
     // Create P2P manager and image store
     let p2p_manager = Arc::new(P2pManager::new(1, temp_dir.path(), P2pConfig::default()).await?);
+    let command_executor = Arc::new(TokioCommandExecutor::new());
 
     let store =
-        NixImageStore::new(1, p2p_manager, temp_dir.path(), Some(nix_store_dir.clone())).await?;
+        NixImageStore::new(1, p2p_manager, temp_dir.path(), Some(nix_store_dir.clone()), command_executor).await?;
 
     // Demo 1: Import with NAR hash verification
     info!("\n--- Demo 1: Import with NAR Hash ---");

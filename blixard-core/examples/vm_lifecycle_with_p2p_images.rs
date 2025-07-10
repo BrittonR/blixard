@@ -8,6 +8,7 @@
 //! 5. Migration with pre-fetching
 
 use blixard_core::{
+    abstractions::command::TokioCommandExecutor,
     error::BlixardResult,
     nix_image_store::NixImageStore,
     node::Node,
@@ -166,8 +167,9 @@ async fn setup_build_node(node_dir: &std::path::Path) -> BlixardResult<(String, 
 
     // Import to P2P store
     let p2p_manager = Arc::new(P2pManager::new(1, node_dir, P2pConfig::default()).await?);
+    let command_executor = Arc::new(TokioCommandExecutor::new());
 
-    let image_store = NixImageStore::new(1, p2p_manager, node_dir, Some(nix_store_dir)).await?;
+    let image_store = NixImageStore::new(1, p2p_manager, node_dir, Some(nix_store_dir), command_executor).await?;
 
     let metadata = image_store
         .import_microvm("demo-nixos-microvm", &system_path, Some(&kernel_path))
@@ -221,9 +223,10 @@ async fn setup_node_with_image_store(
     // Create P2P manager and image store
     let p2p_manager =
         Arc::new(P2pManager::new(node.get_config().id, node_dir, P2pConfig::default()).await?);
+    let command_executor = Arc::new(TokioCommandExecutor::new());
 
     let image_store = Arc::new(
-        NixImageStore::new(node.get_config().id, p2p_manager.clone(), node_dir, None).await?,
+        NixImageStore::new(node.get_config().id, p2p_manager.clone(), node_dir, None, command_executor).await?,
     );
 
     // Set P2P manager on node (which includes image store access)

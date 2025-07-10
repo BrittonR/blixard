@@ -6,6 +6,7 @@
 //! - Verification metrics (NAR hash checks)
 
 use blixard_core::{
+    abstractions::command::TokioCommandExecutor,
     error::BlixardResult,
     metrics_otel::{init_prometheus, prometheus_metrics},
     metrics_server::start_metrics_server,
@@ -47,7 +48,8 @@ async fn main() -> BlixardResult<()> {
 
     // Set up first node with P2P and image store
     let p2p_manager1 = Arc::new(P2pManager::new(1, &node1_dir, P2pConfig::default()).await?);
-    let image_store1 = NixImageStore::new(1, p2p_manager1, &node1_dir, None).await?;
+    let command_executor = Arc::new(TokioCommandExecutor::new());
+    let image_store1 = NixImageStore::new(1, p2p_manager1, &node1_dir, None, command_executor.clone()).await?;
 
     // Create some test content
     let test_file = node1_dir.join("test-system");
@@ -86,7 +88,7 @@ async fn main() -> BlixardResult<()> {
 
     // Set up second node to simulate cross-node transfer
     let p2p_manager2 = Arc::new(P2pManager::new(2, &node2_dir, P2pConfig::default()).await?);
-    let image_store2 = NixImageStore::new(2, p2p_manager2, &node2_dir, None).await?;
+    let image_store2 = NixImageStore::new(2, p2p_manager2, &node2_dir, None, command_executor).await?;
 
     info!("\n5. Importing similar image with 50% overlap...");
     // Create a file that's 50% identical to the first
