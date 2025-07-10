@@ -61,7 +61,11 @@ pub mod p2p_monitor;
 pub mod p2p_monitor_otel;
 pub mod transport;
 pub mod vm_auto_recovery;
+pub mod vm_health_config;
 pub mod vm_health_monitor;
+pub mod vm_health_recovery_coordinator;
+pub mod vm_health_scheduler;
+pub mod vm_health_state_manager;
 pub mod vm_health_types;
 pub mod vm_network_isolation;
 // Temporarily disabled: uses gRPC/tonic which we're removing
