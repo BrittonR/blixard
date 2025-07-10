@@ -1141,11 +1141,11 @@ impl SharedNodeState {
             let read_txn = db.begin_read()?;
 
             // Check if task is assigned
-            if let Ok(assignment_table) = read_txn.open_table(crate::storage::TASK_ASSIGNMENT_TABLE)
+            if let Ok(assignment_table) = read_txn.open_table(crate::raft_storage::TASK_ASSIGNMENT_TABLE)
             {
                 if let Ok(Some(_)) = assignment_table.get(task_id) {
                     // Task is assigned, check if it has results
-                    if let Ok(result_table) = read_txn.open_table(crate::storage::TASK_RESULT_TABLE)
+                    if let Ok(result_table) = read_txn.open_table(crate::raft_storage::TASK_RESULT_TABLE)
                     {
                         if let Ok(Some(result_data)) = result_table.get(task_id) {
                             let result: TaskResult = bincode::deserialize(result_data.value())?;
@@ -1158,7 +1158,7 @@ impl SharedNodeState {
             }
 
             // Check if task exists
-            if let Ok(task_table) = read_txn.open_table(crate::storage::TASK_TABLE) {
+            if let Ok(task_table) = read_txn.open_table(crate::raft_storage::TASK_TABLE) {
                 if let Ok(Some(_)) = task_table.get(task_id) {
                     return Ok(Some(("pending".to_string(), None)));
                 }
@@ -1467,7 +1467,7 @@ impl SharedNodeState {
         let database = self.database.read().await;
         if let Some(db) = database.as_ref() {
             // Load configuration state from storage
-            let storage = crate::storage::RedbRaftStorage {
+            let storage = crate::raft_storage::RedbRaftStorage {
                 database: db.clone(),
             };
             let conf_state = storage.load_conf_state()?;

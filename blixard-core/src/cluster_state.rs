@@ -5,7 +5,7 @@
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::iroh_transport_v2::{DocumentType, IrohTransportV2};
-use crate::storage::Storage;
+use crate::raft_storage::Storage;
 use crate::types::{NodeConfig, VmConfig};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -395,7 +395,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn create_test_storage(temp_dir: &TempDir) -> Arc<dyn Storage> {
-        use crate::storage::RedbRaftStorage;
+        use crate::raft_storage::RedbRaftStorage;
         use redb::Database;
 
         let db_path = temp_dir.path().join("test.db");

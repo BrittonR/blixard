@@ -11,7 +11,7 @@
 //! - Transaction lifecycle management with proper cleanup
 
 use crate::{
-    common::error_context::{SerializationContext, StorageContext},
+    common::error_context::{SerializationContext as SerializationContextTrait, StorageContext as StorageContextTrait},
     error::{BlixardError, BlixardResult},
 };
 use redb::{
@@ -29,60 +29,51 @@ pub enum TransactionType {
 }
 
 /// Wrapper for database transactions with consistent error handling and utilities
-pub struct DatabaseTransaction<'a> {
-    txn: TransactionInner<'a>,
+pub struct DatabaseTransaction {
+    txn: TransactionInner,
     operation: String,
-    database: &'a Database,
 }
 
 /// Internal transaction representation
-enum TransactionInner<'a> {
-    Read(ReadTransaction<'a>),
-    Write(WriteTransaction<'a>),
+enum TransactionInner {
+    Read(ReadTransaction),
+    Write(WriteTransaction),
 }
 
-impl<'a> DatabaseTransaction<'a> {
+impl DatabaseTransaction {
     /// Begin a read transaction with context
     pub fn begin_read(
-        database: &'a Database,
+        database: &Database,
         operation: impl Into<String>,
     ) -> BlixardResult<Self> {
         let operation = operation.into();
         let txn = database
             .begin_read()
-            .context(StorageContext {
-                operation: format!("begin read transaction for {}", operation),
-                table: None,
-            })?;
+            .storage_context(&format!("begin read transaction for {}", operation))?;
 
         debug!("Started read transaction for: {}", operation);
 
         Ok(Self {
             txn: TransactionInner::Read(txn),
             operation,
-            database,
         })
     }
 
     /// Begin a write transaction with context
     pub fn begin_write(
-        database: &'a Database,
+        database: &Database,
         operation: impl Into<String>,
     ) -> BlixardResult<Self> {
         let operation = operation.into();
         let txn = database
             .begin_write()
-            .context(StorageContext {
-                operation: format!("begin write transaction for {}", operation),
-                table: None,
-            })?;
+            .storage_context(&format!("begin write transaction for {}", operation))?;
 
         debug!("Started write transaction for: {}", operation);
 
         Ok(Self {
             txn: TransactionInner::Write(txn),
             operation,
-            database,
         })
     }
 
@@ -101,10 +92,7 @@ impl<'a> DatabaseTransaction<'a> {
             TransactionInner::Write(write_txn) => {
                 write_txn
                     .open_table(table_def)
-                    .context(StorageContext {
-                        operation: format!("open table for {}", self.operation),
-                        table: Some(table_def.name().to_string()),
-                    })
+                    .storage_context(&format!("open table for {}", self.operation))
             }
         }
     }
@@ -118,18 +106,12 @@ impl<'a> DatabaseTransaction<'a> {
             TransactionInner::Read(read_txn) => {
                 read_txn
                     .open_table(table_def)
-                    .context(StorageContext {
-                        operation: format!("open read table for {}", self.operation),
-                        table: Some(table_def.name().to_string()),
-                    })
+                    .storage_context(&format!("open read table for {}", self.operation))
             }
             TransactionInner::Write(write_txn) => {
                 write_txn
                     .open_table(table_def)
-                    .context(StorageContext {
-                        operation: format!("open read table for {}", self.operation),
-                        table: Some(table_def.name().to_string()),
-                    })
+                    .storage_context(&format!("open read table for {}", self.operation))
             }
         }
     }
@@ -145,17 +127,11 @@ impl<'a> DatabaseTransaction<'a> {
         K: redb::Key + 'static,
         T: Serialize,
     {
-        let data = bincode::serialize(value).context(SerializationContext {
-            operation: format!("serialize {} for {}", std::any::type_name::<T>(), self.operation),
-            type_name: std::any::type_name::<T>().to_string(),
-        })?;
+        let data = bincode::serialize(value).bincode_context(&format!("serialize {} for {}", std::any::type_name::<T>(), self.operation))?;
 
         table
             .insert(key, data.as_slice())
-            .context(StorageContext {
-                operation: format!("insert serialized data for {}", self.operation),
-                table: Some("serialized_data".to_string()),
-            })?;
+            .storage_context(&format!("insert serialized data for {}", self.operation))?;
 
         Ok(())
     }
@@ -172,15 +148,9 @@ impl<'a> DatabaseTransaction<'a> {
     {
         match table
             .get(key)
-            .context(StorageContext {
-                operation: format!("get data for {}", self.operation),
-                table: Some("serialized_data".to_string()),
-            })? {
+            .storage_context(&format!("get data for {}", self.operation))? {
             Some(data) => {
-                let value = bincode::deserialize(data.value()).context(SerializationContext {
-                    operation: format!("deserialize {} for {}", std::any::type_name::<T>(), self.operation),
-                    type_name: std::any::type_name::<T>().to_string(),
-                })?;
+                let value = bincode::deserialize(data.value()).bincode_context(&format!("deserialize {} for {}", std::any::type_name::<T>(), self.operation))?;
                 Ok(Some(value))
             }
             None => Ok(None),
@@ -199,10 +169,7 @@ impl<'a> DatabaseTransaction<'a> {
         // Collect all keys first to avoid iterator invalidation
         let keys: Vec<K> = table
             .iter()
-            .context(StorageContext {
-                operation: format!("iterate table for clear during {}", self.operation),
-                table: None,
-            })?
+            .storage_context(&format!("iterate table for clear during {}", self.operation))?
             .filter_map(|entry| entry.ok().map(|(k, _)| k.value().clone()))
             .collect();
 
@@ -211,10 +178,7 @@ impl<'a> DatabaseTransaction<'a> {
         for key in keys {
             table
                 .remove(key)
-                .context(StorageContext {
-                    operation: format!("remove entry during clear for {}", self.operation),
-                    table: None,
-                })?;
+                .storage_context(&format!("remove entry during clear for {}", self.operation))?;
         }
 
         Ok(())
@@ -253,23 +217,13 @@ impl<'a> DatabaseTransaction<'a> {
         
         let iter = table
             .iter()
-            .context(StorageContext {
-                operation: format!("iterate table for {}", self.operation),
-                table: None,
-            })?;
+            .storage_context(&format!("iterate table for {}", self.operation))?;
 
         for entry in iter {
-            let (key, value) = entry.context(StorageContext {
-                operation: format!("read entry during iteration for {}", self.operation),
-                table: None,
-            })?;
+            let (key, value) = entry.storage_context(&format!("read entry during iteration for {}", self.operation))?;
 
-            let deserialized_value = bincode::deserialize(value.value()).context(
-                SerializationContext {
-                    operation: format!("deserialize entry during iteration for {}", self.operation),
-                    type_name: std::any::type_name::<T>().to_string(),
-                },
-            )?;
+            let deserialized_value = bincode::deserialize(value.value())
+                .bincode_context(&format!("deserialize entry during iteration for {}", self.operation))?;
 
             results.push((key.value().clone(), deserialized_value));
         }
@@ -303,10 +257,7 @@ impl<'a> DatabaseTransaction<'a> {
             TransactionInner::Write(write_txn) => {
                 write_txn
                     .commit()
-                    .context(StorageContext {
-                        operation: format!("commit transaction for {}", self.operation),
-                        table: None,
-                    })?;
+                    .storage_context(&format!("commit transaction for {}", self.operation))?;
                 debug!("Committed transaction for: {}", self.operation);
                 Ok(())
             }

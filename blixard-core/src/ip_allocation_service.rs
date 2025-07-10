@@ -13,7 +13,7 @@ use crate::{
     error::{BlixardError, BlixardResult},
     ip_pool::{IpAllocationRequest, IpPoolSelectionStrategy},
     raft_manager::{ProposalData, RaftProposal},
-    storage::{IP_ALLOCATION_TABLE, VM_STATE_TABLE},
+    raft_storage::{IP_ALLOCATION_TABLE, VM_STATE_TABLE},
     types::{VmId, VmState},
 };
 use redb::{Database, ReadableTable};
@@ -203,7 +203,7 @@ pub async fn handle_ip_allocation_result(
     
     // Update VM IP mapping
     {
-        let mut vm_ip_table = write_txn.open_table(crate::storage::VM_IP_MAPPING_TABLE)?;
+        let mut vm_ip_table = write_txn.open_table(crate::raft_storage::VM_IP_MAPPING_TABLE)?;
         
         // Get existing IPs for this VM
         let mut vm_ips = if let Some(data) = vm_ip_table.get(vm_id.to_string().as_str())? {

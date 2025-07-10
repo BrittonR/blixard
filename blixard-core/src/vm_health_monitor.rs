@@ -240,7 +240,7 @@ impl VmHealthMonitor {
             })?;
 
         let read_txn = database.begin_read()?;
-        let table = read_txn.open_table(crate::storage::VM_STATE_TABLE)?;
+        let table = read_txn.open_table(crate::raft_storage::VM_STATE_TABLE)?;
 
         if let Some(data) = table.get(vm_name)? {
             let vm_state: crate::types::VmState = bincode::deserialize(data.value())?;

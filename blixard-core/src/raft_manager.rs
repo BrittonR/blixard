@@ -363,7 +363,7 @@ impl RaftStateMachine {
                 match result {
                     Ok(allocation_result) => {
                         // Store allocation in database
-                        let mut ip_alloc_table = write_txn.open_table(crate::storage::IP_ALLOCATION_TABLE)?;
+                        let mut ip_alloc_table = write_txn.open_table(crate::raft_storage::IP_ALLOCATION_TABLE)?;
                         let alloc_data = bincode::serialize(&allocation_result.allocation)
                             .map_err(|e| BlixardError::Serialization {
                                 operation: "serialize IP allocation".to_string(),
@@ -374,7 +374,7 @@ impl RaftStateMachine {
                         ip_alloc_table.insert(key.as_str(), alloc_data.as_slice())?;
                         
                         // Update VM->IP mapping
-                        let mut vm_ip_table = write_txn.open_table(crate::storage::VM_IP_MAPPING_TABLE)?;
+                        let mut vm_ip_table = write_txn.open_table(crate::raft_storage::VM_IP_MAPPING_TABLE)?;
                         let mut vm_ips = if let Some(data) = vm_ip_table.get(allocation_result.allocation.vm_id.to_string().as_str())? {
                             bincode::deserialize::<Vec<std::net::IpAddr>>(data.value())
                                 .unwrap_or_else(|_| Vec::new())
@@ -579,7 +579,7 @@ impl RaftStateMachine {
     fn validate_vm_admission(&self, config: &VmConfig, node_id: u64) -> BlixardResult<()> {
         // Try to load overcommit policy for the node
         let read_txn = self.database.begin_read()?;
-        let overcommit_policy = if let Ok(policy_table) = read_txn.open_table(crate::storage::RESOURCE_POLICY_TABLE) {
+        let overcommit_policy = if let Ok(policy_table) = read_txn.open_table(crate::raft_storage::RESOURCE_POLICY_TABLE) {
             if let Ok(Some(policy_data)) = policy_table.get(node_id.to_le_bytes().as_ref()) {
                 bincode::deserialize::<OvercommitPolicy>(policy_data.value()).ok()
             } else {
@@ -751,7 +751,7 @@ impl RaftStateMachine {
                     
                     // Mark IP allocation as pending if VM needs networking
                     if needs_ip {
-                        let mut ip_pending_table = txn.open_table(crate::storage::IP_ALLOCATION_TABLE)?;
+                        let mut ip_pending_table = txn.open_table(crate::raft_storage::IP_ALLOCATION_TABLE)?;
                         let pending_marker = bincode::serialize(&("pending", *node_id))
                             .map_err(|e| BlixardError::Storage { 
                                 operation: "serialize IP allocation marker".to_string(), 
@@ -876,12 +876,12 @@ impl RaftStateMachine {
                     
                     // Mark IP for release if VM had networking
                     if has_networking {
-                        let mut ip_allocation_table = txn.open_table(crate::storage::IP_ALLOCATION_TABLE)?;
+                        let mut ip_allocation_table = txn.open_table(crate::raft_storage::IP_ALLOCATION_TABLE)?;
                         // Remove any existing allocation entry for this VM
                         ip_allocation_table.remove(name.as_str())?;
                         
                         // Also remove from VM->IP mapping table
-                        let mut vm_ip_table = txn.open_table(crate::storage::VM_IP_MAPPING_TABLE)?;
+                        let mut vm_ip_table = txn.open_table(crate::raft_storage::VM_IP_MAPPING_TABLE)?;
                         vm_ip_table.remove(name.as_str())?;
                         
                         tracing::info!("VM {} deleted with IP cleanup", name);

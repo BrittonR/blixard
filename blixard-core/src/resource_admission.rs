@@ -62,8 +62,8 @@ impl ResourceAdmissionController {
     /// Synchronize resource state from database to resource manager
     pub async fn sync_resource_state(&self) -> BlixardResult<()> {
         let read_txn = self.database.begin_read()?;
-        let worker_table = read_txn.open_table(crate::storage::WORKER_TABLE)?;
-        let vm_table = read_txn.open_table(crate::storage::VM_STATE_TABLE)?;
+        let worker_table = read_txn.open_table(crate::raft_storage::WORKER_TABLE)?;
+        let vm_table = read_txn.open_table(crate::raft_storage::VM_STATE_TABLE)?;
         
         let mut resource_manager = self.resource_manager.write().await;
         
@@ -284,7 +284,7 @@ impl ResourceAdmissionController {
     /// Get worker capabilities for a node
     async fn get_worker_capabilities(&self, node_id: u64) -> BlixardResult<WorkerCapabilities> {
         let read_txn = self.database.begin_read()?;
-        let worker_table = read_txn.open_table(crate::storage::WORKER_TABLE)?;
+        let worker_table = read_txn.open_table(crate::raft_storage::WORKER_TABLE)?;
         
         if let Some(data) = worker_table.get(node_id.to_le_bytes().as_ref())? {
             let (_address, capabilities): (String, WorkerCapabilities) = 
@@ -369,8 +369,8 @@ mod tests {
         
         // Initialize tables
         let write_txn = database.begin_write().unwrap();
-        let _ = write_txn.open_table(crate::storage::WORKER_TABLE).unwrap();
-        let _ = write_txn.open_table(crate::storage::VM_STATE_TABLE).unwrap();
+        let _ = write_txn.open_table(crate::raft_storage::WORKER_TABLE).unwrap();
+        let _ = write_txn.open_table(crate::raft_storage::VM_STATE_TABLE).unwrap();
         write_txn.commit().unwrap();
         
         // Create admission controller with moderate overcommit
@@ -393,7 +393,7 @@ mod tests {
         
         // Register a node with 10 CPUs, 16GB RAM
         let write_txn = database.begin_write().unwrap();
-        let mut worker_table = write_txn.open_table(crate::storage::WORKER_TABLE).unwrap();
+        let mut worker_table = write_txn.open_table(crate::raft_storage::WORKER_TABLE).unwrap();
         let capabilities = WorkerCapabilities {
             cpu_cores: 10,
             memory_mb: 16384,
@@ -454,8 +454,8 @@ mod tests {
         
         // Initialize tables
         let write_txn = database.begin_write().unwrap();
-        let _ = write_txn.open_table(crate::storage::WORKER_TABLE).unwrap();
-        let _ = write_txn.open_table(crate::storage::VM_STATE_TABLE).unwrap();
+        let _ = write_txn.open_table(crate::raft_storage::WORKER_TABLE).unwrap();
+        let _ = write_txn.open_table(crate::raft_storage::VM_STATE_TABLE).unwrap();
         write_txn.commit().unwrap();
         
         // Create admission controller in strict mode (no overcommit)
@@ -478,7 +478,7 @@ mod tests {
         
         // Register a node with 4 CPUs, 8GB RAM
         let write_txn = database.begin_write().unwrap();
-        let mut worker_table = write_txn.open_table(crate::storage::WORKER_TABLE).unwrap();
+        let mut worker_table = write_txn.open_table(crate::raft_storage::WORKER_TABLE).unwrap();
         let capabilities = WorkerCapabilities {
             cpu_cores: 4,
             memory_mb: 8192,

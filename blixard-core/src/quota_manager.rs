@@ -8,7 +8,7 @@
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::resource_quotas::*;
-use crate::storage::Storage;
+use crate::raft_storage::Storage;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::{Duration, SystemTime};

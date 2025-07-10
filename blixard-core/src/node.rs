@@ -134,7 +134,7 @@ impl Node {
         let db_arc = Arc::new(database);
 
         // Initialize all database tables
-        crate::storage::init_database_tables(&db_arc)?;
+        crate::raft_storage::init_database_tables(&db_arc)?;
 
         self.shared.set_database(db_arc.clone()).await;
         
@@ -179,7 +179,7 @@ impl Node {
     /// Set up storage infrastructure (quota and IP pool managers)
     async fn setup_storage_managers(&self, db: Arc<Database>) -> BlixardResult<()> {
         // Initialize quota manager
-        let storage = Arc::new(crate::storage::RedbRaftStorage {
+        let storage = Arc::new(crate::raft_storage::RedbRaftStorage {
             database: db.clone(),
         });
         let quota_manager = Arc::new(crate::quota_manager::QuotaManager::new(storage).await?);
@@ -196,7 +196,7 @@ impl Node {
             })?;
             
             let mut pools = Vec::new();
-            if let Ok(table) = read_txn.open_table(crate::storage::IP_POOL_TABLE) {
+            if let Ok(table) = read_txn.open_table(crate::raft_storage::IP_POOL_TABLE) {
                 for entry in table.iter().map_err(|e| BlixardError::Storage {
                     operation: "iterate IP pools".to_string(),
                     source: Box::new(e),
@@ -224,7 +224,7 @@ impl Node {
             })?;
             
             let mut allocations = Vec::new();
-            if let Ok(table) = read_txn.open_table(crate::storage::IP_ALLOCATION_TABLE) {
+            if let Ok(table) = read_txn.open_table(crate::raft_storage::IP_ALLOCATION_TABLE) {
                 for entry in table.iter().map_err(|e| BlixardError::Storage {
                     operation: "iterate IP allocations".to_string(),
                     source: Box::new(e),
@@ -298,7 +298,7 @@ impl Node {
         })?;
 
         {
-            let mut worker_table = txn.open_table(crate::storage::WORKER_TABLE)?;
+            let mut worker_table = txn.open_table(crate::raft_storage::WORKER_TABLE)?;
             let key_bytes = self.shared.config.id.to_be_bytes();
             worker_table.insert(key_bytes.as_slice(), worker_data.as_slice())?;
         }
@@ -325,7 +325,7 @@ impl Node {
         db: Arc<Database>,
     ) -> BlixardResult<(RaftManager, mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>, mpsc::UnboundedReceiver<RaftConfChange>, mpsc::UnboundedSender<RaftProposal>, mpsc::UnboundedSender<RaftConfChange>)> {
         let joining_cluster = self.shared.config.join_addr.is_some();
-        let mut storage = crate::storage::RedbRaftStorage {
+        let mut storage = crate::raft_storage::RedbRaftStorage {
             database: db.clone(),
         };
 
@@ -456,7 +456,7 @@ impl Node {
                                         if !resp.voters.is_empty() {
                                             tracing::info!("Updating local configuration with voters: {:?}", resp.voters);
                                             if let Some(db) = self.shared.get_database().await {
-                                                let storage = crate::storage::RedbRaftStorage { database: db };
+                                                let storage = crate::raft_storage::RedbRaftStorage { database: db };
                                                 let mut conf_state = raft::prelude::ConfState::default();
                                                 conf_state.voters = resp.voters.clone();
                                                 if let Err(e) = storage.save_conf_state(&conf_state) {
@@ -887,7 +887,7 @@ impl Node {
         if !voters.is_empty() {
             tracing::info!("Updating local configuration with voters: {:?}", voters);
             if let Some(db) = self.shared.get_database().await {
-                let storage = crate::storage::RedbRaftStorage { database: db };
+                let storage = crate::raft_storage::RedbRaftStorage { database: db };
                 let mut conf_state = raft::prelude::ConfState::default();
                 conf_state.voters = voters.to_vec();
                 if let Err(e) = storage.save_conf_state(&conf_state) {
@@ -1309,7 +1309,7 @@ impl Node {
             // all state must go through Raft consensus.
             if let Some(db) = self.shared.get_database().await {
                 let read_txn = db.begin_read()?;
-                let worker_table = read_txn.open_table(crate::storage::WORKER_TABLE)?;
+                let worker_table = read_txn.open_table(crate::raft_storage::WORKER_TABLE)?;
 
                 // Check if already registered
                 if worker_table
@@ -1322,9 +1322,9 @@ impl Node {
                     let write_txn = db.begin_write()?;
                     {
                         let mut worker_table =
-                            write_txn.open_table(crate::storage::WORKER_TABLE)?;
+                            write_txn.open_table(crate::raft_storage::WORKER_TABLE)?;
                         let mut status_table =
-                            write_txn.open_table(crate::storage::WORKER_STATUS_TABLE)?;
+                            write_txn.open_table(crate::raft_storage::WORKER_STATUS_TABLE)?;
 
                         let worker_data = bincode::serialize(&(address.clone(), &capabilities))?;
                         worker_table

@@ -7,7 +7,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     error::BlixardResult,
-    storage::VM_STATE_TABLE,
+    raft_storage::VM_STATE_TABLE,
     types::{VmConfig, VmState, VmStatus},
     vm_backend::VmBackend,
 };

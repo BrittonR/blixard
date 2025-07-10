@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
 use crate::error::{BlixardError, BlixardResult};
-use crate::storage::{RedbRaftStorage, SnapshotData};
+use crate::raft_storage::{RedbRaftStorage, SnapshotData};
 use crate::types::VmState;
 use tracing::{info, warn, error};
 

@@ -109,26 +109,15 @@ where
 {
     async fn handle(&self, payload: Bytes) -> BlixardResult<Bytes> {
         // Deserialize request with context
-        let request: Req = deserialize_payload(&payload).context(NetworkContext {
-            operation: "deserialize_request".to_string(),
-            peer: None,
-        })?;
+        let request: Req = deserialize_payload(&payload).network_context("deserialize_request")?;
 
         debug!("Handling {}: {:?}", self.method_name, request);
 
         // Execute handler with error context
-        let response = self.handler.handle(request).await.with_context(|| {
-            NetworkContext {
-                operation: format!("execute_{}", self.method_name),
-                peer: None,
-            }
-        })?;
+        let response = self.handler.handle(request).await.context(&format!("execute_{}", self.method_name))?;
 
         // Serialize response with context
-        serialize_payload(&response).context(NetworkContext {
-            operation: "serialize_response".to_string(),
-            peer: None,
-        })
+        serialize_payload(&response).network_context("serialize_response")
     }
 
     fn method_name(&self) -> &str {
@@ -293,7 +282,7 @@ impl ClientBuilder {
     /// Generate a client method call
     pub async fn call<Req, Resp>(
         &self,
-        client: &crate::transport::iroh_client::IrohRpcClient,
+        client: &crate::transport::iroh_client::IrohClient,
         node_addr: iroh::NodeAddr,
         method: &str,
         request: Req,

@@ -285,7 +285,7 @@ impl VmManager {
         let read_txn = self.database.begin_read()?;
         let mut result = Vec::new();
 
-        if let Ok(table) = read_txn.open_table(crate::storage::VM_STATE_TABLE) {
+        if let Ok(table) = read_txn.open_table(crate::raft_storage::VM_STATE_TABLE) {
             for entry in table.iter()? {
                 let (_key, value) = entry?;
                 let vm_state: crate::types::VmState = bincode::deserialize(value.value())?;
@@ -301,7 +301,7 @@ impl VmManager {
         // Read from database instead of backend to ensure Raft consistency
         let read_txn = self.database.begin_read()?;
 
-        if let Ok(table) = read_txn.open_table(crate::storage::VM_STATE_TABLE) {
+        if let Ok(table) = read_txn.open_table(crate::raft_storage::VM_STATE_TABLE) {
             if let Ok(Some(data)) = table.get(name) {
                 let vm_state: crate::types::VmState = bincode::deserialize(data.value())?;
                 Ok(Some((vm_state.config, vm_state.status)))
@@ -368,7 +368,7 @@ impl VmManager {
                         }
                     };
 
-                    if let Ok(table) = read_txn.open_table(crate::storage::VM_STATE_TABLE) {
+                    if let Ok(table) = read_txn.open_table(crate::raft_storage::VM_STATE_TABLE) {
                         if let Ok(Some(data)) = table.get(name.as_str()) {
                             match bincode::deserialize::<crate::types::VmState>(data.value()) {
                                 Ok(vm_state) => Some(vm_state.status),
@@ -696,7 +696,7 @@ impl VmBackend for MockVmBackend {
         // Fallback to database if no simulated state (for existing VMs)
         let read_txn = self.database.begin_read()?;
 
-        if let Ok(table) = read_txn.open_table(crate::storage::VM_STATE_TABLE) {
+        if let Ok(table) = read_txn.open_table(crate::raft_storage::VM_STATE_TABLE) {
             if let Ok(Some(data)) = table.get(name) {
                 let vm_state: crate::types::VmState = bincode::deserialize(data.value())?;
                 Ok(Some(vm_state.status))
@@ -713,7 +713,7 @@ impl VmBackend for MockVmBackend {
         let read_txn = self.database.begin_read()?;
         let mut result = Vec::new();
 
-        if let Ok(table) = read_txn.open_table(crate::storage::VM_STATE_TABLE) {
+        if let Ok(table) = read_txn.open_table(crate::raft_storage::VM_STATE_TABLE) {
             for entry in table.iter()? {
                 let (_key, value) = entry?;
                 let vm_state: crate::types::VmState = bincode::deserialize(value.value())?;

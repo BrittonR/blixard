@@ -10,7 +10,7 @@ use crate::raft_manager::{WorkerCapabilities, WorkerStatus};
 use crate::resource_management::{
     ClusterResourceManager, OvercommitPolicy, ResourceReservation,
 };
-use crate::storage::{VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE};
+use crate::raft_storage::{VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE};
 use crate::types::VmConfig;
 use crate::types::{LocalityPreference, NodeTopology};
 use std::collections::HashMap;
@@ -901,7 +901,7 @@ impl VmScheduler {
         let worker_table = read_txn.open_table(WORKER_TABLE)?;
         let status_table = read_txn.open_table(WORKER_STATUS_TABLE)?;
         let vm_table = read_txn.open_table(VM_STATE_TABLE)?;
-        let topology_table = read_txn.open_table(crate::storage::NODE_TOPOLOGY_TABLE)?;
+        let topology_table = read_txn.open_table(crate::raft_storage::NODE_TOPOLOGY_TABLE)?;
 
         let mut node_usage = Vec::new();
 
@@ -967,7 +967,7 @@ impl VmScheduler {
         let worker_table = read_txn.open_table(WORKER_TABLE)?;
         let status_table = read_txn.open_table(WORKER_STATUS_TABLE)?;
         let vm_table = read_txn.open_table(VM_STATE_TABLE)?;
-        let topology_table = read_txn.open_table(crate::storage::NODE_TOPOLOGY_TABLE)?;
+        let topology_table = read_txn.open_table(crate::raft_storage::NODE_TOPOLOGY_TABLE)?;
 
         let node_id_bytes = node_id.to_le_bytes();
 

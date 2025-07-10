@@ -378,7 +378,7 @@ impl TransactionLogReader {
 /// Apply a transaction to the system state
 pub async fn apply_transaction(
     _transaction: &TransactionEntry,
-    _storage: &Arc<crate::storage::RedbRaftStorage>,
+    _storage: &Arc<crate::raft_storage::RedbRaftStorage>,
 ) -> BlixardResult<()> {
     // TODO: Implement transaction replay logic
     // This would apply the transaction operation to the storage

@@ -97,7 +97,7 @@ impl RedbVmRepository {
 #[async_trait]
 impl VmRepository for RedbVmRepository {
     async fn create(&self, vm: &VmConfig) -> BlixardResult<()> {
-        use crate::storage::VM_STATE_TABLE;
+        use crate::raft_storage::VM_STATE_TABLE;
 
         let db = self.database.clone();
         let vm_name = vm.name.clone();
@@ -119,7 +119,7 @@ impl VmRepository for RedbVmRepository {
     }
 
     async fn get(&self, name: &str) -> BlixardResult<Option<VmConfig>> {
-        use crate::storage::VM_STATE_TABLE;
+        use crate::raft_storage::VM_STATE_TABLE;
 
         let db = self.database.clone();
         let vm_name = name.to_string();
@@ -143,7 +143,7 @@ impl VmRepository for RedbVmRepository {
     }
 
     async fn list(&self) -> BlixardResult<Vec<VmConfig>> {
-        use crate::storage::VM_STATE_TABLE;
+        use crate::raft_storage::VM_STATE_TABLE;
 
         let db = self.database.clone();
 
@@ -173,7 +173,7 @@ impl VmRepository for RedbVmRepository {
     }
 
     async fn delete(&self, name: &str) -> BlixardResult<()> {
-        use crate::storage::VM_STATE_TABLE;
+        use crate::raft_storage::VM_STATE_TABLE;
 
         let db = self.database.clone();
         let vm_name = name.to_string();
@@ -194,7 +194,7 @@ impl VmRepository for RedbVmRepository {
     }
 
     async fn get_status(&self, name: &str) -> BlixardResult<Option<VmStatus>> {
-        use crate::storage::VM_STATE_TABLE;
+        use crate::raft_storage::VM_STATE_TABLE;
 
         let db = self.database.clone();
         let vm_name = name.to_string();
@@ -218,7 +218,7 @@ impl VmRepository for RedbVmRepository {
     }
 
     async fn update_status(&self, name: &str, status: VmStatus) -> BlixardResult<()> {
-        use crate::storage::VM_STATE_TABLE;
+        use crate::raft_storage::VM_STATE_TABLE;
 
         let db = self.database.clone();
         let vm_name = name.to_string();

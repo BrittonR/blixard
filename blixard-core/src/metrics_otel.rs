@@ -881,6 +881,10 @@ pub mod attributes {
         KeyValue::new("operation", name.to_string())
     }
 
+    pub fn service_name(name: &str) -> KeyValue {
+        KeyValue::new("service.name", name.to_string())
+    }
+
     pub fn method(name: &str) -> KeyValue {
         KeyValue::new("method", name.to_string())
     }
