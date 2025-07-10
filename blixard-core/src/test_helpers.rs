@@ -22,6 +22,7 @@ use crate::{
     metrics_server::spawn_metrics_server,
     node::Node,
     node_shared::SharedNodeState,
+    raft_storage::{init_database_tables, VM_STATE_TABLE, WORKER_TABLE, WORKER_STATUS_TABLE},
     transport::iroh_client::IrohClusterServiceClient,
     transport::iroh_service_runner::start_iroh_services,
     types::NodeConfig,
@@ -102,6 +103,274 @@ pub mod timing {
         // to avoid potential overflow in tokio's deadline calculation
         let scaled = scaled_timeout(base_duration);
         sleep(scaled).await;
+    }
+}
+
+/// Test database factory for creating isolated database instances
+pub struct TestDatabaseFactory;
+
+impl TestDatabaseFactory {
+    /// Create a test database with all tables initialized
+    /// Returns (database, temp_dir) for proper cleanup
+    pub fn create() -> BlixardResult<(Arc<redb::Database>, tempfile::TempDir)> {
+        let temp_dir = tempfile::TempDir::new().map_err(|e| BlixardError::Internal {
+            message: format!("Failed to create temp directory: {}", e),
+        })?;
+        
+        let db_path = temp_dir.path().join("test.db");
+        let database = Arc::new(redb::Database::create(&db_path).map_err(|e| BlixardError::StorageError {
+            message: format!("Failed to create database: {}", e),
+        })?);
+        
+        // Initialize all tables
+        init_database_tables(&database)?;
+        
+        Ok((database, temp_dir))
+    }
+    
+    /// Create a test database with custom name
+    pub fn create_with_name(name: &str) -> BlixardResult<(Arc<redb::Database>, tempfile::TempDir)> {
+        let temp_dir = tempfile::TempDir::new().map_err(|e| BlixardError::Internal {
+            message: format!("Failed to create temp directory: {}", e),
+        })?;
+        
+        let db_path = temp_dir.path().join(format!("{}.db", name));
+        let database = Arc::new(redb::Database::create(&db_path).map_err(|e| BlixardError::StorageError {
+            message: format!("Failed to create database: {}", e),
+        })?);
+        
+        // Initialize all tables
+        init_database_tables(&database)?;
+        
+        Ok((database, temp_dir))
+    }
+    
+    /// Create a test database without Arc wrapper (for compatibility)
+    pub fn create_raw() -> BlixardResult<(redb::Database, tempfile::TempDir)> {
+        let temp_dir = tempfile::TempDir::new().map_err(|e| BlixardError::Internal {
+            message: format!("Failed to create temp directory: {}", e),
+        })?;
+        
+        let db_path = temp_dir.path().join("test.db");
+        let database = redb::Database::create(&db_path).map_err(|e| BlixardError::StorageError {
+            message: format!("Failed to create database: {}", e),
+        })?;
+        
+        Ok((database, temp_dir))
+    }
+    
+    /// Create a test database with specific tables only (for specialized tests)
+    pub fn create_with_tables(tables: &[&'static str]) -> BlixardResult<(Arc<redb::Database>, tempfile::TempDir)> {
+        let temp_dir = tempfile::TempDir::new().map_err(|e| BlixardError::Internal {
+            message: format!("Failed to create temp directory: {}", e),
+        })?;
+        
+        let db_path = temp_dir.path().join("test.db");
+        let database = Arc::new(redb::Database::create(&db_path).map_err(|e| BlixardError::StorageError {
+            message: format!("Failed to create database: {}", e),
+        })?);
+        
+        // Create only specified tables
+        let write_txn = database.begin_write().map_err(|e| BlixardError::StorageError {
+            message: format!("Failed to begin write transaction: {}", e),
+        })?;
+        
+        for table_name in tables {
+            match *table_name {
+                "vm_states" => { let _ = write_txn.open_table(VM_STATE_TABLE)?; },
+                "workers" => { let _ = write_txn.open_table(WORKER_TABLE)?; },
+                "worker_status" => { let _ = write_txn.open_table(WORKER_STATUS_TABLE)?; },
+                _ => {
+                    // For now, skip unknown tables - could be extended
+                    tracing::warn!("Unknown table requested: {}", table_name);
+                }
+            }
+        }
+        
+        write_txn.commit().map_err(|e| BlixardError::StorageError {
+            message: format!("Failed to commit table creation: {}", e),
+        })?;
+        
+        Ok((database, temp_dir))
+    }
+}
+
+/// Test worker factory for creating worker registrations
+pub struct TestWorkerFactory;
+
+impl TestWorkerFactory {
+    /// Register a worker in the database with specified capabilities
+    pub fn register_worker(
+        database: &Arc<redb::Database>,
+        node_id: u64,
+        capabilities: crate::raft_manager::WorkerCapabilities,
+        is_online: bool,
+    ) -> BlixardResult<()> {
+        let write_txn = database.begin_write().map_err(|e| BlixardError::StorageError {
+            message: format!("Failed to begin write transaction: {}", e),
+        })?;
+        
+        {
+            let mut worker_table = write_txn.open_table(WORKER_TABLE)?;
+            let mut status_table = write_txn.open_table(WORKER_STATUS_TABLE)?;
+
+            let worker_data = bincode::serialize(&(format!("127.0.0.1:{}", 7000 + node_id), capabilities))
+                .map_err(|e| BlixardError::Internal {
+                    message: format!("Failed to serialize worker data: {}", e),
+                })?;
+            
+            worker_table.insert(node_id.to_le_bytes().as_slice(), worker_data.as_slice())
+                .map_err(|e| BlixardError::StorageError {
+                    message: format!("Failed to insert worker: {}", e),
+                })?;
+
+            let status = if is_online {
+                crate::raft_manager::WorkerStatus::Online as u8
+            } else {
+                crate::raft_manager::WorkerStatus::Offline as u8
+            };
+            
+            status_table.insert(node_id.to_le_bytes().as_slice(), [status].as_slice())
+                .map_err(|e| BlixardError::StorageError {
+                    message: format!("Failed to insert worker status: {}", e),
+                })?;
+        }
+        
+        write_txn.commit().map_err(|e| BlixardError::StorageError {
+            message: format!("Failed to commit worker registration: {}", e),
+        })?;
+        
+        Ok(())
+    }
+    
+    /// Create a standard worker configuration for testing
+    pub fn standard_capabilities() -> crate::raft_manager::WorkerCapabilities {
+        crate::raft_manager::WorkerCapabilities {
+            cpu_cores: 8,
+            memory_mb: 16384,
+            disk_gb: 100,
+            features: vec![],
+        }
+    }
+    
+    /// Create a GPU-enabled worker configuration
+    pub fn gpu_capabilities() -> crate::raft_manager::WorkerCapabilities {
+        crate::raft_manager::WorkerCapabilities {
+            cpu_cores: 16,
+            memory_mb: 32768,
+            disk_gb: 500,
+            features: vec!["gpu".to_string()],
+        }
+    }
+    
+    /// Create a low-resource worker configuration
+    pub fn low_resource_capabilities() -> crate::raft_manager::WorkerCapabilities {
+        crate::raft_manager::WorkerCapabilities {
+            cpu_cores: 2,
+            memory_mb: 4096,
+            disk_gb: 50,
+            features: vec![],
+        }
+    }
+}
+
+/// Test VM factory for creating VM states
+pub struct TestVmFactory;
+
+impl TestVmFactory {
+    /// Create a standard test VM configuration
+    pub fn create_vm_config(name: &str) -> crate::types::VmConfig {
+        crate::types::VmConfig {
+            name: name.to_string(),
+            config_path: "/tmp/test.nix".to_string(),
+            memory: 1024,
+            vcpus: 2,
+            tenant_id: "default".to_string(),
+            ip_address: None,
+            metadata: None,
+            anti_affinity: None,
+        }
+    }
+    
+    /// Create a test VM state
+    pub fn create_vm_state(name: &str, node_id: u64) -> crate::types::VmState {
+        let config = Self::create_vm_config(name);
+        let now = chrono::Utc::now();
+        
+        crate::types::VmState {
+            name: name.to_string(),
+            config,
+            status: crate::types::VmStatus::Creating,
+            node_id,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+    
+    /// Store a VM state in the database
+    pub fn store_vm_state(
+        database: &Arc<redb::Database>,
+        vm_state: &crate::types::VmState,
+    ) -> BlixardResult<()> {
+        let write_txn = database.begin_write().map_err(|e| BlixardError::StorageError {
+            message: format!("Failed to begin write transaction: {}", e),
+        })?;
+        
+        {
+            let mut table = write_txn.open_table(VM_STATE_TABLE)?;
+            let serialized = bincode::serialize(vm_state)
+                .map_err(|e| BlixardError::Internal {
+                    message: format!("Failed to serialize VM state: {}", e),
+                })?;
+            
+            table.insert(vm_state.name.as_str(), serialized.as_slice())
+                .map_err(|e| BlixardError::StorageError {
+                    message: format!("Failed to insert VM state: {}", e),
+                })?;
+        }
+        
+        write_txn.commit().map_err(|e| BlixardError::StorageError {
+            message: format!("Failed to commit VM state: {}", e),
+        })?;
+        
+        Ok(())
+    }
+    
+    /// Add a VM to the database with specified parameters
+    /// This is a convenience method that matches the old add_vm function signature
+    pub fn add_vm_to_database(
+        database: &Arc<redb::Database>,
+        vm_name: &str,
+        node_id: u64,
+        vcpus: u32,
+        memory: u32,
+        status: crate::types::VmStatus,
+    ) -> crate::error::BlixardResult<()> {
+        let vm_config = crate::types::VmConfig {
+            name: vm_name.to_string(),
+            config_path: "".to_string(),
+            vcpus,
+            memory,
+            tenant_id: "default".to_string(),
+            ip_address: None,
+            metadata: None,
+            anti_affinity: None,
+            priority: 500,
+            preemptible: true,
+            locality_preference: Default::default(),
+            health_check_config: None,
+        };
+
+        let vm_state = crate::types::VmState {
+            name: vm_name.to_string(),
+            config: vm_config,
+            status,
+            node_id,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        Self::store_vm_state(database, &vm_state)
     }
 }
 
@@ -1281,5 +1550,50 @@ mod tests {
         assert!(leader_ids.iter().all(|&id| id == leader_ids[0]));
 
         cluster.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn test_database_factory() {
+        // Test basic factory
+        let (database, _temp_dir) = TestDatabaseFactory::create().unwrap();
+        
+        // Verify tables are initialized
+        let read_txn = database.begin_read().unwrap();
+        let _vm_table = read_txn.open_table(VM_STATE_TABLE).unwrap();
+        let _worker_table = read_txn.open_table(WORKER_TABLE).unwrap();
+        
+        // Test named factory
+        let (named_db, _temp_dir2) = TestDatabaseFactory::create_with_name("custom").unwrap();
+        assert!(named_db.begin_read().is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_worker_factory() {
+        let (database, _temp_dir) = TestDatabaseFactory::create().unwrap();
+        
+        // Test worker registration
+        let capabilities = TestWorkerFactory::standard_capabilities();
+        TestWorkerFactory::register_worker(&database, 1, capabilities, true).unwrap();
+        
+        // Verify worker was registered
+        let read_txn = database.begin_read().unwrap();
+        let worker_table = read_txn.open_table(WORKER_TABLE).unwrap();
+        let worker_data = worker_table.get(1u64.to_le_bytes().as_slice()).unwrap();
+        assert!(worker_data.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_vm_factory() {
+        let (database, _temp_dir) = TestDatabaseFactory::create().unwrap();
+        
+        // Test VM creation and storage
+        let vm_state = TestVmFactory::create_vm_state("test-vm", 1);
+        TestVmFactory::store_vm_state(&database, &vm_state).unwrap();
+        
+        // Verify VM was stored
+        let read_txn = database.begin_read().unwrap();
+        let vm_table = read_txn.open_table(VM_STATE_TABLE).unwrap();
+        let vm_data = vm_table.get("test-vm").unwrap();
+        assert!(vm_data.is_some());
     }
 }

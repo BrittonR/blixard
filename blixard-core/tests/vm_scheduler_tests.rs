@@ -1,99 +1,11 @@
 mod common;
 
-use redb::Database;
-use std::sync::Arc;
-use tempfile::TempDir;
-
 use blixard_core::{
     error::BlixardResult,
-    raft_manager::WorkerCapabilities,
-    storage::{init_database_tables, VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE},
-    types::{NodeTopology, VmConfig, VmState, VmStatus},
+    test_helpers::{TestDatabaseFactory, TestWorkerFactory, TestVmFactory},
+    types::{NodeTopology, VmConfig, VmStatus},
     vm_scheduler::{NodeResourceUsage, PlacementStrategy, VmResourceRequirements, VmScheduler},
 };
-
-/// Helper function to create a test database with initialized tables
-fn create_test_database() -> BlixardResult<(Arc<Database>, TempDir)> {
-    let temp_dir = TempDir::new().unwrap();
-    let db_path = temp_dir.path().join("test.db");
-    let database = Arc::new(Database::create(&db_path)?);
-
-    // Initialize tables
-    init_database_tables(&database)?;
-
-    Ok((database, temp_dir))
-}
-
-/// Helper function to add a worker to the database
-fn add_worker(
-    database: &Database,
-    node_id: u64,
-    capabilities: WorkerCapabilities,
-    is_online: bool,
-) -> BlixardResult<()> {
-    let write_txn = database.begin_write()?;
-    {
-        let mut worker_table = write_txn.open_table(WORKER_TABLE)?;
-        let mut status_table = write_txn.open_table(WORKER_STATUS_TABLE)?;
-
-        let worker_data =
-            bincode::serialize(&(format!("127.0.0.1:{}", 7000 + node_id), capabilities))?;
-        worker_table.insert(node_id.to_le_bytes().as_slice(), worker_data.as_slice())?;
-
-        let status = if is_online {
-            blixard_core::raft_manager::WorkerStatus::Online as u8
-        } else {
-            blixard_core::raft_manager::WorkerStatus::Offline as u8
-        };
-        status_table.insert(node_id.to_le_bytes().as_slice(), [status].as_slice())?;
-    }
-    write_txn.commit()?;
-    Ok(())
-}
-
-/// Helper function to add a VM to the database
-fn add_vm(
-    database: &Database,
-    vm_name: &str,
-    node_id: u64,
-    vcpus: u32,
-    memory: u32,
-    status: VmStatus,
-) -> BlixardResult<()> {
-    let write_txn = database.begin_write()?;
-    {
-        let mut vm_table = write_txn.open_table(VM_STATE_TABLE)?;
-
-        let vm_config = VmConfig {
-            name: vm_name.to_string(),
-            config_path: "".to_string(),
-            vcpus,
-            memory,
-            tenant_id: "default".to_string(),
-            ip_address: None,
-            metadata: None,
-            anti_affinity: None,
-            priority: 500,
-            preemptible: true,
-            locality_preference: Default::default(),
-            health_check_config: None,
-        };
-
-        let vm_state = VmState {
-            name: vm_name.to_string(),
-            config: vm_config,
-            status,
-            node_id,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        };
-
-        let vm_data = bincode::serialize(&vm_state)?;
-        vm_table.insert(vm_name, vm_data.as_slice())?;
-    }
-    write_txn.commit()?;
-    Ok(())
-}
 
 #[tokio::test]
 async fn test_vm_resource_requirements_from_config() {
@@ -206,7 +118,7 @@ async fn test_placement_strategy_scoring() {
 
 #[tokio::test]
 async fn test_scheduler_no_workers_available() {
-    let (database, _temp_dir) = create_test_database().unwrap();
+    let (database, _temp_dir) = TestDatabaseFactory::create().unwrap();
     let scheduler = VmScheduler::new(database);
 
     let vm_config = VmConfig {
@@ -237,7 +149,7 @@ async fn test_scheduler_no_workers_available() {
 
 #[tokio::test]
 async fn test_scheduler_no_suitable_workers() {
-    let (database, _temp_dir) = create_test_database().unwrap();
+    let (database, _temp_dir) = TestDatabaseFactory::create().unwrap();
     let scheduler = VmScheduler::new(database.clone());
 
     // Add a worker with insufficient resources
@@ -247,7 +159,7 @@ async fn test_scheduler_no_suitable_workers() {
         disk_gb: 10,
         features: vec!["microvm".to_string()],
     };
-    add_worker(&database, 1, small_capabilities, true).unwrap();
+    TestWorkerFactory::register_worker(&database, 1, small_capabilities, true).unwrap();
 
     // Try to place a VM that requires more resources
     let vm_config = VmConfig {
@@ -277,7 +189,7 @@ async fn test_scheduler_no_suitable_workers() {
 
 #[tokio::test]
 async fn test_scheduler_most_available_strategy() {
-    let (database, _temp_dir) = create_test_database().unwrap();
+    let (database, _temp_dir) = TestDatabaseFactory::create().unwrap();
     let scheduler = VmScheduler::new(database.clone());
 
     // Add two workers with different available resources
@@ -294,12 +206,12 @@ async fn test_scheduler_most_available_strategy() {
         features: vec!["microvm".to_string()],
     };
 
-    add_worker(&database, 1, capabilities1, true).unwrap();
-    add_worker(&database, 2, capabilities2, true).unwrap();
+    TestWorkerFactory::register_worker(&database, 1, capabilities1, true).unwrap();
+    TestWorkerFactory::register_worker(&database, 2, capabilities2, true).unwrap();
 
     // Add some VMs to node 1 to reduce its available resources
-    add_vm(&database, "vm1", 1, 4, 4096, VmStatus::Running).unwrap();
-    add_vm(&database, "vm2", 1, 2, 2048, VmStatus::Running).unwrap();
+    TestVmFactory::add_vm_to_database(&database, "vm1", 1, 4, 4096, VmStatus::Running).unwrap();
+    TestVmFactory::add_vm_to_database(&database, "vm2", 1, 2, 2048, VmStatus::Running).unwrap();
 
     let vm_config = common::test_vm_config("new-vm");
 
@@ -316,7 +228,7 @@ async fn test_scheduler_most_available_strategy() {
 
 #[tokio::test]
 async fn test_scheduler_least_available_strategy() {
-    let (database, _temp_dir) = create_test_database().unwrap();
+    let (database, _temp_dir) = TestDatabaseFactory::create().unwrap();
     let scheduler = VmScheduler::new(database.clone());
 
     // Add two workers
@@ -333,11 +245,11 @@ async fn test_scheduler_least_available_strategy() {
         features: vec!["microvm".to_string()],
     };
 
-    add_worker(&database, 1, capabilities1, true).unwrap();
-    add_worker(&database, 2, capabilities2, true).unwrap();
+    TestWorkerFactory::register_worker(&database, 1, capabilities1, true).unwrap();
+    TestWorkerFactory::register_worker(&database, 2, capabilities2, true).unwrap();
 
     // Add some VMs to node 1 to increase its used resources
-    add_vm(&database, "vm1", 1, 4, 4096, VmStatus::Running).unwrap();
+    TestVmFactory::add_vm_to_database(&database, "vm1", 1, 4, 4096, VmStatus::Running).unwrap();
 
     let vm_config = common::test_vm_config("new-vm");
 
@@ -354,7 +266,7 @@ async fn test_scheduler_least_available_strategy() {
 
 #[tokio::test]
 async fn test_scheduler_round_robin_strategy() {
-    let (database, _temp_dir) = create_test_database().unwrap();
+    let (database, _temp_dir) = TestDatabaseFactory::create().unwrap();
     let scheduler = VmScheduler::new(database.clone());
 
     // Add two workers with identical capabilities
@@ -365,13 +277,13 @@ async fn test_scheduler_round_robin_strategy() {
         features: vec!["microvm".to_string()],
     };
 
-    add_worker(&database, 1, capabilities.clone(), true).unwrap();
-    add_worker(&database, 2, capabilities, true).unwrap();
+    TestWorkerFactory::register_worker(&database, 1, capabilities.clone(), true).unwrap();
+    TestWorkerFactory::register_worker(&database, 2, capabilities, true).unwrap();
 
     // Add more VMs to node 1
-    add_vm(&database, "vm1", 1, 1, 1024, VmStatus::Running).unwrap();
-    add_vm(&database, "vm2", 1, 1, 1024, VmStatus::Running).unwrap();
-    add_vm(&database, "vm3", 2, 1, 1024, VmStatus::Running).unwrap();
+    TestVmFactory::add_vm_to_database(&database, "vm1", 1, 1, 1024, VmStatus::Running).unwrap();
+    TestVmFactory::add_vm_to_database(&database, "vm2", 1, 1, 1024, VmStatus::Running).unwrap();
+    TestVmFactory::add_vm_to_database(&database, "vm3", 2, 1, 1024, VmStatus::Running).unwrap();
 
     let vm_config = common::test_vm_config("new-vm");
 
@@ -388,7 +300,7 @@ async fn test_scheduler_round_robin_strategy() {
 
 #[tokio::test]
 async fn test_scheduler_manual_strategy() {
-    let (database, _temp_dir) = create_test_database().unwrap();
+    let (database, _temp_dir) = TestDatabaseFactory::create().unwrap();
     let scheduler = VmScheduler::new(database.clone());
 
     // Add a worker
@@ -398,7 +310,7 @@ async fn test_scheduler_manual_strategy() {
         disk_gb: 100,
         features: vec!["microvm".to_string()],
     };
-    add_worker(&database, 1, capabilities, true).unwrap();
+    TestWorkerFactory::register_worker(&database, 1, capabilities, true).unwrap();
 
     let mut vm_config = common::test_vm_config("manual-vm");
     vm_config.vcpus = 2;
@@ -424,7 +336,7 @@ async fn test_scheduler_manual_strategy() {
 
 #[tokio::test]
 async fn test_scheduler_offline_workers_ignored() {
-    let (database, _temp_dir) = create_test_database().unwrap();
+    let (database, _temp_dir) = TestDatabaseFactory::create().unwrap();
     let scheduler = VmScheduler::new(database.clone());
 
     // Add online and offline workers
@@ -435,8 +347,8 @@ async fn test_scheduler_offline_workers_ignored() {
         features: vec!["microvm".to_string()],
     };
 
-    add_worker(&database, 1, capabilities.clone(), true).unwrap(); // Online
-    add_worker(&database, 2, capabilities, false).unwrap(); // Offline
+    TestWorkerFactory::register_worker(&database, 1, capabilities.clone(), true).unwrap(); // Online
+    TestWorkerFactory::register_worker(&database, 2, capabilities, false).unwrap(); // Offline
 
     let vm_config = common::test_vm_config("test-vm");
 
@@ -453,7 +365,7 @@ async fn test_scheduler_offline_workers_ignored() {
 
 #[tokio::test]
 async fn test_cluster_resource_summary() {
-    let (database, _temp_dir) = create_test_database().unwrap();
+    let (database, _temp_dir) = TestDatabaseFactory::create().unwrap();
     let scheduler = VmScheduler::new(database.clone());
 
     // Add workers
@@ -470,13 +382,13 @@ async fn test_cluster_resource_summary() {
         features: vec!["microvm".to_string()],
     };
 
-    add_worker(&database, 1, capabilities1, true).unwrap();
-    add_worker(&database, 2, capabilities2, true).unwrap();
+    TestWorkerFactory::register_worker(&database, 1, capabilities1, true).unwrap();
+    TestWorkerFactory::register_worker(&database, 2, capabilities2, true).unwrap();
 
     // Add some VMs
-    add_vm(&database, "vm1", 1, 2, 2048, VmStatus::Running).unwrap();
-    add_vm(&database, "vm2", 2, 1, 1024, VmStatus::Running).unwrap();
-    add_vm(&database, "vm3", 1, 1, 512, VmStatus::Stopped).unwrap(); // Stopped VM shouldn't count
+    TestVmFactory::add_vm_to_database(&database, "vm1", 1, 2, 2048, VmStatus::Running).unwrap();
+    TestVmFactory::add_vm_to_database(&database, "vm2", 2, 1, 1024, VmStatus::Running).unwrap();
+    TestVmFactory::add_vm_to_database(&database, "vm3", 1, 1, 512, VmStatus::Stopped).unwrap(); // Stopped VM shouldn't count
 
     let result = scheduler.get_cluster_resource_summary().await;
     assert!(result.is_ok());
@@ -501,7 +413,7 @@ async fn test_cluster_resource_summary() {
 
 #[tokio::test]
 async fn test_vm_status_resource_counting() {
-    let (database, _temp_dir) = create_test_database().unwrap();
+    let (database, _temp_dir) = TestDatabaseFactory::create().unwrap();
     let scheduler = VmScheduler::new(database.clone());
 
     // Add a worker
@@ -511,13 +423,13 @@ async fn test_vm_status_resource_counting() {
         disk_gb: 100,
         features: vec!["microvm".to_string()],
     };
-    add_worker(&database, 1, capabilities, true).unwrap();
+    TestWorkerFactory::register_worker(&database, 1, capabilities, true).unwrap();
 
     // Add VMs with different statuses
-    add_vm(&database, "running-vm", 1, 2, 2048, VmStatus::Running).unwrap();
-    add_vm(&database, "starting-vm", 1, 1, 1024, VmStatus::Starting).unwrap();
-    add_vm(&database, "stopped-vm", 1, 4, 4096, VmStatus::Stopped).unwrap();
-    add_vm(&database, "failed-vm", 1, 2, 2048, VmStatus::Failed).unwrap();
+    TestVmFactory::add_vm_to_database(&database, "running-vm", 1, 2, 2048, VmStatus::Running).unwrap();
+    TestVmFactory::add_vm_to_database(&database, "starting-vm", 1, 1, 1024, VmStatus::Starting).unwrap();
+    TestVmFactory::add_vm_to_database(&database, "stopped-vm", 1, 4, 4096, VmStatus::Stopped).unwrap();
+    TestVmFactory::add_vm_to_database(&database, "failed-vm", 1, 2, 2048, VmStatus::Failed).unwrap();
 
     let summary = scheduler.get_cluster_resource_summary().await.unwrap();
 
@@ -534,7 +446,7 @@ async fn test_vm_status_resource_counting() {
 
 #[tokio::test]
 async fn test_feature_requirements() {
-    let (database, _temp_dir) = create_test_database().unwrap();
+    let (database, _temp_dir) = TestDatabaseFactory::create().unwrap();
     let scheduler = VmScheduler::new(database.clone());
 
     // Add workers with different features
@@ -551,8 +463,8 @@ async fn test_feature_requirements() {
         features: vec!["microvm".to_string()],
     };
 
-    add_worker(&database, 1, gpu_capabilities, true).unwrap();
-    add_worker(&database, 2, basic_capabilities, true).unwrap();
+    TestWorkerFactory::register_worker(&database, 1, gpu_capabilities, true).unwrap();
+    TestWorkerFactory::register_worker(&database, 2, basic_capabilities, true).unwrap();
 
     // Create a VM config that will require GPU features
     let vm_config = common::test_vm_config("gpu-vm");

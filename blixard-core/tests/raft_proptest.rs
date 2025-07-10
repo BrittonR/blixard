@@ -13,6 +13,7 @@ use blixard_core::{
         WorkerCapabilities, WorkerStatus,
     },
     storage::{TASK_RESULT_TABLE, VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE},
+    test_helpers::{TestDatabaseFactory, TestWorkerFactory},
     types::{VmCommand, VmConfig},
 };
 
@@ -32,28 +33,16 @@ proptest! {
         worker_disk in 10u64..2000,
     ) {
         RUNTIME.block_on(async {
-            let temp_dir = TempDir::new().unwrap();
-            let db_path = temp_dir.path().join("test.db");
-            let database = Arc::new(Database::create(db_path).unwrap());
+            let (database, _temp_dir) = TestDatabaseFactory::create().unwrap();
 
-            // Register a worker
-            let write_txn = database.begin_write().unwrap();
-            let mut worker_table = write_txn.open_table(WORKER_TABLE).unwrap();
-            let mut status_table = write_txn.open_table(WORKER_STATUS_TABLE).unwrap();
-
+            // Register a worker with custom capabilities
             let capabilities = WorkerCapabilities {
                 cpu_cores: worker_cpu,
                 memory_mb: worker_mem,
                 disk_gb: worker_disk,
                 features: vec![],
             };
-
-            let worker_data = bincode::serialize(&("127.0.0.1:7001", &capabilities)).unwrap();
-            worker_table.insert(1u64.to_le_bytes().as_slice(), worker_data.as_slice()).unwrap();
-            status_table.insert(1u64.to_le_bytes().as_slice(), [WorkerStatus::Online as u8].as_slice()).unwrap();
-            drop(worker_table);
-            drop(status_table);
-            write_txn.commit().unwrap();
+            TestWorkerFactory::register_worker(&database, 1, capabilities, true).unwrap();
 
             // Try to schedule a task
             let task = TaskSpec {
@@ -93,9 +82,7 @@ proptest! {
         outputs in prop::collection::vec("[a-zA-Z0-9 ]{0,100}", 1..10),
     ) {
         RUNTIME.block_on(async {
-            let temp_dir = TempDir::new().unwrap();
-            let db_path = temp_dir.path().join("test.db");
-            let database = Arc::new(Database::create(db_path).unwrap());
+            let (database, _temp_dir) = TestDatabaseFactory::create().unwrap();
             let state_machine = RaftStateMachine::new(database.clone(), std::sync::Weak::new());
 
             // Store task results
@@ -154,9 +141,7 @@ proptest! {
         ),
     ) {
         RUNTIME.block_on(async {
-            let temp_dir = TempDir::new().unwrap();
-            let db_path = temp_dir.path().join("test.db");
-            let database = Arc::new(Database::create(db_path).unwrap());
+            let (database, _temp_dir) = TestDatabaseFactory::create().unwrap();
             let state_machine = RaftStateMachine::new(database.clone(), std::sync::Weak::new());
 
             // Register workers
@@ -230,9 +215,7 @@ proptest! {
         ),
     ) {
         RUNTIME.block_on(async {
-            let temp_dir = TempDir::new().unwrap();
-            let db_path = temp_dir.path().join("test.db");
-            let database = Arc::new(Database::create(db_path).unwrap());
+            let (database, _temp_dir) = TestDatabaseFactory::create().unwrap();
             let state_machine = RaftStateMachine::new(database.clone(), std::sync::Weak::new());
 
             // Track expected VM states
@@ -369,9 +352,7 @@ proptest! {
         ),
     ) {
         RUNTIME.block_on(async {
-            let temp_dir = TempDir::new().unwrap();
-            let db_path = temp_dir.path().join("test.db");
-            let database = Arc::new(Database::create(db_path).unwrap());
+            let (database, _temp_dir) = TestDatabaseFactory::create().unwrap();
 
             // Setup workers with various statuses
             let write_txn = database.begin_write().unwrap();
