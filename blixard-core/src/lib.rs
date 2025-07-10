@@ -45,6 +45,7 @@ pub mod resource_quotas;
 pub mod security;
 // P2P implementation
 pub mod abstractions;
+pub mod patterns;
 pub mod cluster_state;
 pub mod iroh_transport;
 pub mod iroh_transport_v2;
