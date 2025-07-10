@@ -134,6 +134,30 @@ pub enum BlixardError {
 
     #[error("Invalid configuration: {message}")]
     InvalidConfiguration { message: String },
+
+    #[error("Operation timed out: {operation} after {duration:?}")]
+    Timeout { 
+        operation: String, 
+        duration: std::time::Duration 
+    },
+
+    #[error("Connection error to {address}: {details}")]
+    ConnectionError { 
+        address: String, 
+        details: String 
+    },
+
+    #[error("Temporary failure: {details}")]
+    TemporaryFailure { 
+        details: String 
+    },
+
+    #[error("Database error: {operation} failed")]
+    DatabaseError { 
+        operation: String, 
+        #[source] 
+        source: Box<dyn std::error::Error + Send + Sync> 
+    },
 }
 
 pub type Result<T> = std::result::Result<T, BlixardError>;

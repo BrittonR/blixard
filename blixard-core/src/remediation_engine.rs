@@ -2,6 +2,17 @@
 //!
 //! This module provides a framework for detecting and automatically
 //! remediating common issues in the distributed system.
+//!
+//! ## Migration to Retry Pattern
+//!
+//! This module has been migrated from manual circuit breaker logic to use
+//! the unified retry pattern from `crate::patterns::retry`. This provides:
+//!
+//! - **Sophisticated backoff strategies**: Exponential, linear, and constant backoff
+//! - **Configurable retry policies**: Per-issue-type retry configurations
+//! - **Jitter support**: Avoid thundering herd problems
+//! - **Better error categorization**: Leverages structured BlixardError types
+//! - **Unified metrics**: Consistent retry metrics across the codebase
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,6 +22,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
 use crate::error::{BlixardError, BlixardResult};
+use crate::patterns::retry::{RetryConfig, BackoffStrategy, retry};
 use crate::types::{NodeState, VmStatus};
 use crate::node_shared::SharedNodeState;
 use crate::audit_log::{AuditLogger, log_vm_event, AuditActor};
@@ -18,6 +30,7 @@ use crate::metrics_otel::{
     record_vm_recovery_attempt, record_remediation_action,
 };
 use tracing::{info, warn, error, debug};
+use uuid;
 
 /// Default configuration constants
 mod constants {
@@ -29,11 +42,6 @@ mod constants {
     /// Default cooldown period between remediation attempts (5 minutes)
     pub const DEFAULT_COOLDOWN_PERIOD: Duration = Duration::from_secs(300);
     
-    /// Default circuit breaker threshold (failures before disabling)
-    pub const DEFAULT_CIRCUIT_BREAKER_THRESHOLD: u32 = 10;
-    
-    /// Default circuit breaker reset time (1 hour)
-    pub const DEFAULT_CIRCUIT_BREAKER_RESET: Duration = Duration::from_secs(3600);
     
     /// Default remediation monitoring interval (30 seconds)
     pub const DEFAULT_MONITORING_INTERVAL: Duration = Duration::from_secs(30);
@@ -138,34 +146,145 @@ pub struct RemediationContext {
     pub node_id: u64,
 }
 
+/// Retry predicate functions for different issue types
+
+/// Determine if VM failure errors are retryable
+fn vm_failure_is_retryable(error: &BlixardError) -> bool {
+    matches!(error,
+        BlixardError::VmOperationFailed { .. } |
+        BlixardError::TemporaryFailure { .. } |
+        BlixardError::ConnectionError { .. } |
+        BlixardError::Timeout { .. }
+    )
+}
+
+/// Determine if network partition errors are retryable
+fn network_is_retryable(error: &BlixardError) -> bool {
+    matches!(error,
+        BlixardError::NetworkError(_) |
+        BlixardError::ConnectionError { .. } |
+        BlixardError::P2PError(_) |
+        BlixardError::TemporaryFailure { .. } |
+        BlixardError::Timeout { .. }
+    )
+}
+
+/// Determine if resource exhaustion errors are retryable
+fn resource_exhaustion_is_retryable(error: &BlixardError) -> bool {
+    matches!(error,
+        BlixardError::ResourceExhausted { .. } |
+        BlixardError::InsufficientResources { .. } |
+        BlixardError::TemporaryFailure { .. }
+    )
+}
+
+/// Determine if service degradation errors are retryable
+fn service_degradation_is_retryable(error: &BlixardError) -> bool {
+    matches!(error,
+        BlixardError::TemporaryFailure { .. } |
+        BlixardError::Timeout { .. } |
+        BlixardError::ServiceManagementError(_)
+    )
+}
+
+/// Default retry predicate for other issue types
+fn default_is_retryable(error: &BlixardError) -> bool {
+    matches!(error,
+        BlixardError::TemporaryFailure { .. } |
+        BlixardError::Timeout { .. } |
+        BlixardError::ConnectionError { .. }
+    )
+}
+
 /// Policy for remediation behavior
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemediationPolicy {
     /// Enable automatic remediation
     pub enabled: bool,
-    /// Maximum remediation attempts per issue
-    pub max_attempts: u32,
-    /// Cooldown period between remediation attempts
-    pub cooldown_period: Duration,
+    /// Retry configurations per issue type
+    pub retry_configs: HashMap<IssueType, RetryConfig>,
     /// Require human approval for destructive actions
     pub require_approval_for_destructive: bool,
-    /// Circuit breaker threshold (failures before disabling)
-    pub circuit_breaker_threshold: u32,
-    /// Circuit breaker reset time
-    pub circuit_breaker_reset: Duration,
     /// Issue types to auto-remediate
     pub auto_remediate_types: Vec<IssueType>,
 }
 
 impl Default for RemediationPolicy {
     fn default() -> Self {
+        let mut retry_configs = HashMap::new();
+        
+        // VM failures: aggressive retry with exponential backoff
+        retry_configs.insert(IssueType::VmFailure, RetryConfig {
+            max_attempts: 5,
+            backoff: BackoffStrategy::Exponential {
+                base: Duration::from_millis(500),
+                max: Duration::from_secs(30),
+                multiplier: 2.0,
+            },
+            jitter: true,
+            max_total_delay: Some(Duration::from_secs(300)),
+            is_retryable: vm_failure_is_retryable,
+        });
+        
+        // Network issues: longer retry with linear backoff
+        retry_configs.insert(IssueType::NetworkPartition, RetryConfig {
+            max_attempts: 10,
+            backoff: BackoffStrategy::Linear {
+                base: Duration::from_secs(1),
+                max: Duration::from_secs(60),
+            },
+            jitter: true,
+            max_total_delay: Some(Duration::from_secs(600)),
+            is_retryable: network_is_retryable,
+        });
+        
+        // Resource exhaustion: moderate retry with exponential backoff
+        retry_configs.insert(IssueType::ResourceExhaustion, RetryConfig {
+            max_attempts: 3,
+            backoff: BackoffStrategy::Exponential {
+                base: Duration::from_secs(2),
+                max: Duration::from_secs(120),
+                multiplier: 2.0,
+            },
+            jitter: true,
+            max_total_delay: Some(Duration::from_secs(600)),
+            is_retryable: resource_exhaustion_is_retryable,
+        });
+        
+        // Service degradation: quick retry with fixed backoff
+        retry_configs.insert(IssueType::ServiceDegradation, RetryConfig {
+            max_attempts: 3,
+            backoff: BackoffStrategy::Fixed(Duration::from_secs(5)),
+            jitter: false,
+            max_total_delay: Some(Duration::from_secs(60)),
+            is_retryable: service_degradation_is_retryable,
+        });
+        
+        // Default config for other issue types
+        let default_retry_config = RetryConfig {
+            max_attempts: 3,
+            backoff: BackoffStrategy::Linear {
+                base: Duration::from_secs(1),
+                max: Duration::from_secs(30),
+            },
+            jitter: true,
+            max_total_delay: Some(Duration::from_secs(300)),
+            is_retryable: default_is_retryable,
+        };
+        
+        for issue_type in [
+            IssueType::NodeUnhealthy,
+            IssueType::RaftConsensusIssue,
+            IssueType::StorageIssue,
+            IssueType::ConfigurationDrift,
+        ] {
+            retry_configs.insert(issue_type, default_retry_config.clone());
+        }
+        
         Self {
             enabled: true,
-            max_attempts: constants::DEFAULT_MAX_ATTEMPTS,
-            cooldown_period: constants::DEFAULT_COOLDOWN_PERIOD,
+            retry_configs,
             require_approval_for_destructive: true,
-            circuit_breaker_threshold: constants::DEFAULT_CIRCUIT_BREAKER_THRESHOLD,
-            circuit_breaker_reset: constants::DEFAULT_CIRCUIT_BREAKER_RESET,
             auto_remediate_types: vec![
                 IssueType::VmFailure,
                 IssueType::ServiceDegradation,
@@ -175,20 +294,6 @@ impl Default for RemediationPolicy {
     }
 }
 
-/// Circuit breaker state
-#[derive(Debug, Clone)]
-struct CircuitBreaker {
-    failure_count: u32,
-    last_failure: Option<SystemTime>,
-    state: CircuitState,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CircuitState {
-    Closed,
-    Open,
-    HalfOpen,
-}
 
 /// Event for remediation history
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -236,8 +341,6 @@ pub struct RemediationEngine {
     remediators: HashMap<IssueType, Vec<Arc<dyn Remediator>>>,
     /// Remediation policy
     policy: RemediationPolicy,
-    /// Circuit breakers per issue type
-    circuit_breakers: Arc<RwLock<HashMap<IssueType, CircuitBreaker>>>,
     /// Remediation history
     history: Arc<RwLock<Vec<RemediationEvent>>>,
     /// Active remediations
@@ -253,7 +356,6 @@ impl RemediationEngine {
             detectors: Vec::new(),
             remediators: HashMap::new(),
             policy,
-            circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
             history: Arc::new(RwLock::new(Vec::new())),
             active_remediations: Arc::new(Mutex::new(HashMap::new())),
             shutdown_tx: None,
@@ -283,7 +385,6 @@ impl RemediationEngine {
         let detectors = self.detectors.clone();
         let remediators = self.remediators.clone();
         let policy = self.policy.clone();
-        let circuit_breakers = self.circuit_breakers.clone();
         let history = self.history.clone();
         let active = self.active_remediations.clone();
         
@@ -301,7 +402,6 @@ impl RemediationEngine {
                             &detectors,
                             &remediators,
                             &policy,
-                            &circuit_breakers,
                             &history,
                             &active,
                             &context,
@@ -329,7 +429,6 @@ impl RemediationEngine {
         detectors: &[Arc<dyn IssueDetector>],
         remediators: &HashMap<IssueType, Vec<Arc<dyn Remediator>>>,
         policy: &RemediationPolicy,
-        circuit_breakers: &Arc<RwLock<HashMap<IssueType, CircuitBreaker>>>,
         history: &Arc<RwLock<Vec<RemediationEvent>>>,
         active: &Arc<Mutex<HashMap<String, SystemTime>>>,
         context: &RemediationContext,
@@ -359,11 +458,14 @@ impl RemediationEngine {
                 continue;
             }
             
-            // Check circuit breaker
-            if Self::is_circuit_open(&issue.issue_type, circuit_breakers, policy).await {
-                warn!("Circuit breaker open for issue type {:?}", issue.issue_type);
-                continue;
-            }
+            // Check if we have retry configuration for this issue type
+            let retry_config = match policy.retry_configs.get(&issue.issue_type) {
+                Some(config) => config.clone(),
+                None => {
+                    warn!("No retry configuration for issue type {:?}", issue.issue_type);
+                    continue;
+                }
+            };
             
             // Check if auto-remediation is allowed
             if !policy.auto_remediate_types.contains(&issue.issue_type) {
@@ -383,17 +485,39 @@ impl RemediationEngine {
                         // Mark as active
                         active.lock().await.insert(issue.id.clone(), SystemTime::now());
                         
-                        // Attempt remediation
-                        let result = remediator.remediate(&issue, context).await;
+                        // Attempt remediation with retry pattern
+                        let remediation_result = {
+                            let remediator_clone = remediator.clone();
+                            let issue_clone = issue.clone();
+                            let context_clone = context.clone();
+                            
+                            retry(retry_config, move || {
+                                let remediator = remediator_clone.clone();
+                                let issue = issue_clone.clone();
+                                let context = context_clone.clone();
+                                Box::pin(async move {
+                                    remediator.remediate(&issue, &context).await
+                                        .map_err(|e| BlixardError::TemporaryFailure { 
+                                            details: format!("Remediation failed: {}", e) 
+                                        })
+                                })
+                            }).await
+                        };
+                        
+                        // Convert retry result to RemediationResult
+                        let result = match remediation_result {
+                            Ok(result) => result,
+                            Err(e) => RemediationResult {
+                                success: false,
+                                actions: vec![],
+                                error: Some(e.to_string()),
+                                duration: Duration::from_secs(0),
+                                requires_manual_intervention: true,
+                            },
+                        };
                         
                         // Record result
-                        Self::record_remediation_result(
-                            &issue,
-                            result,
-                            circuit_breakers,
-                            history,
-                            policy,
-                        ).await;
+                        Self::record_remediation_result(&issue, result, history).await;
                         
                         // Remove from active
                         active.lock().await.remove(&issue.id);
@@ -429,61 +553,13 @@ impl RemediationEngine {
         }
     }
     
-    /// Check circuit breaker state
-    async fn is_circuit_open(
-        issue_type: &IssueType,
-        circuit_breakers: &Arc<RwLock<HashMap<IssueType, CircuitBreaker>>>,
-        policy: &RemediationPolicy,
-    ) -> bool {
-        let mut breakers = circuit_breakers.write().await;
-        let breaker = breakers.entry(*issue_type).or_insert(CircuitBreaker {
-            failure_count: 0,
-            last_failure: None,
-            state: CircuitState::Closed,
-        });
-        
-        // Update circuit state based on time
-        if let Some(last_failure) = breaker.last_failure {
-            if last_failure.elapsed().unwrap_or_default() > policy.circuit_breaker_reset {
-                breaker.state = CircuitState::HalfOpen;
-                breaker.failure_count = 0;
-            }
-        }
-        
-        matches!(breaker.state, CircuitState::Open)
-    }
     
     /// Record remediation result
     async fn record_remediation_result(
         issue: &Issue,
         result: RemediationResult,
-        circuit_breakers: &Arc<RwLock<HashMap<IssueType, CircuitBreaker>>>,
         history: &Arc<RwLock<Vec<RemediationEvent>>>,
-        policy: &RemediationPolicy,
     ) {
-        // Update circuit breaker
-        {
-            let mut breakers = circuit_breakers.write().await;
-            if let Some(breaker) = breakers.get_mut(&issue.issue_type) {
-                if result.success {
-                    // Reset on success
-                    breaker.failure_count = 0;
-                    breaker.state = CircuitState::Closed;
-                } else {
-                    // Increment failures
-                    breaker.failure_count += 1;
-                    breaker.last_failure = Some(SystemTime::now());
-                    
-                    if breaker.failure_count >= policy.circuit_breaker_threshold {
-                        breaker.state = CircuitState::Open;
-                        error!("Circuit breaker opened for issue type {:?}", issue.issue_type);
-                    }
-                }
-            } else {
-                warn!("No circuit breaker found for issue type {:?}", issue.issue_type);
-            }
-        }
-        
         // Record in history
         let event = RemediationEvent {
             id: uuid::Uuid::new_v4().to_string(),
@@ -502,13 +578,6 @@ impl RemediationEngine {
         self.history.read().await.clone()
     }
     
-    /// Get circuit breaker status
-    pub async fn get_circuit_status(&self) -> HashMap<IssueType, CircuitState> {
-        self.circuit_breakers.read().await
-            .iter()
-            .map(|(k, v)| (*k, v.state))
-            .collect()
-    }
 }
 
 // Concrete implementations of detectors and remediators
@@ -613,7 +682,8 @@ impl Remediator for VmFailureRemediator {
             timestamp: Utc::now(),
         };
         
-        // Use the VM backend to restart
+        // Restart VM operation with proper error handling - retry logic is handled at the engine level
+        // This method focuses on the actual restart operation
         match context.node_state.restart_vm(&vm_name).await {
             Ok(_) => {
                 let mut action = restart_action;
@@ -652,23 +722,36 @@ impl Remediator for VmFailureRemediator {
                 action.result = format!("Failed to restart: {}", e);
                 actions.push(action);
                 
-                // Check if we should try migration
+                // Check if we should try migration (but don't implement it here)
                 if node_id == context.node_id {
-                    // Try to migrate to another node
+                    // Note: Migration would be a separate remediation strategy
                     actions.push(RemediationAction {
-                        action: "migrate_vm".to_string(),
+                        action: "evaluate_migration".to_string(),
                         target: vm_name.clone(),
-                        result: "Migration not implemented yet".to_string(),
+                        result: "Migration evaluation not implemented yet".to_string(),
                         timestamp: Utc::now(),
                     });
                 }
                 
-                RemediationResult {
-                    success: false,
-                    actions,
-                    error: Some(format!("Failed to restart VM: {}", e)),
-                    duration: start_time.elapsed(),
-                    requires_manual_intervention: true,
+                // Return the specific error for retry pattern to handle
+                match e {
+                    BlixardError::VmOperationFailed { .. } |
+                    BlixardError::TemporaryFailure { .. } |
+                    BlixardError::ConnectionError { .. } |
+                    BlixardError::Timeout { .. } => {
+                        // These errors are retryable - return them for retry pattern to handle
+                        return Err(e);
+                    }
+                    _ => {
+                        // Non-retryable errors require manual intervention
+                        RemediationResult {
+                            success: false,
+                            actions,
+                            error: Some(format!("Non-retryable VM restart failure: {}", e)),
+                            duration: start_time.elapsed(),
+                            requires_manual_intervention: true,
+                        }
+                    }
                 }
             }
         }
@@ -774,10 +857,7 @@ mod tests {
     
     #[tokio::test]
     async fn test_circuit_breaker() {
-        let policy = RemediationPolicy {
-            circuit_breaker_threshold: 3,
-            ..Default::default()
-        };
+        let policy = RemediationPolicy::default();
         
         let engine = RemediationEngine::new(policy);
         
