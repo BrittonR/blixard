@@ -329,9 +329,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fallback_permissions() {
+    async fn test_cedar_authorization_without_cedar() {
         let registry = Arc::new(NodeIdentityRegistry::new());
         let middleware = IrohMiddleware::new(None, None, registry);
+
+        // When no SecurityManager is configured, Cedar authorization should return errors
+        assert!(!middleware.has_cedar());
 
         // Test admin role
         let admin_ctx = IrohAuthContext {
@@ -341,11 +344,14 @@ mod tests {
             metadata: HashMap::new(),
         };
 
-        // TODO: Fix - check_permission_fallback method no longer exists
-        // assert!(middleware.check_permission_fallback(&admin_ctx, "createVM").await.unwrap());
-        // assert!(middleware.check_permission_fallback(&admin_ctx, "manageCluster").await.unwrap());
+        // Without Cedar, authorization should fail
+        let create_vm_result = middleware.authorize_cedar(&admin_ctx, "createVM", "VM", "test-vm").await;
+        assert!(create_vm_result.is_err());
+        
+        let manage_cluster_result = middleware.authorize_cedar(&admin_ctx, "manageCluster", "Cluster", "main").await;
+        assert!(manage_cluster_result.is_err());
 
-        // Test operator role
+        // Test operator role  
         let operator_ctx = IrohAuthContext {
             user_id: "operator-user".to_string(),
             roles: vec!["operator".to_string()],
@@ -353,8 +359,59 @@ mod tests {
             metadata: HashMap::new(),
         };
 
-        // TODO: Fix - check_permission_fallback method no longer exists
-        // assert!(middleware.check_permission_fallback(&operator_ctx, "createVM").await.unwrap());
-        // assert!(!middleware.check_permission_fallback(&operator_ctx, "manageCluster").await.unwrap());
+        // Without Cedar, all authorization should fail regardless of role
+        let operator_create_result = middleware.authorize_cedar(&operator_ctx, "createVM", "VM", "test-vm").await;
+        assert!(operator_create_result.is_err());
+        
+        let operator_manage_result = middleware.authorize_cedar(&operator_ctx, "manageCluster", "Cluster", "main").await;
+        assert!(operator_manage_result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_authentication_context_creation() {
+        let registry = Arc::new(NodeIdentityRegistry::new());
+        
+        // Register a test user
+        let test_node_id = NodeId::new(&[1; 32]);
+        registry.register_user(test_node_id, "test-user".to_string(), vec!["operator".to_string()], "tenant-1".to_string()).await;
+        
+        let middleware = IrohMiddleware::new(None, None, registry);
+        
+        // Test different auth context scenarios
+        let contexts = vec![
+            IrohAuthContext {
+                user_id: "admin".to_string(),
+                roles: vec!["admin".to_string(), "operator".to_string()],
+                tenant_id: "default".to_string(),
+                metadata: HashMap::new(),
+            },
+            IrohAuthContext {
+                user_id: "regular-user".to_string(),
+                roles: vec!["user".to_string()],
+                tenant_id: "tenant-a".to_string(),
+                metadata: HashMap::from([
+                    ("department".to_string(), "engineering".to_string()),
+                    ("region".to_string(), "us-west".to_string()),
+                ]),
+            },
+            IrohAuthContext {
+                user_id: "service-account".to_string(),
+                roles: vec!["service".to_string(), "read-only".to_string()],
+                tenant_id: "system".to_string(),
+                metadata: HashMap::new(),
+            },
+        ];
+        
+        // Verify each context has the expected structure
+        for ctx in contexts {
+            assert!(!ctx.user_id.is_empty());
+            assert!(!ctx.roles.is_empty());
+            assert!(!ctx.tenant_id.is_empty());
+            
+            // Test that contexts can be used with middleware
+            let auth_result = middleware.authorize_cedar(&ctx, "read", "VM", "test").await;
+            // Should fail since no Cedar is configured, but shouldn't panic
+            assert!(auth_result.is_err());
+        }
     }
 }

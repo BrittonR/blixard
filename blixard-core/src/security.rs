@@ -575,16 +575,28 @@ mod tests {
         let config = default_dev_security_config();
         let security_manager = SecurityManager::new(config).await.unwrap();
 
-        // Should work without TLS when disabled
-        // TODO: Fix - get_server_tls_config method no longer exists
-        // assert!(security_manager.get_server_tls_config().await.unwrap().is_none());
-
-        // Should allow all requests when auth is disabled
+        // Iroh handles transport security via QUIC/TLS - no separate TLS config needed
+        // Verify that authentication is properly disabled in dev config
         let auth_result = security_manager
             .authenticate_token("any-token")
             .await
             .unwrap();
         assert!(auth_result.authenticated);
+        assert_eq!(auth_result.user, Some("anonymous".to_string()));
+        assert_eq!(auth_result.auth_method, "disabled");
+        
+        // Test that various token formats are accepted when auth is disabled
+        let test_tokens = vec![
+            "simple-token",
+            "bearer-token-123",
+            "",
+            "very-long-token-with-special-characters-!@#$%",
+        ];
+        
+        for token in test_tokens {
+            let result = security_manager.authenticate_token(token).await.unwrap();
+            assert!(result.authenticated, "Token '{}' should be accepted when auth is disabled", token);
+        }
     }
 
     #[tokio::test]

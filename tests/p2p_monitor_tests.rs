@@ -350,18 +350,61 @@ mod p2p_monitor_tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires actual metrics setup
     async fn test_otel_p2p_monitor_integration() {
-        // This would test the actual OtelP2pMonitor with a real metrics instance
-        // Marked as ignore since it requires full OpenTelemetry setup
+        use blixard_core::metrics_otel::metrics;
+        use std::sync::Arc;
         
-        // Example of how it would work:
-        // let metrics = Arc::new(Metrics::new(...));
-        // let monitor = OtelP2pMonitor::new(metrics);
-        // 
-        // monitor.record_connection_attempt("peer1", true).await;
-        // monitor.record_rtt("peer1", 25.5).await;
-        // 
-        // // Verify metrics were recorded properly
+        // Initialize the global metrics instance for testing
+        let test_metrics = metrics();
+        
+        // Create OtelP2pMonitor with the test metrics
+        let monitor = Arc::new(blixard_core::p2p_monitor_otel::OtelP2pMonitor::new());
+        
+        // Test recording connection attempts
+        monitor.record_connection_attempt("peer1", true).await;
+        monitor.record_connection_attempt("peer2", false).await;
+        monitor.record_connection_attempt("peer1", true).await; // Duplicate peer
+        
+        // Test recording RTT measurements
+        monitor.record_rtt("peer1", 25.5).await;
+        monitor.record_rtt("peer2", 150.0).await;
+        monitor.record_rtt("peer1", 30.2).await; // Multiple measurements
+        
+        // Test recording data transfer
+        monitor.record_data_sent("peer1", 1024).await;
+        monitor.record_data_received("peer1", 2048).await;
+        monitor.record_data_sent("peer2", 512).await;
+        
+        // Test recording connection state changes
+        monitor.record_connection_state_change("peer1", "connected").await;
+        monitor.record_connection_state_change("peer2", "disconnected").await;
+        monitor.record_connection_state_change("peer1", "reconnecting").await;
+        
+        // Test error recording
+        monitor.record_error("peer1", "timeout").await;
+        monitor.record_error("peer2", "network_unreachable").await;
+        
+        // At this point, metrics should have been recorded
+        // We can't easily verify the exact values without exposing metric readers
+        // but we can verify the operations completed without errors
+        
+        // Test concurrent operations
+        let futures = (0..10).map(|i| {
+            let monitor = monitor.clone();
+            async move {
+                monitor.record_connection_attempt(&format!("peer{}", i), i % 2 == 0).await;
+                monitor.record_rtt(&format!("peer{}", i), 50.0 + i as f64).await;
+            }
+        });
+        
+        futures::future::join_all(futures).await;
+        
+        // Test with unusual peer names
+        monitor.record_connection_attempt("peer-with-dashes", true).await;
+        monitor.record_connection_attempt("peer_with_underscores", true).await;
+        monitor.record_connection_attempt("peer123", true).await;
+        
+        // The test passes if no panics occurred and all operations completed
+        println!("OTel P2P monitor integration test completed successfully");
     }
 }
