@@ -1,24 +1,61 @@
+//! P2P Health Check Service
+//!
+//! This module provides health checking capabilities for P2P connections.
+//!
+//! ## Migration to Clock Abstraction
+//!
+//! This module has been migrated from direct time operations to use the `Clock` trait.
+//! This enables:
+//!
+//! - **Deterministic testing**: Use `MockClock` to control time in tests
+//! - **Fast tests**: No need to wait for real timeouts
+//! - **Predictable behavior**: Time-dependent logic is fully testable
+//!
+//! ### Usage Examples
+//!
+//! ```rust,ignore
+//! use std::sync::Arc;
+//! use blixard_core::p2p_health_check::P2pHealthChecker;
+//! use blixard_core::abstractions::time::{SystemClock, MockClock};
+//!
+//! // Method 1: With custom clock (recommended for testing)
+//! let clock = Arc::new(MockClock::new());
+//! let checker = P2pHealthChecker::new(monitor, clock.clone());
+//!
+//! // Method 2: With default system clock (for production)
+//! let checker = P2pHealthChecker::with_default_clock(monitor);
+//! ```
+
+use crate::abstractions::time::{Clock, ClockExt, Instant};
 use crate::error::{BlixardError, BlixardResult};
 use crate::iroh_types::{HealthCheckRequest, HealthCheckResponse};
 use crate::p2p_monitor::{ConnectionQuality, P2pMonitor};
 use async_trait::async_trait;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::time::timeout;
+use std::time::Duration;
 use tracing::{debug, error, warn};
 
 /// P2P health check service for measuring connection quality
 pub struct P2pHealthChecker {
     monitor: Arc<dyn P2pMonitor>,
     timeout_duration: Duration,
+    clock: Arc<dyn Clock>,
 }
 
 impl P2pHealthChecker {
-    pub fn new(monitor: Arc<dyn P2pMonitor>) -> Self {
+    /// Create a new health checker with custom clock
+    pub fn new(monitor: Arc<dyn P2pMonitor>, clock: Arc<dyn Clock>) -> Self {
         Self {
             monitor,
             timeout_duration: Duration::from_secs(5),
+            clock,
         }
+    }
+    
+    /// Create a new health checker with default system clock
+    pub fn with_default_clock(monitor: Arc<dyn P2pMonitor>) -> Self {
+        use crate::abstractions::time::SystemClock;
+        Self::new(monitor, Arc::new(SystemClock::new()))
     }
 
     /// Perform a health check and RTT measurement for a peer
@@ -27,14 +64,15 @@ impl P2pHealthChecker {
         peer_id: &str,
         _client: Arc<crate::transport::iroh_client::IrohClusterServiceClient>,
     ) -> BlixardResult<f64> {
-        let start = Instant::now();
+        let start = self.clock.now();
 
         // Send health check request using Iroh client
         let request = HealthCheckRequest {};
 
-        match timeout(self.timeout_duration, _client.health_check(request)).await {
+        match self.clock.timeout(self.timeout_duration, _client.health_check(request)).await {
             Ok(Ok(response)) => {
-                let rtt_ms = start.elapsed().as_secs_f64() * 1000.0;
+                let now = self.clock.now();
+                let rtt_ms = start.elapsed(now).as_secs_f64() * 1000.0;
                 let response = response.into_inner();
 
                 debug!(
@@ -140,7 +178,7 @@ mod tests {
     #[tokio::test]
     async fn test_connection_quality_calculation() {
         let monitor = Arc::new(NoOpMonitor);
-        let checker = P2pHealthChecker::new(monitor);
+        let checker = P2pHealthChecker::with_default_clock(monitor);
 
         // Test with good metrics
         let rtts = vec![10.0, 12.0, 11.0, 13.0];
@@ -161,5 +199,26 @@ mod tests {
         assert_eq!(quality.success_rate, 0.5);
         assert_eq!(quality.avg_rtt, 550.0);
         assert!(quality.score() < 0.5); // Should have low score
+    }
+    
+    #[tokio::test]
+    async fn test_with_mock_clock() {
+        use crate::abstractions::time::MockClock;
+        
+        let monitor = Arc::new(NoOpMonitor);
+        let mock_clock = Arc::new(MockClock::new());
+        let checker = P2pHealthChecker::new(monitor, mock_clock.clone());
+        
+        // Test that we can control time in tests
+        let start_time = mock_clock.current_time().await;
+        assert_eq!(start_time, 0);
+        
+        // Advance time and verify it changes
+        mock_clock.advance(Duration::from_millis(100)).await;
+        let new_time = mock_clock.current_time().await;
+        assert_eq!(new_time, 100_000); // 100ms = 100,000 microseconds
+        
+        // This demonstrates how MockClock enables deterministic testing
+        // In real tests, we could simulate timeout scenarios by not advancing time
     }
 }
