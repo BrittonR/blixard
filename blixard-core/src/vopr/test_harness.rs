@@ -166,8 +166,8 @@ impl TestHarness {
     /// Execute a client operation
     async fn execute_client_operation(
         &self,
-        client_id: u64,
-        request_id: u64,
+        _client_id: u64,
+        _request_id: u64,
         operation: &ClientOp,
     ) -> BlixardResult<()> {
         let cluster_guard = self.cluster.read().await;
@@ -190,7 +190,7 @@ impl TestHarness {
                     };
 
                     // Send proposal through Raft
-                    let proposal = RaftProposal {
+                    let _proposal = RaftProposal {
                         id: uuid::Uuid::new_v4().as_bytes().to_vec(),
                         data: ProposalData::CreateVm(VmCommand::Create { config, node_id: 1 }),
                         response_tx: None,
@@ -202,19 +202,19 @@ impl TestHarness {
                         // Send to first node - in real implementation would use Raft message passing
                     }
                 }
-                ClientOp::StartVm { vm_id } => {
+                ClientOp::StartVm { vm_id: _ } => {
                     // Similar pattern for Start command
                 }
-                ClientOp::StopVm { vm_id } => {
+                ClientOp::StopVm { vm_id: _ } => {
                     // Similar pattern for Stop command
                 }
-                ClientOp::DeleteVm { vm_id } => {
+                ClientOp::DeleteVm { vm_id: _ } => {
                     // Similar pattern for Delete command
                 }
-                ClientOp::SubmitTask { task_id, command } => {
+                ClientOp::SubmitTask { task_id: _, command: _ } => {
                     // Task submission would go here
                 }
-                ClientOp::GetVmStatus { vm_id } => {
+                ClientOp::GetVmStatus { vm_id: _ } => {
                     // Read operations
                 }
                 ClientOp::GetClusterStatus => {

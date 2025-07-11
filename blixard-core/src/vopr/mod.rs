@@ -213,7 +213,7 @@ impl Vopr {
     }
 
     /// Create a test function for shrinking
-    fn create_test_function(&self, invariant: String) -> shrink::TestFunction {
+    fn create_test_function(&self, _invariant: String) -> shrink::TestFunction {
         Box::new(move |ops| {
             // This is a simplified version - in reality, we'd re-run the operations
             // and check if the same invariant is violated
@@ -224,7 +224,7 @@ impl Vopr {
     /// Generate a failure report
     pub fn generate_report(&self, failure: &FuzzFailure) -> String {
         let mut output = Vec::new();
-        let mut visualizer = visualizer::Visualizer::new(Default::default());
+        let visualizer = visualizer::Visualizer::new(Default::default());
 
         visualizer
             .generate_report(

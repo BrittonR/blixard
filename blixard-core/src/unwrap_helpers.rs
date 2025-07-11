@@ -120,6 +120,19 @@ macro_rules! acquire_lock {
     };
 }
 
+/// Macro for acquiring locks without Result return - panics on poisoned lock
+/// 
+/// # Example
+/// ```rust
+/// let guard = acquire_lock_unwrap!(mutex.lock(), "read cluster state");
+/// ```
+#[macro_export]
+macro_rules! acquire_lock_unwrap {
+    ($expr:expr, $operation:expr) => {
+        $expr.expect(&format!("Lock poisoned during: {}", $operation))
+    };
+}
+
 /// Macro for acquiring read locks with poison handling
 /// 
 /// # Example

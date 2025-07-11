@@ -282,7 +282,7 @@ impl LifecycleManager for VmHealthMonitor {
     type State = ();
     type Error = BlixardError;
 
-    async fn new(config: Self::Config) -> Result<Self, Self::Error> {
+    async fn new(_config: Self::Config) -> Result<Self, Self::Error> {
         // For now, create minimal dependencies - in practice these would be provided
         // This is a temporary implementation to satisfy the trait
         Err(BlixardError::NotImplemented {

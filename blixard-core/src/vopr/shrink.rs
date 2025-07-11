@@ -148,7 +148,7 @@ impl Shrinker {
 
         while chunk_size >= 1 {
             let mut i = 0;
-            let mut made_progress = false;
+            let made_progress = false;
 
             while i + chunk_size <= n {
                 // Try removing this chunk

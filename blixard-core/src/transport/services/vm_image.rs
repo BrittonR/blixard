@@ -139,7 +139,7 @@ impl VmImageService for VmImageServiceImpl {
         image_name: &str,
         image_path: &str,
         version: &str,
-        metadata: HashMap<String, String>,
+        _metadata: HashMap<String, String>,
     ) -> BlixardResult<String> {
         // Get P2P manager
         let p2p_manager =
@@ -152,7 +152,7 @@ impl VmImageService for VmImageServiceImpl {
         // Calculate image hash
         let path = Path::new(image_path);
         let hash = Self::calculate_file_hash(path).await?;
-        let size = Self::get_file_size(path).await?;
+        let _size = Self::get_file_size(path).await?;
 
         // Upload the image to P2P network
         p2p_manager
@@ -181,7 +181,7 @@ impl VmImageService for VmImageServiceImpl {
         &self,
         image_name: &str,
         version: &str,
-        image_hash: &str,
+        _image_hash: &str,
     ) -> BlixardResult<(String, HashMap<String, String>)> {
         // Get P2P manager
         let p2p_manager =
@@ -199,7 +199,7 @@ impl VmImageService for VmImageServiceImpl {
         // }
 
         // Request download from P2P network
-        let request_id = p2p_manager
+        let _request_id = p2p_manager
             .request_download(
                 ResourceType::VmImage,
                 image_name,
@@ -225,7 +225,7 @@ impl VmImageService for VmImageServiceImpl {
 
     async fn list_images(&self) -> BlixardResult<Vec<ImageInfo>> {
         // Get P2P manager
-        let p2p_manager =
+        let _p2p_manager =
             self.node
                 .get_p2p_manager()
                 .ok_or_else(|| BlixardError::Internal {

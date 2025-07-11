@@ -338,7 +338,7 @@ impl LinearizabilityChecker {
         Ok(())
     }
 
-    fn check_cluster_consistency(&self, entries: &[HistoryEntry]) -> Result<(), String> {
+    fn check_cluster_consistency(&self, _entries: &[HistoryEntry]) -> Result<(), String> {
         // Check that cluster operations maintain consistency
         // This is a simplified check - real implementation would be more thorough
 

@@ -346,7 +346,7 @@ impl AnomalyDetector {
         let mut anomalies = Vec::new();
 
         // Check for missing heartbeats
-        for (node_id, node) in &curr.nodes {
+        for (node_id, _node) in &curr.nodes {
             if let Some(prev_node) = prev.nodes.get(node_id) {
                 let time_diff = curr.timestamp - prev_node.last_heartbeat;
                 if time_diff > self.heartbeat_interval.as_nanos() * 10 {

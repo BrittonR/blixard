@@ -206,7 +206,7 @@ impl ProtocolHandler for SecureRpcProtocolHandler {
     fn accept<'a>(
         &'a self,
         connection: Connection,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AcceptError>> + Send + 'a>>
+    ) -> impl futures::Future<Output = std::result::Result<(), AcceptError>> + std::marker::Send
     {
         Box::pin(async move {
             debug!(

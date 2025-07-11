@@ -19,7 +19,6 @@ use crate::{
     vm_backend::VmManager,
 };
 
-use crate::metrics_otel;
 
 /// Real-time resource utilization data for a VM
 #[derive(Debug, Clone)]

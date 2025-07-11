@@ -227,7 +227,8 @@ impl OperationGenerator {
             self.generate_byzantine_behavior(rng)
         );
 
-        // Fallback
+        // Fallback - should have exhausted all weights
+        debug_assert!(choice < 0.01, "Unexpected remaining weight: {}", choice);
         self.generate_client_request(rng)
     }
 
@@ -286,7 +287,7 @@ impl OperationGenerator {
         Operation::StopNode { node_id }
     }
 
-    fn generate_restart_node(&mut self, rng: &mut ChaCha8Rng) -> Operation {
+    fn generate_restart_node(&mut self, _rng: &mut ChaCha8Rng) -> Operation {
         match choose_random(&self.active_nodes) {
             Ok(node_id) => Operation::RestartNode { node_id: *node_id },
             Err(_) => self.generate_start_node(), // No active nodes, start a new one

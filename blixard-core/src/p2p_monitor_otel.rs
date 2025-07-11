@@ -219,7 +219,7 @@ impl P2pMonitor for OtelP2pMonitor {
         &self,
         peer_id: &str,
         message_type: &str,
-        size: usize,
+        _size: usize,
         latency_ms: Option<f64>,
     ) {
         let attributes = vec![

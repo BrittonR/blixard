@@ -99,7 +99,7 @@ pub trait LifecycleManager: Send + Sync + Debug {
     type State: Send + Sync;
     
     /// Associated error type (typically BlixardError)
-    type Error: std::error::Error + Send + Sync + 'static;
+    type Error: std::error::Error + Send + Sync + 'static + From<BlixardError>;
 
     /// Create a new manager instance with the given configuration
     /// 

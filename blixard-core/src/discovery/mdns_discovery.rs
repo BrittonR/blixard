@@ -249,7 +249,7 @@ impl DiscoveryProvider for MdnsDiscoveryProvider {
 
         // Spawn a task to forward events
         tokio::spawn(async move {
-            let mut service_rx = service_receiver;
+            let service_rx = service_receiver;
             while let Ok(event) = service_rx.recv_async().await {
                 let _ = tx.send(event).await;
             }

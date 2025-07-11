@@ -221,7 +221,7 @@ where
         })
     }
     
-    fn raft_storage_context(self, operation: &str) -> raft::Result<T> {
+    fn raft_storage_context(self, _operation: &str) -> raft::Result<T> {
         self.map_err(|e| {
             let boxed_error = e.into();
             raft::Error::Store(raft::StorageError::Other(boxed_error))

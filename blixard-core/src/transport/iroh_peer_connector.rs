@@ -738,7 +738,7 @@ impl IrohPeerConnector {
     /// Start health check background task
     fn start_health_check_task(&self) -> JoinHandle<()> {
         let connections = self.connections.clone();
-        let node = self.node.clone();
+        let _node = self.node.clone();
         let p2p_monitor = self.p2p_monitor.clone();
         let mut shutdown_rx = self.shutdown_rx.clone();
 
@@ -792,7 +792,7 @@ impl IrohPeerConnector {
     /// Start buffer processing background task
     fn start_buffer_processing_task(&self) -> JoinHandle<()> {
         let buffer = self.message_buffer.clone();
-        let connections = self.connections.clone();
+        let _connections = self.connections.clone();
         let mut shutdown_rx = self.shutdown_rx.clone();
 
         tokio::spawn(async move {

@@ -264,12 +264,12 @@ impl TimeAccelerator {
     }
 
     /// Create a time dilation effect (slow down or speed up time for specific operations)
-    pub fn with_time_dilation<F, R>(&self, factor: f64, f: F) -> R
+    pub fn with_time_dilation<F, R>(&self, _factor: f64, f: F) -> R
     where
         F: FnOnce() -> R,
     {
         // Store current acceleration
-        let old_acceleration = self.acceleration;
+        let _old_acceleration = self.acceleration;
 
         // Apply dilation factor
         // Note: In a real implementation, we'd need to handle this more carefully

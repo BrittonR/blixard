@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use redb::ReadableTable;
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::raft_manager::{WorkerCapabilities, WorkerStatus};
@@ -211,7 +210,7 @@ impl NodeResourceUsage {
                     0.0
                 };
                 // Weighted average of utilization
-                (cpu_util * 0.4 + memory_util * 0.4 + disk_util * 0.2)
+                cpu_util * 0.4 + memory_util * 0.4 + disk_util * 0.2
             }
             PlacementStrategy::RoundRobin => {
                 // Score based on inverse of VM count (fewer VMs = higher score)

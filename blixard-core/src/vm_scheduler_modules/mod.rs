@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::collections::HashMap;
 
 use crate::error::BlixardResult;
-use crate::metrics_otel;
 use crate::resource_management::{ClusterResourceManager, OvercommitPolicy};
 use crate::types::VmConfig;
 

@@ -67,7 +67,7 @@ pub mod types;
 
 pub use microvm_backend::{MicrovmBackend, MicrovmBackendFactory};
 pub use nix_generator::NixFlakeGenerator;
-pub use process_manager::{CommandExecutor, VmProcess, VmProcessManager};
+pub use process_manager::{VmProcess, VmProcessManager};
 
 // Re-export enhanced VM types
 pub use types::*;

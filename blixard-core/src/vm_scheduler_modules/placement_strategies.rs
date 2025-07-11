@@ -96,12 +96,12 @@ pub struct PreemptionCandidate {
 
 impl super::VmScheduler {
     /// Apply the specified placement strategy to find the best node
-    pub(super) fn apply_placement_strategy(
-        &self,
-        context: &SchedulingContext,
-        vm_config: &VmConfig,
+    pub(super) fn apply_placement_strategy<'a>(
+        &'a self,
+        context: &'a SchedulingContext,
+        vm_config: &'a VmConfig,
         strategy: PlacementStrategy,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<PlacementDecision>> + Send + '_>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<PlacementDecision>> + Send + 'a>> {
         Box::pin(async move {
         match strategy {
             PlacementStrategy::MostAvailable => {

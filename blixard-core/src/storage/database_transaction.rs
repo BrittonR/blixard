@@ -16,7 +16,7 @@ use crate::{
 };
 use redb::{
     Database, ReadTransaction, WriteTransaction, Table, TableDefinition,
-    ReadOnlyTable, ReadableMultimapTable, ReadableTable,
+    ReadOnlyTable, ReadableTable,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

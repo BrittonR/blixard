@@ -13,7 +13,6 @@ use tracing::{debug, error, info, warn};
 use async_trait::async_trait;
 
 use crate::{
-    abstractions::time::Clock,
     error::{BlixardError, BlixardResult},
     patterns::LifecycleManager,
     vm_health_config::{HealthStateManagerConfig, VmHealthMonitorDependencies},
@@ -246,7 +245,7 @@ impl LifecycleManager for HealthStateManager {
     type State = ();
     type Error = BlixardError;
 
-    async fn new(config: Self::Config) -> Result<Self, Self::Error> {
+    async fn new(_config: Self::Config) -> Result<Self, Self::Error> {
         Err(BlixardError::NotImplemented {
             feature: "HealthStateManager::new requires dependencies - use new_with_deps instead".to_string(),
         })

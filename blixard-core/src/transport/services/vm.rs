@@ -349,7 +349,7 @@ impl VmService for VmServiceImpl {
             );
         }
 
-        let strategy = Self::parse_strategy(strategy);
+        let _strategy = Self::parse_strategy(strategy);
 
         // Use the scheduling method from SharedNodeState  
         let _result = self
@@ -405,12 +405,12 @@ impl VmService for VmServiceImpl {
             );
         }
 
-        let strategy = Self::parse_strategy(strategy);
+        let _strategy = Self::parse_strategy(strategy.clone());
 
         // TODO: Implement VM scheduling integration
         let decision = crate::vm_scheduler_modules::placement_strategies::PlacementDecision {
             target_node_id: 1, // For now, always assign to node 1
-            strategy_used: strategy.to_string(),
+            strategy_used: strategy.unwrap_or_else(|| "default".to_string()),
             confidence_score: 100.0,
             preempted_vms: Vec::new(),
             resource_fit_score: 100.0,
@@ -459,7 +459,8 @@ impl VmService for VmServiceImpl {
             })?;
         self.node
             .send_vm_command(vm_name, command_str)
-            .await
+            .await?;
+        Ok(())
     }
 }
 

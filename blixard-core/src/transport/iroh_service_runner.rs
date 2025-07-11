@@ -184,7 +184,7 @@ impl ProtocolHandler for IrohProtocolHandler {
     fn accept<'a>(
         &'a self,
         connection: Connection,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AcceptError>> + Send + 'a>>
+    ) -> impl futures::Future<Output = std::result::Result<(), AcceptError>> + std::marker::Send
     {
         Box::pin(async move {
             debug!("Accepted connection from {:?}", connection.remote_node_id());

@@ -424,16 +424,18 @@ impl RaftStateMachine {
         {
             let mut vm_table = txn.open_table(VM_STATE_TABLE)?;
             
-            // First, get the data and drop the immutable borrow
-            let vm_data = vm_table.get(vm_name)?;
-            if let Some(data) = vm_data {
-                let mut vm_state: VmState = bincode::deserialize(data.value())
+            // Get the data and make a copy to avoid borrow conflicts
+            let vm_data_bytes = match vm_table.get(vm_name)? {
+                Some(data) => Some(data.value().to_vec()),
+                None => None,
+            };
+            
+            if let Some(data) = vm_data_bytes {
+                let mut vm_state: VmState = bincode::deserialize(&data)
                     .deserialize_context("vm state", "VmState")?;
                 vm_state.status = status;
                 
                 let updated_data = bincode::serialize(&vm_state).serialize_context("vm state")?;
-                // Now we can get a mutable borrow
-                drop(data); // Explicitly drop to release immutable borrow
                 vm_table.insert(vm_name, updated_data.as_slice())?;
             }
         }

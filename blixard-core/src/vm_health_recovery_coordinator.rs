@@ -268,7 +268,7 @@ impl LifecycleManager for RecoveryCoordinator {
     type State = ();
     type Error = BlixardError;
 
-    async fn new(config: Self::Config) -> Result<Self, Self::Error> {
+    async fn new(_config: Self::Config) -> Result<Self, Self::Error> {
         Err(BlixardError::NotImplemented {
             feature: "RecoveryCoordinator::new requires dependencies - use new_with_deps instead".to_string(),
         })

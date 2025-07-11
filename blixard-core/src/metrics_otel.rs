@@ -698,16 +698,14 @@ pub fn record_vm_placement_attempt(_strategy: &str, _success: bool, _duration_se
 /// Record VM scheduling decision with details
 #[cfg(feature = "observability")]
 pub fn record_vm_scheduling_decision(
-    vm_name: &str, 
+    _vm_name: &str, 
     strategy: &str, 
     decision: &crate::vm_scheduler_modules::placement_strategies::PlacementDecision,
     duration: std::time::Duration
 ) {
     let metrics = metrics();
-    let vm_attr = KeyValue::new("vm_name", vm_name.to_string());
     let strategy_attr = KeyValue::new("strategy", strategy.to_string());
     let node_attr = KeyValue::new("target_node", decision.target_node_id.to_string());
-    let confidence_attr = KeyValue::new("confidence", decision.confidence_score.to_string());
     
     // Record the scheduling decision
     metrics
@@ -782,7 +780,7 @@ pub fn record_vm_operation(operation: &str, success: bool) {
 }
 
 /// Record VM preemption event
-pub fn record_vm_preemption(vm_name: &str, node_id: u64, priority: u32, preemption_type: &str) {
+pub fn record_vm_preemption(_vm_name: &str, node_id: u64, priority: u32, preemption_type: &str) {
     let metrics = metrics();
     let attrs = &[
         KeyValue::new("node_id", node_id.to_string()),
@@ -809,7 +807,7 @@ pub fn record_p2p_image_import(artifact_type: &str, success: bool, size_bytes: u
 }
 
 /// Record P2P image download operation
-pub fn record_p2p_image_download(image_id: &str, success: bool, duration_secs: f64) {
+pub fn record_p2p_image_download(_image_id: &str, success: bool, duration_secs: f64) {
     let metrics = metrics();
 
     metrics.p2p_image_downloads_total.add(1, &[]);

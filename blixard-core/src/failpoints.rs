@@ -73,7 +73,7 @@ pub mod scenarios {
     use std::time::Duration;
 
     /// Configure a failpoint to fail with a specific error
-    pub fn fail_with_error(name: &str, error: BlixardError) {
+    pub fn fail_with_error(name: &str, _error: BlixardError) {
         fail::cfg(name, "return").ok();
         // Note: We can't use cfg_callback with BlixardError because it doesn't implement Clone
         // This function is provided for API compatibility but has limited functionality

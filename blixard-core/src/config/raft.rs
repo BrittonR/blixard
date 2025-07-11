@@ -171,7 +171,7 @@ impl RaftConfig {
     
     /// Convert to raft-rs Config
     pub fn to_raft_config(&self, id: u64) -> raft::Config {
-        let mut cfg = raft::Config {
+        let cfg = raft::Config {
             id,
             election_tick: self.election_tick as usize,
             heartbeat_tick: self.heartbeat_tick as usize,

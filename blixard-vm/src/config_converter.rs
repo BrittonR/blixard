@@ -176,7 +176,7 @@ impl VmConfigConverter {
             name: core_config.name.clone(),
             vm_index,
             hypervisor: vm_types::Hypervisor::Qemu,
-            vcpus: core_config.cpus,
+            vcpus: core_config.vcpus,
             memory: core_config.memory,
             init_command: None,
             kernel,

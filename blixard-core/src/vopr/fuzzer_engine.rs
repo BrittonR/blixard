@@ -3,7 +3,7 @@
 //! This module implements the main fuzzing logic, including random operation
 //! generation, coverage tracking, and execution orchestration.
 
-use rand::{seq::SliceRandom, Rng, SeedableRng};
+use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -227,28 +227,42 @@ impl FuzzerEngine {
 
     /// Mutate an existing test case from the corpus
     fn mutate_test_case(&mut self, config: &FuzzConfig) -> Vec<Operation> {
-        let corpus = match self.corpus.lock() {
-            Ok(guard) => guard,
+        // Try to get a test case from the corpus
+        let test_case_ops = match self.corpus.lock() {
+            Ok(guard) => {
+                if guard.is_empty() {
+                    None
+                } else {
+                    // Generate random index before accessing self again
+                    let len = guard.len();
+                    drop(guard); // Release the lock
+                    
+                    let idx = self.rng.gen_range(0..len);
+                    
+                    // Re-acquire lock to get the test case
+                    match self.corpus.lock() {
+                        Ok(guard) => {
+                            if idx < guard.len() {
+                                Some(guard[idx].operations.clone())
+                            } else {
+                                None
+                            }
+                        }
+                        Err(_) => None,
+                    }
+                }
+            }
             Err(_) => {
                 eprintln!("Failed to acquire corpus lock for mutation, generating random operations");
-                return self.generate_random_operations(config);
+                None
             }
         };
-        if corpus.is_empty() {
-            drop(corpus);
-            return self.generate_random_operations(config);
-        }
-
-        // Pick a random test case
-        let test_case = match corpus.choose(&mut self.rng) {
-            Some(tc) => tc,
-            None => {
-                drop(corpus);
-                return self.generate_random_operations(config);
-            }
+        
+        // If we couldn't get a test case, generate random operations
+        let mut operations = match test_case_ops {
+            None => return self.generate_random_operations(config),
+            Some(ops) => ops,
         };
-        let mut operations = test_case.operations.clone();
-        drop(corpus);
 
         // Apply mutations
         let num_mutations = self.rng.gen_range(1..=5);
@@ -312,7 +326,8 @@ impl FuzzerEngine {
         found_bug: bool,
         execution_time: std::time::Duration,
     ) {
-        let mut global_cov = acquire_lock!(self.global_coverage.lock(), "record execution coverage");
+        let mut global_cov = self.global_coverage.lock()
+            .expect("Lock poisoned during: record execution coverage");
 
         // Check if this execution found new coverage
         let is_interesting = global_cov.has_new_coverage(&coverage) || found_bug;
@@ -331,7 +346,9 @@ impl FuzzerEngine {
                 execution_time,
             };
 
-            acquire_lock!(self.corpus.lock(), "add interesting test case to corpus").push(test_case);
+            self.corpus.lock()
+                .expect("Lock poisoned during: add interesting test case to corpus")
+                .push(test_case);
         }
     }
 

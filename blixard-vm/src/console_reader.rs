@@ -4,6 +4,7 @@
 //! and match patterns for health checking.
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::net::UnixStream;
@@ -90,14 +91,14 @@ impl ConsoleReader {
         let healthy_regex = regex::Regex::new(healthy_pattern).map_err(|e| {
             BlixardError::InvalidInput {
                 field: "healthy_pattern".to_string(),
-                reason: format!("Invalid regex: {}", e),
+                message: format!("Invalid regex: {}", e),
             }
         })?;
 
         let unhealthy_regex = if let Some(pattern) = unhealthy_pattern {
             Some(regex::Regex::new(pattern).map_err(|e| BlixardError::InvalidInput {
                 field: "unhealthy_pattern".to_string(),
-                reason: format!("Invalid regex: {}", e),
+                message: format!("Invalid regex: {}", e),
             })?)
         } else {
             None
@@ -200,19 +201,20 @@ impl ConsoleReader {
         })?;
 
         let mut reader = BufReader::with_capacity(self.buffer_size, stream);
-        let mut lines = Vec::new();
+        let lines = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let lines_clone = lines.clone();
         let mut line = String::new();
 
         // Read with timeout
-        let result = timeout(timeout_duration, async {
-            while lines.len() < max_lines {
+        let result = timeout(timeout_duration, async move {
+            while lines_clone.lock().await.len() < max_lines {
                 line.clear();
                 match reader.read_line(&mut line).await {
                     Ok(0) => break, // EOF
                     Ok(_) => {
                         let line_trimmed = line.trim();
                         if !line_trimmed.is_empty() {
-                            lines.push(line_trimmed.to_string());
+                            lines_clone.lock().await.push(line_trimmed.to_string());
                         }
                     }
                     Err(e) => {
@@ -223,16 +225,17 @@ impl ConsoleReader {
                     }
                 }
             }
-            Ok(lines)
+            Ok(())
         })
         .await;
 
+        let lines_vec = lines.lock().await.clone();
         match result {
-            Ok(Ok(lines)) => Ok(lines),
+            Ok(Ok(())) => Ok(lines_vec),
             Ok(Err(e)) => Err(e),
             Err(_) => {
                 // Timeout - return what we have
-                Ok(lines)
+                Ok(lines_vec)
             }
         }
     }

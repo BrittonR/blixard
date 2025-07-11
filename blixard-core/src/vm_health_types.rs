@@ -269,7 +269,7 @@ impl VmHealthStatus {
     }
 
     /// Update health state based on check results and thresholds
-    pub fn update_state(&mut self, config: &VmHealthCheckConfig) {
+    pub fn update_state(&mut self, _config: &VmHealthCheckConfig) {
         // Check if any critical checks failed
         let critical_failures = self
             .check_results

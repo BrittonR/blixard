@@ -168,7 +168,7 @@ impl ServiceBuilder {
         Req: DeserializeOwned + Send + Sync + std::fmt::Debug + 'static,
         Resp: Serialize + Send + Sync + 'static,
         F: Fn(Req) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<Output = BlixardResult<Resp>> + Send,
+        Fut: std::future::Future<Output = BlixardResult<Resp>> + Send + 'static,
     {
         struct ClosureHandler<F>(F);
 
