@@ -7,13 +7,13 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::common::error_context::StorageContext;
 use crate::raft_storage::{
     RedbRaftStorage, SnapshotData, CLUSTER_STATE_TABLE, TASK_ASSIGNMENT_TABLE, TASK_RESULT_TABLE,
-    TASK_TABLE, VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE, NODE_TOPOLOGY_TABLE,
+    TASK_TABLE, VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE,
     IP_ALLOCATION_TABLE, VM_IP_MAPPING_TABLE, IP_POOL_TABLE,
 };
 
 use raft::prelude::{RawNode, Ready, SnapshotStatus};
 use redb::{Database, WriteTransaction, TableDefinition, ReadableTable};
-use slog::{info, warn, error, Logger};
+use slog::{info, warn, Logger};
 use std::sync::{Arc, RwLock};
 use tracing::{debug, instrument};
 

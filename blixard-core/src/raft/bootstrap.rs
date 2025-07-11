@@ -3,7 +3,7 @@
 //! This module handles the decision logic and execution for bootstrapping
 //! a single-node Raft cluster when no peers are configured.
 
-use crate::error::{BlixardError, BlixardResult};
+use crate::error::BlixardResult;
 use crate::raft_storage::RedbRaftStorage;
 
 use raft::{RawNode, StateRole};

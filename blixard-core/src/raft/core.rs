@@ -22,7 +22,7 @@ use redb::Database;
 use slog::{error, info, warn, Drain, Logger};
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::time::{interval, Duration};
 use tracing::{debug, instrument};
 

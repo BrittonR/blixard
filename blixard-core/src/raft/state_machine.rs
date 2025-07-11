@@ -10,6 +10,7 @@ use crate::raft_storage::{
     TASK_ASSIGNMENT_TABLE, TASK_RESULT_TABLE,
     TASK_TABLE, VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE,
     IP_ALLOCATION_TABLE, VM_IP_MAPPING_TABLE, RESOURCE_POLICY_TABLE,
+    NODE_TOPOLOGY_TABLE,
 };
 use crate::resource_admission::{ResourceAdmissionController, AdmissionControlConfig};
 use crate::resource_management::{ClusterResourceManager, OvercommitPolicy};
@@ -390,12 +391,17 @@ impl RaftStateMachine {
     ) -> BlixardResult<()> {
         {
             let mut vm_table = txn.open_table(VM_STATE_TABLE)?;
-            if let Some(data) = vm_table.get(vm_name)? {
+            
+            // First, get the data and drop the immutable borrow
+            let vm_data = vm_table.get(vm_name)?;
+            if let Some(data) = vm_data {
                 let mut vm_state: VmState = bincode::deserialize(data.value())
                     .deserialize_context("vm state", "VmState")?;
                 vm_state.status = status;
                 
                 let updated_data = bincode::serialize(&vm_state).serialize_context("vm state")?;
+                // Now we can get a mutable borrow
+                drop(data); // Explicitly drop to release immutable borrow
                 vm_table.insert(vm_name, updated_data.as_slice())?;
             }
         }

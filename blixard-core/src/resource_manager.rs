@@ -351,7 +351,7 @@ pub trait ResourceManager: Send + Sync + Debug {
     async fn get_efficiency_metrics(&self) -> BlixardResult<ResourceEfficiencyMetrics> {
         let usage = self.get_usage().await?;
         Ok(ResourceEfficiencyMetrics {
-            resource_type: usage.resource_type,
+            resource_type: usage.resource_type.clone(),
             allocation_efficiency: if usage.allocated_amount > 0 {
                 usage.used_amount as f64 / usage.allocated_amount as f64
             } else {

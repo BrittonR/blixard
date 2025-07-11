@@ -14,7 +14,7 @@ use redb::Database;
 use slog::{info, warn, error, Logger};
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::RwLock;
 use tracing::{debug, instrument};
 
 /// Configuration manager for Raft membership changes

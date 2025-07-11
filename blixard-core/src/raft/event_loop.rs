@@ -3,14 +3,14 @@
 //! This module provides the main event loop coordination for processing
 //! Raft events including ticks, proposals, messages, and configuration changes.
 
-use crate::error::{BlixardError, BlixardResult};
+use crate::error::BlixardResult;
 
 use super::messages::{RaftConfChange, RaftProposal};
 
 use slog::{error, info, Logger};
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration, Interval};
-use tracing::{instrument, warn};
+use tracing::instrument;
 
 /// Configuration for the event loop
 #[derive(Debug, Clone)]
