@@ -12,9 +12,8 @@ use tokio::sync::Mutex;
 use crate::{
     error::BlixardResult,
     iroh_types::{
-        CreateVmRequest, CreateVmResponse, GetVmStatusRequest, GetVmStatusResponse,
-        ListVmsResponse, Response, StartVmRequest, StartVmResponse, StopVmRequest, StopVmResponse,
-        VmConfig, VmInfo, VmState,
+        CreateVmResponse, Response, StartVmRequest, StartVmResponse, StopVmRequest, StopVmResponse,
+        VmConfig, VmInfo,
     },
     transport::iroh_client::IrohClusterServiceClient,
 };

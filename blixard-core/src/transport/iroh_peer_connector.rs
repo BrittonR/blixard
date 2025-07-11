@@ -563,10 +563,10 @@ impl IrohPeerConnector {
 
     /// Get peer info from node state
     async fn get_peer_info(&self, peer_id: u64) -> BlixardResult<PeerInfo> {
-        let peers = self.node.get_peers().await;
+        let peers = self.node.get_peers();
         peers
             .into_iter()
-            .find(|p| p.id == peer_id)
+            .find(|p| p.node_id.parse::<u64>().unwrap_or(0) == peer_id)
             .ok_or_else(|| BlixardError::NotFound {
                 resource: format!("Peer {}", peer_id),
             })

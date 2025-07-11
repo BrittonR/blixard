@@ -3,7 +3,7 @@
 //! This module implements cluster management operations over Iroh transport.
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::iroh_types::{NodeInfo, NodeState};
+use crate::iroh_types::NodeInfo;
 use crate::transport::iroh_protocol::{
     deserialize_payload, generate_request_id, read_message, serialize_payload, write_message,
     MessageType, RpcRequest, RpcResponse,
@@ -14,7 +14,7 @@ use bytes::Bytes;
 use iroh::endpoint::{RecvStream, SendStream};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::debug;
 
 /// Cluster service message types
 #[derive(Debug, Clone, Serialize, Deserialize)]

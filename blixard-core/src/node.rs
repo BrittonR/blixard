@@ -6,9 +6,9 @@ use tokio::task::JoinHandle;
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::node_shared::SharedNodeState;
+use crate::p2p_manager::{ConnectionQuality, PeerInfo};
 use crate::raft_manager::{ProposalData, RaftConfChange, RaftManager};
 use crate::raft::messages::RaftProposal;
-use crate::transport::iroh_peer_connector::IrohPeerConnector;
 use crate::types::{NodeConfig, VmCommand};
 use crate::vm_backend::{VmBackendRegistry, VmManager};
 use crate::vm_health_monitor::VmHealthMonitor;
@@ -151,14 +151,15 @@ impl Node {
         // Create VM backend
         let vm_backend = self.create_vm_backend(&registry, db.clone())?;
         
+        // Store VM backend in shared state
+        self.shared.set_vm_manager(vm_backend.clone());
+        
         // Initialize VM manager
         let vm_manager = Arc::new(VmManager::new(
             db.clone(),
             vm_backend,
             self.shared.clone(),
         ));
-
-        self.shared.set_vm_manager(vm_manager.clone()).await;
 
         // Recover persisted VMs
         if let Err(e) = vm_manager.recover_persisted_vms().await {
@@ -427,15 +428,21 @@ impl Node {
                 let node_addr = self.create_p2p_node_addr(&bootstrap_info).await?;
 
                 // Store the leader's P2P info
+                let peer_info = PeerInfo {
+                    node_id: bootstrap_info.p2p_node_id.clone(),
+                    address: join_addr.clone(),
+                    last_seen: chrono::Utc::now(),
+                    capabilities: vec![],
+                    shared_resources: HashMap::new(),
+                    connection_quality: ConnectionQuality {
+                        latency_ms: 0,
+                        bandwidth_mbps: 100.0,
+                        packet_loss: 0.0,
+                        reliability_score: 1.0,
+                    },
+                };
                 self.shared
-                    .add_peer_with_p2p(
-                        bootstrap_info.node_id,
-                        join_addr.clone(),
-                        Some(bootstrap_info.p2p_node_id.clone()),
-                        bootstrap_info.p2p_addresses.clone(),
-                        bootstrap_info.p2p_relay_url.clone(),
-                    )
-                    .await?;
+                    .add_peer_with_p2p(bootstrap_info.node_id, peer_info);
 
                 // Execute HTTP bootstrap join
                 self.execute_http_bootstrap_join(&bootstrap_info, &node_addr, &p2p_node_id, &p2p_addresses, &p2p_relay_url).await?;
@@ -476,7 +483,20 @@ impl Node {
                                         for peer in resp.peers {
                                             if peer.id != self.shared.get_id() {
                                                 tracing::info!("Adding peer {} at {} from join response", peer.id, peer.address);
-                                                let _ = self.shared.add_peer(peer.id, peer.address).await;
+                                                let peer_info = PeerInfo {
+                                                    node_id: peer.id.to_string(),
+                                                    address: peer.address.clone(),
+                                                    last_seen: chrono::Utc::now(),
+                                                    capabilities: vec![],
+                                                    shared_resources: HashMap::new(),
+                                                    connection_quality: ConnectionQuality {
+                        latency_ms: 0,
+                        bandwidth_mbps: 100.0,
+                        packet_loss: 0.0,
+                        reliability_score: 1.0,
+                    },
+                                                };
+                                                self.shared.add_peer(peer.id, peer_info);
                                             } else {
                                                 tracing::info!("Skipping self (node {}) in peer list", peer.id);
                                             }
@@ -655,18 +675,24 @@ impl Node {
                     }
 
                     // Store the leader's P2P info
+                    let peer_info = PeerInfo {
+                        node_id: node_info.node_id.to_string(),
+                        address: join_addr.to_string(),
+                        last_seen: chrono::Utc::now(),
+                        capabilities: vec![],
+                        shared_resources: HashMap::new(),
+                        connection_quality: ConnectionQuality {
+                        latency_ms: 0,
+                        bandwidth_mbps: 100.0,
+                        packet_loss: 0.0,
+                        reliability_score: 1.0,
+                    },
+                    };
                     self.shared
-                        .add_peer_with_p2p(
-                            leader_node_id,
-                            join_addr.to_string(),
-                            Some(node_info.node_id.to_string()),
-                            node_info.addresses.iter().map(|a| a.to_string()).collect(),
-                            None, // TODO: Get relay URL from discovery
-                        )
-                        .await?;
+                        .add_peer_with_p2p(leader_node_id, peer_info);
 
                     // Now we can make the P2P connection
-                    if let Some(p2p_manager) = self.shared.get_p2p_manager().await {
+                    if let Some(p2p_manager) = self.shared.get_p2p_manager() {
                         tracing::info!(
                             "Connecting to leader via P2P at {}",
                             node_info.node_id
@@ -743,19 +769,21 @@ impl Node {
         for peer_info in peers {
             if peer_info.id != self.shared.get_id() && !peer_info.p2p_node_id.is_empty() {
                 // Store peer info
+                let p2p_peer_info = PeerInfo {
+                    node_id: peer_info.p2p_node_id.clone(),
+                    address: peer_info.address.clone(),
+                    last_seen: chrono::Utc::now(),
+                    capabilities: vec![],
+                    shared_resources: HashMap::new(),
+                    connection_quality: ConnectionQuality {
+                        latency_ms: 0,
+                        bandwidth_mbps: 100.0,
+                        packet_loss: 0.0,
+                        reliability_score: 1.0,
+                    },
+                };
                 self.shared
-                    .add_peer_with_p2p(
-                        peer_info.id,
-                        peer_info.address.clone(),
-                        Some(peer_info.p2p_node_id.clone()),
-                        peer_info.p2p_addresses.clone(),
-                        if peer_info.p2p_relay_url.is_empty() {
-                            None
-                        } else {
-                            Some(peer_info.p2p_relay_url.clone())
-                        },
-                    )
-                    .await?;
+                    .add_peer_with_p2p(peer_info.id, p2p_peer_info);
 
                 // Establish P2P connection to this peer
                 if let Ok(node_id_parsed) = peer_info.p2p_node_id.parse::<iroh::NodeId>() {
@@ -780,7 +808,7 @@ impl Node {
 
                     // Try to connect
                     tracing::info!("Establishing P2P connection to peer {} after joining cluster", peer_info.id);
-                    if let Some(p2p_manager) = self.shared.get_p2p_manager().await {
+                    if let Some(p2p_manager) = self.shared.get_p2p_manager() {
                         match p2p_manager.connect_p2p_peer(peer_info.id, &node_addr).await {
                             Ok(_) => {
                                 tracing::info!("✅ Successfully connected to P2P peer {}", peer_info.id);
@@ -808,7 +836,7 @@ impl Node {
         p2p_relay_url: &Option<String>,
     ) -> BlixardResult<()> {
         // Now connect via P2P
-        if let Some(p2p_manager) = self.shared.get_p2p_manager().await {
+        if let Some(p2p_manager) = self.shared.get_p2p_manager() {
             tracing::info!("Connecting to leader via P2P at {}", node_addr.node_id);
             p2p_manager
                 .connect_p2p_peer(bootstrap_info.node_id, node_addr)
@@ -1039,7 +1067,7 @@ impl Node {
             // Recovery loop
             while restart_count <= max_restarts {
                 if let Some(shared) = shared_weak.upgrade() {
-                    if !shared.is_running().await {
+                    if !shared.is_running() {
                         tracing::info!("Node is stopping, not restarting Raft manager");
                         return Ok(());
                     }
@@ -1105,12 +1133,16 @@ impl Node {
 
         // Update shared state with new channels
         // Set individual Raft channels
-        shared.set_raft_proposal_tx(proposal_tx.clone()).await;
-        shared.set_raft_message_tx(message_tx.clone()).await;
+        shared.set_raft_proposal_tx(proposal_tx.clone());
+        shared.set_raft_message_tx(message_tx.clone());
 
         // Create new Raft manager with correct signature
-        let peers = shared.get_peers().await;
-        let peer_list: Vec<(u64, String)> = peers.into_iter().map(|p| (p.id, p.address)).collect();
+        let peers = shared.get_peers();
+        let peer_list: Vec<(u64, String)> = peers.into_iter().map(|p| {
+            // Parse node_id string to u64 - use 0 as fallback
+            let id = p.node_id.parse::<u64>().unwrap_or(0);
+            (id, p.address)
+        }).collect();
         let shared_weak = Arc::downgrade(&shared);
         let (raft_manager, _proposal_tx, _message_tx, _conf_change_tx, _outgoing_tx) = RaftManager::new(
             node_id,
@@ -1188,7 +1220,7 @@ impl Node {
     async fn pre_connect_to_leader(&self, join_addr: &str) -> BlixardResult<()> {
         tracing::info!("Pre-connecting to leader at {}", join_addr);
         
-        if let Some(peer_connector) = self.shared.get_peer_connector().await {
+        if let Some(peer_connector) = self.shared.get_peer_connector() {
             let parts: Vec<&str> = join_addr.split(':').collect();
             if parts.len() == 2 {
                 if let Ok(port) = parts[1].parse::<u16>() {
@@ -1209,11 +1241,10 @@ impl Node {
         tracing::info!("Waiting for leader identification...");
         
         while start.elapsed() < timeout {
-            if let Ok(raft_status) = self.shared.get_raft_status().await {
-                if let Some(leader_id) = raft_status.leader_id {
-                    tracing::info!("Leader identified: {}", leader_id);
-                    return Ok(());
-                }
+            let raft_status = self.shared.get_raft_status();
+            if let Some(leader_id) = raft_status.leader_id {
+                tracing::info!("Leader identified: {}", leader_id);
+                return Ok(());
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
@@ -1465,12 +1496,12 @@ impl Node {
 
     /// Check if the node is running
     pub async fn is_running(&self) -> bool {
-        self.shared.is_running().await
+        self.shared.is_running()
     }
 
     /// Check if this node is the Raft leader
     pub async fn is_leader(&self) -> bool {
-        self.shared.is_leader().await
+        self.shared.is_leader()
     }
 
     /// Send a Raft message to the Raft manager
@@ -1677,10 +1708,10 @@ mod tests {
 
         // Start node
         node.start().await.expect("node should start");
-        assert!(node.is_running().await);
+        assert!(node.is_running());
 
         // Stop node
         node.stop().await.expect("node should stop");
-        assert!(!node.is_running().await);
+        assert!(!node.is_running());
     }
 }

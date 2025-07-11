@@ -14,8 +14,7 @@ use crate::transport::iroh_protocol::{
     deserialize_payload, generate_request_id, read_message, serialize_payload, write_message,
     MessageType, RpcRequest, RpcResponse,
 };
-use crate::transport::services::vm::{VmOperationRequest, VmOperationResponse};
-use bytes::Bytes;
+use crate::transport::services::vm::VmOperationResponse;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, error};

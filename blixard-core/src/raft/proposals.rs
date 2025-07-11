@@ -4,7 +4,7 @@
 //! consensus layer, including task management, worker registration, VM operations,
 //! and IP pool management.
 
-use crate::error::{BlixardError, BlixardResult};
+use crate::error::BlixardError;
 use crate::types::{VmCommand, VmStatus, NodeTopology, VmId};
 use serde::{Deserialize, Serialize};
 

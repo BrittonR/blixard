@@ -54,9 +54,8 @@ where
     where
         F: FnOnce() -> String,
     {
-        self.map_err(|e| BlixardError::Internal {
+        self.map_err(|_e| BlixardError::Internal {
             message: f(),
-            source: Some(Box::new(e)),
         })
     }
 
@@ -249,13 +248,11 @@ impl ErrorUtils {
             .map_err(|join_error| {
                 if join_error.is_panic() {
                     BlixardError::Internal {
-                        message: format!("Async panic in '{}'", context),
-                        source: Some(Box::new(join_error)),
+                        message: format!("Async panic in '{}': {:?}", context, join_error),
                     }
                 } else {
                     BlixardError::Internal {
                         message: format!("Async task cancelled in '{}'", context),
-                        source: Some(Box::new(join_error)),
                     }
                 }
             })

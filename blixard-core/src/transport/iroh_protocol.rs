@@ -8,11 +8,9 @@
 //! - Compatible with our existing service definitions
 
 use crate::error::{BlixardError, BlixardResult};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use iroh::endpoint::{RecvStream, SendStream};
 use serde::{Deserialize, Serialize};
-use std::io::Cursor;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{debug, error};
 
 /// Protocol version for compatibility checking

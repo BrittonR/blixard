@@ -26,9 +26,9 @@
 //! let checker = P2pHealthChecker::with_default_clock(monitor);
 //! ```
 
-use crate::abstractions::time::{Clock, ClockExt, Instant};
+use crate::abstractions::time::{Clock, ClockExt};
 use crate::error::{BlixardError, BlixardResult};
-use crate::iroh_types::{HealthCheckRequest, HealthCheckResponse};
+use crate::iroh_types::HealthCheckRequest;
 use crate::p2p_monitor::{ConnectionQuality, P2pMonitor};
 use async_trait::async_trait;
 use std::sync::Arc;

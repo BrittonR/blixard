@@ -5,10 +5,8 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
-    iroh_types::{HealthCheckRequest, HealthCheckResponse},
-    metrics_otel::{attributes, metrics, Timer},
+    iroh_types::HealthCheckResponse,
     node_shared::SharedNodeState,
-    transport::config::TransportConfig,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -52,7 +50,7 @@ impl HealthServiceImpl {
         }
 
         // 3. Check if peer connector is healthy (for networked nodes)
-        if let Some(peer_connector) = self.node.get_peer_connector().await {
+        if let Some(peer_connector) = self.node.get_peer_connector() {
             // Could check connection health here
             let _ = peer_connector;
         }

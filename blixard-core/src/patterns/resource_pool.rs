@@ -59,7 +59,7 @@ impl Default for PoolConfig {
 
 /// Factory trait for creating new resources
 #[async_trait]
-pub trait ResourceFactory<T: PoolableResource>: Send + Sync {
+pub trait ResourceFactory<T: PoolableResource + 'static>: Send + Sync {
     /// Create a new resource
     async fn create(&self) -> BlixardResult<T>;
     
@@ -124,7 +124,7 @@ impl<T: PoolableResource> PooledResource<T> {
     }
 }
 
-impl<T: PoolableResource> Drop for PooledResource<T> {
+impl<T: PoolableResource + 'static> Drop for PooledResource<T> {
     fn drop(&mut self) {
         if let Some(resource) = self.resource.take() {
             // Return resource to pool in background
@@ -145,7 +145,7 @@ impl<T: PoolableResource> Drop for PooledResource<T> {
 // This is a deliberate design choice to prevent runtime panics.
 
 /// Generic resource pool implementation
-pub struct ResourcePool<T: PoolableResource> {
+pub struct ResourcePool<T: PoolableResource + 'static> {
     /// Available resources
     available: Arc<Mutex<VecDeque<T>>>,
     /// Semaphore to limit total resources
@@ -158,7 +158,7 @@ pub struct ResourcePool<T: PoolableResource> {
     total_created: Arc<Mutex<usize>>,
 }
 
-impl<T: PoolableResource> ResourcePool<T> {
+impl<T: PoolableResource + 'static> ResourcePool<T> {
     /// Create a new resource pool
     pub fn new(factory: Arc<dyn ResourceFactory<T>>, config: PoolConfig) -> Self {
         let semaphore = Arc::new(Semaphore::new(config.max_size));

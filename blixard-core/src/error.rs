@@ -97,6 +97,12 @@ pub enum BlixardError {
 
     #[error("Not initialized: {component}")]
     NotInitialized { component: String },
+    
+    #[error("Invalid input for {field}: {message}")]
+    InvalidInput { field: String, message: String },
+    
+    #[error("Validation error for {field}: {message}")]
+    Validation { field: String, message: String },
 
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),

@@ -848,7 +848,7 @@ impl NixImageStore {
         }
 
         // Run nix path-info to get NAR hash and size
-        let options = CommandOptions::builder()
+        let options = CommandOptions::new()
             .env("NIX_CONFIG", "experimental-features = nix-command")
             .build();
         
@@ -859,13 +859,13 @@ impl NixImageStore {
                 message: format!("Failed to run nix path-info: {}", e),
             })?;
 
-        if !output.status.success() {
+        if !output.success {
             // Path might not be in store database yet
             // Try to add it first if it's a regular path
             if path.is_dir() || path.is_file() {
                 debug!("Path not in store database, trying nix store add-path");
 
-                let add_options = CommandOptions::builder()
+                let add_options = CommandOptions::new()
                     .env("NIX_CONFIG", "experimental-features = nix-command")
                     .build();
                     
@@ -885,7 +885,7 @@ impl NixImageStore {
                 }
 
                 // Try path-info again
-                let retry_options = CommandOptions::builder()
+                let retry_options = CommandOptions::new()
                     .env("NIX_CONFIG", "experimental-features = nix-command")
                     .build();
                     
@@ -976,7 +976,7 @@ impl NixImageStore {
 
         // First try to get the NAR hash if the path is already in the store
         if path.starts_with(&self.nix_store_dir) {
-            let options = CommandOptions::builder()
+            let options = CommandOptions::new()
                 .env("NIX_CONFIG", "experimental-features = nix-command")
                 .build();
                 
@@ -984,7 +984,7 @@ impl NixImageStore {
                 .execute("nix", &["path-info", "--json", &path.to_string_lossy()], options)
                 .await?;
 
-            if output.status.success() {
+            if output.success {
                 let (nar_hash, _) = self
                     .parse_nix_path_info_output(&output.stdout, path)
                     .await?;
@@ -1006,7 +1006,7 @@ impl NixImageStore {
 
         // Otherwise, compute the NAR hash directly
         // First, dump the NAR
-        let dump_options = CommandOptions::builder().build();
+        let dump_options = CommandOptions::new().build();
         let dump_output = self.command_executor
             .execute("nix-store", &["--dump", &path.to_string_lossy()], dump_options)
             .await
@@ -1025,7 +1025,7 @@ impl NixImageStore {
         }
 
         // Hash the NAR output
-        let hash_options = CommandOptions::builder()
+        let hash_options = CommandOptions::new()
             .stdin(dump_output.stdout)
             .build();
             

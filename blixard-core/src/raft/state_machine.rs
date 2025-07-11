@@ -7,8 +7,8 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::common::error_context::{StorageContext, SerializationContext};
 use crate::metrics_otel::{attributes, metrics, Timer};
 use crate::raft_storage::{
-    RedbRaftStorage, SnapshotData, CLUSTER_STATE_TABLE, TASK_ASSIGNMENT_TABLE, TASK_RESULT_TABLE,
-    TASK_TABLE, VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE, NODE_TOPOLOGY_TABLE,
+    TASK_ASSIGNMENT_TABLE, TASK_RESULT_TABLE,
+    TASK_TABLE, VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE,
     IP_ALLOCATION_TABLE, VM_IP_MAPPING_TABLE, RESOURCE_POLICY_TABLE,
 };
 use crate::resource_admission::{ResourceAdmissionController, AdmissionControlConfig};

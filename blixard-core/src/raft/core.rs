@@ -4,26 +4,25 @@
 //! including initialization, the main event loop, and ready state processing.
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::common::error_context::StorageContext;
 use crate::config_global;
 use crate::metrics_otel::{attributes, metrics, Timer};
-use crate::raft_storage::{RedbRaftStorage, CLUSTER_STATE_TABLE};
+use crate::raft_storage::RedbRaftStorage;
 
 use super::config_manager::RaftConfigManager;
-use super::messages::{RaftMessage, RaftConfChange, RaftProposal};
+use super::messages::{RaftConfChange, RaftProposal};
 use super::snapshot::RaftSnapshotManager;
 use super::state_machine::RaftStateMachine;
 use super::bootstrap::RaftBootstrapCoordinator;
-use super::event_loop::{EventLoopFactory, EventLoopConfig};
+use super::event_loop::EventLoopFactory;
 use super::handlers::HandlerFactory;
 
 use raft::prelude::{Config, Entry, RawNode, Ready};
 use raft::{GetEntriesContext, StateRole};
 use redb::Database;
-use slog::{error, info, warn, o, Drain, Logger};
+use slog::{error, info, warn, Drain, Logger};
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
-use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio::sync::{mpsc, RwLock};
 use tokio::time::{interval, Duration};
 use tracing::{debug, instrument};
 

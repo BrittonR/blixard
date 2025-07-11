@@ -4,7 +4,7 @@
 //! to the existing SharedNodeState functionality.
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::iroh_types::{NodeInfo, NodeState};
+use crate::iroh_types::NodeInfo;
 use crate::node_shared::SharedNodeState;
 use crate::raft_manager::ConfChangeType;
 use crate::transport::iroh_cluster_service::{ClusterOperations, Task, TaskRequest, TaskStatus};
@@ -63,21 +63,39 @@ impl ClusterOperations for ClusterOperationsAdapter {
             };
 
         // Add peer to our peer list with P2P info (only if it doesn't already exist)
-        if self.shared_state.get_peer(node_id).await.is_none() {
+        if self.shared_state.get_peer(node_id).is_none() {
             if p2p_node_id.is_some() || !p2p_addresses.is_empty() {
+                let peer_info = crate::p2p_manager::PeerInfo {
+                    node_id: p2p_node_id.clone().unwrap_or_else(|| node_id.to_string()),
+                    address: addr.to_string(),
+                    last_seen: chrono::Utc::now(),
+                    capabilities: vec![],
+                    shared_resources: std::collections::HashMap::new(),
+                    connection_quality: crate::p2p_manager::ConnectionQuality {
+                        latency_ms: 0,
+                        bandwidth_mbps: 100.0,
+                        packet_loss: 0.0,
+                        reliability_score: 1.0,
+                    },
+                };
                 self.shared_state
-                    .add_peer_with_p2p(
-                        node_id,
-                        addr.to_string(),
-                        p2p_node_id.clone(),
-                        p2p_addresses.clone(),
-                        p2p_relay_url.clone(),
-                    )
-                    .await?;
+                    .add_peer_with_p2p(node_id, peer_info);
             } else {
+                let peer_info = crate::p2p_manager::PeerInfo {
+                    node_id: node_id.to_string(),
+                    address: addr.to_string(),
+                    last_seen: chrono::Utc::now(),
+                    capabilities: vec![],
+                    shared_resources: std::collections::HashMap::new(),
+                    connection_quality: crate::p2p_manager::ConnectionQuality {
+                        latency_ms: 0,
+                        bandwidth_mbps: 100.0,
+                        packet_loss: 0.0,
+                        reliability_score: 1.0,
+                    },
+                };
                 self.shared_state
-                    .add_peer(node_id, addr.to_string())
-                    .await?;
+                    .add_peer(node_id, peer_info);
             }
         } else {
             debug!("Peer {} already exists, updating P2P info", node_id);
@@ -85,15 +103,21 @@ impl ClusterOperations for ClusterOperationsAdapter {
             if p2p_node_id.is_some() || !p2p_addresses.is_empty() {
                 // Remove and re-add to update P2P info
                 self.shared_state.remove_peer(node_id).await;
+                let peer_info = crate::p2p_manager::PeerInfo {
+                    node_id: p2p_node_id.clone().unwrap_or_else(|| node_id.to_string()),
+                    address: addr.to_string(),
+                    last_seen: chrono::Utc::now(),
+                    capabilities: vec![],
+                    shared_resources: std::collections::HashMap::new(),
+                    connection_quality: crate::p2p_manager::ConnectionQuality {
+                        latency_ms: 0,
+                        bandwidth_mbps: 100.0,
+                        packet_loss: 0.0,
+                        reliability_score: 1.0,
+                    },
+                };
                 self.shared_state
-                    .add_peer_with_p2p(
-                        node_id,
-                        addr.to_string(),
-                        p2p_node_id.clone(),
-                        p2p_addresses.clone(),
-                        p2p_relay_url.clone(),
-                    )
-                    .await?;
+                    .add_peer_with_p2p(node_id, peer_info);
             }
         }
 
@@ -189,9 +213,9 @@ impl ClusterOperations for ClusterOperationsAdapter {
                 // Build peer information from the voter list and our local peer cache
                 let mut node_infos = Vec::new();
                 for voter_id in &voters {
-                    if let Some(peer_info) = self.shared_state.get_peer(*voter_id).await {
+                    if let Some(peer_info) = self.shared_state.get_peer(*voter_id) {
                         node_infos.push(NodeInfo {
-                            id: peer_info.id,
+                            id: peer_info.node_id.parse::<u64>().unwrap_or(*voter_id),
                             address: peer_info.address.clone(),
                             state: if *voter_id == our_id {
                                 if status.is_leader {
@@ -298,9 +322,9 @@ impl ClusterOperations for ClusterOperationsAdapter {
         // Build node information from the voter list
         let mut nodes: Vec<NodeInfo> = Vec::new();
         for voter_id in &voters {
-            if let Some(peer_info) = self.shared_state.get_peer(*voter_id).await {
+            if let Some(peer_info) = self.shared_state.get_peer(*voter_id) {
                 nodes.push(NodeInfo {
-                    id: peer_info.id,
+                    id: peer_info.node_id.parse::<u64>().unwrap_or(*voter_id),
                     address: peer_info.address.clone(),
                     state: if *voter_id == our_id {
                         if raft_status.is_leader {

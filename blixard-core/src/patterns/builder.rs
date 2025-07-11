@@ -3,9 +3,8 @@
 //! This module provides standardized builder patterns that are used throughout
 //! the Blixard codebase for complex object construction, especially configuration objects.
 
-use crate::error::{BlixardError, BlixardResult};
+use crate::error::BlixardError;
 use async_trait::async_trait;
-use std::fmt::Debug;
 
 /// Unified builder trait for configuration objects
 pub trait Builder<T> {

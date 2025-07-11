@@ -7,23 +7,22 @@
 //! - Efficient streaming for log entries and snapshots
 //! - Integration with existing Raft manager
 
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use iroh::endpoint::{Connection, RecvStream, SendStream};
 use iroh::{Endpoint, NodeId};
 use raft::prelude::*;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task::JoinHandle;
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::metrics_otel::{attributes, metrics, Timer};
-use crate::node_shared::{PeerInfo, SharedNodeState};
-use crate::raft_manager::RaftManager;
+use crate::node_shared::SharedNodeState;
 use crate::transport::iroh_protocol::{
-    deserialize_payload, generate_request_id, read_message, serialize_payload, write_message,
-    MessageHeader, MessageType as ProtocolMessageType, RpcRequest, RpcResponse,
+    generate_request_id, read_message, write_message,
+    MessageType as ProtocolMessageType,
 };
 
 lazy_static::lazy_static! {
@@ -241,7 +240,7 @@ impl IrohRaftTransport {
     /// Send a Raft message to a peer
     pub async fn send_message(&self, to: u64, message: Message) -> BlixardResult<()> {
         // Check if we know about this peer first
-        if self.node.get_peer(to).await.is_none() {
+        if self.node.get_peer(to).is_none() {
             // Peer is not in our cluster, silently drop the message
             tracing::debug!("Dropping message to unknown peer {}", to);
             return Ok(());
@@ -588,16 +587,13 @@ async fn handle_incoming_connection(
         })?;
 
     // Find the peer ID for this Iroh node
-    let peers = node.get_peers().await;
+    let peers = node.get_peers();
     let peer_id = peers
         .iter()
         .find(|p| {
-            p.p2p_node_id
-                .as_ref()
-                .map(|id| id == &remote_node_id.to_string())
-                .unwrap_or(false)
+            p.node_id == remote_node_id.to_string()
         })
-        .map(|p| p.id)
+        .map(|p| p.node_id.parse::<u64>().unwrap_or(0))
         .ok_or_else(|| {
             BlixardError::ClusterError(format!("Unknown Iroh node: {}", remote_node_id))
         })?;
@@ -862,7 +858,6 @@ async fn check_connection_health(connections: &Arc<RwLock<HashMap<u64, PeerConne
     }
 }
 
-use std::str::FromStr;
 
 /// Extension trait to integrate with existing PeerConnector
 impl IrohRaftTransport {

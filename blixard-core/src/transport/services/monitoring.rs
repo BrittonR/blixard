@@ -108,11 +108,11 @@ impl MonitoringServiceImpl {
 
     /// Get cluster health information
     async fn get_cluster_health(&self) -> ClusterHealth {
-        let is_leader = self.node.is_leader().await;
-        let connected_peers = self.node.get_peers().await.len() as u32;
+        let is_leader = self.node.is_leader();
+        let connected_peers = self.node.get_peers().len() as u32;
 
         // Get VM count
-        let running_vms = if let Some(vm_manager) = self.node.get_vm_manager().await {
+        let running_vms = if let Some(vm_manager) = self.node.get_vm_manager() {
             vm_manager
                 .list_vms()
                 .await

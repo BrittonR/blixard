@@ -11,7 +11,6 @@ use super::messages::{RaftConfChange, ConfChangeType, ConfChangeContext};
 
 use raft::prelude::{ConfChange, ConfChangeType as RaftConfChangeType, Entry, RawNode};
 use redb::Database;
-use serde::{Deserialize, Serialize};
 use slog::{info, warn, error, Logger};
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
@@ -199,7 +198,7 @@ impl RaftConfigManager {
         // Establish P2P connection to the new node if we have P2P info
         if let Some(shared) = self.shared_state.upgrade() {
             if let Some(ref p2p_node_id) = conf_change.p2p_node_id {
-                if let Some(peer_connector) = shared.get_peer_connector().await {
+                if let Some(peer_connector) = shared.get_peer_connector() {
                     let node_addr = if let Some(relay_url) = &conf_change.p2p_relay_url {
                         // Use relay for connection
                         self.create_node_addr_with_relay(p2p_node_id, &conf_change.p2p_addresses, relay_url)?

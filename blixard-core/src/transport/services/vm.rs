@@ -403,7 +403,7 @@ impl VmService for VmServiceImpl {
         use crate::types::VmMigrationTask;
 
         // Verify we're the leader
-        if !self.node.is_leader().await {
+        if !self.node.is_leader() {
             return Err(BlixardError::Internal {
                 message: "Not the leader".to_string(),
             });
