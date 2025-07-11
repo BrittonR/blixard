@@ -115,7 +115,7 @@ impl HealthServiceV2 {
     /// Handle health check with legacy interface
     pub async fn handle_health_check(
         &self,
-        request: HealthCheckRequest,
+        _request: HealthCheckRequest,
     ) -> BlixardResult<HealthCheckResponse> {
         // HealthCheckRequest has no fields, so create basic HealthRequest
         let health_req = HealthRequest {

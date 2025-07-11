@@ -74,8 +74,8 @@ pub struct HealthStateManagerConfig {
 impl Default for HealthStateManagerConfig {
     fn default() -> Self {
         Self {
-            max_state_age: Duration::from_hours(24),
-            cleanup_interval: Duration::from_hours(1),
+            max_state_age: Duration::from_secs(24 * 60 * 60), // 24 hours
+            cleanup_interval: Duration::from_secs(60 * 60), // 1 hour
             max_results_per_vm: 50,
             enable_persistence: false,
         }

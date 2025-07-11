@@ -330,8 +330,8 @@ async fn handle_create_vm_with_scheduling(
 }
 
 async fn handle_schedule_placement(
-    node: Arc<SharedNodeState>,
-    request: PlacementRequest,
+    _node: Arc<SharedNodeState>,
+    _request: PlacementRequest,
 ) -> BlixardResult<ServiceResponse<PlacementResponse>> {
     // Get placement recommendation
     // TODO: Integrate with VmScheduler properly

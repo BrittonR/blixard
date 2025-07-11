@@ -377,7 +377,7 @@ impl ContainerResourceCollector {
     }
     
     /// Parse Docker stats JSON output
-    fn parse_docker_stats(&self, json: &str) -> BlixardResult<VmResourceMetrics> {
+    fn parse_docker_stats(&self, _json: &str) -> BlixardResult<VmResourceMetrics> {
         // Docker stats format:
         // {"BlockIO":"0B / 0B","CPUPerc":"0.01%","Container":"my-container","ID":"abc123",
         //  "MemPerc":"0.50%","MemUsage":"512MiB / 16GiB","Name":"my-container","NetIO":"0B / 0B","PIDs":"5"}
@@ -398,7 +398,7 @@ impl ContainerResourceCollector {
     }
     
     /// Parse Podman stats JSON output
-    fn parse_podman_stats(&self, json: &str) -> BlixardResult<VmResourceMetrics> {
+    fn parse_podman_stats(&self, _json: &str) -> BlixardResult<VmResourceMetrics> {
         // Podman stats format is similar to Docker but in a JSON array
         // [{"Name":"container","CPU":"0.01%","MemUsage":"512MB","Mem":"0.50%",...}]
         

@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::collections::HashMap;
 
 use crate::error::BlixardResult;
-#[cfg(feature = "observability")]
 use crate::metrics_otel;
 use crate::resource_management::{ClusterResourceManager, OvercommitPolicy};
 use crate::types::VmConfig;
@@ -88,7 +87,6 @@ impl VmScheduler {
 
         // Record metrics
         let duration = start_time.elapsed();
-        #[cfg(feature = "observability")]
         crate::metrics_otel::record_vm_scheduling_decision(&vm_config.name, &strategy_name, &decision, duration);
 
         tracing::info!(

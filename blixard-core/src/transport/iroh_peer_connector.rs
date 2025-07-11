@@ -614,7 +614,7 @@ impl IrohPeerConnector {
         }
 
         Err(BlixardError::Internal {
-            message: format!("Cannot convert peer {} to Iroh address", peer.id),
+            message: format!("Cannot convert peer {} to Iroh address", peer.node_id),
         })
     }
 

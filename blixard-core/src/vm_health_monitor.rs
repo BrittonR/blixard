@@ -278,6 +278,37 @@ impl VmHealthMonitor {
 
 #[async_trait]
 impl LifecycleManager for VmHealthMonitor {
+    type Config = VmHealthMonitorConfig;
+    type State = ();
+    type Error = BlixardError;
+
+    async fn new(config: Self::Config) -> Result<Self, Self::Error> {
+        // For now, create minimal dependencies - in practice these would be provided
+        // This is a temporary implementation to satisfy the trait
+        Err(BlixardError::NotImplemented {
+            feature: "VmHealthMonitor::new requires dependencies - use new_with_deps instead".to_string(),
+        })
+    }
+
+    fn state(&self) -> crate::patterns::lifecycle::LifecycleState {
+        if self.is_running {
+            crate::patterns::lifecycle::LifecycleState::Running
+        } else {
+            crate::patterns::lifecycle::LifecycleState::Stopped
+        }
+    }
+
+    fn stats(&self) -> crate::patterns::lifecycle::LifecycleStats {
+        crate::patterns::lifecycle::LifecycleStats::new()
+    }
+
+    fn name(&self) -> &'static str {
+        "VmHealthMonitor"
+    }
+
+    fn config(&self) -> &Self::Config {
+        &self.config
+    }
     async fn start(&mut self) -> BlixardResult<()> {
         if self.is_running {
             warn!("VmHealthMonitor is already running");
@@ -345,9 +376,6 @@ impl LifecycleManager for VmHealthMonitor {
         self.is_running
     }
 
-    fn name(&self) -> &'static str {
-        "VmHealthMonitor"
-    }
 }
 
 impl Drop for VmHealthMonitor {

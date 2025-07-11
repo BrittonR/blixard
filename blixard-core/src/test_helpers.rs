@@ -44,6 +44,11 @@ impl TestCluster {
         }
     }
 
+    /// Create a builder for test cluster
+    pub fn builder() -> Self {
+        Self::new()
+    }
+
     /// Add a new node to the cluster
     pub async fn add_node(&mut self) -> BlixardResult<u64> {
         let node_id = self.nodes.len() as u64 + 1;
@@ -58,7 +63,7 @@ impl TestCluster {
             ..Default::default()
         };
 
-        let node = Node::new(config)?;
+        let node = Node::new(config);
         let node = Arc::new(Mutex::new(node));
 
         let test_node = TestNode {
@@ -75,6 +80,16 @@ impl TestCluster {
     /// Get nodes map
     pub fn nodes(&self) -> &HashMap<u64, TestNode> {
         &self.nodes
+    }
+
+    /// Get a specific node by ID
+    pub fn get_node(&self, node_id: u64) -> Option<&TestNode> {
+        self.nodes.get(&node_id)
+    }
+
+    /// Remove a node from the cluster
+    pub fn remove_node(&mut self, node_id: u64) -> Option<TestNode> {
+        self.nodes.remove(&node_id)
     }
 
     /// Shutdown all nodes
@@ -104,6 +119,6 @@ where
     }
     Err(BlixardError::Timeout {
         operation: "wait_for_condition".to_string(),
-        timeout,
+        duration: timeout,
     })
 }

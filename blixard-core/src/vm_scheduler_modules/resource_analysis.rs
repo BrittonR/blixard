@@ -81,6 +81,21 @@ pub struct SchedulingContext {
 pub type DatacenterLatencyMap = HashMap<(String, String), u32>;
 
 impl NodeResourceUsage {
+    /// Get available CPU cores
+    pub fn available_vcpus(&self) -> u32 {
+        self.capabilities.cpu_cores.saturating_sub(self.used_vcpus)
+    }
+
+    /// Get available memory in MB
+    pub fn available_memory_mb(&self) -> u64 {
+        self.capabilities.memory_mb.saturating_sub(self.used_memory_mb)
+    }
+
+    /// Get available disk space in GB
+    pub fn available_disk_gb(&self) -> u64 {
+        self.capabilities.disk_gb.saturating_sub(self.used_disk_gb)
+    }
+
     /// Check if this node can accommodate the given VM requirements
     pub fn can_accommodate(&self, requirements: &VmResourceRequirements) -> bool {
         if !self.is_healthy {
@@ -164,6 +179,70 @@ impl NodeResourceUsage {
             },
         };
     }
+
+    /// Calculate placement score based on strategy
+    pub fn placement_score(&self, strategy: &crate::vm_scheduler::PlacementStrategy) -> f64 {
+        use crate::vm_scheduler::PlacementStrategy;
+        
+        if !self.is_healthy {
+            return 0.0;
+        }
+
+        match strategy {
+            PlacementStrategy::MostAvailable => {
+                // Return availability score (0.0 to 1.0)
+                self.calculate_availability_score() / 100.0
+            }
+            PlacementStrategy::LeastAvailable => {
+                // Return utilization score (0.0 to 1.0)
+                let cpu_util = if self.capabilities.cpu_cores > 0 {
+                    self.used_vcpus as f64 / self.capabilities.cpu_cores as f64
+                } else {
+                    0.0
+                };
+                let memory_util = if self.capabilities.memory_mb > 0 {
+                    self.used_memory_mb as f64 / self.capabilities.memory_mb as f64
+                } else {
+                    0.0
+                };
+                let disk_util = if self.capabilities.disk_gb > 0 {
+                    self.used_disk_gb as f64 / self.capabilities.disk_gb as f64
+                } else {
+                    0.0
+                };
+                // Weighted average of utilization
+                (cpu_util * 0.4 + memory_util * 0.4 + disk_util * 0.2)
+            }
+            PlacementStrategy::RoundRobin => {
+                // Score based on inverse of VM count (fewer VMs = higher score)
+                1.0 / (1.0 + self.running_vms as f64)
+            }
+            PlacementStrategy::Manual { node_id } => {
+                // Return 1.0 if this is the target node, 0.0 otherwise
+                if self.node_id == *node_id { 1.0 } else { 0.0 }
+            }
+            PlacementStrategy::PriorityBased { .. } => {
+                // TODO: Implement priority-based scoring
+                // For now, fallback to availability-based scoring
+                self.calculate_availability_score() / 100.0
+            }
+            PlacementStrategy::LocalityAware { .. } => {
+                // TODO: Implement locality-aware scoring
+                // For now, fallback to availability-based scoring
+                self.calculate_availability_score() / 100.0
+            }
+            PlacementStrategy::SpreadAcrossFailureDomains { .. } => {
+                // TODO: Implement failure domain spreading
+                // For now, fallback to availability-based scoring
+                self.calculate_availability_score() / 100.0
+            }
+            _ => {
+                // Catch-all for any other placement strategies
+                // Fallback to availability-based scoring
+                self.calculate_availability_score() / 100.0
+            }
+        }
+    }
 }
 
 /// Implementation for the VmScheduler's resource analysis methods
@@ -228,7 +307,7 @@ impl super::VmScheduler {
 
         let mut node_usage = Vec::new();
 
-        for entry in worker_table.iter().map_err(|e| BlixardError::Storage {
+        for entry in worker_table.range::<&[u8]>(..).map_err(|e| BlixardError::Storage {
             operation: "iterate workers".to_string(),
             source: Box::new(e),
         })? {
@@ -299,7 +378,7 @@ impl super::VmScheduler {
     /// Calculate resource usage for a specific node from its running VMs
     fn calculate_node_resource_usage(
         &self,
-        node_id: u64,
+        _node_id: u64,
         vm_table: &redb::ReadOnlyTable<&str, &[u8]>,
     ) -> BlixardResult<(u32, u64, u64, u32)> 
     {
@@ -308,7 +387,7 @@ impl super::VmScheduler {
         let mut used_disk_gb = 0;
         let mut running_vms = 0;
 
-        for entry in vm_table.iter().map_err(|e| BlixardError::Storage {
+        for entry in vm_table.range::<&str>(..).map_err(|e| BlixardError::Storage {
             operation: "iterate VMs".to_string(),
             source: Box::new(e),
         })? {
@@ -349,7 +428,7 @@ impl super::VmScheduler {
 
         let mut existing_placements = Vec::new();
 
-        for entry in vm_table.iter().map_err(|e| BlixardError::Storage {
+        for entry in vm_table.range::<&str>(..).map_err(|e| BlixardError::Storage {
             operation: "iterate VMs".to_string(),
             source: Box::new(e),
         })? {

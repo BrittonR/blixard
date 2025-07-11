@@ -91,7 +91,7 @@ impl NodeIdentityRegistry {
     }
 
     /// Load identities from persistent storage
-    pub async fn load_from_storage(&self, path: &std::path::Path) -> BlixardResult<()> {
+    pub async fn load_from_storage(&self, _path: &std::path::Path) -> BlixardResult<()> {
         // TODO: Implement loading from file/database
         // For now, hardcode some test identities
         info!("Loading node identities from storage");
@@ -173,7 +173,7 @@ impl IrohMiddleware {
     }
 
     /// Check if a node ID belongs to the cluster
-    async fn is_cluster_node(&self, node_id: &NodeId) -> bool {
+    async fn is_cluster_node(&self, _node_id: &NodeId) -> bool {
         // TODO: Check against known cluster members
         // For now, return false
         false
@@ -248,7 +248,7 @@ impl IrohMiddleware {
     /// Check and update resource quotas
     pub async fn check_resource_quota(
         &self,
-        tenant_id: &str,
+        _tenant_id: &str,
         resource_request: &crate::resource_quotas::ResourceRequest,
     ) -> BlixardResult<()> {
         if let Some(ref quota_manager) = self.quota_manager {

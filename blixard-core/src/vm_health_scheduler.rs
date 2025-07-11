@@ -330,6 +330,35 @@ impl HealthCheckScheduler {
 
 #[async_trait]
 impl LifecycleManager for HealthCheckScheduler {
+    type Config = HealthCheckSchedulerConfig;
+    type State = ();
+    type Error = BlixardError;
+
+    async fn new(config: Self::Config) -> Result<Self, Self::Error> {
+        Err(BlixardError::NotImplemented {
+            feature: "HealthCheckScheduler::new requires dependencies - use new_with_deps instead".to_string(),
+        })
+    }
+
+    fn state(&self) -> crate::patterns::lifecycle::LifecycleState {
+        if self.is_running {
+            crate::patterns::lifecycle::LifecycleState::Running
+        } else {
+            crate::patterns::lifecycle::LifecycleState::Stopped
+        }
+    }
+
+    fn stats(&self) -> crate::patterns::lifecycle::LifecycleStats {
+        crate::patterns::lifecycle::LifecycleStats::new()
+    }
+
+    fn name(&self) -> &'static str {
+        "HealthCheckScheduler"
+    }
+
+    fn config(&self) -> &Self::Config {
+        &self.config
+    }
     async fn start(&mut self) -> BlixardResult<()> {
         if self.is_running {
             warn!("HealthCheckScheduler is already running");
@@ -383,9 +412,6 @@ impl LifecycleManager for HealthCheckScheduler {
         self.is_running
     }
 
-    fn name(&self) -> &'static str {
-        "HealthCheckScheduler"
-    }
 }
 
 impl Drop for HealthCheckScheduler {

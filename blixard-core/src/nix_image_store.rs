@@ -1134,7 +1134,7 @@ impl NixImageStore {
     }
 
     /// Get Nix dependencies of a store path
-    async fn get_nix_dependencies(&self, path: &Path) -> BlixardResult<Vec<String>> {
+    async fn get_nix_dependencies(&self, _path: &Path) -> BlixardResult<Vec<String>> {
         // In production: run `nix-store --query --requisites <path>`
         // For now, return empty
         Ok(vec![])

@@ -16,7 +16,7 @@ use crate::{
 };
 use redb::{
     Database, ReadTransaction, WriteTransaction, Table, TableDefinition,
-    ReadOnlyTable, ReadableMultimapTable,
+    ReadOnlyTable, ReadableMultimapTable, ReadableTable,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -98,6 +98,7 @@ impl DatabaseTransaction {
     }
 
     /// Open a read-only table with automatic error context
+    /// Note: For write transactions, this returns an error since we can't get a ReadOnlyTable
     pub fn open_table_read<K: redb::Key + 'static, V: redb::Value + 'static>(
         &self,
         table_def: TableDefinition<K, V>,
@@ -108,23 +109,23 @@ impl DatabaseTransaction {
                     .open_table(table_def)
                     .storage_context(&format!("open read table for {}", self.operation))
             }
-            TransactionInner::Write(write_txn) => {
-                write_txn
-                    .open_table(table_def)
-                    .storage_context(&format!("open read table for {}", self.operation))
+            TransactionInner::Write(_) => {
+                Err(BlixardError::Storage {
+                    operation: self.operation.clone(),
+                    source: Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Cannot get ReadOnlyTable from WriteTransaction. Use open_table() instead.")),
+                })
             }
         }
     }
 
     /// Insert with automatic serialization and error context
-    pub fn insert_serialized<K, T>(
+    pub fn insert_serialized<T>(
         &self,
-        table: &mut Table<K, &[u8]>,
-        key: K,
+        table: &mut Table<&str, &[u8]>,
+        key: &str,
         value: &T,
     ) -> BlixardResult<()>
     where
-        K: redb::Key + 'static,
         T: Serialize,
     {
         let data = bincode::serialize(value).bincode_context(&format!("serialize {} for {}", std::any::type_name::<T>(), self.operation))?;
@@ -137,13 +138,12 @@ impl DatabaseTransaction {
     }
 
     /// Get with automatic deserialization and error context
-    pub fn get_deserialized<K, T>(
+    pub fn get_deserialized<T>(
         &self,
-        table: &ReadOnlyTable<K, &[u8]>,
-        key: K,
+        table: &ReadOnlyTable<&str, &[u8]>,
+        key: &str,
     ) -> BlixardResult<Option<T>>
     where
-        K: redb::Key + 'static,
         T: for<'de> Deserialize<'de>,
     {
         match table
@@ -158,29 +158,28 @@ impl DatabaseTransaction {
     }
 
     /// Clear all entries from a table
-    pub fn clear_table<K, V>(
+    pub fn clear_table<V>(
         &self,
-        table: &mut Table<K, V>,
+        table: &mut Table<&str, V>,
     ) -> BlixardResult<()>
     where
-        K: redb::Key + Clone + 'static,
         V: redb::Value + 'static,
     {
         // Collect all keys first to avoid iterator invalidation
-        let keys: Vec<K> = table
+        let keys: Vec<String> = table
             .iter()
             .map_err(|e| BlixardError::Storage {
                 operation: format!("iterate table for clear during {}", self.operation),
                 source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
             })?
-            .filter_map(|entry| entry.ok().map(|(k, _)| k.value().clone()))
+            .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
             .collect();
 
         debug!("Clearing {} entries from table during {}", keys.len(), self.operation);
 
         for key in keys {
             table
-                .remove(key)
+                .remove(key.as_str())
                 .storage_context(&format!("remove entry during clear for {}", self.operation))?;
         }
 
@@ -188,13 +187,12 @@ impl DatabaseTransaction {
     }
 
     /// Bulk insert with automatic serialization
-    pub fn bulk_insert_serialized<K, T>(
+    pub fn bulk_insert_serialized<'a, T>(
         &self,
-        table: &mut Table<K, &[u8]>,
-        data: impl IntoIterator<Item = (K, T)>,
+        table: &mut Table<&str, &[u8]>,
+        data: impl IntoIterator<Item = (&'a str, T)>,
     ) -> BlixardResult<()>
     where
-        K: redb::Key + 'static,
         T: Serialize,
     {
         let mut count = 0;
@@ -208,12 +206,11 @@ impl DatabaseTransaction {
     }
 
     /// Iterate table with automatic deserialization
-    pub fn iter_deserialized<K, T>(
+    pub fn iter_deserialized<T>(
         &self,
-        table: &ReadOnlyTable<K, &[u8]>,
-    ) -> BlixardResult<Vec<(K, T)>>
+        table: &ReadOnlyTable<&str, &[u8]>,
+    ) -> BlixardResult<Vec<(String, T)>>
     where
-        K: redb::Key + Clone + 'static,
         T: for<'de> Deserialize<'de>,
     {
         let mut results = Vec::new();
@@ -228,7 +225,7 @@ impl DatabaseTransaction {
             let deserialized_value = bincode::deserialize(value.value())
                 .bincode_context(&format!("deserialize entry during iteration for {}", self.operation))?;
 
-            results.push((key.value().clone(), deserialized_value));
+            results.push((key.value().to_string(), deserialized_value));
         }
 
         debug!("Iterated {} entries for {}", results.len(), self.operation);
@@ -236,13 +233,12 @@ impl DatabaseTransaction {
     }
 
     /// Clear table and restore from data (common pattern in restore operations)
-    pub fn clear_and_restore_serialized<K, T>(
+    pub fn clear_and_restore_serialized<'a, T>(
         &self,
-        table: &mut Table<K, &[u8]>,
-        data: impl IntoIterator<Item = (K, T)>,
+        table: &mut Table<&str, &[u8]>,
+        data: impl IntoIterator<Item = (&'a str, T)>,
     ) -> BlixardResult<()>
     where
-        K: redb::Key + Clone + 'static,
         T: Serialize,
     {
         // Clear existing data

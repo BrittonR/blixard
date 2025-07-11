@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use crate::vopr::operation_generator::{Operation, OperationGenerator};
-use crate::{acquire_lock, error::BlixardError};
+use crate::{acquire_lock, error::{BlixardError, BlixardResult}};
 
 /// Fuzzing mode - safety vs liveness
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,16 +189,16 @@ impl FuzzerEngine {
     }
 
     /// Generate a random test case
-    pub fn generate_test_case(&mut self, config: &FuzzConfig) -> Vec<Operation> {
+    pub fn generate_test_case(&mut self, config: &FuzzConfig) -> BlixardResult<Vec<Operation>> {
         if self.coverage_guided && !acquire_lock!(self.corpus.lock(), "check corpus empty").is_empty() {
             // Sometimes mutate an existing test case from the corpus
             if self.rng.gen_bool(0.5) {
-                return self.mutate_test_case(config);
+                return Ok(self.mutate_test_case(config));
             }
         }
 
         // Generate a fresh test case
-        self.generate_random_operations(config)
+        Ok(self.generate_random_operations(config))
     }
 
     /// Generate random operations
@@ -227,7 +227,13 @@ impl FuzzerEngine {
 
     /// Mutate an existing test case from the corpus
     fn mutate_test_case(&mut self, config: &FuzzConfig) -> Vec<Operation> {
-        let corpus = acquire_lock!(self.corpus.lock(), "access corpus for mutation");
+        let corpus = match self.corpus.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                eprintln!("Failed to acquire corpus lock for mutation, generating random operations");
+                return self.generate_random_operations(config);
+            }
+        };
         if corpus.is_empty() {
             drop(corpus);
             return self.generate_random_operations(config);
@@ -385,7 +391,7 @@ mod tests {
             max_message_delay_ms: 1000,
         };
 
-        let operations = engine.generate_test_case(&config);
+        let operations = engine.generate_test_case(&config).expect("Failed to generate test case");
 
         // Should start with node starts
         let start_ops: Vec<_> = operations

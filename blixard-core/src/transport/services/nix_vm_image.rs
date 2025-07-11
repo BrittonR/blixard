@@ -292,7 +292,7 @@ impl NixVmImageServiceImpl {
     }
 
     /// List available images
-    pub async fn list_images(&self, filter: Option<&str>) -> BlixardResult<Vec<NixImageMetadata>> {
+    pub async fn list_images(&self, _filter: Option<&str>) -> BlixardResult<Vec<NixImageMetadata>> {
         // This would need to be added to NixImageStore
         // For now, return empty list
         Ok(Vec::new())
@@ -342,7 +342,7 @@ impl crate::transport::iroh_service::IrohService for NixVmImageServiceImpl {
                         &req.name,
                         Path::new(&req.system_path),
                         req.kernel_path.as_ref().map(|p| Path::new(p)),
-                        req.metadata,
+                        req._metadata,
                     )
                     .await?;
 
@@ -359,7 +359,7 @@ impl crate::transport::iroh_service::IrohService for NixVmImageServiceImpl {
 
                 let req: Request = deserialize_payload(&payload)?;
                 let response = self
-                    .import_container(&req.image_ref, Path::new(&req.tar_path), req.metadata)
+                    .import_container(&req.image_ref, Path::new(&req.tar_path), req._metadata)
                     .await?;
 
                 serialize_payload(&response)
@@ -375,7 +375,7 @@ impl crate::transport::iroh_service::IrohService for NixVmImageServiceImpl {
 
                 let req: Request = deserialize_payload(&payload)?;
                 let response = self
-                    .import_closure(&req.name, Path::new(&req.root_path), req.metadata)
+                    .import_closure(&req.name, Path::new(&req.root_path), req._metadata)
                     .await?;
 
                 serialize_payload(&response)

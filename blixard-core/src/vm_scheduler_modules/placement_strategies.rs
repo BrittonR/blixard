@@ -96,12 +96,13 @@ pub struct PreemptionCandidate {
 
 impl super::VmScheduler {
     /// Apply the specified placement strategy to find the best node
-    pub(super) async fn apply_placement_strategy(
+    pub(super) fn apply_placement_strategy(
         &self,
         context: &SchedulingContext,
         vm_config: &VmConfig,
         strategy: PlacementStrategy,
-    ) -> BlixardResult<PlacementDecision> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<PlacementDecision>> + Send + '_>> {
+        Box::pin(async move {
         match strategy {
             PlacementStrategy::MostAvailable => {
                 self.apply_most_available_strategy(context, vm_config).await
@@ -128,6 +129,7 @@ impl super::VmScheduler {
                 self.apply_cost_optimized_strategy(context, vm_config, max_cost_increase, include_network_costs).await
             }
         }
+        })
     }
 
     /// Filter candidate nodes based on resource requirements and anti-affinity
@@ -541,4 +543,27 @@ fn calculate_string_hash(s: &str) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     s.hash(&mut hasher);
     hasher.finish()
+}
+
+impl std::fmt::Display for PlacementStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PlacementStrategy::MostAvailable => write!(f, "MostAvailable"),
+            PlacementStrategy::LeastAvailable => write!(f, "LeastAvailable"),
+            PlacementStrategy::RoundRobin => write!(f, "RoundRobin"),
+            PlacementStrategy::Manual { node_id } => write!(f, "Manual(node_id={})", node_id),
+            PlacementStrategy::PriorityBased { base_strategy, enable_preemption } => {
+                write!(f, "PriorityBased(base={}, preemption={})", base_strategy, enable_preemption)
+            }
+            PlacementStrategy::LocalityAware { base_strategy, strict } => {
+                write!(f, "LocalityAware(base={}, strict={})", base_strategy, strict)
+            }
+            PlacementStrategy::SpreadAcrossFailureDomains { min_domains, spread_level } => {
+                write!(f, "SpreadAcrossFailureDomains(min_domains={}, level={})", min_domains, spread_level)
+            }
+            PlacementStrategy::CostOptimized { max_cost_increase, include_network_costs } => {
+                write!(f, "CostOptimized(max_increase={:.1}%, network={})", max_cost_increase, include_network_costs)
+            }
+        }
+    }
 }

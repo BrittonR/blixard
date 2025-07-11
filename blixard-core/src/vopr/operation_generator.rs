@@ -529,6 +529,19 @@ impl OperationGenerator {
         self.next_request_id += 1;
         id
     }
+
+    /// Generate a CreateVm operation (helper method)
+    fn generate_create_vm(&mut self) -> ClientOp {
+        let vm_id = format!("vm-{}", self.next_vm_id);
+        self.next_vm_id += 1;
+        self.active_vms.push(vm_id.clone());
+
+        ClientOp::CreateVm {
+            vm_id,
+            cpu: 2,    // Default CPU count
+            memory: 1024, // Default memory in MB
+        }
+    }
 }
 
 #[cfg(test)]

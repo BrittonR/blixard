@@ -2,9 +2,10 @@ mod common;
 
 use blixard_core::{
     error::BlixardResult,
+    raft::proposals::WorkerCapabilities,
     test_helpers::{TestDatabaseFactory, TestWorkerFactory, TestVmFactory},
     types::{NodeTopology, VmConfig, VmStatus},
-    vm_scheduler::{NodeResourceUsage, PlacementStrategy, VmResourceRequirements, VmScheduler},
+    vm_scheduler::{NodeResourceUsage, NodeUtilization, PlacementStrategy, VmResourceRequirements, VmScheduler},
 };
 
 #[tokio::test]
@@ -42,12 +43,19 @@ async fn test_node_resource_usage_calculations() {
 
     let usage = NodeResourceUsage {
         node_id: 1,
+        is_healthy: true,
         capabilities,
         used_vcpus: 4,
         used_memory_mb: 8192,
         used_disk_gb: 50,
         running_vms: 2,
-        topology: NodeTopology::default(),
+        topology: Some(NodeTopology::default()),
+        cost_per_hour: None,
+        current_utilization: NodeUtilization {
+            cpu_percent: 50.0,
+            memory_percent: 50.0,
+            disk_percent: 50.0,
+        },
     };
 
     // Test available resource calculations
@@ -95,12 +103,19 @@ async fn test_placement_strategy_scoring() {
 
     let usage = NodeResourceUsage {
         node_id: 1,
+        is_healthy: true,
         capabilities,
         used_vcpus: 4,
         used_memory_mb: 8192,
         used_disk_gb: 50,
         running_vms: 2,
-        topology: NodeTopology::default(),
+        topology: Some(NodeTopology::default()),
+        cost_per_hour: None,
+        current_utilization: NodeUtilization {
+            cpu_percent: 50.0,
+            memory_percent: 50.0,
+            disk_percent: 50.0,
+        },
     };
 
     // Most available should score based on available resources (50% available = 0.5 score)

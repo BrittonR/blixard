@@ -75,7 +75,7 @@ impl HealthStateManager {
         let mut statuses = self.health_statuses.write().await;
         
         // Check if we should store the status based on configuration
-        if let Some(existing) = statuses.get(vm_name) {
+        if let Some(_existing) = statuses.get(vm_name) {
             // Limit the number of stored statuses per VM
             if statuses.len() >= self.config.max_results_per_vm && !statuses.contains_key(vm_name) {
                 warn!("Health status storage limit reached for VM '{}'", vm_name);
@@ -242,6 +242,35 @@ impl HealthStateManager {
 
 #[async_trait]
 impl LifecycleManager for HealthStateManager {
+    type Config = HealthStateManagerConfig;
+    type State = ();
+    type Error = BlixardError;
+
+    async fn new(config: Self::Config) -> Result<Self, Self::Error> {
+        Err(BlixardError::NotImplemented {
+            feature: "HealthStateManager::new requires dependencies - use new_with_deps instead".to_string(),
+        })
+    }
+
+    fn state(&self) -> crate::patterns::lifecycle::LifecycleState {
+        if self.is_running {
+            crate::patterns::lifecycle::LifecycleState::Running
+        } else {
+            crate::patterns::lifecycle::LifecycleState::Stopped
+        }
+    }
+
+    fn stats(&self) -> crate::patterns::lifecycle::LifecycleStats {
+        crate::patterns::lifecycle::LifecycleStats::new()
+    }
+
+    fn name(&self) -> &'static str {
+        "HealthStateManager"
+    }
+
+    fn config(&self) -> &Self::Config {
+        &self.config
+    }
     async fn start(&mut self) -> BlixardResult<()> {
         if self.is_running {
             warn!("HealthStateManager is already running");
@@ -277,9 +306,6 @@ impl LifecycleManager for HealthStateManager {
         self.is_running
     }
 
-    fn name(&self) -> &'static str {
-        "HealthStateManager"
-    }
 }
 
 impl Drop for HealthStateManager {

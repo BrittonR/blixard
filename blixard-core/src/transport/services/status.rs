@@ -51,7 +51,14 @@ impl StatusService for StatusServiceImpl {
         // Get all configured node IDs from peers
         let peers = self.node.get_peers();
         let mut node_ids = vec![self.node.get_id()];
-        node_ids.extend(peers.iter().map(|p| p.id));
+        node_ids.extend(peers.iter().filter_map(|p| {
+            // Try to parse node_id as u64 if it's a string
+            if let Ok(id) = p.node_id.parse::<u64>() {
+                Some(id)
+            } else {
+                None
+            }
+        }));
 
         // Get peers for address information
         let peers = self.node.get_peers();
@@ -74,7 +81,7 @@ impl StatusService for StatusServiceImpl {
                 // Peer - get address from peers list
                 let peer_addr = peers
                     .iter()
-                    .find(|p| p.id == node_id)
+                    .find(|p| p.node_id.parse::<u64>().unwrap_or(0) == node_id)
                     .map(|p| p.address.clone())
                     .unwrap_or_else(|| format!("unknown-{}", node_id));
 

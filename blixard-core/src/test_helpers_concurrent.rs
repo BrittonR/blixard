@@ -104,8 +104,10 @@ impl ConcurrentTestCluster {
     {
         let cluster = self.inner.lock().await;
         match cluster.get_node(node_id) {
-            Ok(node) => Ok(f(node)),
-            Err(e) => Err(e),
+            Some(node) => Ok(f(node)),
+            None => Err(crate::error::BlixardError::NotFound {
+                resource: format!("node {}", node_id)
+            }),
         }
     }
     
@@ -113,8 +115,13 @@ impl ConcurrentTestCluster {
     pub async fn get_node_shared_state(&self, node_id: u64) -> BlixardResult<Arc<crate::node_shared::SharedNodeState>> {
         let cluster = self.inner.lock().await;
         match cluster.get_node(node_id) {
-            Ok(node) => Ok(node.shared_state.clone()),
-            Err(e) => Err(e),
+            Some(test_node) => {
+                let node = test_node.node.lock().await;
+                Ok(node.shared())
+            },
+            None => Err(crate::error::BlixardError::NotFound {
+                resource: format!("node {}", node_id)
+            }),
         }
     }
     
@@ -123,7 +130,11 @@ impl ConcurrentTestCluster {
         let mut cluster = self.inner.lock().await;
         
         // Use the existing remove_node method which properly handles node removal
-        cluster.remove_node(node_id).await?;
+        if cluster.remove_node(node_id).is_none() {
+            return Err(crate::error::BlixardError::NotFound { 
+                resource: format!("node {}", node_id) 
+            });
+        }
         
         // Remove from node info
         let mut info = self.node_info.write().await;
@@ -158,11 +169,12 @@ impl ConcurrentTestClusterBuilder {
     }
     
     pub async fn build(self) -> BlixardResult<ConcurrentTestCluster> {
-        let cluster = TestCluster::builder()
-            .with_nodes(self.node_count)
-            .with_convergence_timeout(self.convergence_timeout)
-            .build()
-            .await?;
+        let mut cluster = TestCluster::new();
+        
+        // Add the requested number of nodes
+        for _ in 0..self.node_count {
+            cluster.add_node().await?;
+        }
             
         Ok(ConcurrentTestCluster::new(cluster))
     }

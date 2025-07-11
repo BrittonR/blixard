@@ -115,7 +115,10 @@ where
         debug!("Handling {}: {:?}", self.method_name, request);
 
         // Execute handler with error context
-        let response = self.handler.handle(request).await.context(&format!("execute_{}", self.method_name))?;
+        let response = self.handler.handle(request).await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("execute_{}: {}", self.method_name, e),
+            })?;
 
         // Serialize response with context
         serialize_payload(&response).network_context("serialize_response")
@@ -355,6 +358,12 @@ impl ServiceProtocolHandler {
     /// Get available methods
     pub fn available_methods(&self) -> Vec<&str> {
         self.service.methods()
+    }
+}
+
+impl From<BuiltService> for ServiceProtocolHandler {
+    fn from(service: BuiltService) -> Self {
+        Self::new(service)
     }
 }
 

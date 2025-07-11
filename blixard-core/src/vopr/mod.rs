@@ -120,7 +120,14 @@ impl Vopr {
                 max_message_delay_ms: 1000,
             };
 
-            let operations = self.engine.generate_test_case(&fuzz_config);
+            let operations = self.engine.generate_test_case(&fuzz_config)
+                .map_err(|e| FuzzFailure {
+                    seed: self.config.seed,
+                    operations: vec![],
+                    violated_invariant: format!("Failed to generate test case: {}", e),
+                    minimal_reproducer: None,
+                    state_history: vec![],
+                })?;
             let start_time = std::time::Instant::now();
 
             // Execute operations

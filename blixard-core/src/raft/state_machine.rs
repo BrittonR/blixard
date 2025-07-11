@@ -314,7 +314,7 @@ impl RaftStateMachine {
         match command {
             VmCommand::Create { config, node_id } => {
                 // Validate admission if controller is configured
-                if let Some(ref controller) = self.admission_controller {
+                if let Some(ref _controller) = self.admission_controller {
                     self.validate_vm_admission(config, *node_id)?;
                 }
                 
@@ -324,7 +324,6 @@ impl RaftStateMachine {
                     status: VmStatus::Creating,
                     node_id: *node_id,
                     config: config.clone(),
-                    health: crate::vm_health_types::HealthState::default(),
                     created_at: now,
                     updated_at: now,
                 };
@@ -344,7 +343,7 @@ impl RaftStateMachine {
                 info!("Starting VM {}", name);
             }
             
-            VmCommand::Stop { name, force: _ } => {
+            VmCommand::Stop { name } => {
                 self.update_vm_status_internal(txn, name, VmStatus::Stopping)?;
                 info!("Stopping VM {}", name);
             }
@@ -362,8 +361,11 @@ impl RaftStateMachine {
                 // Update VM's node assignment
                 {
                     let mut vm_table = txn.open_table(VM_STATE_TABLE)?;
-                    if let Some(data) = vm_table.get(task.vm_name.as_str())? {
-                        let mut vm_state: VmState = bincode::deserialize(data.value())
+                    let vm_data = vm_table.get(task.vm_name.as_str())?
+                        .map(|data| data.value().to_vec());
+                    
+                    if let Some(data) = vm_data {
+                        let mut vm_state: VmState = bincode::deserialize(&data)
                             .deserialize_context("vm state", "VmState")?;
                         vm_state.node_id = task.target_node_id;
                         vm_state.status = VmStatus::Stopping;
@@ -394,8 +396,11 @@ impl RaftStateMachine {
     ) -> BlixardResult<()> {
         {
             let mut vm_table = txn.open_table(VM_STATE_TABLE)?;
-            if let Some(data) = vm_table.get(vm_name)? {
-                let mut vm_state: VmState = bincode::deserialize(data.value())
+            let vm_data = vm_table.get(vm_name)?
+                .map(|data| data.value().to_vec());
+            
+            if let Some(data) = vm_data {
+                let mut vm_state: VmState = bincode::deserialize(&data)
                     .deserialize_context("vm state", "VmState")?;
                 vm_state.status = status;
                 vm_state.node_id = node_id;
@@ -557,7 +562,7 @@ impl RaftStateMachine {
     fn validate_vm_admission(&self, config: &VmConfig, node_id: u64) -> BlixardResult<()> {
         // Try to load overcommit policy for the node
         let read_txn = self.database.begin_read()?;
-        let overcommit_policy = if let Ok(policy_table) = read_txn.open_table(RESOURCE_POLICY_TABLE) {
+        let _overcommit_policy = if let Ok(policy_table) = read_txn.open_table(RESOURCE_POLICY_TABLE) {
             if let Ok(Some(policy_data)) = policy_table.get(node_id.to_le_bytes().as_ref()) {
                 bincode::deserialize::<OvercommitPolicy>(policy_data.value()).ok()
             } else {
@@ -568,18 +573,18 @@ impl RaftStateMachine {
         };
         
         // Use the configured admission controller if available
-        if let Some(ref controller) = self.admission_controller {
+        if let Some(ref _controller) = self.admission_controller {
             // Check admission with the overcommit policy
-            let resources = crate::resource_quotas::ResourceRequest {
+            let _resources = crate::resource_quotas::ResourceRequest {
                 tenant_id: crate::resource_quotas::TenantId::default(),
                 node_id: Some(node_id),
                 vcpus: config.vcpus,
                 memory_mb: config.memory as u64,
                 disk_gb: 0, // TODO: Add disk requirements to VmConfig
-                timestamp: chrono::Utc::now(),
+                timestamp: chrono::Utc::now().into(),
             };
             
-            let runtime = tokio::runtime::Handle::try_current()
+            let _runtime = tokio::runtime::Handle::try_current()
                 .map_err(|_| BlixardError::Internal {
                     message: "No tokio runtime available".to_string(),
                 })?;

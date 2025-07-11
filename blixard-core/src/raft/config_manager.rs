@@ -367,7 +367,7 @@ impl RaftConfigManager {
     }
 
     /// Check if this is a single-node cluster
-    fn is_single_node_cluster(&self, raft_node: &RawNode<RedbRaftStorage>) -> bool {
+    fn is_single_node_cluster(&self, _raft_node: &RawNode<RedbRaftStorage>) -> bool {
         // A single-node cluster has only one voter (this node) and no learners
         // TODO: Check the correct way to access voters in the raft crate
         // For now, assume it's not a single node cluster

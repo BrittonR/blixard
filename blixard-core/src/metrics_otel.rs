@@ -1157,6 +1157,7 @@ pub fn record_remediation_action(issue_type: &str, action: &str) {
 }
 
 /// Records resource utilization metrics
+#[cfg(feature = "observability")]
 pub fn record_resource_utilization(
     node_id: u64,
     actual_cpu_percent: f64,
@@ -1181,4 +1182,18 @@ pub fn record_resource_utilization(
     
     // Note: In production, we'd add specific metrics for resource utilization
     // This is a simplified implementation reusing existing metrics
+}
+
+/// Records resource utilization metrics (no-op version)
+#[cfg(not(feature = "observability"))]
+pub fn record_resource_utilization(
+    _node_id: u64,
+    _actual_cpu_percent: f64,
+    _actual_memory_mb: u64,
+    _actual_disk_gb: u64,
+    _overcommit_ratio_cpu: f64,
+    _overcommit_ratio_memory: f64,
+    _overcommit_ratio_disk: f64,
+) {
+    // No-op when observability is disabled
 }

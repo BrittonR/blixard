@@ -752,21 +752,6 @@ impl Node {
         })
     }
 
-    /// Execute HTTP bootstrap join process  
-    async fn execute_http_bootstrap_join(
-        &self,
-        _bootstrap_info: &crate::iroh_types::BootstrapInfo,
-        _node_addr: &iroh::NodeAddr,
-        _p2p_node_id: &Option<String>,
-        _p2p_addresses: &[String],
-        _p2p_relay_url: &Option<String>,
-    ) -> BlixardResult<()> {
-        // TODO: Fix to handle proper endpoint retrieval
-        Err(BlixardError::NotImplemented { 
-            feature: "HTTP bootstrap join".to_string() 
-        })
-    }
-
     /// Update shared state after joining cluster
     async fn update_shared_state_after_join(
         &self,
@@ -1023,7 +1008,7 @@ impl Node {
         
         tokio::spawn(async move {
             while let Some((target, msg)) = outgoing_rx.recv().await {
-                if let Some(shared) = shared_weak.upgrade() {
+                if let Some(_shared) = shared_weak.upgrade() {
                     let result = transport.send_message(target, msg).await;
                     
                     if let Err(e) = result {

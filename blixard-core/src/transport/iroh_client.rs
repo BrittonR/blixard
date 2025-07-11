@@ -672,7 +672,7 @@ impl IrohClusterServiceClient {
     /// Schedule VM placement
     pub async fn schedule_vm_placement(
         &self,
-        request: crate::iroh_types::TaskSchedulingRequest,
+        _request: crate::iroh_types::TaskSchedulingRequest,
     ) -> BlixardResult<Response<crate::iroh_types::TaskSchedulingResponse>> {
         // For now, just return a simple success response
         // In a real implementation, this would call the actual scheduler

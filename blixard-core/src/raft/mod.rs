@@ -27,7 +27,7 @@ pub use self::proposals::ProposalData;
 
 // Internal utilities shared across modules
 pub(crate) mod utils {
-    use slog::{o, Logger};
+    use slog::{o, Logger, Drain};
     
     /// Create a Raft logger with consistent formatting
     pub fn create_raft_logger(node_id: u64) -> Logger {

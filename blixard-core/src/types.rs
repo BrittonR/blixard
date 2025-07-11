@@ -238,3 +238,18 @@ impl Default for LocalityPreference {
         }
     }
 }
+
+impl Default for NodeConfig {
+    fn default() -> Self {
+        Self {
+            id: 1,
+            data_dir: "./data".to_string(),
+            bind_addr: "127.0.0.1:7001".parse().unwrap(),
+            join_addr: None,
+            use_tailscale: false,
+            vm_backend: "mock".to_string(),
+            transport_config: None,
+            topology: NodeTopology::default(),
+        }
+    }
+}

@@ -167,7 +167,7 @@ impl SharedNodeState {
     
     /// Get the bind address
     pub fn get_bind_addr(&self) -> String {
-        self.config.bind_addr.clone()
+        self.config.bind_addr.to_string()
     }
     
     /// Get the database (async convenience method)
@@ -345,6 +345,28 @@ impl SharedNodeState {
     
     pub async fn get_task_status(&self, _task_id: &str) -> BlixardResult<Option<(String, Option<crate::raft_manager::TaskResult>)>> {
         Err(BlixardError::NotImplemented { feature: "get_task_status in SharedNodeState".to_string() })
+    }
+
+    /// Schedule VM placement using the intelligent scheduler
+    /// 
+    /// This method delegates to the VM manager for scheduling decisions
+    pub async fn schedule_vm_placement(
+        &self,
+        vm_config: &crate::types::VmConfig,
+        strategy: crate::vm_scheduler::PlacementStrategy,
+    ) -> BlixardResult<crate::vm_scheduler::PlacementDecision> {
+        // Get database handle
+        let database = self.database().await.ok_or_else(|| BlixardError::DatabaseError {
+            operation: "get database for VM scheduling".to_string(),
+            source: Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Database not available"
+            )),
+        })?;
+
+        // Create VM scheduler and schedule placement
+        let scheduler = crate::vm_scheduler::VmScheduler::new(database);
+        scheduler.schedule_vm_placement(vm_config, strategy).await
     }
     
     pub async fn create_vm_with_scheduling(&self, _config: crate::types::VmConfig) -> BlixardResult<String> {

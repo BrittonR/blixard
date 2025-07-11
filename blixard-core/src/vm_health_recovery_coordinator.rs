@@ -177,7 +177,7 @@ impl RecoveryCoordinator {
     }
 
     /// Attempt to migrate a VM to another node
-    async fn attempt_migration(&self, vm_name: &str, vm_config: &VmConfig) -> BlixardResult<()> {
+    async fn attempt_migration(&self, vm_name: &str, _vm_config: &VmConfig) -> BlixardResult<()> {
         // For now, this is a placeholder. In a real implementation, this would:
         // 1. Find an available node with sufficient resources
         // 2. Schedule the VM on the new node
@@ -264,6 +264,35 @@ impl Clone for RecoveryCoordinator {
 
 #[async_trait]
 impl LifecycleManager for RecoveryCoordinator {
+    type Config = RecoveryCoordinatorConfig;
+    type State = ();
+    type Error = BlixardError;
+
+    async fn new(config: Self::Config) -> Result<Self, Self::Error> {
+        Err(BlixardError::NotImplemented {
+            feature: "RecoveryCoordinator::new requires dependencies - use new_with_deps instead".to_string(),
+        })
+    }
+
+    fn state(&self) -> crate::patterns::lifecycle::LifecycleState {
+        if self.is_running {
+            crate::patterns::lifecycle::LifecycleState::Running
+        } else {
+            crate::patterns::lifecycle::LifecycleState::Stopped
+        }
+    }
+
+    fn stats(&self) -> crate::patterns::lifecycle::LifecycleStats {
+        crate::patterns::lifecycle::LifecycleStats::new()
+    }
+
+    fn name(&self) -> &'static str {
+        "RecoveryCoordinator"
+    }
+
+    fn config(&self) -> &Self::Config {
+        &self.config
+    }
     async fn start(&mut self) -> BlixardResult<()> {
         if self.is_running {
             warn!("RecoveryCoordinator is already running");
@@ -303,9 +332,6 @@ impl LifecycleManager for RecoveryCoordinator {
         self.is_running
     }
 
-    fn name(&self) -> &'static str {
-        "RecoveryCoordinator"
-    }
 }
 
 #[cfg(test)]

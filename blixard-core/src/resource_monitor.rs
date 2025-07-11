@@ -19,7 +19,6 @@ use crate::{
     vm_backend::VmManager,
 };
 
-#[cfg(feature = "observability")]
 use crate::metrics_otel;
 
 /// Real-time resource utilization data for a VM
@@ -337,7 +336,6 @@ impl ResourceMonitor {
         }
 
         // Record metrics for observability
-        #[cfg(feature = "observability")]
         crate::metrics_otel::record_resource_utilization(
             node_id,
             total_actual_cpu_percent,
