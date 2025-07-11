@@ -4,8 +4,6 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
-    iroh_types::{
-    },
     node_shared::SharedNodeState,
     p2p_manager::ResourceType,
 };
@@ -147,7 +145,6 @@ impl VmImageService for VmImageServiceImpl {
         let p2p_manager =
             self.node
                 .get_p2p_manager()
-                .await
                 .ok_or_else(|| BlixardError::Internal {
                     message: "P2P manager not available".to_string(),
                 })?;
@@ -190,7 +187,6 @@ impl VmImageService for VmImageServiceImpl {
         let p2p_manager =
             self.node
                 .get_p2p_manager()
-                .await
                 .ok_or_else(|| BlixardError::Internal {
                     message: "P2P manager not available".to_string(),
                 })?;
@@ -232,7 +228,6 @@ impl VmImageService for VmImageServiceImpl {
         let p2p_manager =
             self.node
                 .get_p2p_manager()
-                .await
                 .ok_or_else(|| BlixardError::Internal {
                     message: "P2P manager not available".to_string(),
                 })?;

@@ -43,24 +43,18 @@ impl StatusServiceImpl {
 impl StatusService for StatusServiceImpl {
     async fn get_cluster_status(&self) -> BlixardResult<ClusterStatusResponse> {
         // Get Raft status to determine leadership and term
-        let raft_status =
-            self.node
-                .get_raft_status()
-                .await
-                .map_err(|e| BlixardError::Internal {
-                    message: format!("Failed to get Raft status: {}", e),
-                })?;
+        let raft_status = self.node.get_raft_status();
 
         let leader_id = raft_status.leader_id.unwrap_or(0);
         let term = raft_status.term;
 
         // Get all configured node IDs from peers
-        let peers = self.node.get_peers().await;
+        let peers = self.node.get_peers();
         let mut node_ids = vec![self.node.get_id()];
         node_ids.extend(peers.iter().map(|p| p.id));
 
         // Get peers for address information
-        let peers = self.node.get_peers().await;
+        let peers = self.node.get_peers();
 
         // Build node list from the authoritative Raft configuration
         let mut nodes = Vec::new();
@@ -96,7 +90,7 @@ impl StatusService for StatusServiceImpl {
 
             // Get P2P info if available
             let (p2p_node_id, p2p_addresses, p2p_relay_url) =
-                if let Some(p2p_manager) = self.node.get_p2p_manager().await {
+                if let Some(p2p_manager) = self.node.get_p2p_manager() {
                     if node_id == self.node.get_id() {
                         // Self - get our own P2P info
                         if let Ok(node_addr) = p2p_manager.get_node_addr().await {

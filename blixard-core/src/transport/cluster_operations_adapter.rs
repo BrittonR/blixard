@@ -50,14 +50,10 @@ impl ClusterOperations for ClusterOperationsAdapter {
 
         // Get our P2P info if available
         let (our_p2p_node_id, our_p2p_addresses, our_p2p_relay_url) =
-            if let Some(node_addr) = self.shared_state.get_p2p_node_addr() {
-                let p2p_id = node_addr.node_id.to_string();
-                let p2p_addrs: Vec<String> = node_addr
-                    .direct_addresses()
-                    .map(|a| a.to_string())
-                    .collect();
-                let relay_url = node_addr.relay_url().map(|u| u.to_string());
-                (Some(p2p_id), p2p_addrs, relay_url)
+            // TODO: Fix API mismatch - get_p2p_node_addr() returns Option<String> not iroh::NodeAddr
+            if let Some(node_addr_str) = self.shared_state.get_p2p_node_addr() {
+                // For now, return the string as node ID and empty addresses
+                (Some(node_addr_str), Vec::new(), None)
             } else {
                 (None, Vec::new(), None)
             };
@@ -124,7 +120,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
         // If the joining node has P2P info, try to connect
         if let Some(ref p2p_id) = p2p_node_id {
             if let Ok(node_id_parsed) = p2p_id.parse::<iroh::NodeId>() {
-                if let Some(p2p_manager) = self.shared_state.get_p2p_manager().await {
+                if let Some(p2p_manager) = self.shared_state.get_p2p_manager() {
                     // Create NodeAddr from the P2P info
                     let mut node_addr = iroh::NodeAddr::new(node_id_parsed);
 
@@ -208,7 +204,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
 
                 // Get current cluster information using the authoritative voter list
                 let voters = self.shared_state.get_current_voters().await?;
-                let status = self.shared_state.get_raft_status().await?;
+                let status = self.shared_state.get_raft_status();
 
                 // Build peer information from the voter list and our local peer cache
                 let mut node_infos = Vec::new();
@@ -296,7 +292,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
         debug!("Get cluster status request");
 
         // Get Raft status
-        let raft_status = self.shared_state.get_raft_status().await?;
+        let raft_status = self.shared_state.get_raft_status();
 
         // Get the authoritative list of voters from Raft
         let voters = self.shared_state.get_current_voters().await?;
@@ -307,14 +303,10 @@ impl ClusterOperations for ClusterOperationsAdapter {
 
         // Get our P2P info if available
         let (our_p2p_node_id, our_p2p_addresses, our_p2p_relay_url) =
-            if let Some(node_addr) = self.shared_state.get_p2p_node_addr() {
-                let p2p_id = node_addr.node_id.to_string();
-                let p2p_addrs: Vec<String> = node_addr
-                    .direct_addresses()
-                    .map(|a| a.to_string())
-                    .collect();
-                let relay_url = node_addr.relay_url().map(|u| u.to_string());
-                (Some(p2p_id), p2p_addrs, relay_url)
+            // TODO: Fix API mismatch - get_p2p_node_addr() returns Option<String> not iroh::NodeAddr
+            if let Some(node_addr_str) = self.shared_state.get_p2p_node_addr() {
+                // For now, return the string as node ID and empty addresses
+                (Some(node_addr_str), Vec::new(), None)
             } else {
                 (None, Vec::new(), None)
             };

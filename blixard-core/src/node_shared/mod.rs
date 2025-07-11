@@ -325,6 +325,18 @@ impl SharedNodeState {
         Err(BlixardError::NotImplemented { feature: "register_worker_through_raft in SharedNodeState".to_string() })
     }
     
+    pub async fn get_worker_capabilities(&self) -> BlixardResult<crate::types::WorkerCapabilities> {
+        // Return hardcoded capabilities for now
+        Ok(crate::types::WorkerCapabilities {
+            max_vcpus: 8,
+            max_memory_mb: 16384,
+            max_disk_gb: 100,
+            supports_microvm: true,
+            supports_gpu: false,
+            network_bandwidth_mbps: 1000,
+        })
+    }
+    
     pub async fn get_task_status(&self, _task_id: &str) -> BlixardResult<Option<(String, Option<crate::raft_manager::TaskResult>)>> {
         Err(BlixardError::NotImplemented { feature: "get_task_status in SharedNodeState".to_string() })
     }

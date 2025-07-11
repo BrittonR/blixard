@@ -55,7 +55,7 @@ impl RaftBootstrapCoordinator {
     }
 
     /// Execute bootstrap process if needed
-    #[instrument(skip(self, raft_node), fields(node_id = self.node_id))]
+    #[instrument(skip(self, raft_node, on_ready_fn), fields(node_id = self.node_id))]
     pub async fn execute_bootstrap_if_needed(
         &self,
         raft_node: &tokio::sync::RwLock<RawNode<RedbRaftStorage>>,

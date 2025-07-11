@@ -521,14 +521,10 @@ impl Node {
 
     /// Gather local P2P info if available
     async fn gather_local_p2p_info(&self) -> (Option<String>, Vec<String>, Option<String>) {
-        if let Some(node_addr) = self.shared.get_p2p_node_addr() {
-            let p2p_id = node_addr.node_id.to_string();
-            let p2p_addrs: Vec<String> = node_addr
-                .direct_addresses()
-                .map(|a| a.to_string())
-                .collect();
-            let relay_url = node_addr.relay_url().map(|u| u.to_string());
-            (Some(p2p_id), p2p_addrs, relay_url)
+        // TODO: Fix API mismatch - get_p2p_node_addr() returns Option<String> not iroh::NodeAddr
+        if let Some(node_addr_str) = self.shared.get_p2p_node_addr() {
+            // For now, return the string as node ID and empty addresses
+            (Some(node_addr_str), Vec::new(), None)
         } else {
             (None, Vec::new(), None)
         }
@@ -1141,10 +1137,10 @@ impl Node {
         })?;
 
         // Create new channels
-        let (proposal_tx, proposal_rx) = mpsc::unbounded_channel();
-        let (message_tx, message_rx) = mpsc::unbounded_channel();
-        let (conf_change_tx, conf_change_rx): (mpsc::UnboundedSender<RaftConfChange>, mpsc::UnboundedReceiver<RaftConfChange>) = mpsc::unbounded_channel();
-        let (outgoing_tx, outgoing_rx): (mpsc::UnboundedSender<(u64, raft::prelude::Message)>, mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>) = mpsc::unbounded_channel();
+        let (proposal_tx, _proposal_rx) = mpsc::unbounded_channel();
+        let (message_tx, _message_rx) = mpsc::unbounded_channel();
+        let (_conf_change_tx, _conf_change_rx): (mpsc::UnboundedSender<RaftConfChange>, mpsc::UnboundedReceiver<RaftConfChange>) = mpsc::unbounded_channel();
+        let (_outgoing_tx, _outgoing_rx): (mpsc::UnboundedSender<(u64, raft::prelude::Message)>, mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>) = mpsc::unbounded_channel();
 
         // Update shared state with new channels
         // Set individual Raft channels
@@ -1235,7 +1231,7 @@ impl Node {
     async fn pre_connect_to_leader(&self, join_addr: &str) -> BlixardResult<()> {
         tracing::info!("Pre-connecting to leader at {}", join_addr);
         
-        if let Some(peer_connector) = self.shared.get_peer_connector() {
+        if let Some(_peer_connector) = self.shared.get_peer_connector() {
             let parts: Vec<&str> = join_addr.split(':').collect();
             if parts.len() == 2 {
                 if let Ok(port) = parts[1].parse::<u16>() {

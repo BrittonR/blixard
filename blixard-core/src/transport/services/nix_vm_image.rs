@@ -59,7 +59,6 @@ impl NixVmImageServiceImpl {
         // Get P2P manager
         let p2p_manager =
             node.get_p2p_manager()
-                .await
                 .ok_or_else(|| BlixardError::NotInitialized {
                     component: "P2P manager".to_string(),
                 })?;

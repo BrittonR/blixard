@@ -88,7 +88,7 @@ impl IrohService for IrohStatusService {
                 let _request: GetRaftStatusRequest = deserialize_payload(&payload)?;
 
                 // Get Raft status
-                let proto_response = self.service.node.get_raft_status().await?;
+                let proto_response = self.service.node.get_raft_status();
 
                 // Convert to wrapper type
                 let response = GetRaftStatusResponse {

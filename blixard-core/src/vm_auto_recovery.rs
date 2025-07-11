@@ -198,7 +198,7 @@ impl VmAutoRecovery {
             name: vm_name.to_string(),
         };
 
-        self.node_state.create_vm_through_raft(command).await
+        self.node_state.create_vm_through_raft(command).await.map(|_| ())
     }
 
     /// Attempt to migrate the VM to another node
@@ -262,7 +262,7 @@ impl VmAutoRecovery {
         };
 
         match self.node_state.create_vm_through_raft(command).await {
-            Ok(()) => {
+            Ok(_task_id) => {
                 info!("Successfully initiated migration for VM '{}'", vm_name);
                 metrics.vm_recovery_success.add(
                     1,
