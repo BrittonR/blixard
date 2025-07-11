@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 use crate::error::BlixardResult;
 use crate::raft::messages::RaftProposal;
 use crate::raft_manager::ProposalData;
-use crate::test_helpers::{TestCluster, TestNode};
+use crate::test_helpers::TestCluster;
 use crate::types::{VmCommand, VmConfig};
 use crate::vopr::fuzzer_engine::Coverage;
 use crate::vopr::operation_generator::{ByzantineBehavior, ClientOp, Operation};

@@ -276,13 +276,14 @@ impl RaftConfigManager {
                 if !cc.context.is_empty() {
                     match bincode::deserialize::<ConfChangeContext>(&cc.context) {
                         Ok(context) => {
+                            let address = context.address.clone();
                             let mut peers = self.peers.write().await;
-                            peers.insert(cc.node_id, context.address);
+                            peers.insert(cc.node_id, address.clone());
                             info!(
                                 self.logger,
                                 "Added node {} with address {} to local peer list",
                                 cc.node_id,
-                                context.address
+                                address
                             );
                         }
                         Err(e) => {

@@ -11,7 +11,6 @@ use opentelemetry::KeyValue;
 #[cfg(feature = "observability")]
 mod observability_impl {
     use super::*;
-    use crate::metrics_otel::attributes;
     use opentelemetry::KeyValue;
 
     /// Trait for recording metrics in a standardized way
@@ -184,19 +183,19 @@ impl<'a> MetricBuilder<'a> {
     
     /// Add method label
     pub fn method(mut self, method: &str) -> Self {
-        self.labels.push(attributes::method(method));
+        self.labels.push(KeyValue::new("method", method.to_string()));
         self
     }
     
     /// Add node ID label
     pub fn node_id(mut self, node_id: u64) -> Self {
-        self.labels.push(attributes::node_id(node_id));
+        self.labels.push(KeyValue::new("node_id", node_id.to_string()));
         self
     }
     
     /// Add error label
     pub fn error(mut self, is_error: bool) -> Self {
-        self.labels.push(attributes::error(is_error));
+        self.labels.push(KeyValue::new("error", is_error.to_string()));
         self
     }
     

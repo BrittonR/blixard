@@ -2044,7 +2044,7 @@ async fn handle_security_command(command: SecurityCommands) -> BlixardResult<()>
                 .filter(|s| !s.is_empty())
                 .collect();
 
-            let mut parsed_permissions = Vec::new();
+            let mut parsed_permissions = Vec::with_capacity(perm_strings.len());
             for perm in perm_strings {
                 match perm {
                     "cluster-read" => parsed_permissions.push("ClusterRead"),

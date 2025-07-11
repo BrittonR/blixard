@@ -172,8 +172,10 @@ impl ServiceBuilder {
         #[async_trait]
         impl<F, Fut, Req, Resp> ServiceMethod<Req, Resp> for ClosureHandler<F>
         where
-            F: Fn(Req) -> Fut + Send + Sync,
-            Fut: std::future::Future<Output = BlixardResult<Resp>> + Send,
+            F: Fn(Req) -> Fut + Send + Sync + 'static,
+            Fut: std::future::Future<Output = BlixardResult<Resp>> + Send + 'static,
+            Req: Send + 'static,
+            Resp: Send + 'static,
         {
             async fn handle(&self, request: Req) -> BlixardResult<Resp> {
                 self.0(request).await

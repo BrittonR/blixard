@@ -4,6 +4,7 @@
 //! periodic health checks for VMs using the LifecycleManager pattern.
 
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 use tracing::{error, info, warn};

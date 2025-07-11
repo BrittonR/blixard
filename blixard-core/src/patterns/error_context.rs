@@ -209,10 +209,11 @@ impl ErrorUtils {
 
         Err(BlixardError::Internal {
             message: format!(
-                "Operation '{}' failed after {} attempts",
-                context, max_attempts
+                "Operation '{}' failed after {} attempts: {}",
+                context, 
+                max_attempts,
+                last_error.as_ref().map(|e| e.to_string()).unwrap_or_else(|| "unknown error".to_string())
             ),
-            source: last_error.map(Box::new),
         })
     }
 

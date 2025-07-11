@@ -175,9 +175,9 @@ impl RaftSnapshotManager {
     /// Check and send snapshots to followers that need them
     #[instrument(skip(self, raft_node))]
     pub async fn check_and_send_snapshots(&self, raft_node: &mut RawNode<RedbRaftStorage>) -> BlixardResult<()> {
-        let progress = raft_node.raft.prs();
+        let _progress = raft_node.raft.prs();
         
-        let mut followers_needing_snapshots: Vec<u64> = Vec::new();
+        let _followers_needing_snapshots: Vec<u64> = Vec::new();
         
         // TODO: Check the correct way to iterate over voters in the raft crate
         // For now, skip this functionality

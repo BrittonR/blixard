@@ -93,7 +93,7 @@ impl ResourceAdmissionController {
         }
         
         // Clear all allocations (we'll rebuild from VM state)
-        for (node_id, state) in resource_manager.node_states.iter_mut() {
+        for (_node_id, state) in resource_manager.node_states.iter_mut() {
             state.allocated_resources = Default::default();
             state.reservations.clear();
         }

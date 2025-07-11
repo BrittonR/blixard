@@ -6,14 +6,8 @@
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::resource_manager::{ResourceManager, ResourceType, ResourceAllocationRequest, CompositeResourceManager, ResourceAllocation, ResourceLimits};
-use crate::patterns::resource_pool::PooledResource;
 use crate::resource_managers::{DefaultResourceManagerFactory, create_standard_composite_manager};
-use crate::quota_manager::QuotaManager as LegacyQuotaManager;
-use crate::quota_system::QuotaManager as LegacyQuotaSystem;
 use crate::resource_quotas::{TenantId, TenantQuota, ResourceRequest, QuotaViolation};
-use crate::resource_management::ClusterResourceManager as LegacyClusterResourceManager;
-use crate::resource_monitor::ResourceMonitor as LegacyResourceMonitor;
-use crate::resource_admission::ResourceAdmissionController as LegacyAdmissionController;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -203,9 +197,8 @@ impl ResourceManagerMigrationWrapper {
                 }
             }
             QuotaViolation::RateLimitExceeded { operation, limit, current } => {
-                BlixardError::RateLimited {
-                    operation: operation.clone(),
-                    retry_after: Duration::from_secs(60), // Default retry after 1 minute
+                BlixardError::ResourceExhausted {
+                    resource: format!("Rate limit for operation '{}': {}/{} per minute", operation, current, limit),
                 }
             }
             QuotaViolation::StorageLimitExceeded { limit, current, requested } => {
@@ -405,7 +398,7 @@ pub fn convert_tenant_quota_to_limits(quota: &TenantQuota) -> Vec<ResourceLimits
 
 /// Generate migration report
 pub fn generate_migration_report(status: &MigrationStatus) -> String {
-    let mut report = String::new();
+    let mut report = String::with_capacity(512);
     
     report.push_str(&format!("Resource Manager Migration Report\n"));
     report.push_str(&format!("=====================================\n\n"));

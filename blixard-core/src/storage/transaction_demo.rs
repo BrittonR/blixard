@@ -16,7 +16,7 @@ mod traditional_patterns {
 
     const VM_STATE_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vm_states");
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Clone)]
     struct VmState {
         name: String,
         status: String,
@@ -57,6 +57,9 @@ mod traditional_patterns {
                 operation: "insert vm state".to_string(),
                 source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
             })?;
+
+        // Drop the table to release the borrow on write_txn
+        drop(table);
 
         // Repetitive commit with error handling
         write_txn
@@ -161,6 +164,9 @@ mod traditional_patterns {
                 })?;
         }
 
+        // Drop the table to release the borrow on write_txn
+        drop(table);
+
         // Repetitive commit
         write_txn
             .commit()
@@ -188,7 +194,7 @@ mod wrapper_patterns {
 
     const VM_STATE_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vm_states");
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Clone)]
     struct VmState {
         name: String,
         status: String,
@@ -197,23 +203,24 @@ mod wrapper_patterns {
     /// DatabaseTransaction pattern - NO boilerplate!
     pub async fn wrapper_insert_vm_state(
         database: &Database,
-        vm_name: &str,
-        state: &VmState,
+        vm_name: String,  // Take owned String to avoid lifetime issues
+        state: VmState,   // Take owned state
     ) -> BlixardResult<()> {
         let txn = DatabaseTransaction::begin_write(database, "insert vm state")?;
         let mut table = txn.open_table(VM_STATE_TABLE)?;
-        txn.insert_serialized(&mut table, vm_name, state)?;
+        txn.insert_serialized(&mut table, vm_name.as_str(), &state)?;
+        drop(table);  // Release the borrow before commit
         txn.commit()
     }
 
     /// DatabaseTransaction pattern - read with automatic deserialization
     pub async fn wrapper_get_vm_state(
         database: &Database,
-        vm_name: &str,
+        vm_name: String,  // Take owned String to avoid lifetime issues
     ) -> BlixardResult<Option<VmState>> {
         let txn = DatabaseTransaction::begin_read(database, "get vm state")?;
         let table = txn.open_table_read(VM_STATE_TABLE)?;
-        txn.get_deserialized(&table, vm_name)
+        txn.get_deserialized(&table, vm_name.as_str())
     }
 
     /// DatabaseTransaction pattern - clear and restore in one call
@@ -223,7 +230,16 @@ mod wrapper_patterns {
     ) -> BlixardResult<()> {
         let txn = DatabaseTransaction::begin_write(database, "clear and restore vm states")?;
         let mut table = txn.open_table(VM_STATE_TABLE)?;
-        txn.clear_and_restore_serialized(&mut table, new_states)?;
+        
+        // Clear existing data
+        txn.clear_table(&mut table)?;
+        
+        // Insert new data one by one to avoid lifetime issues
+        for (name, state) in &new_states {
+            txn.insert_serialized(&mut table, name.as_str(), state)?;
+        }
+        
+        drop(table);  // Release the borrow before commit
         txn.commit()
     }
 

@@ -113,50 +113,29 @@ pub struct Metrics {
 impl Metrics {
     /// Create new metrics instance with the given meter
     fn new(meter: Meter) -> Self {
-        let mut metrics = Metrics::with_meter(meter.clone());
-        
-        // Initialize all metric groups
-        metrics.init_raft_metrics(&meter);
-        metrics.init_network_metrics(&meter);
-        metrics.init_vm_metrics(&meter);
-        metrics.init_resource_metrics(&meter);
-        metrics.init_storage_metrics(&meter);
-        metrics.init_p2p_metrics(&meter);
-        metrics.init_connection_pool_metrics(&meter);
-        
-        metrics
-    }
-
-    /// Create a new metrics instance with the given meter (without initialization)
-    fn with_meter(meter: Meter) -> Self {
-        // Create temporary placeholders - these will be replaced during initialization
-        let temp_counter = meter.u64_counter("temp").init();
-        let temp_histogram = meter.f64_histogram("temp").init();
-        let temp_up_down = meter.i64_up_down_counter("temp").init();
-
         Self {
             // Raft metrics
-            raft_proposals_total: temp_counter.clone(),
-            raft_proposals_failed: temp_counter.clone(),
-            raft_committed_entries: temp_counter.clone(),
-            raft_applied_entries: temp_counter.clone(),
-            raft_leader_changes: temp_counter.clone(),
-            raft_term: temp_up_down.clone(),
-            raft_commit_index: temp_up_down.clone(),
-            raft_proposal_duration: temp_histogram.clone(),
+            raft_proposals_total: meter.u64_counter("raft_proposals_total").init(),
+            raft_proposals_failed: meter.u64_counter("raft_proposals_failed").init(),
+            raft_committed_entries: meter.u64_counter("raft_committed_entries").init(),
+            raft_applied_entries: meter.u64_counter("raft_applied_entries").init(),
+            raft_leader_changes: meter.u64_counter("raft_leader_changes").init(),
+            raft_term: meter.i64_up_down_counter("raft_term").init(),
+            raft_commit_index: meter.i64_up_down_counter("raft_commit_index").init(),
+            raft_proposal_duration: meter.f64_histogram("raft_proposal_duration").init(),
 
             // Raft batch processing metrics
-            raft_batches_total: temp_counter.clone(),
-            raft_batch_size: temp_histogram.clone(),
-            raft_batch_bytes: temp_histogram.clone(),
-            raft_batch_age_ms: temp_histogram.clone(),
+            raft_batches_total: meter.u64_counter("raft_batches_total").init(),
+            raft_batch_size: meter.f64_histogram("raft_batch_size").init(),
+            raft_batch_bytes: meter.f64_histogram("raft_batch_bytes").init(),
+            raft_batch_age_ms: meter.f64_histogram("raft_batch_age_ms").init(),
 
             // Network metrics
-            grpc_requests_total: temp_counter.clone(),
-            grpc_requests_failed: temp_counter.clone(),
-            grpc_request_duration: temp_histogram.clone(),
-            peer_connections_active: temp_up_down.clone(),
-            peer_reconnect_attempts: temp_counter.clone(),
+            grpc_requests_total: meter.u64_counter("grpc_requests_total").init(),
+            grpc_requests_failed: meter.u64_counter("grpc_requests_failed").init(),
+            grpc_request_duration: meter.f64_histogram("grpc_request_duration").init(),
+            peer_connections_active: meter.i64_up_down_counter("peer_connections_active").init(),
+            peer_reconnect_attempts: meter.u64_counter("peer_reconnect_attempts").init(),
 
             // VM metrics
             vm_total: temp_up_down.clone(),
@@ -726,7 +705,7 @@ pub fn record_vm_scheduling_decision(
         for _preempted_vm in &decision.preempted_vms {
             metrics
                 .vm_preemptions_total
-                .add(1, &[preemption_attr.clone()]);
+                .add(1, &[preemption_attr]);
         }
     }
 }

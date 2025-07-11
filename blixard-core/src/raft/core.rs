@@ -231,7 +231,7 @@ impl RaftManager {
 
     /// Main run loop for the Raft manager
     #[instrument(skip(self))]
-    pub async fn run(mut self) -> BlixardResult<()> {
+    pub async fn run(self) -> BlixardResult<()> {
         info!(self.logger, "[RAFT-RUN] Starting RaftManager::run() method");
 
         // Create bootstrap coordinator
@@ -261,11 +261,11 @@ impl RaftManager {
 
     /// Static method to process on_ready state
     async fn process_on_ready(
-        raft_node: &Arc<RwLock<RawNode<RedbRaftStorage>>>,
-        snapshot_manager: &Arc<RaftSnapshotManager>,
-        state_machine: &Arc<RaftStateMachine>,
-        shared_state: &Weak<crate::node_shared::SharedNodeState>,
-        storage: &RedbRaftStorage,
+        _raft_node: &Arc<RwLock<RawNode<RedbRaftStorage>>>,
+        _snapshot_manager: &Arc<RaftSnapshotManager>,
+        _state_machine: &Arc<RaftStateMachine>,
+        _shared_state: &Weak<crate::node_shared::SharedNodeState>,
+        _storage: &RedbRaftStorage,
         logger: &Logger,
     ) -> BlixardResult<()> {
         // This is a simplified version - in practice we'd need to move the full on_ready logic here
@@ -905,7 +905,7 @@ impl RaftManager {
     }
 
     /// Configure the state machine's admission controller
-    pub async fn configure_admission_controller(&self, config: crate::resource_admission::AdmissionControlConfig) {
+    pub async fn configure_admission_controller(&self, _config: crate::resource_admission::AdmissionControlConfig) {
         // This is a bit awkward since state_machine is Arc'd, but we need mutable access
         // In practice, this should be called during initialization before concurrent access
         // For now, we'll need to add interior mutability to RaftStateMachine if needed

@@ -328,7 +328,7 @@ impl Node {
         db: Arc<Database>,
     ) -> BlixardResult<(RaftManager, mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>, mpsc::UnboundedReceiver<RaftConfChange>, mpsc::UnboundedSender<RaftProposal>, mpsc::UnboundedSender<RaftConfChange>)> {
         let joining_cluster = self.shared.config.join_addr.is_some();
-        let mut storage = crate::raft_storage::RedbRaftStorage {
+        let storage = crate::raft_storage::RedbRaftStorage {
             database: db.clone(),
         };
 
@@ -842,9 +842,9 @@ impl Node {
         &self,
         bootstrap_info: &crate::iroh_types::BootstrapInfo,
         node_addr: &iroh::NodeAddr,
-        p2p_node_id: &Option<String>,
-        p2p_addresses: &[String],
-        p2p_relay_url: &Option<String>,
+        _p2p_node_id: &Option<String>,
+        _p2p_addresses: &[String],
+        _p2p_relay_url: &Option<String>,
     ) -> BlixardResult<()> {
         // Now connect via P2P
         if let Some(p2p_manager) = self.shared.get_p2p_manager() {

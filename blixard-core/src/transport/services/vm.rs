@@ -237,7 +237,7 @@ impl VmService for VmServiceImpl {
             node_id: self.node.get_id(),
         };
         let command_str = serde_json::to_string(&command)
-            .map_err(|e| crate::error::BlixardError::InternalError {
+            .map_err(|e| crate::error::BlixardError::Internal {
                 message: format!("Failed to serialize VM command: {}", e),
             })?;
         self.node
@@ -252,7 +252,7 @@ impl VmService for VmServiceImpl {
             name: name.to_string(),
         };
         let command_str = serde_json::to_string(&command)
-            .map_err(|e| crate::error::BlixardError::InternalError {
+            .map_err(|e| crate::error::BlixardError::Internal {
                 message: format!("Failed to serialize VM command: {}", e),
             })?;
         self.node
@@ -265,7 +265,7 @@ impl VmService for VmServiceImpl {
             name: name.to_string(),
         };
         let command_str = serde_json::to_string(&command)
-            .map_err(|e| crate::error::BlixardError::InternalError {
+            .map_err(|e| crate::error::BlixardError::Internal {
                 message: format!("Failed to serialize VM command: {}", e),
             })?;
         self.node
@@ -278,7 +278,7 @@ impl VmService for VmServiceImpl {
             name: name.to_string(),
         };
         let command_str = serde_json::to_string(&command)
-            .map_err(|e| crate::error::BlixardError::InternalError {
+            .map_err(|e| crate::error::BlixardError::Internal {
                 message: format!("Failed to serialize VM command: {}", e),
             })?;
         self.node
@@ -441,7 +441,7 @@ impl VmService for VmServiceImpl {
             task: migration_task,
         };
         let command_str = serde_json::to_string(&command)
-            .map_err(|e| crate::error::BlixardError::InternalError {
+            .map_err(|e| crate::error::BlixardError::Internal {
                 message: format!("Failed to serialize VM command: {}", e),
             })?;
         self.node

@@ -8,12 +8,11 @@
 use crate::{
     error::{BlixardError, BlixardResult},
     node::Node,
-    types::{NodeConfig, VmConfig},
+    types::NodeConfig,
 };
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    path::PathBuf,
     sync::Arc,
 };
 use tokio::sync::Mutex;

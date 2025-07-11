@@ -185,16 +185,16 @@ impl EnrollCommand {
         // Build certificate attributes
         let mut cert_attrs = HashMap::new();
         if let Some(cn) = cn {
-            cert_attrs.insert("CN".to_string(), cn);
+            cert_attrs.insert("CN".into(), cn);
         }
         if let Some(ou) = ou {
-            cert_attrs.insert("OU".to_string(), ou);
+            cert_attrs.insert("OU".into(), ou);
         }
         if let Some(o) = o {
-            cert_attrs.insert("O".to_string(), o);
+            cert_attrs.insert("O".into(), o);
         }
         if let Some(email) = email {
-            cert_attrs.insert("emailAddress".to_string(), email);
+            cert_attrs.insert("emailAddress".into(), email);
         }
         for (key, value) in attrs {
             cert_attrs.insert(key, value);
@@ -202,7 +202,7 @@ impl EnrollCommand {
         
         if cert_attrs.is_empty() {
             return Err(BlixardError::Configuration {
-                message: "No certificate attributes provided".to_string(),
+                message: "No certificate attributes provided".into(),
             });
         }
         
@@ -264,7 +264,7 @@ impl EnrollCommand {
         let secret_display = if token.secret.len() > 8 {
             format!("{}...{}", &token.secret[..4], &token.secret[token.secret.len()-4..])
         } else {
-            "****".to_string()
+            "****".into()
         };
         println!("Secret: {} (full secret written to secure location)", secret_display);
         println!("⚠️  Store this secret securely - it will not be shown again");
@@ -357,13 +357,13 @@ fn parse_key_val(s: &str) -> Result<(String, String), String> {
     if parts.len() != 2 {
         return Err(format!("Invalid key=value format: {}", s));
     }
-    Ok((parts[0].to_string(), parts[1].to_string()))
+    Ok((parts[0].into(), parts[1].into()))
 }
 
 /// Truncate string for display
 fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
-        s.to_string()
+        s.into()
     } else {
         format!("{}...", &s[..max_len - 3])
     }
@@ -378,7 +378,7 @@ async fn get_local_node_id() -> BlixardResult<NodeId> {
     
     // For now, return a placeholder
     Err(BlixardError::NotImplemented {
-        feature: "Local node ID detection".to_string(),
+        feature: "Local node ID detection".into(),
     })
 }
 

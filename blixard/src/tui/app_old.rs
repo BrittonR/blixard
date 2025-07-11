@@ -1113,13 +1113,13 @@ impl App {
             last_refresh: Instant::now(),
 
             cluster_metrics: ClusterMetrics::default(),
-            recent_events: Vec::new(),
+            recent_events: Vec::with_capacity(100),
             cluster_health: ClusterHealth::default(),
             node_health_history: HashMap::new(),
-            health_alerts: Vec::new(),
+            health_alerts: Vec::with_capacity(10),
 
             // Debug mode fields
-            debug_log_entries: Vec::new(),
+            debug_log_entries: Vec::with_capacity(1000),
             debug_metrics: DebugMetrics::default(),
             max_debug_entries: 1000,
             raft_debug_info: None,
@@ -1133,7 +1133,7 @@ impl App {
             vm_log_state: ListState::default(),
 
             log_stream_config: LogStreamConfig::default(),
-            log_entries: Vec::new(),
+            log_entries: Vec::with_capacity(1000),
             log_list_state: ListState::default(),
             max_log_entries: 1000,
 
@@ -1170,9 +1170,9 @@ impl App {
             cluster_discovery_active: false,
             cluster_scan_progress: 0.0,
 
-            cpu_history: Vec::new(),
-            memory_history: Vec::new(),
-            network_history: Vec::new(),
+            cpu_history: Vec::with_capacity(50),
+            memory_history: Vec::with_capacity(50),
+            network_history: Vec::with_capacity(50),
             max_history_points: 50,
 
             config_dirty: false,

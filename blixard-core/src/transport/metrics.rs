@@ -189,7 +189,7 @@ impl TransportMetrics {
     pub fn record_election_timeout(&self) {}
 }
 
-/// Global transport metrics instance
+// Global transport metrics instance
 #[cfg(feature = "observability")]
 lazy_static::lazy_static! {
     pub static ref TRANSPORT_METRICS: TransportMetrics = {
@@ -197,7 +197,7 @@ lazy_static::lazy_static! {
     };
 }
 
-/// No-op global instance when observability is disabled
+// No-op global instance when observability is disabled
 #[cfg(not(feature = "observability"))]
 lazy_static::lazy_static! {
     pub static ref TRANSPORT_METRICS: TransportMetrics = {

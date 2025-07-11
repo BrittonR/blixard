@@ -75,12 +75,12 @@ pub trait ResourceFactory<T: PoolableResource + 'static>: Send + Sync {
 /// This type deliberately does NOT implement Deref/DerefMut to prevent panics.
 /// Use the safe `get()` and `get_mut()` methods which return Result types.
 /// This design prevents runtime panics at the cost of slightly more verbose API.
-pub struct PooledResource<T: PoolableResource> {
+pub struct PooledResource<T: PoolableResource + 'static> {
     resource: Option<T>,
     pool: Arc<ResourcePool<T>>,
 }
 
-impl<T: PoolableResource> PooledResource<T> {
+impl<T: PoolableResource + 'static> PooledResource<T> {
     /// Get a reference to the resource
     pub fn get(&self) -> crate::error::BlixardResult<&T> {
         self.resource.as_ref().ok_or_else(|| crate::error::BlixardError::ResourceUnavailable {

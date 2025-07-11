@@ -120,14 +120,13 @@ impl IrohClient {
         let (p2p_node_id, p2p_addresses, p2p_relay_url) =
             if let Some(node_addr) = request.p2p_node_addr {
                 let node_id_str = node_addr.node_id.to_string();
-                let addresses: Vec<String> = node_addr
-                    .direct_addresses()
-                    .map(|addr| addr.to_string())
-                    .collect();
+                let direct_addrs: Vec<_> = node_addr.direct_addresses().collect();
+                let mut addresses = Vec::with_capacity(direct_addrs.len());
+                addresses.extend(direct_addrs.into_iter().map(|addr| addr.to_string()));
                 let relay_url = node_addr.relay_url.map(|url| url.to_string());
                 (Some(node_id_str), addresses, relay_url)
             } else {
-                (None, Vec::new(), None)
+                (None, Vec::with_capacity(0), None)
             };
 
         let (success, message, peers, voters) = self
@@ -163,7 +162,7 @@ impl IrohClient {
         _request: CreateVmWithSchedulingRequest,
     ) -> BlixardResult<CreateVmWithSchedulingResponse> {
         Err(BlixardError::NotImplemented {
-            feature: "create_vm_with_scheduling".to_string(),
+            feature: "create_vm_with_scheduling".into(),
         })
     }
 
@@ -172,7 +171,7 @@ impl IrohClient {
         _request: ClusterResourceSummaryRequest,
     ) -> BlixardResult<ClusterResourceSummaryResponse> {
         Err(BlixardError::NotImplemented {
-            feature: "get_cluster_resource_summary".to_string(),
+            feature: "get_cluster_resource_summary".into(),
         })
     }
 
@@ -181,7 +180,7 @@ impl IrohClient {
         _request: ScheduleVmPlacementRequest,
     ) -> BlixardResult<ScheduleVmPlacementResponse> {
         Err(BlixardError::NotImplemented {
-            feature: "schedule_vm_placement".to_string(),
+            feature: "schedule_vm_placement".into(),
         })
     }
 
@@ -190,7 +189,7 @@ impl IrohClient {
         _request: MigrateVmRequest,
     ) -> BlixardResult<MigrateVmResponse> {
         Err(BlixardError::NotImplemented {
-            feature: "migrate_vm".to_string(),
+            feature: "migrate_vm".into(),
         })
     }
 

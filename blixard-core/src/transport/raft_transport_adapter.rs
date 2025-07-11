@@ -28,23 +28,18 @@ impl RaftTransport {
         raft_rx_tx: mpsc::UnboundedSender<(u64, Message)>,
         _transport_config: &TransportConfig,
     ) -> BlixardResult<Self> {
-        // Get Iroh endpoint from node
-        let (endpoint, local_node_id) = node.get_iroh_endpoint()?;
-
-        let iroh_transport = Arc::new(IrohRaftTransport::new(
-            node,
-            endpoint.clone(),
-            local_node_id,
-            raft_rx_tx,
-        ));
-
-        // Start the Iroh transport
-        iroh_transport.start().await?;
-
-        Ok(RaftTransport {
-            iroh: iroh_transport,
-            endpoint: Arc::new(endpoint),
-        })
+        // Get Iroh endpoint from node (stub implementation)
+        let _endpoint_str = node.get_iroh_endpoint().ok_or_else(|| {
+            crate::error::BlixardError::NotInitialized {
+                component: "Iroh endpoint".to_string()
+            }
+        })?;
+        
+        // TODO: Replace with actual Iroh endpoint and node ID when available
+        // For now, return a placeholder error since we need proper Iroh integration
+        return Err(crate::error::BlixardError::NotImplemented {
+            feature: "Iroh transport adapter".to_string()
+        });
     }
 
     /// Send a Raft message to a peer

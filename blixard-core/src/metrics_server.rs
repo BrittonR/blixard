@@ -110,21 +110,21 @@ async fn handle_request(
 
 /// Get bootstrap information from shared state
 async fn get_bootstrap_info(shared_state: &SharedNodeState) -> BlixardResult<BootstrapInfo> {
-    // Get the Iroh endpoint information
-    let (endpoint, node_id) = shared_state.get_iroh_endpoint()?;
+    // Get the Iroh endpoint information (stub implementation for now)
+    let endpoint_info = shared_state.get_iroh_endpoint().ok_or_else(|| {
+        crate::error::BlixardError::NotInitialized {
+            component: "Iroh endpoint".to_string()
+        }
+    })?;
 
-    // Get our addresses
-    let our_addrs = endpoint.bound_sockets();
-    let p2p_addresses: Vec<String> = our_addrs.iter().map(|addr| addr.to_string()).collect();
-
-    // Get relay URL if available
-    // Note: home_relay() returns a Watcher, not an Option
-    // For now, we'll set it to None and could implement watching later
+    // For now, use placeholder values since endpoint is not fully implemented
+    let p2p_addresses = vec![endpoint_info]; // Use the endpoint string as address
     let p2p_relay_url = None;
+    let p2p_node_id = "placeholder_node_id".to_string(); // TODO: Get real node ID
 
     Ok(BootstrapInfo {
         node_id: shared_state.get_id(),
-        p2p_node_id: node_id.to_string(),
+        p2p_node_id,
         p2p_addresses,
         p2p_relay_url,
     })

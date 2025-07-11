@@ -171,7 +171,7 @@ pub fn record_error(error: &dyn std::error::Error) {
 pub fn add_attributes(attributes: &[(&str, &dyn std::fmt::Display)]) {
     // In the current tracing implementation, we need to log attributes as events
     // because dynamic field recording requires pre-declared fields
-    let mut attrs = String::new();
+    let mut attrs = String::with_capacity(attributes.len() * 20); // Estimate 20 chars per attribute
     for (i, (key, value)) in attributes.iter().enumerate() {
         if i > 0 {
             attrs.push_str(", ");

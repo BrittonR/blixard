@@ -177,7 +177,8 @@ impl RecordingClient {
     }
 
     /// Start a VM with history recording
-    pub async fn start_vm(&self, name: String) -> BlixardResult<Response<StartVmResponse>> {
+    pub async fn start_vm(&self, name: impl Into<String>) -> BlixardResult<Response<StartVmResponse>> {
+        let name = name.into();
         let op_id = self
             .history
             .begin(
@@ -208,7 +209,8 @@ impl RecordingClient {
     }
 
     /// Stop a VM with history recording
-    pub async fn stop_vm(&self, name: String) -> BlixardResult<Response<StopVmResponse>> {
+    pub async fn stop_vm(&self, name: impl Into<String>) -> BlixardResult<Response<StopVmResponse>> {
+        let name = name.into();
         let op_id = self
             .history
             .begin(OperationType::StopVm { name: name.clone() }, self.client_id)
@@ -258,7 +260,8 @@ impl RecordingClient {
     }
 
     /// Get VM status with history recording
-    pub async fn get_vm_status(&self, name: String) -> BlixardResult<Option<VmInfo>> {
+    pub async fn get_vm_status(&self, name: impl Into<String>) -> BlixardResult<Option<VmInfo>> {
+        let name = name.into();
         let op_id = self
             .history
             .begin(

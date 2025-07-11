@@ -489,8 +489,8 @@ impl ResourceManagerConfigBuilder {
     }
 
     /// Add custom configuration
-    pub fn with_custom_config(mut self, key: String, value: String) -> Self {
-        self.config.custom_config.insert(key, value);
+    pub fn with_custom_config(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.config.custom_config.insert(key.into(), value.into());
         self
     }
 

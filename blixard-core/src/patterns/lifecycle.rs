@@ -175,9 +175,8 @@ pub trait LifecycleManager: Send + Sync + Debug {
     /// Default implementation returns error - managers that support
     /// dynamic reconfiguration should override this.
     async fn update_config(&mut self, _config: Self::Config) -> Result<(), Self::Error> {
-        Err(Self::Error::from(BlixardError::NotSupported {
-            operation: "update_config".to_string(),
-            reason: format!("{} does not support dynamic reconfiguration", self.name()),
+        Err(Self::Error::from(BlixardError::NotImplemented {
+            feature: format!("Dynamic reconfiguration for {}", self.name()),
         }))
     }
 

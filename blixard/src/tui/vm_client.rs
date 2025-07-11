@@ -136,7 +136,7 @@ impl VmClient {
                 .map_err(|e| crate::BlixardError::Internal {
                     message: format!("Failed to list VMs: {}", e),
                 })?;
-        let mut vms = Vec::new();
+        let mut vms = Vec::with_capacity(resp.vms.len());
 
         for vm in resp.vms {
             let status = match vm.state {
