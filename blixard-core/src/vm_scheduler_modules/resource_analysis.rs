@@ -297,11 +297,14 @@ impl super::VmScheduler {
     }
 
     /// Calculate resource usage for a specific node from its running VMs
-    fn calculate_node_resource_usage(
+    fn calculate_node_resource_usage<T>(
         &self,
         node_id: u64,
-        vm_table: &dyn ReadableTable<&str, &[u8]>,
-    ) -> BlixardResult<(u32, u64, u64, u32)> {
+        vm_table: &T,
+    ) -> BlixardResult<(u32, u64, u64, u32)> 
+    where 
+        T: ReadableTable<&str, &[u8]>,
+    {
         let mut used_vcpus = 0;
         let mut used_memory_mb = 0;
         let mut used_disk_gb = 0;

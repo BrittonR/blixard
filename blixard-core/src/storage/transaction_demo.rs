@@ -185,7 +185,7 @@ mod traditional_patterns {
 /// AFTER: DatabaseTransaction wrapper (eliminates boilerplate)
 mod wrapper_patterns {
     use crate::{
-        error::BlixardResult,
+        error::{BlixardError, BlixardResult},
         storage::{DatabaseTransaction, TransactionExecutor},
     };
     use redb::{Database, TableDefinition};
@@ -201,26 +201,68 @@ mod wrapper_patterns {
     }
 
     /// DatabaseTransaction pattern - NO boilerplate!
+    /// TODO: Fix lifetime issues with DatabaseTransaction wrapper design
+    #[allow(dead_code)]
     pub async fn wrapper_insert_vm_state(
         database: &Database,
         vm_name: String,  // Take owned String to avoid lifetime issues
         state: VmState,   // Take owned state
     ) -> BlixardResult<()> {
-        let txn = DatabaseTransaction::begin_write(database, "insert vm state")?;
-        let mut table = txn.open_table(VM_STATE_TABLE)?;
-        txn.insert_serialized(&mut table, vm_name.as_str(), &state)?;
-        drop(table);  // Release the borrow before commit
-        txn.commit()
+        // Temporary workaround: Use traditional pattern until wrapper design is fixed
+        let write_txn = database.begin_write().map_err(|e| BlixardError::Storage {
+            operation: "begin write transaction".to_string(),
+            source: Box::new(e),
+        })?;
+        let mut table = write_txn.open_table(VM_STATE_TABLE).map_err(|e| BlixardError::Storage {
+            operation: "open table".to_string(),
+            source: Box::new(e),
+        })?;
+        let data = bincode::serialize(&state).map_err(|e| BlixardError::Serialization {
+            operation: "serialize vm state".to_string(),
+            source: Box::new(e),
+        })?;
+        table.insert(vm_name.as_str(), data.as_slice()).map_err(|e| BlixardError::Storage {
+            operation: "insert vm state".to_string(),
+            source: Box::new(e),
+        })?;
+        drop(table);
+        write_txn.commit().map_err(|e| BlixardError::Storage {
+            operation: "commit transaction".to_string(),
+            source: Box::new(e),
+        })?;
+        Ok(())
     }
 
     /// DatabaseTransaction pattern - read with automatic deserialization
+    /// TODO: Fix lifetime issues with DatabaseTransaction wrapper design
+    #[allow(dead_code)]
     pub async fn wrapper_get_vm_state(
         database: &Database,
         vm_name: String,  // Take owned String to avoid lifetime issues
     ) -> BlixardResult<Option<VmState>> {
-        let txn = DatabaseTransaction::begin_read(database, "get vm state")?;
-        let table = txn.open_table_read(VM_STATE_TABLE)?;
-        txn.get_deserialized(&table, vm_name.as_str())
+        // Temporary workaround: Use traditional pattern until wrapper design is fixed
+        let read_txn = database.begin_read().map_err(|e| BlixardError::Storage {
+            operation: "begin read transaction".to_string(),
+            source: Box::new(e),
+        })?;
+        let table = read_txn.open_table(VM_STATE_TABLE).map_err(|e| BlixardError::Storage {
+            operation: "open table".to_string(),
+            source: Box::new(e),
+        })?;
+        
+        match table.get(vm_name.as_str()).map_err(|e| BlixardError::Storage {
+            operation: "get vm state".to_string(),
+            source: Box::new(e),
+        })? {
+            Some(data) => {
+                let state: VmState = bincode::deserialize(data.value()).map_err(|e| BlixardError::Serialization {
+                    operation: "deserialize vm state".to_string(),
+                    source: Box::new(e),
+                })?;
+                Ok(Some(state))
+            }
+            None => Ok(None),
+        }
     }
 
     /// DatabaseTransaction pattern - clear and restore in one call
