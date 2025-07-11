@@ -144,6 +144,16 @@ pub struct VmHealthMonitorDependencies {
     pub clock: std::sync::Arc<dyn crate::abstractions::time::Clock>,
 }
 
+impl std::fmt::Debug for VmHealthMonitorDependencies {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VmHealthMonitorDependencies")
+            .field("node_state", &self.node_state)
+            .field("vm_manager", &self.vm_manager)
+            .field("clock", &"<dyn Clock>")
+            .finish()
+    }
+}
+
 impl VmHealthMonitorDependencies {
     /// Create new dependencies with default clock
     pub fn new(

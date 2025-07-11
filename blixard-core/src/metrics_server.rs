@@ -6,6 +6,7 @@
 
 use crate::error::BlixardResult;
 use crate::iroh_types::BootstrapInfo;
+#[cfg(feature = "observability")]
 use crate::metrics_otel::prometheus_metrics;
 use crate::node_shared::SharedNodeState;
 use hyper::service::{make_service_fn, service_fn};

@@ -17,6 +17,7 @@ use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task::JoinHandle;
 
 use crate::error::{BlixardError, BlixardResult};
+#[cfg(feature = "observability")]
 use crate::metrics_otel::{attributes, metrics, Timer};
 use crate::node_shared::SharedNodeState;
 use crate::transport::iroh_protocol::{
@@ -24,6 +25,7 @@ use crate::transport::iroh_protocol::{
     MessageType as ProtocolMessageType,
 };
 
+#[cfg(feature = "observability")]
 lazy_static::lazy_static! {
     static ref RAFT_MESSAGES_SENT: opentelemetry::metrics::Counter<u64> = {
         opentelemetry::global::meter("blixard")
@@ -354,12 +356,8 @@ impl IrohRaftTransport {
             .get_peer(peer_id)
             .ok_or_else(|| BlixardError::ClusterError(format!("Unknown peer {}", peer_id)))?;
 
-        // Parse Iroh node ID from peer info
-        let p2p_node_id = peer_info
-            .p2p_node_id
-            .ok_or_else(|| BlixardError::Internal {
-                message: format!("Peer {} has no P2P node ID", peer_id),
-            })?;
+        // Use the regular node_id as P2P node ID (temporary mapping)
+        let p2p_node_id = peer_info.node_id.clone();
         let iroh_node_id = p2p_node_id
             .parse::<NodeId>()
             .map_err(|e| BlixardError::Internal {
@@ -369,18 +367,19 @@ impl IrohRaftTransport {
         // Create NodeAddr with the peer's P2P addresses
         let mut node_addr = iroh::NodeAddr::new(iroh_node_id);
 
-        // Add relay URL if available
-        if let Some(ref relay_url) = peer_info.p2p_relay_url {
-            if let Ok(relay) = relay_url.parse() {
-                node_addr = node_addr.with_relay_url(relay);
-            }
-        }
+        // TODO: Add relay URL if available - p2p_relay_url field doesn't exist in PeerInfo
+        // Need to extend PeerInfo with Iroh-specific fields when P2P is fully implemented
+        // if let Some(ref relay_url) = peer_info.p2p_relay_url {
+        //     if let Ok(relay) = relay_url.parse() {
+        //         node_addr = node_addr.with_relay_url(relay);
+        //     }
+        // }
 
-        // Add direct addresses
-        let addrs: Vec<std::net::SocketAddr> = peer_info
-            .p2p_addresses
-            .iter()
-            .filter_map(|addr_str| addr_str.parse().ok())
+        // TODO: Add direct addresses - p2p_addresses field doesn't exist in PeerInfo
+        // For now, try to parse the address field as a socket address
+        let addrs: Vec<std::net::SocketAddr> = vec![peer_info.address.parse().ok()]
+            .into_iter()
+            .flatten()
             .collect();
         if !addrs.is_empty() {
             node_addr = node_addr.with_direct_addresses(addrs);

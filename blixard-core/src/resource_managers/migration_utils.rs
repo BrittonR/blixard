@@ -5,12 +5,12 @@
 //! ResourceManager trait interface.
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::resource_manager::{ResourceManager, ResourceType, ResourceAllocationRequest};
+use crate::resource_manager::{ResourceManager, ResourceType, ResourceAllocationRequest, CompositeResourceManager, ResourceAllocation, ResourceLimits};
 use crate::patterns::resource_pool::PooledResource;
-use crate::resource_managers::{DefaultResourceManagerFactory};
+use crate::resource_managers::{DefaultResourceManagerFactory, create_standard_composite_manager};
 use crate::quota_manager::QuotaManager as LegacyQuotaManager;
 use crate::quota_system::QuotaManager as LegacyQuotaSystem;
-use crate::resource_quotas::{TenantId, TenantQuota};
+use crate::resource_quotas::{TenantId, TenantQuota, ResourceRequest, QuotaViolation};
 use crate::resource_management::ClusterResourceManager as LegacyClusterResourceManager;
 use crate::resource_monitor::ResourceMonitor as LegacyResourceMonitor;
 use crate::resource_admission::ResourceAdmissionController as LegacyAdmissionController;
@@ -22,8 +22,8 @@ use tracing::{info, warn};
 /// Migration wrapper that provides backward compatibility
 #[derive(Debug)]
 pub struct ResourceManagerMigrationWrapper {
-    /// New unified resource managers (placeholder for CompositeResourceManager)
-    composite_manager: String, // TODO: Replace with actual CompositeResourceManager when implemented
+    /// New unified resource managers
+    composite_manager: CompositeResourceManager,
     /// Factory for creating new managers
     factory: Arc<DefaultResourceManagerFactory>,
     /// Migration state tracking
@@ -326,7 +326,7 @@ impl ResourceManagerMigrationWrapper {
         let allocations = self.composite_manager.get_allocations().await?;
         
         for allocation in allocations {
-            if let Some(allocated_vm_name) = allocation.metadata.get("vm_name") {
+            if let Some(allocated_vm_name) = allocation.request.metadata.get("vm_name") {
                 if allocated_vm_name == vm_name {
                     self.composite_manager.deallocate(&allocation.allocation_id).await?;
                 }

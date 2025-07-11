@@ -169,7 +169,10 @@ impl DatabaseTransaction {
         // Collect all keys first to avoid iterator invalidation
         let keys: Vec<K> = table
             .iter()
-            .storage_context(&format!("iterate table for clear during {}", self.operation))?
+            .map_err(|e| BlixardError::Storage {
+                operation: format!("iterate table for clear during {}", self.operation),
+                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
+            })?
             .filter_map(|entry| entry.ok().map(|(k, _)| k.value().clone()))
             .collect();
 

@@ -17,6 +17,7 @@ use crate::{
     patterns::resource_pool::{PoolableResource, ResourceFactory, ResourcePool, PoolConfig},
     types::VmId,
     unwrap_helpers::time_since_epoch_safe,
+    acquire_write_lock,
 };
 use async_trait::async_trait;
 use std::sync::Arc;

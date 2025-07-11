@@ -38,6 +38,7 @@ use crate::{
 /// - Dependency injection for testability
 /// - Configurable components with centralized configuration
 /// - Improved error handling and observability
+#[derive(Debug)]
 pub struct VmHealthMonitor {
     config: VmHealthMonitorConfig,
     deps: VmHealthMonitorDependencies,

@@ -13,12 +13,14 @@ use tracing::{debug, error, info};
 
 use crate::{
     error::{BlixardError, BlixardResult},
-    metrics_otel,
     node_shared::SharedNodeState,
     resource_collection::SystemResourceCollector,
     types::VmStatus,
     vm_backend::VmManager,
 };
+
+#[cfg(feature = "observability")]
+use crate::metrics_otel;
 
 /// Real-time resource utilization data for a VM
 #[derive(Debug, Clone)]

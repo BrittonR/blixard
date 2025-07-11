@@ -5,6 +5,7 @@
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::config_global;
+#[cfg(feature = "observability")]
 use crate::metrics_otel::{attributes, metrics, Timer};
 use crate::raft_storage::RedbRaftStorage;
 
@@ -17,7 +18,7 @@ use super::event_loop::EventLoopFactory;
 use super::handlers::HandlerFactory;
 
 use raft::prelude::{Config, Entry, RawNode, Ready};
-use raft::{GetEntriesContext, StateRole};
+use raft::{GetEntriesContext, StateRole, Storage};
 use redb::Database;
 use slog::{error, info, warn, Logger};
 use std::collections::HashMap;
@@ -395,7 +396,8 @@ impl RaftManager {
     /// Handle a proposal request
     #[instrument(skip(self, proposal), fields(proposal_id = %hex::encode(&proposal.id)))]
     async fn handle_proposal(&self, proposal: RaftProposal) -> BlixardResult<()> {
-        let _timer = Timer::new(&metrics().raft_proposal_duration, &[
+        #[cfg(feature = "observability")]
+        let _timer = Timer::with_attributes(metrics().raft_proposal_duration.clone(), vec![
             attributes::operation("handle_proposal"),
         ]);
 
@@ -423,7 +425,7 @@ impl RaftManager {
                 if let Some(response_tx) = pending.remove(&proposal.id) {
                     let _ = response_tx.send(Err(BlixardError::NotLeader {
                         operation: "propose".to_string(),
-                        leader_id: node.raft.leader_id,
+                        leader_id: if node.raft.leader_id == 0 { None } else { Some(node.raft.leader_id) },
                     }));
                 }
                 return Ok(());
@@ -441,7 +443,8 @@ impl RaftManager {
     /// Handle a Raft message from another node
     #[instrument(skip(self, msg), fields(from, msg_type = ?msg.msg_type()))]
     async fn handle_raft_message(&self, from: u64, msg: raft::prelude::Message) -> BlixardResult<()> {
-        let _timer = Timer::new(&metrics().raft_proposal_duration, &[
+        #[cfg(feature = "observability")]
+        let _timer = Timer::with_attributes(metrics().raft_proposal_duration.clone(), vec![
             attributes::operation("handle_message"),
         ]);
 
@@ -768,7 +771,7 @@ impl RaftManager {
                 "committed" => node.raft.raft_log.committed
             );
 
-            if let Ok(entries) = node.mut_store().entries(start, end, None, GetEntriesContext::empty(false)) {
+            if let Ok(entries) = node.store().entries(start, end, None, GetEntriesContext::empty(false)) {
                 info!(
                     self.logger,
                     "[RAFT-READY] Processing {} newly committed entries",

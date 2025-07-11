@@ -6,6 +6,7 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::raft_manager::{WorkerCapabilities, WorkerStatus};
 use crate::raft_storage::{VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE};
 use crate::types::{VmConfig, NodeTopology};
+use crate::anti_affinity::AntiAffinityChecker;
 
 /// Resource requirements for VM placement
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -249,19 +250,20 @@ impl super::VmScheduler {
             );
 
             let capabilities: WorkerCapabilities = bincode::deserialize(worker_data.value())
-                .map_err(|e| BlixardError::Serialization {
-                    operation: "deserialize worker capabilities".to_string(),
-                    source: Box::new(e),
-                })?;
+                .map_err(|e| BlixardError::serialization(
+                    "deserialize worker capabilities",
+                    e
+                ))?;
 
             // Get worker status
-            let is_healthy = if let Ok(Some(status_data)) = status_table.get(&node_id.to_be_bytes()) {
+            let node_id_bytes = node_id.to_be_bytes();
+            let is_healthy = if let Ok(Some(status_data)) = status_table.get(&node_id_bytes[..]) {
                 let status: WorkerStatus = bincode::deserialize(status_data.value())
-                    .map_err(|e| BlixardError::Serialization {
-                        operation: "deserialize worker status".to_string(),
-                        source: Box::new(e),
-                    })?;
-                status.is_healthy
+                    .map_err(|e| BlixardError::serialization(
+                        "deserialize worker status",
+                        e
+                    ))?;
+                matches!(status, crate::raft::proposals::WorkerStatus::Online)
             } else {
                 false // No status means not healthy
             };
@@ -298,7 +300,7 @@ impl super::VmScheduler {
     fn calculate_node_resource_usage<'a>(
         &self,
         node_id: u64,
-        vm_table: &'a impl ReadableTable<&'a [u8], &'a [u8]>,
+        vm_table: &'a impl ReadableTable<&'a str, &'a [u8]>,
     ) -> BlixardResult<(u32, u64, u64, u32)> {
         let mut used_vcpus = 0;
         let mut used_memory_mb = 0;
@@ -320,13 +322,13 @@ impl super::VmScheduler {
                     source: Box::new(e),
                 })?;
 
-            // Only count VMs assigned to this node
-            if vm_config.assigned_node == Some(node_id) {
-                used_vcpus += vm_config.vcpus;
-                used_memory_mb += vm_config.memory as u64;
-                used_disk_gb += 5; // Default disk usage per VM
-                running_vms += 1;
-            }
+            // TODO: VM placement tracking - assigned_node field doesn't exist in VmConfig
+            // For now, assume all VMs are assigned to count resource usage
+            // This is temporary until proper placement tracking is implemented
+            used_vcpus += vm_config.vcpus;
+            used_memory_mb += vm_config.memory as u64;
+            used_disk_gb += 5; // Default disk usage per VM
+            running_vms += 1;
         }
 
         Ok((used_vcpus, used_memory_mb, used_disk_gb, running_vms))
@@ -361,9 +363,11 @@ impl super::VmScheduler {
                     source: Box::new(e),
                 })?;
 
-            if let Some(node_id) = vm_config.assigned_node {
-                existing_placements.insert(vm_config.name.clone(), node_id);
-            }
+            // TODO: VM placement tracking - assigned_node field doesn't exist in VmConfig
+            // Need to check if placement is tracked in VmStatus or separate table
+            // if let Some(node_id) = vm_config.assigned_node {
+            //     existing_placements.insert(vm_config.name.clone(), node_id);
+            // }
         }
 
         Ok(AntiAffinityChecker::new(existing_placements))

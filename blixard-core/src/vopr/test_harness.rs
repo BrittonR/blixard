@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::error::BlixardResult;
+use crate::raft::messages::RaftProposal;
 use crate::raft_manager::ProposalData;
 use crate::test_helpers::{TestCluster, TestNode};
 use crate::types::{VmCommand, VmConfig};

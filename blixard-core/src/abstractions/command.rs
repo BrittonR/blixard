@@ -495,11 +495,26 @@ pub struct MockCommandExecutor {
     pub expectations: std::sync::Arc<std::sync::Mutex<Vec<MockExpectation>>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct MockExpectation {
     pub program: String,
     pub args: Vec<String>,
     pub response: BlixardResult<CommandOutput>,
+}
+
+impl Clone for MockExpectation {
+    fn clone(&self) -> Self {
+        Self {
+            program: self.program.clone(),
+            args: self.args.clone(),
+            response: match &self.response {
+                Ok(output) => Ok(output.clone()),
+                Err(e) => Err(crate::error::BlixardError::Internal {
+                    message: format!("Mock error: {}", e),
+                }),
+            },
+        }
+    }
 }
 
 impl MockCommandExecutor {

@@ -2,11 +2,12 @@
 //!
 //! This module provides production-ready metrics using OpenTelemetry v0.20.
 
+use opentelemetry::KeyValue;
+
 #[cfg(feature = "observability")]
 use opentelemetry::{
     global,
     metrics::{Counter, Histogram, Meter, UpDownCounter},
-    KeyValue,
 };
 use std::sync::OnceLock;
 
@@ -668,6 +669,7 @@ pub fn update_node_resource_metrics(node_id: u64, usage: &crate::vm_scheduler::N
 }
 
 /// Record VM placement attempt
+#[cfg(feature = "observability")]
 pub fn record_vm_placement_attempt(strategy: &str, success: bool, duration_secs: f64) {
     let metrics = metrics();
     let strategy_attr = KeyValue::new("strategy", strategy.to_string());
@@ -687,7 +689,14 @@ pub fn record_vm_placement_attempt(strategy: &str, success: bool, duration_secs:
         .record(duration_secs, &[duration_attr]);
 }
 
+/// Record VM placement attempt (no-op version)
+#[cfg(not(feature = "observability"))]
+pub fn record_vm_placement_attempt(_strategy: &str, _success: bool, _duration_secs: f64) {
+    // No-op when observability is disabled
+}
+
 /// Record VM scheduling decision with details
+#[cfg(feature = "observability")]
 pub fn record_vm_scheduling_decision(
     vm_name: &str, 
     strategy: &str, 
@@ -722,7 +731,19 @@ pub fn record_vm_scheduling_decision(
     }
 }
 
+/// Record VM scheduling decision with details (no-op version)
+#[cfg(not(feature = "observability"))]
+pub fn record_vm_scheduling_decision(
+    _vm_name: &str, 
+    _strategy: &str, 
+    _decision: &crate::vm_scheduler_modules::placement_strategies::PlacementDecision,
+    _duration: std::time::Duration
+) {
+    // No-op when observability is disabled
+}
+
 /// Record VM lifecycle operation
+#[cfg(feature = "observability")]
 pub fn record_vm_operation(operation: &str, success: bool) {
     let metrics = metrics();
     

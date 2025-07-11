@@ -6,6 +6,7 @@
 use crate::error::BlixardResult;
 use crate::resource_manager::*;
 use crate::resource_managers::*;
+use crate::resource_managers::migration_utils::generate_migration_report;
 use crate::resource_quotas::TenantQuota;
 use std::collections::HashMap;
 use std::time::Duration;

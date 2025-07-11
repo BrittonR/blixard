@@ -6,7 +6,8 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
-    types::NodeConfig,
+    types::{NodeConfig, NodeTopology},
+    raft::proposals::WorkerCapabilities,
 };
 use redb::Database;
 use std::{
@@ -67,7 +68,7 @@ impl SharedNodeState {
     }
     
     /// Create new SharedNodeState with default configuration (for tests)
-    pub fn new() -> Self {
+    pub fn new_default() -> Self {
         Self::new(NodeConfig::default())
     }
     
@@ -321,19 +322,23 @@ impl SharedNodeState {
         Err(BlixardError::NotImplemented { feature: "update_vm_status_through_raft in SharedNodeState".to_string() })
     }
     
-    pub async fn register_worker_through_raft(&self, _worker_info: String) -> BlixardResult<()> {
+    pub async fn register_worker_through_raft(
+        &self,
+        _node_id: u64,
+        _address: String,
+        _capabilities: WorkerCapabilities,
+        _topology: NodeTopology,
+    ) -> BlixardResult<()> {
         Err(BlixardError::NotImplemented { feature: "register_worker_through_raft in SharedNodeState".to_string() })
     }
     
-    pub async fn get_worker_capabilities(&self) -> BlixardResult<crate::types::WorkerCapabilities> {
+    pub async fn get_worker_capabilities(&self) -> BlixardResult<WorkerCapabilities> {
         // Return hardcoded capabilities for now
-        Ok(crate::types::WorkerCapabilities {
-            max_vcpus: 8,
-            max_memory_mb: 16384,
-            max_disk_gb: 100,
-            supports_microvm: true,
-            supports_gpu: false,
-            network_bandwidth_mbps: 1000,
+        Ok(WorkerCapabilities {
+            cpu_cores: 8,
+            memory_mb: 16384,
+            disk_gb: 100,
+            features: vec!["microvm".to_string()],
         })
     }
     
@@ -349,7 +354,7 @@ impl SharedNodeState {
         self.add_cluster_member(node_id, peer_info);
     }
     
-    pub async fn send_raft_message(&self, _message: String) -> BlixardResult<()> {
+    pub async fn send_raft_message(&self, _from: u64, _msg: raft::prelude::Message) -> BlixardResult<()> {
         Err(BlixardError::NotImplemented { feature: "send_raft_message in SharedNodeState".to_string() })
     }
     
@@ -411,7 +416,7 @@ impl SharedNodeState {
 
 impl Default for SharedNodeState {
     fn default() -> Self {
-        Self::new()
+        Self::new_default()
     }
 }
 

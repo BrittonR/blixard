@@ -26,6 +26,7 @@ use crate::patterns::retry::{RetryConfig, BackoffStrategy, retry};
 use crate::types::{NodeState, VmStatus};
 use crate::node_shared::SharedNodeState;
 use crate::audit_log::{AuditLogger, log_vm_event, AuditActor};
+#[cfg(feature = "observability")]
 use crate::metrics_otel::{
     record_vm_recovery_attempt, record_remediation_action,
 };

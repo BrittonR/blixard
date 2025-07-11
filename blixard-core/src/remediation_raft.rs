@@ -12,6 +12,7 @@ use crate::remediation_engine::{
     IssueDetector, IssueType, Issue, IssueSeverity, IssueResource,
     Remediator, RemediationContext, RemediationResult, RemediationAction,
 };
+#[cfg(feature = "observability")]
 use crate::metrics_otel::record_remediation_action;
 use tracing::{info, warn, error, debug};
 

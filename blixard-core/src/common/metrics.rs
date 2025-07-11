@@ -3,28 +3,64 @@
 //! This module provides utilities for consistent metrics recording
 //! across the application.
 
-use crate::metrics_otel::attributes;
 use std::time::Instant;
+
+#[cfg(feature = "observability")]
 use opentelemetry::KeyValue;
 
-/// Trait for recording metrics in a standardized way
-pub trait MetricsRecorder {
-    /// Record a counter increment
-    fn record_count(&self, metric_name: &str, value: u64, labels: &[KeyValue]);
-    
-    /// Record a gauge value
-    fn record_gauge(&self, metric_name: &str, value: i64, labels: &[KeyValue]);
-    
-    /// Record a histogram value
-    fn record_histogram(&self, metric_name: &str, value: f64, labels: &[KeyValue]);
-    
-    /// Start a timer for duration recording
-    fn start_timer(&self, metric_name: &str, labels: Vec<KeyValue>) -> MetricTimer;
+#[cfg(feature = "observability")]
+mod observability_impl {
+    use super::*;
+    use crate::metrics_otel::attributes;
+    use opentelemetry::KeyValue;
+
+    /// Trait for recording metrics in a standardized way
+    pub trait MetricsRecorder {
+        /// Record a counter increment
+        fn record_count(&self, metric_name: &str, value: u64, labels: &[KeyValue]);
+        
+        /// Record a gauge value
+        fn record_gauge(&self, metric_name: &str, value: i64, labels: &[KeyValue]);
+        
+        /// Record a histogram value
+        fn record_histogram(&self, metric_name: &str, value: f64, labels: &[KeyValue]);
+        
+        /// Start a timer for duration recording
+        fn start_timer(&self, metric_name: &str, labels: Vec<KeyValue>) -> MetricTimer;
+    }
 }
+
+#[cfg(not(feature = "observability"))]
+mod stub_impl {
+    use super::*;
+    
+    /// Stub trait for when observability is disabled
+    pub trait MetricsRecorder {
+        /// Record a counter increment (no-op)
+        fn record_count(&self, _metric_name: &str, _value: u64) {}
+        
+        /// Record a gauge value (no-op)
+        fn record_gauge(&self, _metric_name: &str, _value: i64) {}
+        
+        /// Record a histogram value (no-op)
+        fn record_histogram(&self, _metric_name: &str, _value: f64) {}
+        
+        /// Start a timer for duration recording (no-op)
+        fn start_timer(&self, metric_name: &str) -> MetricTimer {
+            MetricTimer::new(metric_name.to_string())
+        }
+    }
+}
+
+#[cfg(feature = "observability")]
+pub use observability_impl::*;
+#[cfg(not(feature = "observability"))]
+pub use stub_impl::*;
 
 /// Default implementation using global metrics
 pub struct GlobalMetricsRecorder;
 
+#[cfg(feature = "observability")]
 impl MetricsRecorder for GlobalMetricsRecorder {
     fn record_count(&self, metric_name: &str, value: u64, labels: &[KeyValue]) {
         if let Some(metrics) = crate::metrics_otel::try_metrics() {
@@ -63,16 +99,28 @@ impl MetricsRecorder for GlobalMetricsRecorder {
     }
 }
 
+#[cfg(not(feature = "observability"))]
+impl MetricsRecorder for GlobalMetricsRecorder {
+    fn record_count(&self, _metric_name: &str, _value: u64) {}
+    fn record_gauge(&self, _metric_name: &str, _value: i64) {}
+    fn record_histogram(&self, _metric_name: &str, _value: f64) {}
+    fn start_timer(&self, metric_name: &str) -> MetricTimer {
+        MetricTimer::new_stub(metric_name.to_string())
+    }
+}
+
 /// Timer for recording operation durations
 pub struct MetricTimer {
     metric_name: String,
-    labels: Vec<KeyValue>,
+    #[cfg(feature = "observability")]
+    labels: Vec<opentelemetry::KeyValue>,
     start: Instant,
 }
 
 impl MetricTimer {
-    /// Create a new timer
-    pub fn new(metric_name: String, labels: Vec<KeyValue>) -> Self {
+    /// Create a new timer (with observability features)
+    #[cfg(feature = "observability")]
+    pub fn new(metric_name: String, labels: Vec<opentelemetry::KeyValue>) -> Self {
         Self {
             metric_name,
             labels,
@@ -80,11 +128,27 @@ impl MetricTimer {
         }
     }
     
+    /// Create a new timer stub (without observability features)
+    #[cfg(not(feature = "observability"))]
+    pub fn new_stub(metric_name: String) -> Self {
+        Self {
+            metric_name,
+            start: Instant::now(),
+        }
+    }
+    
     /// Record the duration and consume the timer
+    #[cfg(feature = "observability")]
     pub fn record(self) {
         let duration = self.start.elapsed().as_secs_f64();
         let recorder = GlobalMetricsRecorder;
         recorder.record_histogram(&self.metric_name, duration, &self.labels);
+    }
+    
+    /// Record the duration and consume the timer (stub version)
+    #[cfg(not(feature = "observability"))]
+    pub fn record(self) {
+        // No-op in stub version
     }
 }
 

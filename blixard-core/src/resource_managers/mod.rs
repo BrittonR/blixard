@@ -6,13 +6,13 @@
 
 pub mod memory_manager;
 pub mod cpu_manager;
-// pub mod migration_utils; // Temporarily disabled due to missing dependencies
+pub mod migration_utils;
 pub mod integration_example;
 
 // Re-export the managers for easy access
 pub use memory_manager::{MemoryResourceManager, MemoryResourceManagerBuilder};
 pub use cpu_manager::{CpuResourceManager, CpuResourceManagerBuilder, CpuSchedulingPolicy};
-// pub use migration_utils::{ResourceManagerMigrationWrapper, MigrationStatus, convert_tenant_quota_to_limits, generate_migration_report}; // Temporarily disabled
+pub use migration_utils::{ResourceManagerMigrationWrapper, MigrationStatus, convert_tenant_quota_to_limits, generate_migration_report};
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::resource_manager::*;

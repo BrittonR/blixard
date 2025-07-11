@@ -11,9 +11,7 @@ use std::net::SocketAddr;
 use crate::{
     error::BlixardResult,
     test_helpers::{TestCluster, TestNode},
-    proto::cluster_service_client::ClusterServiceClient,
 };
-use tonic::transport::Channel;
 
 /// A cloneable handle to a test cluster that allows concurrent operations
 #[derive(Clone)]
@@ -65,17 +63,18 @@ impl ConcurrentTestCluster {
         Ok(node_id)
     }
     
-    /// Get a client for a specific node
-    pub async fn client(&self, node_id: u64) -> BlixardResult<ClusterServiceClient<Channel>> {
-        let cluster = self.inner.lock().await;
-        cluster.client(node_id).await
-    }
-    
-    /// Get the leader client
-    pub async fn leader_client(&self) -> BlixardResult<ClusterServiceClient<Channel>> {
-        let cluster = self.inner.lock().await;
-        cluster.leader_client().await
-    }
+    // TODO: Re-implement these methods with Iroh P2P transport
+    // /// Get a client for a specific node
+    // pub async fn client(&self, node_id: u64) -> BlixardResult<ClusterServiceClient<Channel>> {
+    //     let cluster = self.inner.lock().await;
+    //     cluster.client(node_id).await
+    // }
+    // 
+    // /// Get the leader client
+    // pub async fn leader_client(&self) -> BlixardResult<ClusterServiceClient<Channel>> {
+    //     let cluster = self.inner.lock().await;
+    //     cluster.leader_client().await
+    // }
     
     /// Get node information without locking the cluster
     pub async fn get_node_info(&self, node_id: u64) -> Option<NodeInfo> {

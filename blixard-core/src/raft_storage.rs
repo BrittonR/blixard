@@ -1,4 +1,5 @@
 use crate::error::{BlixardError, BlixardResult};
+#[cfg(feature = "observability")]
 use crate::metrics_otel::{attributes, metrics, Timer};
 use crate::raft_codec;
 use raft::{Config, GetEntriesContext, RawNode};
@@ -85,14 +86,17 @@ impl raft::Storage for RedbRaftStorage {
         // let span = tracing_otel::storage_span("initial_state", "raft_state");
         // let _enter = span.enter();
 
-        let metrics = metrics();
-        let _timer = Timer::with_attributes(
-            metrics.storage_read_duration.clone(),
-            vec![
-                attributes::table("raft_state"),
-                attributes::operation("initial_state"),
-            ],
-        );
+        #[cfg(feature = "observability")]
+        {
+            let metrics = metrics();
+            let _timer = Timer::with_attributes(
+                metrics.storage_read_duration.clone(),
+                vec![
+                    attributes::table("raft_state"),
+                    attributes::operation("initial_state"),
+                ],
+            );
+        }
 
         let read_txn = self
             .database

@@ -33,6 +33,20 @@ pub struct HealthStateManager {
     is_running: bool,
 }
 
+impl std::fmt::Debug for HealthStateManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HealthStateManager")
+            .field("config", &self.config)
+            .field("deps", &self.deps)
+            .field("health_configs", &self.health_configs)
+            .field("health_statuses", &self.health_statuses)
+            .field("monitoring_enabled", &self.monitoring_enabled)
+            .field("cleanup_handle", &self.cleanup_handle.as_ref().map(|_| "<JoinHandle>"))
+            .field("is_running", &self.is_running)
+            .finish()
+    }
+}
+
 impl HealthStateManager {
     /// Create new health state manager
     pub fn new(
@@ -170,9 +184,14 @@ impl HealthStateManager {
         let mut to_remove = Vec::new();
 
         for (vm_name, status) in statuses.iter() {
-            let status_age = current_time.duration_since(
-                std::time::UNIX_EPOCH + std::time::Duration::from_secs(status.last_check_time as u64)
-            ).unwrap_or_default();
+            let status_age = if let Some(last_healthy_at) = status.last_healthy_at_secs {
+                current_time.duration_since(
+                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(last_healthy_at as u64)
+                ).unwrap_or(Duration::from_secs(0))
+            } else {
+                // If no last healthy time, consider it very old
+                Duration::from_secs(u64::MAX / 2)
+            };
 
             if status_age > max_age {
                 to_remove.push(vm_name.clone());

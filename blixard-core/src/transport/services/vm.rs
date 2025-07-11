@@ -232,37 +232,57 @@ impl VmService for VmServiceImpl {
         };
 
         // Send command through Raft consensus
+        let command = VmCommand::Create {
+            config: vm_config,
+            node_id: self.node.get_id(),
+        };
+        let command_str = serde_json::to_string(&command)
+            .map_err(|e| crate::error::BlixardError::InternalError {
+                message: format!("Failed to serialize VM command: {}", e),
+            })?;
         self.node
-            .send_vm_command(VmCommand::Create {
-                config: vm_config,
-                node_id: self.node.get_id(),
-            })
+            .send_vm_command(&name, command_str)
             .await?;
 
         Ok(name)
     }
 
     async fn start_vm(&self, name: &str) -> BlixardResult<()> {
+        let command = VmCommand::Start {
+            name: name.to_string(),
+        };
+        let command_str = serde_json::to_string(&command)
+            .map_err(|e| crate::error::BlixardError::InternalError {
+                message: format!("Failed to serialize VM command: {}", e),
+            })?;
         self.node
-            .send_vm_command(VmCommand::Start {
-                name: name.to_string(),
-            })
+            .send_vm_command(name, command_str)
             .await
     }
 
     async fn stop_vm(&self, name: &str) -> BlixardResult<()> {
+        let command = VmCommand::Stop {
+            name: name.to_string(),
+        };
+        let command_str = serde_json::to_string(&command)
+            .map_err(|e| crate::error::BlixardError::InternalError {
+                message: format!("Failed to serialize VM command: {}", e),
+            })?;
         self.node
-            .send_vm_command(VmCommand::Stop {
-                name: name.to_string(),
-            })
+            .send_vm_command(name, command_str)
             .await
     }
 
     async fn delete_vm(&self, name: &str) -> BlixardResult<()> {
+        let command = VmCommand::Delete {
+            name: name.to_string(),
+        };
+        let command_str = serde_json::to_string(&command)
+            .map_err(|e| crate::error::BlixardError::InternalError {
+                message: format!("Failed to serialize VM command: {}", e),
+            })?;
         self.node
-            .send_vm_command(VmCommand::Delete {
-                name: name.to_string(),
-            })
+            .send_vm_command(name, command_str)
             .await
     }
 
@@ -327,7 +347,7 @@ impl VmService for VmServiceImpl {
         // Use the scheduling method from SharedNodeState
         let decision = self
             .node
-            .create_vm_with_scheduling(vm_config, strategy)
+            .create_vm_with_scheduling(vm_config)
             .await?;
 
         Ok((name, decision.target_node_id, decision.reason))
@@ -417,10 +437,15 @@ impl VmService for VmServiceImpl {
             force,
         };
 
+        let command = VmCommand::Migrate {
+            task: migration_task,
+        };
+        let command_str = serde_json::to_string(&command)
+            .map_err(|e| crate::error::BlixardError::InternalError {
+                message: format!("Failed to serialize VM command: {}", e),
+            })?;
         self.node
-            .send_vm_command(VmCommand::Migrate {
-                task: migration_task,
-            })
+            .send_vm_command(vm_name, command_str)
             .await
     }
 }

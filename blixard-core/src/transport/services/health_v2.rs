@@ -117,8 +117,9 @@ impl HealthServiceV2 {
         &self,
         request: HealthCheckRequest,
     ) -> BlixardResult<HealthCheckResponse> {
+        // HealthCheckRequest has no fields, so create basic HealthRequest
         let health_req = HealthRequest {
-            include_details: request.include_details.unwrap_or(false),
+            include_details: false, // Default since HealthCheckRequest doesn't have this field
         };
 
         // Serialize request

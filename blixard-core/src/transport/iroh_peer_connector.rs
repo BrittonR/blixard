@@ -14,12 +14,13 @@ use tokio::task::JoinHandle;
 use crate::{
     config_global,
     error::{BlixardError, BlixardResult},
-    metrics_otel::{attributes, metrics, Timer},
     node_shared::{PeerInfo, SharedNodeState},
     p2p_monitor::{
         ConnectionQuality, ConnectionState, Direction, P2pErrorType, P2pMonitor,
     },
 };
+#[cfg(feature = "observability")]
+use crate::metrics_otel::{attributes, metrics, Timer};
 use iroh::{Endpoint, NodeAddr, NodeId};
 
 /// Circuit breaker states

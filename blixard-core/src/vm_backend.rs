@@ -6,6 +6,7 @@ use std::sync::Arc;
 use uuid;
 
 use crate::error::{BlixardError, BlixardResult};
+#[cfg(feature = "observability")]
 use crate::metrics_otel::{attributes, metrics, Timer};
 use crate::types::{VmCommand, VmConfig, VmStatus};
 use crate::vm_health_types::{HealthCheckResult, HealthCheckType, VmHealthStatus};
@@ -134,6 +135,16 @@ pub struct VmManager {
     node_state: Arc<crate::node_shared::SharedNodeState>,
 }
 
+impl std::fmt::Debug for VmManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VmManager")
+            .field("database", &"<Database>")
+            .field("backend", &"<dyn VmBackend>")
+            .field("node_state", &self.node_state)
+            .finish()
+    }
+}
+
 impl VmManager {
     /// Create a new VM manager with the given backend
     pub fn new(
@@ -155,11 +166,17 @@ impl VmManager {
 
     /// Process a VM command after Raft consensus
     pub async fn process_command(&self, command: VmCommand) -> BlixardResult<()> {
+        #[cfg(feature = "observability")]
         let span = tracing::span!(
             tracing::Level::INFO,
             "vm.process_command",
             otel.name = "vm.process_command",
             otel.kind = ?opentelemetry::trace::SpanKind::Internal,
+        );
+        #[cfg(not(feature = "observability"))]
+        let span = tracing::span!(
+            tracing::Level::INFO,
+            "vm.process_command",
         );
         let _enter = span.enter();
 
@@ -401,9 +418,8 @@ impl VmManager {
                         // Trigger Raft status update
                         match node_state
                             .update_vm_status_through_raft(
-                                name.clone(),
+                                &name,
                                 actual_status,
-                                node_state.config.id,
                             )
                             .await
                         {

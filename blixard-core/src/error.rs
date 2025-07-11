@@ -180,10 +180,68 @@ pub enum BlixardError {
         #[source] 
         source: Box<dyn std::error::Error + Send + Sync> 
     },
+    
+    #[error("Multiple errors in {context}: {}", format_errors(.errors))]
+    Multiple {
+        context: String,
+        errors: Vec<BlixardError>,
+    },
+}
+
+// Helper function to format multiple errors
+fn format_errors(errors: &[BlixardError]) -> String {
+    errors
+        .iter()
+        .enumerate()
+        .map(|(i, e)| format!("{}. {}", i + 1, e))
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 pub type Result<T> = std::result::Result<T, BlixardError>;
 pub type BlixardResult<T> = std::result::Result<T, BlixardError>;
+
+impl BlixardError {
+    /// Create a Storage error with a boxed source
+    pub fn storage<E: std::error::Error + Send + Sync + 'static>(operation: impl Into<String>, source: E) -> Self {
+        BlixardError::Storage {
+            operation: operation.into(),
+            source: Box::new(source),
+        }
+    }
+    
+    /// Create a Raft error with a boxed source
+    pub fn raft<E: std::error::Error + Send + Sync + 'static>(operation: impl Into<String>, source: E) -> Self {
+        BlixardError::Raft {
+            operation: operation.into(),
+            source: Box::new(source),
+        }
+    }
+    
+    /// Create a Serialization error with a boxed source
+    pub fn serialization<E: std::error::Error + Send + Sync + 'static>(operation: impl Into<String>, source: E) -> Self {
+        BlixardError::Serialization {
+            operation: operation.into(),
+            source: Box::new(source),
+        }
+    }
+    
+    /// Create a LockPoisoned error with a boxed source
+    pub fn lock_poisoned<E: std::error::Error + Send + Sync + 'static>(operation: impl Into<String>, source: E) -> Self {
+        BlixardError::LockPoisoned {
+            operation: operation.into(),
+            source: Box::new(source),
+        }
+    }
+    
+    /// Create a DatabaseError with a boxed source
+    pub fn database<E: std::error::Error + Send + Sync + 'static>(operation: impl Into<String>, source: E) -> Self {
+        BlixardError::DatabaseError {
+            operation: operation.into(),
+            source: Box::new(source),
+        }
+    }
+}
 
 impl From<redb::TransactionError> for BlixardError {
     fn from(err: redb::TransactionError) -> Self {

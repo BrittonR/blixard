@@ -6,11 +6,12 @@ use tracing::{error, info, warn};
 
 use crate::{
     error::{BlixardError, BlixardResult},
-    metrics_otel::{attributes, metrics},
     node_shared::SharedNodeState,
     types::{VmCommand, VmConfig},
     vm_scheduler::{PlacementStrategy, VmScheduler},
 };
+#[cfg(feature = "observability")]
+use crate::metrics_otel::{attributes, metrics};
 
 /// Recovery policy for a failed VM
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -56,6 +57,7 @@ struct VmRecoveryState {
 ///
 /// This component manages the recovery of failed VMs with configurable
 /// policies including restart attempts, backoff strategies, and migration.
+#[derive(Debug)]
 pub struct VmAutoRecovery {
     node_state: Arc<SharedNodeState>,
     policy: RecoveryPolicy,

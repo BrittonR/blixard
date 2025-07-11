@@ -263,6 +263,10 @@ use tokio::sync::RwLock;
 pub struct MockVmRepository {
     vms: Arc<RwLock<HashMap<String, VmConfig>>>,
     statuses: Arc<RwLock<HashMap<String, VmStatus>>>,
+    tasks: Arc<RwLock<HashMap<String, TaskSpec>>>,
+    task_statuses: Arc<RwLock<HashMap<String, String>>>,
+    nodes: Arc<RwLock<HashMap<u64, String>>>,
+    node_health: Arc<RwLock<HashMap<u64, bool>>>,
 }
 
 impl MockVmRepository {
@@ -271,6 +275,10 @@ impl MockVmRepository {
         Self {
             vms: Arc::new(RwLock::new(HashMap::new())),
             statuses: Arc::new(RwLock::new(HashMap::new())),
+            tasks: Arc::new(RwLock::new(HashMap::new())),
+            task_statuses: Arc::new(RwLock::new(HashMap::new())),
+            nodes: Arc::new(RwLock::new(HashMap::new())),
+            node_health: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }
@@ -327,5 +335,72 @@ impl VmRepository for MockVmRepository {
         }
 
         Ok(result)
+    }
+}
+
+#[async_trait]
+impl TaskRepository for MockVmRepository {
+    async fn create(&self, task_id: &str, task: &TaskSpec) -> BlixardResult<()> {
+        self.tasks.write().await.insert(task_id.to_string(), task.clone());
+        self.task_statuses.write().await.insert(task_id.to_string(), "pending".to_string());
+        Ok(())
+    }
+
+    async fn get(&self, task_id: &str) -> BlixardResult<Option<TaskSpec>> {
+        Ok(self.tasks.read().await.get(task_id).cloned())
+    }
+
+    async fn update_status(&self, task_id: &str, status: &str) -> BlixardResult<()> {
+        self.task_statuses.write().await.insert(task_id.to_string(), status.to_string());
+        Ok(())
+    }
+
+    async fn list_by_status(&self, status: &str) -> BlixardResult<Vec<(String, TaskSpec)>> {
+        let tasks = self.tasks.read().await;
+        let statuses = self.task_statuses.read().await;
+        
+        let mut result = Vec::new();
+        for (id, task) in tasks.iter() {
+            if let Some(task_status) = statuses.get(id) {
+                if task_status == status {
+                    result.push((id.clone(), task.clone()));
+                }
+            }
+        }
+        
+        Ok(result)
+    }
+
+    async fn delete(&self, task_id: &str) -> BlixardResult<()> {
+        self.tasks.write().await.remove(task_id);
+        self.task_statuses.write().await.remove(task_id);
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl NodeRepository for MockVmRepository {
+    async fn store_node_info(&self, node_id: u64, bind_address: &str) -> BlixardResult<()> {
+        self.nodes.write().await.insert(node_id, bind_address.to_string());
+        Ok(())
+    }
+
+    async fn get_node_info(&self, node_id: u64) -> BlixardResult<Option<String>> {
+        Ok(self.nodes.read().await.get(&node_id).cloned())
+    }
+
+    async fn list_nodes(&self) -> BlixardResult<HashMap<u64, String>> {
+        Ok(self.nodes.read().await.clone())
+    }
+
+    async fn remove_node(&self, node_id: u64) -> BlixardResult<()> {
+        self.nodes.write().await.remove(&node_id);
+        self.node_health.write().await.remove(&node_id);
+        Ok(())
+    }
+
+    async fn update_node_health(&self, node_id: u64, healthy: bool) -> BlixardResult<()> {
+        self.node_health.write().await.insert(node_id, healthy);
+        Ok(())
     }
 }

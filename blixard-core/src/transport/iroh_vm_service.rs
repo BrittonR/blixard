@@ -2,7 +2,6 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
-    metrics_otel::{attributes, metrics, Timer},
     node_shared::SharedNodeState,
     transport::{
         iroh_protocol::{deserialize_payload, serialize_payload},
@@ -12,6 +11,8 @@ use crate::{
         },
     },
 };
+#[cfg(feature = "observability")]
+use crate::metrics_otel::{attributes, metrics, Timer};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

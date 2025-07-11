@@ -104,7 +104,7 @@ where
 
 
 /// Error aggregation for collecting multiple errors
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ErrorCollector {
     errors: Vec<BlixardError>,
     context: String,

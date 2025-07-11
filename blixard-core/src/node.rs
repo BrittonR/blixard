@@ -75,7 +75,7 @@ impl Node {
         self.setup_p2p_infrastructure().await?;
 
         // Phase 6: Raft initialization
-        let (raft_manager, _message_rx, _, proposal_tx, _conf_change_tx) = 
+        let (raft_manager, _message_rx, _, proposal_tx, conf_change_tx) = 
             self.initialize_raft(db.clone()).await?;
 
         // Phase 7: Transport setup
@@ -647,7 +647,7 @@ impl Node {
     ) -> BlixardResult<()> {
         if let Some(discovery_manager) = self
             .shared
-            .get_discovery_manager::<crate::discovery::DiscoveryManager>()
+            .get_discovery_manager()
         {
             // Try to find the leader's info via discovery
             let discovered_nodes = discovery_manager.get_nodes().await;
@@ -865,14 +865,9 @@ impl Node {
             let our_node_id = self.shared.get_id();
             let our_bind_address = self.shared.get_bind_addr().to_string();
             let (our_p2p_node_id, our_p2p_addresses, our_p2p_relay_url) =
-                if let Some(node_addr) = self.shared.get_p2p_node_addr() {
-                    let p2p_id = node_addr.node_id.to_string();
-                    let p2p_addrs: Vec<String> = node_addr
-                        .direct_addresses()
-                        .map(|a| a.to_string())
-                        .collect();
-                    let relay_url = node_addr.relay_url().map(|u| u.to_string());
-                    (Some(p2p_id), p2p_addrs, relay_url)
+                if let Some(node_addr_str) = self.shared.get_p2p_node_addr() {
+                    // TODO: Parse node_addr_str into proper components when p2p is fully implemented
+                    (Some(node_addr_str), Vec::new(), None)
                 } else {
                     (None, Vec::new(), None)
                 };

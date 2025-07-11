@@ -3,6 +3,7 @@
 //! This module provides functionality to record and replay transactions
 //! for precise point-in-time recovery between backups.
 
+use crate::common::error_context::StorageContext as StorageContextTrait;
 use crate::error::{BlixardError, BlixardResult};
 use crate::raft_manager::WorkerCapabilities;
 use crate::types::VmStatus;

@@ -38,6 +38,7 @@ pub enum RecoveryStatus {
 }
 
 /// Component responsible for coordinating VM recovery operations
+#[derive(Debug)]
 pub struct RecoveryCoordinator {
     config: RecoveryCoordinatorConfig,
     deps: VmHealthMonitorDependencies,

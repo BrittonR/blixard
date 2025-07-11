@@ -12,13 +12,14 @@ use async_trait::async_trait;
 use crate::{
     abstractions::time::Clock,
     error::{BlixardError, BlixardResult},
-    metrics_otel::{attributes, metrics},
     patterns::LifecycleManager,
     types::VmStatus,
     vm_auto_recovery::VmAutoRecovery,
     vm_health_config::{HealthCheckSchedulerConfig, VmHealthMonitorDependencies},
     vm_health_types::{HealthState, VmHealthStatus},
 };
+#[cfg(feature = "observability")]
+use crate::metrics_otel::{attributes, metrics};
 
 /// Component responsible for scheduling and executing health checks
 pub struct HealthCheckScheduler {
@@ -27,6 +28,18 @@ pub struct HealthCheckScheduler {
     auto_recovery: Arc<VmAutoRecovery>,
     handle: Option<JoinHandle<()>>,
     is_running: bool,
+}
+
+impl std::fmt::Debug for HealthCheckScheduler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HealthCheckScheduler")
+            .field("config", &self.config)
+            .field("deps", &self.deps)
+            .field("auto_recovery", &self.auto_recovery)
+            .field("handle", &self.handle.as_ref().map(|_| "<JoinHandle>"))
+            .field("is_running", &self.is_running)
+            .finish()
+    }
 }
 
 impl HealthCheckScheduler {
@@ -98,9 +111,8 @@ impl HealthCheckScheduler {
                     // Update status through Raft
                     if let Err(e) = self.deps.node_state
                         .update_vm_status_through_raft(
-                            vm_config.name.clone(),
+                            &vm_config.name,
                             process_status,
-                            node_id,
                         )
                         .await
                     {
@@ -246,7 +258,7 @@ impl HealthCheckScheduler {
                         duration_ms: self.deps.clock.now().duration_since(start_time).as_millis() as u64,
                         timestamp_secs: self.deps.clock.now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
+                            .unwrap_or(Duration::from_secs(0))
                             .as_secs() as i64,
                         error: Some(e.to_string()),
                     }
@@ -260,7 +272,7 @@ impl HealthCheckScheduler {
                         duration_ms: self.config.health_check_timeout.as_millis() as u64,
                         timestamp_secs: self.deps.clock.now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
+                            .unwrap_or(Duration::from_secs(0))
                             .as_secs() as i64,
                         error: Some("Timeout".to_string()),
                     }

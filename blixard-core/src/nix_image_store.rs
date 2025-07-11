@@ -7,6 +7,7 @@
 
 use crate::abstractions::command::{CommandExecutor, CommandOptions};
 use crate::error::{BlixardError, BlixardResult};
+#[cfg(feature = "observability")]
 use crate::metrics_otel::{
     record_p2p_cache_access, record_p2p_chunk_transfer, record_p2p_image_download,
     record_p2p_image_import, record_p2p_verification, start_p2p_transfer,
@@ -1002,7 +1003,7 @@ impl NixImageStore {
 
         // Otherwise, compute the NAR hash directly
         // First, dump the NAR
-        let dump_options = CommandOptions::new().build();
+        let dump_options = CommandOptions::new();
         let dump_output = self.command_executor
             .execute("nix-store", &["--dump", &path.to_string_lossy()], dump_options)
             .await
@@ -1022,8 +1023,7 @@ impl NixImageStore {
 
         // Hash the NAR output
         let hash_options = CommandOptions::new()
-            .stdin(dump_output.stdout)
-            .build();
+            .with_stdin(dump_output.stdout);
             
         let hash_result = self.command_executor
             .execute("nix-hash", &["--type", "sha256", "--base32", "--flat"], hash_options)

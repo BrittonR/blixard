@@ -521,7 +521,7 @@ async fn test_cluster_resource_summary_accuracy() {
     // Stop one VM and verify resources are freed
     leader
         .shared_state
-        .update_vm_status_through_raft("vm1".to_string(), VmStatus::Stopped, 1)
+        .update_vm_status_through_raft("vm1", "Stopped".to_string())
         .await
         .expect("Should update VM status");
 

@@ -38,6 +38,7 @@ pub mod transaction_log;
 // pub mod backup_replication; // Temporarily disabled for compilation
 // pub mod remediation_engine; // Temporarily disabled for compilation
 // pub mod remediation_raft; // Temporarily disabled for compilation
+#[cfg(feature = "observability")]
 pub mod metrics_otel;
 pub mod metrics_server;
 // Temporarily disabled: uses tonic which we're removing
@@ -63,6 +64,7 @@ pub mod p2p_health_check;
 pub mod p2p_image_store;
 pub mod p2p_manager;
 pub mod p2p_monitor;
+#[cfg(feature = "observability")]
 pub mod p2p_monitor_otel;
 pub mod transport;
 pub mod vm_auto_recovery;
@@ -81,9 +83,8 @@ pub mod discovery;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;
 
-// Temporarily disabled: uses gRPC which we're removing
-// #[cfg(any(test, feature = "test-helpers"))]
-// pub mod test_helpers_concurrent;
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod test_helpers_concurrent;
 
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_message_filter;

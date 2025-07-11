@@ -174,7 +174,7 @@ impl P2pManager {
         let transport = Arc::new(
             IrohTransportV2::new_with_discovery(node_id, data_dir, discovery_manager).await?,
         );
-        let image_store = Arc::new(P2pImageStore::new(node_id, data_dir).await?);
+        let image_store = Arc::new(P2pImageStore::with_default_filesystem(node_id, data_dir).await?);
 
         let (event_tx, event_rx) = mpsc::channel(1000);
 
