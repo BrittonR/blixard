@@ -16,9 +16,13 @@ use crate::{
     error::{BlixardError, BlixardResult},
     patterns::resource_pool::{PoolableResource, ResourceFactory, ResourcePool, PoolConfig},
     types::VmId,
+    acquire_write_lock,
+    acquire_read_lock,
+    unwrap_helpers::time_since_epoch_safe,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
+use tracing;
 
 /// Unique identifier for an IP pool
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -81,7 +85,10 @@ impl IpAddressFactory {
         let allocated = self.allocated_ips.read()
             .map_err(|e| crate::error::BlixardError::LockPoisoned {
                 operation: "read allocated IPs".to_string(),
-                source: Box::new(e),
+                source: Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Lock poisoned: {}", e)
+                )),
             })?;
         
         match (self.config.allocation_start, self.config.allocation_end) {
@@ -127,7 +134,7 @@ impl IpAddressFactory {
 #[async_trait]
 impl ResourceFactory<IpAddress> for IpAddressFactory {
     async fn create(&self) -> BlixardResult<IpAddress> {
-        let ip = self.find_next_available_ip().ok_or_else(|| {
+        let ip = self.find_next_available_ip()?.ok_or_else(|| {
             BlixardError::ResourceExhausted {
                 resource: format!("IP addresses in pool {}", self.config.id),
             }
@@ -135,7 +142,7 @@ impl ResourceFactory<IpAddress> for IpAddressFactory {
         
         // Mark IP as allocated
         {
-            let mut allocated = self.allocated_ips.write().unwrap();
+            let mut allocated = acquire_write_lock!(self.allocated_ips.write(), "allocate IP address");
             allocated.insert(ip);
         }
         
@@ -148,7 +155,7 @@ impl ResourceFactory<IpAddress> for IpAddressFactory {
     
     async fn destroy(&self, resource: IpAddress) -> BlixardResult<()> {
         // Remove IP from allocated set
-        let mut allocated = self.allocated_ips.write().unwrap();
+        let mut allocated = acquire_write_lock!(self.allocated_ips.write(), "deallocate IP address");
         allocated.remove(&resource.ip);
         Ok(())
     }
@@ -406,17 +413,12 @@ impl EnhancedIpPoolState {
             })?;
         
         let pooled_ip = resource_pool.acquire().await?;
-        let ip_address = pooled_ip.take(); // Take ownership, removing from pool
+        let ip_address = pooled_ip.take()?; // Take ownership, removing from pool
         
         // Update state tracking
         self.state.allocated_ips.insert(ip_address.ip);
         self.state.total_allocated += 1;
-        self.state.last_allocation = Some(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i64,
-        );
+        self.state.last_allocation = Some(time_since_epoch_safe() as i64);
         
         Ok(ip_address)
     }
@@ -430,7 +432,7 @@ impl EnhancedIpPoolState {
         
         // Remove from shared state
         {
-            let mut allocated = self.allocated_ips_shared.write().unwrap();
+            let mut allocated = acquire_write_lock!(self.allocated_ips_shared.write(), "remove allocated IP from shared state");
             allocated.remove(&ip);
         }
         
@@ -481,10 +483,14 @@ impl EnhancedIpPoolState {
             let _stats = resource_pool.stats().await;
             
             // Update allocated IPs from shared state
-            {
-                let allocated = self.allocated_ips_shared.read().unwrap();
-                self.state.allocated_ips = allocated.clone();
-                self.state.total_allocated = allocated.len() as u64;
+            match self.allocated_ips_shared.read() {
+                Ok(allocated) => {
+                    self.state.allocated_ips = allocated.clone();
+                    self.state.total_allocated = allocated.len() as u64;
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to acquire read lock for allocated IPs sync: {}", e);
+                }
             }
         }
     }
@@ -624,15 +630,15 @@ mod tests {
         IpPoolConfig {
             id: IpPoolId(1),
             name: "test-pool".to_string(),
-            subnet: IpNet::from_str("10.0.0.0/24").unwrap(),
+            subnet: IpNet::from_str("10.0.0.0/24").expect("Test subnet should be valid"),
             vlan_id: Some(100),
-            gateway: IpAddr::from_str("10.0.0.1").unwrap(),
+            gateway: IpAddr::from_str("10.0.0.1").expect("Test gateway should be valid"),
             dns_servers: vec![
-                IpAddr::from_str("8.8.8.8").unwrap(),
-                IpAddr::from_str("8.8.4.4").unwrap(),
+                IpAddr::from_str("8.8.8.8").expect("Test DNS server should be valid"),
+                IpAddr::from_str("8.8.4.4").expect("Test DNS server should be valid"),
             ],
-            allocation_start: IpAddr::from_str("10.0.0.10").unwrap(),
-            allocation_end: IpAddr::from_str("10.0.0.250").unwrap(),
+            allocation_start: IpAddr::from_str("10.0.0.10").expect("Test allocation start should be valid"),
+            allocation_end: IpAddr::from_str("10.0.0.250").expect("Test allocation end should be valid"),
             topology_hint: Some("zone-1".to_string()),
             reserved_ips: BTreeSet::new(),
             enabled: true,
@@ -646,17 +652,17 @@ mod tests {
         assert!(pool.validate().is_ok());
 
         // Test invalid gateway
-        pool.gateway = IpAddr::from_str("192.168.1.1").unwrap();
+        pool.gateway = IpAddr::from_str("192.168.1.1").expect("Test IP should be valid");
         assert!(pool.validate().is_err());
-        pool.gateway = IpAddr::from_str("10.0.0.1").unwrap();
+        pool.gateway = IpAddr::from_str("10.0.0.1").expect("Test IP should be valid");
 
         // Test invalid allocation range
-        pool.allocation_start = IpAddr::from_str("10.0.0.250").unwrap();
-        pool.allocation_end = IpAddr::from_str("10.0.0.10").unwrap();
+        pool.allocation_start = IpAddr::from_str("10.0.0.250").expect("Test IP should be valid");
+        pool.allocation_end = IpAddr::from_str("10.0.0.10").expect("Test IP should be valid");
         assert!(pool.validate().is_err());
 
         // Test invalid VLAN
-        pool.allocation_start = IpAddr::from_str("10.0.0.10").unwrap();
+        pool.allocation_start = IpAddr::from_str("10.0.0.10").expect("Test IP should be valid");
         pool.vlan_id = Some(5000);
         assert!(pool.validate().is_err());
     }
@@ -668,8 +674,8 @@ mod tests {
         assert_eq!(pool.total_capacity(), 241);
 
         let mut pool_with_reserved = pool.clone();
-        pool_with_reserved.reserved_ips.insert(IpAddr::from_str("10.0.0.100").unwrap());
-        pool_with_reserved.reserved_ips.insert(IpAddr::from_str("10.0.0.101").unwrap());
+        pool_with_reserved.reserved_ips.insert(IpAddr::from_str("10.0.0.100").expect("Test IP should be valid"));
+        pool_with_reserved.reserved_ips.insert(IpAddr::from_str("10.0.0.101").expect("Test IP should be valid"));
         assert_eq!(pool_with_reserved.total_capacity(), 239);
     }
 
@@ -681,17 +687,17 @@ mod tests {
         // First available should be 10.0.0.10
         assert_eq!(
             state.next_available_ip(),
-            Some(IpAddr::from_str("10.0.0.10").unwrap())
+            Some(IpAddr::from_str("10.0.0.10").expect("Test IP should be valid"))
         );
 
         // Allocate some IPs
-        state.allocated_ips.insert(IpAddr::from_str("10.0.0.10").unwrap());
-        state.allocated_ips.insert(IpAddr::from_str("10.0.0.11").unwrap());
+        state.allocated_ips.insert(IpAddr::from_str("10.0.0.10").expect("Test IP should be valid"));
+        state.allocated_ips.insert(IpAddr::from_str("10.0.0.11").expect("Test IP should be valid"));
 
         // Next available should be 10.0.0.12
         assert_eq!(
             state.next_available_ip(),
-            Some(IpAddr::from_str("10.0.0.12").unwrap())
+            Some(IpAddr::from_str("10.0.0.12").expect("Test IP should be valid"))
         );
 
         // Test utilization
@@ -704,12 +710,12 @@ mod tests {
         let config = IpPoolConfig {
             id: IpPoolId(2),
             name: "ipv6-pool".to_string(),
-            subnet: IpNet::from_str("2001:db8::/64").unwrap(),
+            subnet: IpNet::from_str("2001:db8::/64").expect("Test IPv6 subnet should be valid"),
             vlan_id: None,
-            gateway: IpAddr::from_str("2001:db8::1").unwrap(),
-            dns_servers: vec![IpAddr::from_str("2001:4860:4860::8888").unwrap()],
-            allocation_start: IpAddr::from_str("2001:db8::1000").unwrap(),
-            allocation_end: IpAddr::from_str("2001:db8::2000").unwrap(),
+            gateway: IpAddr::from_str("2001:db8::1").expect("Test IPv6 gateway should be valid"),
+            dns_servers: vec![IpAddr::from_str("2001:4860:4860::8888").expect("Test IPv6 DNS should be valid")],
+            allocation_start: IpAddr::from_str("2001:db8::1000").expect("Test IPv6 start should be valid"),
+            allocation_end: IpAddr::from_str("2001:db8::2000").expect("Test IPv6 end should be valid"),
             topology_hint: None,
             reserved_ips: BTreeSet::new(),
             enabled: true,

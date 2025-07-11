@@ -347,7 +347,7 @@ impl IrohPeerConnector {
         let metrics = metrics();
         let peer_attrs = vec![attributes::peer_id(peer_id)];
         let _timer =
-            Timer::with_attributes(metrics.grpc_request_duration.clone(), peer_attrs.clone());
+            Timer::with_attributes(metrics.grpc_request_duration.clone(), &peer_attrs);
         metrics.peer_reconnect_attempts.add(1, &peer_attrs);
 
         let peer_id_str = peer_id.to_string();
@@ -370,9 +370,9 @@ impl IrohPeerConnector {
         // Attempt connection
         match IrohClient::new(
             self.endpoint.clone(),
-            node_addr.clone(),
+            node_addr,
             peer_id,
-            Some(self.p2p_monitor.clone()),
+            Some(Arc::clone(&self.p2p_monitor)),
         )
         .await
         {
@@ -450,7 +450,7 @@ impl IrohPeerConnector {
         let metrics = metrics();
         let peer_attrs = vec![attributes::peer_id(peer_id)];
         let _timer =
-            Timer::with_attributes(metrics.grpc_request_duration.clone(), peer_attrs.clone());
+            Timer::with_attributes(metrics.grpc_request_duration.clone(), &peer_attrs);
         metrics.peer_reconnect_attempts.add(1, &peer_attrs);
 
         // Check if already connected

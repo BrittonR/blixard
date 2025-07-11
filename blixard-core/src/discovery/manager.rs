@@ -219,8 +219,16 @@ impl DiscoveryManager {
         };
 
         let subscribers = self.subscribers.read().await;
-        for sender in subscribers.iter() {
-            let _ = sender.send(event.clone()).await;
+        if !subscribers.is_empty() {
+            for (i, sender) in subscribers.iter().enumerate() {
+                let event_to_send = if i == subscribers.len() - 1 {
+                    // For the last subscriber, move the event instead of cloning
+                    event
+                } else {
+                    event.clone()
+                };
+                let _ = sender.send(event_to_send).await;
+            }
         }
 
         Ok(())
@@ -281,8 +289,15 @@ impl DiscoveryManager {
                 if let Some(event) = event {
                     // Notify subscribers
                     let subscribers = manager_read.subscribers.read().await;
-                    for sender in subscribers.iter() {
-                        let _ = sender.send(event.clone()).await;
+                    if !subscribers.is_empty() {
+                        for (i, sender) in subscribers.iter().enumerate() {
+                            let event_to_send = if i == subscribers.len() - 1 {
+                                event
+                            } else {
+                                event.clone()
+                            };
+                            let _ = sender.send(event_to_send).await;
+                        }
                     }
                 }
             }

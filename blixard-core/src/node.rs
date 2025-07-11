@@ -81,7 +81,7 @@ impl Node {
         let (message_tx, _unused_rx) = mpsc::unbounded_channel();
         
         // Set the message tx in shared state
-        self.shared.set_raft_message_tx(message_tx.clone()).await;
+        self.shared.set_raft_message_tx(message_tx.clone());
         
         let (raft_transport, outgoing_rx) = 
             self.setup_transport(message_tx.clone(), conf_change_tx, proposal_tx).await?;
@@ -97,7 +97,7 @@ impl Node {
         self.join_cluster_if_configured().await?;
 
         // Mark node as initialized
-        self.shared.set_initialized(true).await;
+        self.shared.set_initialized(true);
 
         Ok(())
     }
@@ -184,7 +184,7 @@ impl Node {
             database: db.clone(),
         });
         let quota_manager = Arc::new(crate::quota_manager::QuotaManager::new(storage).await?);
-        self.shared.set_quota_manager(quota_manager).await;
+        self.shared.set_quota_manager(quota_manager);
 
         // Initialize IP pool manager
         let ip_pool_manager = Arc::new(crate::ip_pool_manager::IpPoolManager::new());
@@ -954,7 +954,7 @@ impl Node {
         let (outgoing_tx, outgoing_rx) = mpsc::unbounded_channel();
         // Set individual Raft channels
         self.shared.set_raft_proposal_tx(proposal_tx).await;
-        self.shared.set_raft_message_tx(message_tx.clone()).await;
+        self.shared.set_raft_message_tx(message_tx.clone());
 
         // Initialize discovery if configured
         self.setup_discovery_if_configured().await?;

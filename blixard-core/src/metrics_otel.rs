@@ -658,6 +658,39 @@ pub fn record_vm_placement_attempt(strategy: &str, success: bool, duration_secs:
         .record(duration_secs, &[strategy_attr]);
 }
 
+/// Record VM scheduling decision with details
+pub fn record_vm_scheduling_decision(
+    vm_name: &str, 
+    strategy: &str, 
+    decision: &crate::vm_scheduler_modules::placement_strategies::PlacementDecision,
+    duration: std::time::Duration
+) {
+    let metrics = metrics();
+    let vm_attr = KeyValue::new("vm_name", vm_name.to_string());
+    let strategy_attr = KeyValue::new("strategy", strategy.to_string());
+    let node_attr = KeyValue::new("target_node", decision.target_node_id.to_string());
+    let confidence_attr = KeyValue::new("confidence", decision.confidence_score.to_string());
+    
+    // Record the scheduling decision
+    metrics
+        .vm_placement_attempts
+        .add(1, &[strategy_attr.clone(), node_attr.clone()]);
+    
+    // Record timing
+    metrics
+        .vm_placement_duration
+        .record(duration.as_secs_f64(), &[strategy_attr.clone()]);
+    
+    // If there were preemptions, record them
+    if !decision.preempted_vms.is_empty() {
+        for _preempted_vm in &decision.preempted_vms {
+            metrics
+                .vm_preemptions_total
+                .add(1, &[node_attr.clone()]);
+        }
+    }
+}
+
 /// Record VM lifecycle operation
 pub fn record_vm_operation(operation: &str, success: bool) {
     let metrics = metrics();

@@ -3,14 +3,43 @@ members = ["blixard", "blixard-core", "blixard-vm"]
 resolver = "2"
 
 [workspace.dependencies]
-# Common dependencies shared across crates
+# Core async and traits
 async-trait = "0.1"
 futures = "0.3"
+tokio = { version = "1.35", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+
+# Serialization
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+bincode = "1.3"
+
+# Error handling
 thiserror = "1.0"
 anyhow = "1.0"
+
+# Logging and tracing
 tracing = "0.1"
-uuid = { version = "1.6", features = ["v4", "serde"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-opentelemetry = "0.20"
+
+# Observability
+opentelemetry = { version = "0.20", features = ["metrics", "trace"] }
+opentelemetry_sdk = { version = "0.20", features = ["rt-tokio", "metrics", "trace"] }
+opentelemetry-otlp = { version = "0.13", features = ["metrics", "trace"] }
+opentelemetry-prometheus = "0.13"
+prometheus = "0.13"
+
+# Networking - use compatible versions to avoid breaking changes
+hyper = { version = "0.14", features = ["server", "http1", "tcp"] }
+reqwest = { version = "0.11", features = ["json"] }
+http = "0.2"
+http-body = "0.4"
+
+# gRPC/Networking  
+prost = "0.13"
+tonic = "0.12"
 
 # Raft consensus
 raft = { version = "0.7", default-features = false, features = ["prost-codec"] }
@@ -18,11 +47,144 @@ raft-proto = { version = "0.7", default-features = false, features = ["prost-cod
 
 # Storage
 redb = "2.0"
-bincode = "1.3"
 
-# gRPC/Networking  
-prost = "0.13"
-tonic = "0.12"
+# Utilities - standardize on latest versions
+uuid = { version = "1.6", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tempfile = "3.8"
+bytes = "1.5"
+parking_lot = "0.12"
+once_cell = "1.19"
+lazy_static = "1.4"
+scopeguard = "1.2"
+dashmap = "6.1"
+rand = "0.8"
+rand_chacha = "0.3"
+
+# Network utilities
+ipnet = { version = "2.9", features = ["serde"] }
+trust-dns-resolver = "0.23"
+mdns-sd = "0.11"
+
+# File and path operations
+glob = "0.3"
+notify = "6.1"
+
+# Compression
+flate2 = "1.0"
+zstd = "0.13"
+
+# Encoding
+base64 = "0.21"
+hex = "0.4"
+
+# Math and algorithms
+num_cpus = "1.16"
+md5 = "0.7"
+blake3 = "1.5"
+
+# Configuration
+toml = "0.8"
+humantime-serde = "1.1"
+
+# CLI utilities
+clap = { version = "4.4", features = ["derive"] }
+dialoguer = "0.11"
+color-eyre = "0.6"
+
+# TUI
+ratatui = "0.26"
+crossterm = "0.28"
+
+# System
+nix = "0.27"
+procfs = "0.16"
+systemd = "0.10"
+daemonize = "0.5"
+
+# Security
+aes-gcm = "0.10"
+sha2 = "0.10"
+hmac = "0.12"
+rcgen = { version = "0.11", features = ["pem"] }
+time = "0.3"
+x509-parser = "0.16"
+pem = "3.0"
+
+# Cedar Policy Engine
+cedar-policy = "3.0"
+cedar-policy-core = "3.0"
+cedar-policy-validator = "3.0"
+
+# Template engine
+tera = "1.19"
+
+# P2P networking
+iroh = "0.90"
+iroh-blobs = "0.90"
+
+# Test utilities
+proptest = "1.4"
+proptest-derive = "0.4"
+test-case = "3.3"
+rstest = "0.18"
+quickcheck = "1.0"
+arbitrary = { version = "1.3", features = ["derive"] }
+stateright = "0.30"
+criterion = "0.5"
+pretty_assertions = "1.4"
+insta = "1.34"
+tracing-test = "0.2"
+serial_test = "3.0"
+assert_cmd = "2.0"
+predicates = "3.0"
+tokio-test = "0.4"
+fail = "0.5"
+
+# Network simulation
+pnet = "0.34"
+pcap = "1.1"
+
+# Regex
+regex = "1.10"
+
+# Pattern matching
+paste = "1.0"
+static_assertions = "1.1"
+
+# Features for controlling optional dependencies
+[workspace.metadata.features]
+default = []
+observability = [
+    "opentelemetry",
+    "opentelemetry_sdk", 
+    "opentelemetry-otlp",
+    "opentelemetry-prometheus",
+    "prometheus",
+    "tracing-opentelemetry"
+]
+testing = [
+    "proptest",
+    "proptest-derive",
+    "test-case",
+    "rstest", 
+    "quickcheck",
+    "arbitrary",
+    "stateright",
+    "criterion",
+    "pretty_assertions",
+    "insta",
+    "tracing-test",
+    "serial_test",
+    "assert_cmd",
+    "predicates",
+    "tokio-test",
+    "fail"
+]
+simulation = [
+    "pnet",
+    "pcap"
+]
 
 [profile.release]
 lto = true

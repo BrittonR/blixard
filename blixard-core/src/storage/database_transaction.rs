@@ -378,8 +378,8 @@ mod tests {
     }
 
     fn create_test_database() -> Database {
-        let temp_file = NamedTempFile::new().unwrap();
-        Database::create(temp_file.path()).unwrap()
+        let temp_file = NamedTempFile::new().expect("Should be able to create temp file for tests");
+        Database::create(temp_file.path()).expect("Should be able to create test database")
     }
 
     #[tokio::test]

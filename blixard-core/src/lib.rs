@@ -8,6 +8,7 @@ pub mod unwrap_helpers;
 pub mod network_isolated_backend;
 pub mod node;
 pub mod node_shared;
+pub mod performance_helpers;
 pub mod raft_batch_processor;
 pub mod raft_codec;
 pub mod raft_manager;
@@ -16,6 +17,8 @@ pub mod resource_management;
 pub mod resource_admission;
 pub mod resource_monitor;
 pub mod resource_collection;
+pub mod resource_manager;
+pub mod resource_managers;
 pub mod raft_storage;
 pub mod storage;
 pub mod ip_pool;
@@ -24,6 +27,7 @@ pub mod ip_allocation_service;
 pub mod types;
 pub mod vm_backend;
 pub mod vm_scheduler;
+pub mod vm_scheduler_modules;
 pub mod vm_state_persistence;
 // pub mod config_hot_reload; // Temporarily disabled for compilation
 // pub mod backup_manager; // Temporarily disabled for compilation

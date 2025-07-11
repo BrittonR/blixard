@@ -13,54 +13,54 @@ blixard-core = { path = "../blixard-core" }
 blixard-vm = { path = "../blixard-vm" }
 
 # CLI
-clap = { version = "4.4", features = ["derive"] }
-dialoguer = "0.11"
+clap = { workspace = true }
+dialoguer = { workspace = true }
 
 # Error handling
-thiserror = "1.0"
+thiserror = { workspace = true }
 
 # For examples
-tempfile = "3.8"
-anyhow = "1.0"
-color-eyre = "0.6"
+tempfile = { workspace = true }
+anyhow = { workspace = true }
+color-eyre = { workspace = true }
 
 # Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 # Async runtime
-tokio = { version = "1.35", features = ["full"] }
+tokio = { workspace = true }
 
 # gRPC client
-tonic = "0.12"
+tonic = { workspace = true }
 
 # Configuration
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-serde_yaml = "0.9"
-chrono = { version = "0.4", features = ["serde"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+chrono = { workspace = true }
 
 # File operations
-glob = "0.3"
+glob = { workspace = true }
 
 # Daemon mode (safe alternative to libc calls)
-daemonize = "0.5"
+daemonize = { workspace = true }
 
 # TUI
-ratatui = "0.26"
-crossterm = "0.28"
+ratatui = { workspace = true }
+crossterm = { workspace = true }
 
 # Random number generation for resource simulation
-rand = "0.8"
+rand = { workspace = true }
 
 # Database for cluster state
-redb = "2.0"
+redb = { workspace = true }
 
 # P2P networking
-iroh = "0.90"
+iroh = { workspace = true }
 
 # Encoding
-base64 = "0.22"
+base64 = { workspace = true }
 
 [features]
 default = []

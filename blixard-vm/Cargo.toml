@@ -11,45 +11,45 @@ authors = ["Blixard Contributors"]
 blixard-core = { path = "../blixard-core" }
 
 # Storage (needed for factory pattern)
-redb = "2.0"
+redb = { workspace = true }
 
 # Async runtime
-async-trait = "0.1"
-futures = "0.3"
-tokio = { version = "1.35", features = ["full"] }
+async-trait = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
 
 # Error handling
-thiserror = "1.0"
-anyhow = "1.0"
+thiserror = { workspace = true }
+anyhow = { workspace = true }
 
 # Logging
-tracing = "0.1"
+tracing = { workspace = true }
 
 # System interaction
-nix = "0.27"
-procfs = "0.16"
-systemd = "0.10"
+nix = { workspace = true }
+procfs = { workspace = true }
+systemd = { workspace = true }
 
 # Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # Template engine for Nix generation
-tera = "1.19"
+tera = { workspace = true }
 
 # Utilities
-uuid = { version = "1.6", features = ["v4", "serde"] }
-tempfile = "3.8"
-chrono = { version = "0.4", features = ["serde"] }
+uuid = { workspace = true }
+tempfile = { workspace = true }
+chrono = { workspace = true }
 
 # HTTP client for health checks
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { workspace = true }
 
 # Regular expressions for console pattern matching
-regex = "1.10"
+regex = { workspace = true }
 
 [dev-dependencies]
-tracing-subscriber = "0.3"
+tracing-subscriber = { workspace = true }
 
 [features]
 default = []
