@@ -337,7 +337,8 @@ impl ResourceMonitor {
         }
 
         // Record metrics for observability
-        metrics_otel::record_resource_utilization(
+        #[cfg(feature = "observability")]
+        crate::metrics_otel::record_resource_utilization(
             node_id,
             total_actual_cpu_percent,
             total_actual_memory_mb,

@@ -35,21 +35,18 @@ mod traditional_service_example {
         ) -> BlixardResult<HealthCheckResponse> {
             // Business logic buried in boilerplate
             Ok(HealthCheckResponse {
-                status: "healthy".to_string(),
-                timestamp: std::time::SystemTime::now()
+                healthy: true,
+                message: "Node is healthy".to_string(),
+                status: Some("healthy".to_string()),
+                timestamp: Some(std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
-                    .as_secs(),
-                node_id: self.node.get_id().to_string(),
-                uptime_seconds: Some(
-                    std::time::SystemTime::now()
-                        .duration_since(self.node.get_start_time())
-                        .unwrap_or_default()
-                        .as_secs(),
-                ),
-                vm_count: Some(self.node.get_vm_count().await as u32),
+                    .as_secs()),
+                node_id: Some(self.node.get_id().to_string()),
+                uptime_seconds: Some(60), // TODO: Fix get_start_time to return proper time
+                vm_count: Some(self.node.get_vm_count() as u32),
                 memory_usage_mb: Some(1024),
-                active_connections: Some(self.node.get_active_connection_count().await as u32),
+                active_connections: Some(self.node.get_active_connection_count() as u32),
             })
         }
     }

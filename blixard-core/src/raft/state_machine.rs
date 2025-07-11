@@ -318,12 +318,15 @@ impl RaftStateMachine {
                     self.validate_vm_admission(config, *node_id)?;
                 }
                 
+                let now = chrono::Utc::now();
                 let vm_state = VmState {
                     name: config.name.clone(),
-                    status: VmStatus::Created,
-                    node_id: Some(*node_id),
+                    status: VmStatus::Creating,
+                    node_id: *node_id,
                     config: config.clone(),
                     health: crate::vm_health_types::HealthState::default(),
+                    created_at: now,
+                    updated_at: now,
                 };
                 
                 {
@@ -362,8 +365,8 @@ impl RaftStateMachine {
                     if let Some(data) = vm_table.get(task.vm_name.as_str())? {
                         let mut vm_state: VmState = bincode::deserialize(data.value())
                             .deserialize_context("vm state", "VmState")?;
-                        vm_state.node_id = Some(task.target_node_id);
-                        vm_state.status = VmStatus::Migrating;
+                        vm_state.node_id = task.target_node_id;
+                        vm_state.status = VmStatus::Stopping;
                         
                         let updated_data = bincode::serialize(&vm_state).serialize_context("vm state")?;
                         vm_table.insert(task.vm_name.as_str(), updated_data.as_slice())?;
@@ -395,7 +398,7 @@ impl RaftStateMachine {
                 let mut vm_state: VmState = bincode::deserialize(data.value())
                     .deserialize_context("vm state", "VmState")?;
                 vm_state.status = status;
-                vm_state.node_id = Some(node_id);
+                vm_state.node_id = node_id;
                 
                 let updated_data = bincode::serialize(&vm_state).serialize_context("vm state")?;
                 vm_table.insert(vm_name, updated_data.as_slice())?;
@@ -568,10 +571,12 @@ impl RaftStateMachine {
         if let Some(ref controller) = self.admission_controller {
             // Check admission with the overcommit policy
             let resources = crate::resource_quotas::ResourceRequest {
+                tenant_id: crate::resource_quotas::TenantId::default(),
+                node_id: Some(node_id),
                 vcpus: config.vcpus,
-                memory_mb: config.memory,
+                memory_mb: config.memory as u64,
                 disk_gb: 0, // TODO: Add disk requirements to VmConfig
-                features: vec![], // TODO: Add feature requirements
+                timestamp: chrono::Utc::now(),
             };
             
             let runtime = tokio::runtime::Handle::try_current()

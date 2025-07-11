@@ -30,6 +30,12 @@ pub struct PeerInfo {
     pub capabilities: Vec<String>,
     pub shared_resources: HashMap<String, ResourceInfo>,
     pub connection_quality: ConnectionQuality,
+    /// Optional P2P node ID for Iroh connections
+    pub p2p_node_id: Option<String>,
+    /// P2P addresses for direct connections
+    pub p2p_addresses: Vec<String>,
+    /// P2P relay URL for NAT traversal
+    pub p2p_relay_url: Option<String>,
 }
 
 /// Resource information
@@ -237,6 +243,9 @@ impl P2pManager {
                 packet_loss: 0.0,
                 reliability_score: 0.99,
             },
+            p2p_node_id: None,
+            p2p_addresses: Vec::new(),
+            p2p_relay_url: None,
         };
 
         self.peers
@@ -275,6 +284,9 @@ impl P2pManager {
                 packet_loss: 0.0,
                 reliability_score: 1.0,
             },
+            p2p_node_id: Some(peer_addr.node_id.to_string()),
+            p2p_addresses: peer_addr.direct_addresses().map(|addr| addr.to_string()).collect(),
+            p2p_relay_url: peer_addr.relay_url().map(|url| url.to_string()),
         };
 
         self.peers

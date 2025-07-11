@@ -25,7 +25,7 @@ impl RaftTransport {
     /// Create a new Raft transport using Iroh
     pub async fn new(
         node: Arc<SharedNodeState>,
-        raft_rx_tx: mpsc::UnboundedSender<(u64, Message)>,
+        _raft_rx_tx: mpsc::UnboundedSender<(u64, Message)>,
         _transport_config: &TransportConfig,
     ) -> BlixardResult<Self> {
         // Get Iroh endpoint from node (stub implementation)

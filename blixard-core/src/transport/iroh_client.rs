@@ -35,6 +35,23 @@ impl IrohClient {
         }
     }
 
+    /// Make an RPC call to a service with explicit node address
+    pub async fn call<Req, Resp>(
+        &self,
+        node_addr: iroh::NodeAddr,
+        service: &str,
+        method: &str,
+        request: Req,
+    ) -> BlixardResult<Resp>
+    where
+        Req: serde::Serialize,
+        Resp: for<'de> serde::Deserialize<'de>,
+    {
+        // Create a temporary client for this specific node
+        let temp_client = IrohClient::new(self.endpoint.clone(), node_addr);
+        temp_client.call_service(service, method, request).await
+    }
+
     /// Make an RPC call to a service
     async fn call_service<Req, Resp>(
         &self,
@@ -385,7 +402,7 @@ impl IrohClient {
         let response: VmOperationResponse = self.call_service("vm", "get_status", request).await?;
 
         match response {
-            crate::transport::services::vm::VmOperationResponse::GetStatus { found, vm_info } => {
+            crate::transport::services::vm::VmOperationResponse::GetStatus { found: _found, vm_info } => {
                 let vm_info = vm_info.map(|data| crate::iroh_types::VmInfo {
                     name: data.name,
                     state: match data.state.as_str() {
@@ -641,6 +658,13 @@ impl IrohClusterServiceClient {
         let response = crate::iroh_types::HealthCheckResponse {
             healthy: true,
             message: "Service is healthy".to_string(),
+            status: Some("OK".to_string()),
+            timestamp: Some(chrono::Utc::now().timestamp() as u64),
+            node_id: Some("client_node".to_string()),
+            uptime_seconds: Some(0),
+            vm_count: Some(0),
+            memory_usage_mb: Some(0),
+            active_connections: Some(1),
         };
         Ok(Response::new(response))
     }

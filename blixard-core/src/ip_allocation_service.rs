@@ -77,7 +77,7 @@ impl IpAllocationService {
             let vm_id = VmId::from_string(&vm_name);
             
             // Create IP allocation request if VM has IP address configured
-            if let Some(ip_address) = &vm_state.config.ip_address {
+            if let Some(_ip_address) = &vm_state.config.ip_address {
                 let mac_address = format!(
                     "02:00:00:00:{:02x}:01",
                     (self.node_id & 0xFF) as u8

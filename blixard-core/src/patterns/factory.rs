@@ -236,7 +236,7 @@ impl<T> Default for AsyncRegistry<T> {
 }
 
 /// Trait for objects that can be created by a factory
-pub trait Creatable<C> {
+pub trait Creatable<C>: Sized {
     type Factory: Factory<Self, Config = C>;
     
     /// Get the factory for creating this type
@@ -244,7 +244,7 @@ pub trait Creatable<C> {
 }
 
 /// Trait for objects that can be created by an async factory
-pub trait AsyncCreatable<C> {
+pub trait AsyncCreatable<C>: Sized {
     type AsyncFactory: AsyncFactory<Self, Config = C>;
     
     /// Get the async factory for creating this type
@@ -289,6 +289,7 @@ impl<T, C, F> Factory<T> for FunctionFactory<T, C, F>
 where
     F: Fn(C) -> BlixardResult<T> + Send + Sync,
     C: Send + Sync,
+    T: Send + Sync,
 {
     type Config = C;
     type Error = BlixardError;

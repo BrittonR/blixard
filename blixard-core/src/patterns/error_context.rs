@@ -241,7 +241,8 @@ impl ErrorUtils {
     pub async fn catch_async_panic<T, F, Fut>(f: F, context: &str) -> BlixardResult<T>
     where
         F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = T>,
+        Fut: std::future::Future<Output = T> + Send + 'static,
+        T: Send + 'static,
     {
         tokio::task::spawn(f())
             .await

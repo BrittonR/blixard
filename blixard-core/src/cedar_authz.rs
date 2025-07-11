@@ -35,7 +35,7 @@ impl CedarAuthz {
     /// Create a new Cedar authorization engine
     pub async fn new(schema_path: &Path, policies_dir: &Path) -> BlixardResult<Self> {
         // Load schema
-        let schema_str = read_text_file_with_context(schema_path, "Cedar schema").await?;
+        let _schema_str = read_text_file_with_context(schema_path, "Cedar schema").await?;
 
         // In Cedar 3.x, schema loading is done differently
         // For now, we'll store the schema as an option and use basic validation
@@ -187,8 +187,8 @@ impl CedarAuthz {
         &self,
         entity_type: &str,
         entity_id: &str,
-        attributes: HashMap<String, Value>,
-        parents: Vec<String>,
+        _attributes: HashMap<String, Value>,
+        _parents: Vec<String>,
     ) -> BlixardResult<()> {
         // In Cedar 3.x, entity creation is simplified
         // For now, we'll log the addition but not actually create the entity

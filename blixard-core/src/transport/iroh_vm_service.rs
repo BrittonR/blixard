@@ -19,7 +19,6 @@ use std::sync::Arc;
 use tracing::{debug, info};
 // Removed unused imports - Hash and FromStr
 use bytes::Bytes;
-use futures::TryStreamExt;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
@@ -683,7 +682,9 @@ impl IrohService for IrohVmService {
     }
 
     async fn handle_call(&self, method: &str, payload: Bytes) -> BlixardResult<Bytes> {
+        #[cfg(feature = "observability")]
         let metrics = metrics();
+        #[cfg(feature = "observability")]
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
             vec![
@@ -691,6 +692,7 @@ impl IrohService for IrohVmService {
                 attributes::node_id(self.node.get_id()),
             ],
         );
+        #[cfg(feature = "observability")]
         metrics
             .grpc_requests_total
             .add(1, &[attributes::method(method)]);

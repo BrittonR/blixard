@@ -144,7 +144,7 @@ impl IrohTransport {
 
         // For now, we'll just compute a hash of the file
         // In a real implementation, this would import into a blob store
-        let content = tokio::fs::read(path)
+        let _content = tokio::fs::read(path)
             .await
             .map_err(|e| BlixardError::IoError(e))?;
 

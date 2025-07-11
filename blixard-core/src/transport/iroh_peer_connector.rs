@@ -197,7 +197,7 @@ impl IrohClient {
         let result = client.create_vm(config).await;
 
         // Update stats and monitoring
-        if let Ok(ref response) = result {
+        if let Ok(ref _response) = result {
             let response_size = 100; // Approximate response size
             self.update_stats(request_size as u64, response_size).await;
 
@@ -345,10 +345,14 @@ impl IrohPeerConnector {
 
     /// Connect to a peer using a discovered NodeAddr
     pub async fn connect_to_peer(&self, peer_id: u64, node_addr: NodeAddr) -> BlixardResult<()> {
+        #[cfg(feature = "observability")]
         let metrics = metrics();
+        #[cfg(feature = "observability")]
         let peer_attrs = vec![attributes::peer_id(peer_id)];
+        #[cfg(feature = "observability")]
         let _timer =
             Timer::with_attributes(metrics.grpc_request_duration.clone(), peer_attrs.clone());
+        #[cfg(feature = "observability")]
         metrics.peer_reconnect_attempts.add(1, &peer_attrs);
 
         let peer_id_str = peer_id.to_string();
@@ -448,10 +452,14 @@ impl IrohPeerConnector {
 
     /// Connect to a peer using their node ID (looks up address from peer info)
     pub async fn connect_to_peer_by_id(&self, peer_id: u64) -> BlixardResult<IrohClient> {
+        #[cfg(feature = "observability")]
         let metrics = metrics();
+        #[cfg(feature = "observability")]
         let peer_attrs = vec![attributes::peer_id(peer_id)];
+        #[cfg(feature = "observability")]
         let _timer =
             Timer::with_attributes(metrics.grpc_request_duration.clone(), peer_attrs.clone());
+        #[cfg(feature = "observability")]
         metrics.peer_reconnect_attempts.add(1, &peer_attrs);
 
         // Check if already connected
@@ -617,7 +625,7 @@ impl IrohPeerConnector {
         data: Vec<u8>,
         message_type: MessageType,
     ) -> BlixardResult<()> {
-        let data_size = data.len();
+        let _data_size = data.len();
 
         let mut buffer = self.message_buffer.lock().await;
         let queue = buffer.entry(peer_id).or_insert_with(VecDeque::new);

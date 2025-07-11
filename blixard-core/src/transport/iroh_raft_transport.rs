@@ -273,6 +273,7 @@ impl IrohRaftTransport {
         message: &Message,
         priority: RaftMessagePriority,
     ) -> BlixardResult<()> {
+        #[cfg(feature = "observability")]
         let _timer = Timer::new(metrics().raft_proposal_duration.clone());
 
         // Get or create connection
@@ -540,6 +541,7 @@ impl IrohRaftTransport {
         let key = format!("{:?}", msg_type);
         *sent.entry(key).or_insert(0) += 1;
 
+        #[cfg(feature = "observability")]
         RAFT_MESSAGES_SENT.add(
             1,
             &[
@@ -645,6 +647,7 @@ async fn handle_raft_stream(
                     let key = format!("{:?}", message.msg_type());
                     *received.entry(key.clone()).or_insert(0) += 1;
 
+                    #[cfg(feature = "observability")]
                     RAFT_MESSAGES_RECEIVED.add(
                         1,
                         &[
@@ -745,7 +748,7 @@ async fn process_message_batches(
 /// Send a batch of messages on a single stream
 async fn send_message_batch(
     connection: &Connection,
-    priority: RaftMessagePriority,
+    _priority: RaftMessagePriority,
     messages: Vec<Message>,
     messages_sent: &Arc<Mutex<HashMap<String, u64>>>,
 ) -> BlixardResult<()> {
@@ -774,6 +777,7 @@ async fn send_message_batch(
             let key = format!("{:?}", message.msg_type());
             *sent.entry(key.clone()).or_insert(0) += 1;
 
+            #[cfg(feature = "observability")]
             RAFT_MESSAGES_SENT.add(
                 1,
                 &[

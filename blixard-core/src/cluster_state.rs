@@ -366,7 +366,7 @@ impl ClusterStateManager {
             info!("Merging with existing VM configurations");
         }
 
-        for (name, config) in vms {
+        for (name, _config) in vms {
             info!("Importing VM configuration: {}", name);
         }
 

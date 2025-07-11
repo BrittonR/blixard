@@ -178,7 +178,7 @@ impl HealthStateManager {
 
     /// Clean up old health state entries
     async fn cleanup_old_entries(&self) -> BlixardResult<()> {
-        let current_time = self.deps.clock.now();
+        let current_time = std::time::SystemTime::now();
         let max_age = self.config.max_state_age;
 
         let mut statuses = self.health_statuses.write().await;

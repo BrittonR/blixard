@@ -216,7 +216,9 @@ impl BuiltService {
     /// Handle a method call with automatic metrics and error handling
     pub async fn handle_call(&self, method: &str, payload: Bytes) -> BlixardResult<Bytes> {
         // Setup metrics
+        #[cfg(feature = "observability")]
         let metrics = metrics();
+        #[cfg(feature = "observability")]
         let _timer = Timer::with_attributes(
             metrics.grpc_request_duration.clone(),
             vec![
@@ -227,6 +229,7 @@ impl BuiltService {
         );
 
         // Increment request counter
+        #[cfg(feature = "observability")]
         metrics.grpc_requests_total.add(
             1,
             &[
@@ -241,15 +244,18 @@ impl BuiltService {
                 let result = handler.handle(payload).await;
 
                 // Record success/failure metrics
-                let status = if result.is_ok() { "success" } else { "error" };
-                metrics.grpc_requests_total.add(
-                    1,
-                    &[
-                        attributes::method(method),
-                        attributes::service_name(&self.name),
-                        attributes::status(status),
-                    ],
-                );
+                #[cfg(feature = "observability")]
+                {
+                    let status = if result.is_ok() { "success" } else { "error" };
+                    metrics.grpc_requests_total.add(
+                        1,
+                        &[
+                            attributes::method(method),
+                            attributes::service_name(&self.name),
+                            attributes::status(status),
+                        ],
+                    );
+                }
 
                 if let Err(ref e) = result {
                     error!("Service {} method {} failed: {}", self.name, method, e);

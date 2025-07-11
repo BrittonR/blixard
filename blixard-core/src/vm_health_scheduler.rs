@@ -11,7 +11,6 @@ use tracing::{error, info, warn};
 use async_trait::async_trait;
 
 use crate::{
-    abstractions::time::Clock,
     error::{BlixardError, BlixardResult},
     patterns::LifecycleManager,
     types::VmStatus,
@@ -113,7 +112,7 @@ impl HealthCheckScheduler {
                     if let Err(e) = self.deps.node_state
                         .update_vm_status_through_raft(
                             &vm_config.name,
-                            process_status,
+                            format!("{:?}", process_status),
                         )
                         .await
                     {
@@ -257,7 +256,7 @@ impl HealthCheckScheduler {
                         success: false,
                         message: format!("Health check failed: {}", e),
                         duration_ms: self.deps.clock.now().duration_since(start_time).as_millis() as u64,
-                        timestamp_secs: self.deps.clock.now()
+                        timestamp_secs: std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or(Duration::from_secs(0))
                             .as_secs() as i64,
@@ -271,7 +270,7 @@ impl HealthCheckScheduler {
                         success: false,
                         message: format!("Health check timed out after {:?}", self.config.health_check_timeout),
                         duration_ms: self.config.health_check_timeout.as_millis() as u64,
-                        timestamp_secs: self.deps.clock.now()
+                        timestamp_secs: std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or(Duration::from_secs(0))
                             .as_secs() as i64,

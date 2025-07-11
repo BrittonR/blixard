@@ -57,10 +57,11 @@ impl TickHandler for RaftTickHandler {
         }
 
         // Process any ready state that results from the tick
-        let processed_ready = (self.on_ready_fn)().await?;
+        (self.on_ready_fn)().await?;
 
         // Check if we need to send snapshots to lagging followers
-        if processed_ready {
+        // Always check since we successfully processed ready state
+        {
             let mut node = self.raft_node.write().await;
             if node.raft.state == StateRole::Leader {
                 self.snapshot_manager.check_and_send_snapshots(&mut node).await?;
@@ -123,7 +124,7 @@ impl ProposalHandler for RaftProposalHandler {
                 if let Some(response_tx) = pending.remove(&proposal.id) {
                     let _ = response_tx.send(Err(BlixardError::NotLeader {
                         operation: "propose".to_string(),
-                        leader_id: node.raft.leader_id,
+                        leader_id: Some(node.raft.leader_id),
                     }));
                 }
                 return Ok(());

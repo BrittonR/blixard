@@ -434,7 +434,7 @@ impl IpPoolManager {
                 let mut counter = self.round_robin_counter.write().await;
                 let index = *counter % eligible_pools.len();
                 *counter = (*counter + 1) % eligible_pools.len();
-                *eligible_pools[index].0
+eligible_pools[index].0
             }
             IpPoolSelectionStrategy::TopologyAware => {
                 // Prefer pools with matching topology, fall back to least utilized
@@ -463,7 +463,7 @@ impl IpPoolManager {
             }
         };
         
-        Ok(selected)
+        Ok(*selected)
     }
 
     /// Get current state of all pools

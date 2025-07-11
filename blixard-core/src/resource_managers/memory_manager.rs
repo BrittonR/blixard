@@ -249,7 +249,6 @@ impl MemoryResourceManager {
 
         let state = self.state.clone();
         let usage = self.usage.clone();
-        let config_limits = self.config.limits.clone();
         let interval_duration = self.config.health_check_interval;
 
         let handle = tokio::spawn(async move {

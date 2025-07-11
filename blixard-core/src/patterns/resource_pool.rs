@@ -268,7 +268,7 @@ impl<T: PoolableResource + 'static> ResourcePool<T> {
     }
     
     /// Return a resource to the pool
-    async fn return_resource(&self, mut resource: T) {
+    async fn return_resource(&self, resource: T) {
         // Validate resource before returning
         if resource.is_valid() {
             self.available.lock().await.push_back(resource);

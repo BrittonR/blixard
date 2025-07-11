@@ -538,7 +538,7 @@ impl CompositeResourceManager {
     }
 
     /// Get manager for a specific resource type
-    pub async fn get_manager(&self, resource_type: &ResourceType) -> Option<&dyn ResourceManager> {
+    pub async fn get_manager(&self, _resource_type: &ResourceType) -> Option<&dyn ResourceManager> {
         // Note: This doesn't work with async RwLock - need different approach
         // Will be implemented in the concrete implementation
         None

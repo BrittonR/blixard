@@ -334,15 +334,18 @@ impl NixImageStore {
         self.update_chunk_index(&metadata).await?;
 
         // Record metrics
+        #[cfg(feature = "observability")]
         let artifact_type_str = match &metadata.artifact_type {
             NixArtifactType::MicroVM { .. } => "microvm",
             NixArtifactType::Container { .. } => "container",
             NixArtifactType::StorePath { .. } => "storepath",
             NixArtifactType::Closure { .. } => "closure",
         };
+        #[cfg(feature = "observability")]
         record_p2p_image_import(artifact_type_str, true, total_size);
 
         // Record deduplication metrics
+        #[cfg(feature = "observability")]
         for _ in 0..dedup_count {
             record_p2p_chunk_transfer(0, true);
         }
@@ -365,6 +368,7 @@ impl NixImageStore {
         info!("Downloading Nix image {}", image_id);
 
         // Start P2P transfer tracking
+        #[cfg(feature = "observability")]
         let _transfer_guard = start_p2p_transfer();
 
         // Get metadata
@@ -420,7 +424,9 @@ impl NixImageStore {
         );
 
         // Record cache hits/misses
+        #[cfg(feature = "observability")]
         record_p2p_cache_access(false, "chunk"); // For chunks we need
+        #[cfg(feature = "observability")]
         for _ in &chunks_have {
             record_p2p_cache_access(true, "chunk"); // For chunks we already have
         }
@@ -435,6 +441,7 @@ impl NixImageStore {
             bytes_transferred += chunk_data.len() as u64;
 
             // Record chunk transfer
+            #[cfg(feature = "observability")]
             record_p2p_chunk_transfer(chunk_data.len() as u64, false);
 
             // Store chunk for future deduplication
@@ -445,6 +452,7 @@ impl NixImageStore {
         for chunk in &chunks_have {
             bytes_deduplicated += chunk.size;
             // Record deduplicated chunks
+            #[cfg(feature = "observability")]
             record_p2p_chunk_transfer(chunk.size, true);
         }
 
@@ -454,8 +462,12 @@ impl NixImageStore {
         // Verify the downloaded image if we have NAR hash
         if metadata.nar_hash.is_some() {
             match self.verify_nix_image(&metadata, &target_path).await {
-                Ok(_) => record_p2p_verification(true, "nar_hash"),
+                Ok(_) => {
+                    #[cfg(feature = "observability")]
+                    record_p2p_verification(true, "nar_hash");
+                },
                 Err(e) => {
+                    #[cfg(feature = "observability")]
                     record_p2p_verification(false, "nar_hash");
                     return Err(e);
                 }
@@ -479,6 +491,7 @@ impl NixImageStore {
         );
 
         // Record download metrics
+        #[cfg(feature = "observability")]
         record_p2p_image_download(image_id, true, stats.duration.as_secs_f64());
 
         Ok((target_path, stats))
@@ -746,7 +759,7 @@ impl NixImageStore {
         Ok(())
     }
 
-    async fn is_image_in_use(&self, image_id: &str) -> BlixardResult<bool> {
+    async fn is_image_in_use(&self, _image_id: &str) -> BlixardResult<bool> {
         // Check if any running VMs are using this image
         // For now, return false (not implemented)
         Ok(false)
@@ -1105,7 +1118,7 @@ impl NixImageStore {
     /// Detect runtime requirements from Nix paths
     async fn detect_runtime_requirements(
         &self,
-        paths: &[&Path],
+        _paths: &[&Path],
     ) -> BlixardResult<RuntimeRequirements> {
         // In a real implementation, we would analyze the paths to detect:
         // - Kernel version from kernel path

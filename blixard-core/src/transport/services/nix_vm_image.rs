@@ -88,7 +88,7 @@ impl NixVmImageServiceImpl {
         name: &str,
         system_path: &Path,
         kernel_path: Option<&Path>,
-        metadata: HashMap<String, String>,
+        _metadata: HashMap<String, String>,
     ) -> BlixardResult<ImportNixImageResponse> {
         info!("Importing Nix microVM: {}", name);
 
@@ -135,7 +135,7 @@ impl NixVmImageServiceImpl {
         &self,
         image_ref: &str,
         tar_path: &Path,
-        metadata: HashMap<String, String>,
+        _metadata: HashMap<String, String>,
     ) -> BlixardResult<ImportNixImageResponse> {
         info!("Importing container image: {}", image_ref);
 
@@ -182,7 +182,7 @@ impl NixVmImageServiceImpl {
         &self,
         name: &str,
         root_path: &Path,
-        metadata: HashMap<String, String>,
+        _metadata: HashMap<String, String>,
     ) -> BlixardResult<ImportNixImageResponse> {
         info!("Importing Nix closure: {} from {:?}", name, root_path);
 
@@ -284,7 +284,7 @@ impl NixVmImageServiceImpl {
     /// Get image metadata
     pub async fn get_image_metadata(
         &self,
-        image_id: &str,
+        _image_id: &str,
     ) -> BlixardResult<Option<NixImageMetadata>> {
         // This would need to be added to NixImageStore
         // For now, return None
@@ -333,7 +333,7 @@ impl crate::transport::iroh_service::IrohService for NixVmImageServiceImpl {
                     name: String,
                     system_path: String,
                     kernel_path: Option<String>,
-                    metadata: HashMap<String, String>,
+                    _metadata: HashMap<String, String>,
                 }
 
                 let req: Request = deserialize_payload(&payload)?;
@@ -354,7 +354,7 @@ impl crate::transport::iroh_service::IrohService for NixVmImageServiceImpl {
                 struct Request {
                     image_ref: String,
                     tar_path: String,
-                    metadata: HashMap<String, String>,
+                    _metadata: HashMap<String, String>,
                 }
 
                 let req: Request = deserialize_payload(&payload)?;
@@ -370,7 +370,7 @@ impl crate::transport::iroh_service::IrohService for NixVmImageServiceImpl {
                 struct Request {
                     name: String,
                     root_path: String,
-                    metadata: HashMap<String, String>,
+                    _metadata: HashMap<String, String>,
                 }
 
                 let req: Request = deserialize_payload(&payload)?;
@@ -496,21 +496,21 @@ impl<'a> NixVmImageClient<'a> {
         name: String,
         system_path: String,
         kernel_path: Option<String>,
-        metadata: HashMap<String, String>,
+        _metadata: HashMap<String, String>,
     ) -> BlixardResult<ImportNixImageResponse> {
         #[derive(Serialize)]
         struct Request {
             name: String,
             system_path: String,
             kernel_path: Option<String>,
-            metadata: HashMap<String, String>,
+            _metadata: HashMap<String, String>,
         }
 
         let request = Request {
             name,
             system_path,
             kernel_path,
-            metadata,
+            _metadata,
         };
 
         self.client

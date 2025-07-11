@@ -210,6 +210,16 @@ impl AntiAffinityChecker {
         violating_nodes
     }
 
+    /// Check if placement violates anti-affinity constraints
+    pub fn check_placement(
+        &self,
+        _vm_name: &str,
+        candidate_node: u64,
+        rules: &AntiAffinityRules,
+    ) -> Result<(), String> {
+        self.check_hard_constraints(rules, candidate_node)
+    }
+
     /// Get distribution statistics for a group
     pub fn get_group_distribution(&self, group_key: &str) -> Option<&HashMap<u64, usize>> {
         self.group_distribution.get(group_key)

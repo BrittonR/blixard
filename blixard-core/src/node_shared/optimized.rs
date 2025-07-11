@@ -346,9 +346,18 @@ mod tests {
         assert_eq!(state.cluster_size(), 0);
         
         let peer1 = PeerInfo {
-            node_id: 2,
-            iroh_node_id: "test".to_string(),
-            bind_addr: "127.0.0.1:7002".to_string(),
+            node_id: "2".to_string(),
+            address: "127.0.0.1:7002".to_string(),
+            last_seen: chrono::Utc::now(),
+            capabilities: vec![],
+            shared_resources: std::collections::HashMap::new(),
+            connection_quality: crate::p2p_manager::ConnectionQuality {
+                latency_ms: 0,
+                bandwidth_mbps: 100.0,
+                packet_loss: 0.0,
+                reliability_score: 1.0,
+            },
+            p2p_node_id: Some("test".to_string()),
         };
         
         state.add_cluster_member(2, peer1.clone());

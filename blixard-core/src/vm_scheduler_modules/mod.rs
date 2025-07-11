@@ -88,7 +88,8 @@ impl VmScheduler {
 
         // Record metrics
         let duration = start_time.elapsed();
-        metrics_otel::record_vm_scheduling_decision(&vm_config.name, &strategy_name, &decision, duration);
+        #[cfg(feature = "observability")]
+        crate::metrics_otel::record_vm_scheduling_decision(&vm_config.name, &strategy_name, &decision, duration);
 
         tracing::info!(
             "VM '{}' scheduled to node {} using strategy {} (took {}ms)",

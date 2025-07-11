@@ -167,7 +167,7 @@ async fn handle_create_vm(
     // Convert request to VmConfig
     let config = VmConfig {
         name: request.name.clone(),
-        config_path: request.config_path,
+        config_path: request.config_path.unwrap_or_default(),
         vcpus: request.vcpus.unwrap_or(2),
         memory: request.memory_mb.unwrap_or(1024),
         ..Default::default()
@@ -337,7 +337,7 @@ async fn handle_schedule_placement(
     // TODO: Integrate with VmScheduler properly
     // For now, return a temporary placeholder since get_vm_placement_recommendation is not implemented
     let response = PlacementResponse {
-        recommended_node: 1, // Default to node 1
+        recommended_node: Some("node-1".to_string()), // Default to node 1
         placement_score: 1.0,
         reasoning: "Placement calculation not yet implemented".to_string(),
     };

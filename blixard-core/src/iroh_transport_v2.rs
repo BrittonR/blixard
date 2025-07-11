@@ -16,7 +16,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info};
 
@@ -950,7 +950,7 @@ impl IrohTransportV2 {
                                     }
                                 };
                                 let peer_id = peer_node_id.to_string();
-                                let alpn = conn.alpn();
+                                let _alpn = conn.alpn();
 
                                 // All connections use standard BLIXARD_ALPN
                                 // Message type is determined by payload content

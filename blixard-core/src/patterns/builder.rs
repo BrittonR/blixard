@@ -42,8 +42,8 @@ pub trait AsyncBuilder<T>: Send {
 }
 
 /// Trait for objects that have a corresponding builder
-pub trait HasBuilder {
-    type Builder: Builder<Self> + Default;
+pub trait HasBuilder: Sized {
+    type Builder: Builder<Self> + Default + Sized;
     
     /// Get a builder for this type
     fn builder() -> Self::Builder {
@@ -52,8 +52,8 @@ pub trait HasBuilder {
 }
 
 /// Trait for objects that have a corresponding async builder
-pub trait HasAsyncBuilder {
-    type AsyncBuilder: AsyncBuilder<Self> + Default;
+pub trait HasAsyncBuilder: Sized {
+    type AsyncBuilder: AsyncBuilder<Self> + Default + Sized;
     
     /// Get an async builder for this type
     fn async_builder() -> Self::AsyncBuilder {

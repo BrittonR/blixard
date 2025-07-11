@@ -494,7 +494,7 @@ impl QuotaManager {
         let mut state = rate_limits.write().await;
         let cutoff_time = SystemTime::now() - Duration::from_secs(RATE_LIMIT_WINDOW_SECS * 2);
 
-        for (tenant_id, tracking) in state.tenant_requests.iter_mut() {
+        for (_tenant_id, tracking) in state.tenant_requests.iter_mut() {
             // Clean up old request times
             tracking.request_times.retain(|&time| time > cutoff_time);
 

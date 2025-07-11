@@ -161,11 +161,19 @@ impl Drop for MetricTimer {
 }
 
 /// Builder for recording metrics with labels
+#[cfg(feature = "observability")]
 pub struct MetricBuilder<'a> {
     recorder: &'a dyn MetricsRecorder,
     labels: Vec<KeyValue>,
 }
 
+/// Stub builder when observability is disabled
+#[cfg(not(feature = "observability"))]
+pub struct MetricBuilder<'a> {
+    _recorder: &'a dyn MetricsRecorder,
+}
+
+#[cfg(feature = "observability")]
 impl<'a> MetricBuilder<'a> {
     /// Create a new metric builder
     pub fn new(recorder: &'a dyn MetricsRecorder) -> Self {
@@ -212,6 +220,49 @@ impl<'a> MetricBuilder<'a> {
     /// Start a timer
     pub fn timer(self, metric_name: &str) -> MetricTimer {
         self.recorder.start_timer(metric_name, self.labels)
+    }
+}
+
+#[cfg(not(feature = "observability"))]
+impl<'a> MetricBuilder<'a> {
+    /// Create a new metric builder (stub)
+    pub fn new(recorder: &'a dyn MetricsRecorder) -> Self {
+        Self { _recorder: recorder }
+    }
+    
+    /// Add a label (stub)
+    pub fn label(self, _key: &str, _value: impl ToString) -> Self {
+        self
+    }
+    
+    /// Add method label (stub)
+    pub fn method(self, _method: &str) -> Self {
+        self
+    }
+    
+    /// Add node ID label (stub)
+    pub fn node_id(self, _node_id: u64) -> Self {
+        self
+    }
+    
+    /// Add error label (stub)
+    pub fn error(self, _is_error: bool) -> Self {
+        self
+    }
+    
+    /// Record a counter (stub)
+    pub fn count(self, _metric_name: &str, _value: u64) {
+        // No-op when observability is disabled
+    }
+    
+    /// Record a gauge (stub)
+    pub fn gauge(self, _metric_name: &str, _value: i64) {
+        // No-op when observability is disabled
+    }
+    
+    /// Start a timer (stub)
+    pub fn timer(self, metric_name: &str) -> MetricTimer {
+        MetricTimer::new_stub(metric_name.to_string())
     }
 }
 

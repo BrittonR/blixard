@@ -67,8 +67,8 @@ async fn check_health(
 
     let details = if request.include_details {
         Some(HealthDetails {
-            vm_count: node.get_vm_count(),
-            active_connections: node.get_active_connection_count(),
+            vm_count: node.get_vm_count() as usize,
+            active_connections: node.get_active_connection_count() as usize,
             memory_usage_mb: get_memory_usage().await,
             disk_usage_percent: get_disk_usage().await,
         })
@@ -134,9 +134,11 @@ impl HealthServiceV2 {
 
         // Convert to legacy format
         Ok(HealthCheckResponse {
-            status: health_resp.status,
-            timestamp: health_resp.timestamp,
-            node_id: health_resp.node_id,
+            healthy: health_resp.status == "healthy",
+            message: format!("Node {} health status: {}", health_resp.node_id, health_resp.status),
+            status: Some(health_resp.status),
+            timestamp: Some(health_resp.timestamp),
+            node_id: Some(health_resp.node_id),
             uptime_seconds: Some(health_resp.uptime_seconds),
             vm_count: health_resp.details.as_ref().map(|d| d.vm_count as u32),
             memory_usage_mb: health_resp.details.as_ref().map(|d| d.memory_usage_mb),

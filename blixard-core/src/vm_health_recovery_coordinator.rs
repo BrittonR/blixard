@@ -10,7 +10,6 @@ use tracing::{error, info, warn};
 use async_trait::async_trait;
 
 use crate::{
-    abstractions::time::Clock,
     error::{BlixardError, BlixardResult},
     patterns::LifecycleManager,
     types::VmConfig,
@@ -90,7 +89,7 @@ impl RecoveryCoordinator {
         // Create recovery operation
         let recovery_op = RecoveryOperation {
             vm_name: vm_name.to_string(),
-            started_at: self.deps.clock.now(),
+            started_at: std::time::SystemTime::now(),
             status: RecoveryStatus::Pending,
             attempts: 0,
             last_error: None,

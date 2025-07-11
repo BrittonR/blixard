@@ -152,7 +152,7 @@ where
 {
     let mut attempt = 0;
     let mut total_delay = Duration::ZERO;
-    let start_time = tokio::time::Instant::now();
+    let _start_time = tokio::time::Instant::now();
     
     loop {
         attempt += 1;

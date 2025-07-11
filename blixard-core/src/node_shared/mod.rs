@@ -8,6 +8,7 @@ use crate::{
     error::{BlixardError, BlixardResult},
     types::{NodeConfig, NodeTopology},
     raft::proposals::WorkerCapabilities,
+    raft_manager::ConfChangeType,
 };
 use redb::Database;
 use std::{
@@ -411,6 +412,32 @@ impl SharedNodeState {
     
     pub async fn get_vm_placement_recommendation(&self, _config: crate::types::VmConfig) -> BlixardResult<String> {
         Err(BlixardError::NotImplemented { feature: "get_vm_placement_recommendation in SharedNodeState".to_string() })
+    }
+    
+    // Missing Raft-related methods
+    pub async fn propose_conf_change_with_p2p(
+        &self,
+        _change_type: ConfChangeType,
+        _node_id: u64,
+        _context: String,
+        _p2p_node_id: Option<String>,
+        _p2p_addresses: Vec<String>,
+        _p2p_relay_url: Option<String>,
+    ) -> BlixardResult<()> {
+        Err(BlixardError::NotImplemented { feature: "propose_conf_change_with_p2p in SharedNodeState".to_string() })
+    }
+    
+    pub async fn propose_conf_change(
+        &self,
+        _change_type: ConfChangeType,
+        _node_id: u64,
+        _context: String,
+    ) -> BlixardResult<()> {
+        Err(BlixardError::NotImplemented { feature: "propose_conf_change in SharedNodeState".to_string() })
+    }
+    
+    pub async fn get_current_voters(&self) -> BlixardResult<Vec<u64>> {
+        Err(BlixardError::NotImplemented { feature: "get_current_voters in SharedNodeState".to_string() })
     }
 }
 

@@ -81,6 +81,7 @@ pub struct PlacementDecision {
     pub preempted_vms: Vec<String>,
     pub resource_fit_score: f64,
     pub alternative_nodes: Vec<u64>,
+    pub reason: String,
 }
 
 /// Information about a VM that could be preempted
@@ -193,6 +194,7 @@ impl super::VmScheduler {
             preempted_vms: Vec::new(),
             resource_fit_score,
             alternative_nodes,
+            reason: format!("Selected node {} with highest resource availability (score: {:.2})", best_node.node_id, resource_fit_score),
         })
     }
 
@@ -237,6 +239,7 @@ impl super::VmScheduler {
             preempted_vms: Vec::new(),
             resource_fit_score,
             alternative_nodes,
+            reason: format!("Selected node {} for bin packing strategy (score: {:.2})", best_node.node_id, resource_fit_score),
         })
     }
 
@@ -276,6 +279,7 @@ impl super::VmScheduler {
             preempted_vms: Vec::new(),
             resource_fit_score,
             alternative_nodes,
+            reason: format!("Selected node {} using round-robin distribution", best_node.node_id),
         })
     }
 
@@ -323,6 +327,7 @@ impl super::VmScheduler {
             preempted_vms: Vec::new(),
             resource_fit_score,
             alternative_nodes: Vec::new(),
+            reason: format!("Manually placed on node {} as requested", target_node_id),
         })
     }
 
@@ -446,6 +451,7 @@ impl super::VmScheduler {
             preempted_vms: Vec::new(),
             resource_fit_score,
             alternative_nodes,
+            reason: format!("Selected node {} for optimal cost efficiency (cost: {:.2})", best_node_id, best_cost),
         })
     }
 

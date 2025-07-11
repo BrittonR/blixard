@@ -87,16 +87,15 @@ impl raft::Storage for RedbRaftStorage {
         // let _enter = span.enter();
 
         #[cfg(feature = "observability")]
-        {
-            let metrics = metrics();
-            let _timer = Timer::with_attributes(
-                metrics.storage_read_duration.clone(),
-                vec![
-                    attributes::table("raft_state"),
-                    attributes::operation("initial_state"),
-                ],
-            );
-        }
+        let metrics = metrics();
+        #[cfg(feature = "observability")]
+        let _timer = Timer::with_attributes(
+            metrics.storage_read_duration.clone(),
+            vec![
+                attributes::table("raft_state"),
+                attributes::operation("initial_state"),
+            ],
+        );
 
         let read_txn = self
             .database
@@ -105,6 +104,7 @@ impl raft::Storage for RedbRaftStorage {
 
         // Load hard state
         let hard_state = if let Ok(table) = read_txn.open_table(RAFT_HARD_STATE_TABLE) {
+            #[cfg(feature = "observability")]
             metrics
                 .storage_reads
                 .add(1, &[attributes::table("raft_hard_state")]);
@@ -314,7 +314,9 @@ impl RedbRaftStorage {
         #[cfg(feature = "failpoints")]
         fail_point!("storage::append_entries");
 
+        #[cfg(feature = "observability")]
         let metrics = metrics();
+        #[cfg(feature = "observability")]
         let _timer = Timer::with_attributes(
             metrics.storage_write_duration.clone(),
             vec![
@@ -331,6 +333,7 @@ impl RedbRaftStorage {
             for entry in entries {
                 let data = raft_codec::serialize_entry(entry)?;
                 table.insert(&entry.index, data.as_slice())?;
+                #[cfg(feature = "observability")]
                 metrics
                     .storage_writes
                     .add(1, &[attributes::table("raft_log")]);
@@ -346,7 +349,9 @@ impl RedbRaftStorage {
 
     /// Save hard state
     pub fn save_hard_state(&self, hard_state: &raft::prelude::HardState) -> BlixardResult<()> {
+        #[cfg(feature = "observability")]
         let metrics = metrics();
+        #[cfg(feature = "observability")]
         let _timer = Timer::with_attributes(
             metrics.storage_write_duration.clone(),
             vec![
@@ -361,6 +366,7 @@ impl RedbRaftStorage {
             let mut table = write_txn.open_table(RAFT_HARD_STATE_TABLE)?;
             let data = raft_codec::serialize_hard_state(hard_state)?;
             table.insert("hard_state", data.as_slice())?;
+            #[cfg(feature = "observability")]
             metrics
                 .storage_writes
                 .add(1, &[attributes::table("raft_hard_state")]);

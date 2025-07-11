@@ -297,13 +297,11 @@ impl super::VmScheduler {
     }
 
     /// Calculate resource usage for a specific node from its running VMs
-    fn calculate_node_resource_usage<T>(
+    fn calculate_node_resource_usage(
         &self,
         node_id: u64,
-        vm_table: &T,
+        vm_table: &redb::ReadOnlyTable<&str, &[u8]>,
     ) -> BlixardResult<(u32, u64, u64, u32)> 
-    where 
-        T: ReadableTable<&str, &[u8]>,
     {
         let mut used_vcpus = 0;
         let mut used_memory_mb = 0;
@@ -349,13 +347,13 @@ impl super::VmScheduler {
             source: Box::new(e),
         })?;
 
-        let mut existing_placements = HashMap::new();
+        let mut existing_placements = Vec::new();
 
         for entry in vm_table.iter().map_err(|e| BlixardError::Storage {
             operation: "iterate VMs".to_string(),
             source: Box::new(e),
         })? {
-            let (_, vm_data) = entry.map_err(|e| BlixardError::Storage {
+            let (vm_name, vm_data) = entry.map_err(|e| BlixardError::Storage {
                 operation: "read VM entry".to_string(),
                 source: Box::new(e),
             })?;
@@ -366,11 +364,18 @@ impl super::VmScheduler {
                     source: Box::new(e),
                 })?;
 
-            // TODO: VM placement tracking - assigned_node field doesn't exist in VmConfig
-            // Need to check if placement is tracked in VmStatus or separate table
-            // if let Some(node_id) = vm_config.assigned_node {
-            //     existing_placements.insert(vm_config.name.clone(), node_id);
-            // }
+            // For now, create empty groups and use a default node (0) for VMs without placement info
+            // TODO: VM placement tracking - need to track which node VMs are actually placed on
+            let vm_name_str = std::str::from_utf8(vm_name.value().as_ref()).unwrap_or("unknown").to_string();
+            let groups = vm_config.metadata.as_ref()
+                .and_then(|metadata| metadata.get("affinity-group"))
+                .map(|group| vec![group.clone()])
+                .unwrap_or_default();
+            let node_id = 0u64; // Default node until proper placement tracking is implemented
+            
+            if !groups.is_empty() {
+                existing_placements.push((vm_name_str, groups, node_id));
+            }
         }
 
         Ok(AntiAffinityChecker::new(existing_placements))

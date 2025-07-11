@@ -180,6 +180,7 @@ impl VmManager {
         );
         let _enter = span.enter();
 
+        #[cfg(feature = "observability")]
         let metrics = metrics();
 
         // All state persistence has already been handled by the RaftStateMachine
@@ -193,6 +194,7 @@ impl VmManager {
                 //     ("node.id", &node_id),
                 // ]);
 
+                #[cfg(feature = "observability")]
                 let _timer = Timer::with_attributes(
                     metrics.vm_create_duration.clone(),
                     vec![
@@ -205,10 +207,12 @@ impl VmManager {
                 let result = self.backend.create_vm(&config, node_id).await;
 
                 if result.is_ok() {
+                    #[cfg(feature = "observability")]
                     metrics.vm_total.add(1, &[]);
                     // Monitor VM status after creation attempt
                     self.monitor_vm_status_after_operation(&config.name).await;
                 } else {
+                    #[cfg(feature = "observability")]
                     metrics
                         .vm_create_failed
                         .add(1, &[attributes::vm_name(&config.name)]);
@@ -220,6 +224,7 @@ impl VmManager {
                 let result = self.backend.start_vm(&name).await;
 
                 if result.is_ok() {
+                    #[cfg(feature = "observability")]
                     metrics.vm_running.add(1, &[]);
                     // Monitor VM status after start attempt
                     self.monitor_vm_status_after_operation(&name).await;
@@ -231,6 +236,7 @@ impl VmManager {
                 let result = self.backend.stop_vm(&name).await;
 
                 if result.is_ok() {
+                    #[cfg(feature = "observability")]
                     metrics.vm_running.add(-1, &[]);
                     // Monitor VM status after stop attempt
                     self.monitor_vm_status_after_operation(&name).await;
@@ -242,6 +248,7 @@ impl VmManager {
                 let result = self.backend.delete_vm(&name).await;
 
                 if result.is_ok() {
+                    #[cfg(feature = "observability")]
                     metrics.vm_total.add(-1, &[]);
                 }
 
@@ -419,7 +426,7 @@ impl VmManager {
                         match node_state
                             .update_vm_status_through_raft(
                                 &name,
-                                actual_status,
+                                format!("{:?}", actual_status),
                             )
                             .await
                         {

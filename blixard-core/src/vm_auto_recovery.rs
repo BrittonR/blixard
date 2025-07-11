@@ -7,7 +7,7 @@ use tracing::{error, info, warn};
 use crate::{
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
-    types::{VmCommand, VmConfig},
+    types::VmConfig,
     vm_scheduler::{PlacementStrategy, VmScheduler},
 };
 #[cfg(feature = "observability")]
@@ -196,11 +196,7 @@ impl VmAutoRecovery {
     async fn attempt_local_restart(&self, vm_name: &str) -> BlixardResult<()> {
         info!("Attempting local restart for VM '{}'", vm_name);
 
-        let command = VmCommand::Start {
-            name: vm_name.to_string(),
-        };
-
-        self.node_state.create_vm_through_raft(command).await.map(|_| ())
+        self.node_state.start_vm(vm_name).await
     }
 
     /// Attempt to migrate the VM to another node
@@ -251,20 +247,8 @@ impl VmAutoRecovery {
         );
 
         // Create migration task
-        let migration_task = crate::types::VmMigrationTask {
-            vm_name: vm_name.to_string(),
-            source_node_id: current_node_id,
-            target_node_id: placement.target_node_id,
-            live_migration: false, // Failed VMs can't do live migration
-            force: true,           // Force migration since VM is failed
-        };
-
-        let command = VmCommand::Migrate {
-            task: migration_task,
-        };
-
-        match self.node_state.create_vm_through_raft(command).await {
-            Ok(_task_id) => {
+        match self.node_state.migrate_vm(vm_name, placement.target_node_id).await {
+            Ok(()) => {
                 info!("Successfully initiated migration for VM '{}'", vm_name);
                 metrics.vm_recovery_success.add(
                     1,

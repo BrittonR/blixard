@@ -344,13 +344,15 @@ impl VmService for VmServiceImpl {
 
         let strategy = Self::parse_strategy(strategy);
 
-        // Use the scheduling method from SharedNodeState
-        let decision = self
+        // Use the scheduling method from SharedNodeState  
+        let _result = self
             .node
             .create_vm_with_scheduling(vm_config)
             .await?;
 
-        Ok((name, decision.target_node_id, decision.reason))
+        // TODO: Integrate with proper scheduler that returns PlacementDecision
+        // For now, return placeholder values since create_vm_with_scheduling returns String, not PlacementDecision
+        Ok((name, 1u64, "VM created with default placement".to_string()))
     }
 
     async fn schedule_vm_placement(

@@ -114,7 +114,7 @@ impl IrohTransportV3 {
     pub async fn join_doc_from_ticket(
         &self,
         ticket: &str,
-        doc_type: DocumentType,
+        _doc_type: DocumentType,
     ) -> BlixardResult<()> {
         // For compatibility, ignore the doc_type parameter in the ticket parsing
         self.inner.join_doc_from_ticket(ticket).await

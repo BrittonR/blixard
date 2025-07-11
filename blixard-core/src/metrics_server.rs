@@ -22,7 +22,11 @@ async fn handle_request(
 ) -> Result<Response<Body>, Infallible> {
     let response = match req.uri().path() {
         "/metrics" => {
+            #[cfg(feature = "observability")]
             let metrics = prometheus_metrics();
+            #[cfg(not(feature = "observability"))]
+            let metrics = "# Observability features disabled\n";
+            
             Response::builder()
                 .status(StatusCode::OK)
                 .header("Content-Type", "text/plain; version=0.0.4")

@@ -5,6 +5,9 @@
 
 #![allow(unused_imports, unused_variables, dead_code)]
 
+// Only compile this demo when test-helpers or observability features are enabled
+#![cfg(any(feature = "test-helpers", feature = "observability"))]
+
 /// BEFORE: Traditional transaction pattern (repetitive code)
 mod traditional_patterns {
     use crate::{
@@ -319,7 +322,7 @@ mod wrapper_patterns {
         executor
             .write_with_retry("bulk insert vm states", 3, |txn| {
                 let mut table = txn.open_table(VM_STATE_TABLE)?;
-                txn.bulk_insert_serialized(&mut table, states.clone())
+                txn.bulk_insert_serialized(&mut table, states.iter().map(|(k, v)| (k.as_str(), v)))
             })
             .await?;
 

@@ -405,7 +405,6 @@ impl CpuResourceManager {
         }
 
         let core_usage = self.core_usage.clone();
-        let usage = self.usage.clone();
         let metrics = self.metrics.clone();
         let interval_duration = self.config.monitoring_interval;
 

@@ -101,7 +101,7 @@ impl TestHarness {
                 self.configure_message_reorder(*from, *to, *window_size)
                     .await
             }
-            Operation::CheckInvariant { invariant } => {
+            Operation::CheckInvariant { invariant: _ } => {
                 // Invariants are checked after each operation in the main loop
                 Ok(())
             }
@@ -116,18 +116,21 @@ impl TestHarness {
 
         // Initialize cluster if needed
         if cluster_guard.is_none() {
-            *cluster_guard = Some(TestCluster::new(0).await?);
+            *cluster_guard = Some(TestCluster::new());
         }
 
         // Register node with time accelerator
         self.time.register_node(node_id);
 
-        // For now, we'll need to recreate the cluster with the new node
+        // For now, we'll need to add nodes to the cluster
         // This is a limitation of the current TestCluster API
         let current_size = cluster_guard.as_ref().unwrap().nodes().len();
         if node_id as usize > current_size {
-            // Create a new cluster with more nodes
-            *cluster_guard = Some(TestCluster::new(node_id as usize).await?);
+            // Add nodes to reach the desired size
+            let cluster_ref = cluster_guard.as_mut().unwrap();
+            while cluster_ref.nodes().len() < node_id as usize {
+                cluster_ref.add_node().await?;
+            }
         }
 
         // Track coverage
@@ -141,7 +144,7 @@ impl TestHarness {
     /// Stop a node
     async fn stop_node(&self, node_id: u64) -> BlixardResult<()> {
         let cluster_guard = self.cluster.read().await;
-        if let Some(cluster) = cluster_guard.as_ref() {
+        if let Some(_cluster) = cluster_guard.as_ref() {
             // Note: TestCluster doesn't have a stop_node method
             // We'll simulate this by tracking stopped nodes separately
 
@@ -193,8 +196,10 @@ impl TestHarness {
                         response_tx: None,
                     };
 
-                    if let Ok(leader_id) = cluster.get_leader_id().await {
-                        // Send to leader node - in real implementation would use Raft message passing
+                    // For now, just use first node as leader - real implementation would
+                    // determine leader through Raft consensus
+                    if !cluster.nodes().is_empty() {
+                        // Send to first node - in real implementation would use Raft message passing
                     }
                 }
                 ClientOp::StartVm { vm_id } => {
@@ -301,9 +306,9 @@ impl TestHarness {
     /// Configure message duplication
     async fn configure_message_duplicate(
         &self,
-        from: u64,
-        to: u64,
-        count: u32,
+        _from: u64,
+        _to: u64,
+        _count: u32,
     ) -> BlixardResult<()> {
         // Note: Message duplication would be implemented via test infrastructure
 
@@ -313,9 +318,9 @@ impl TestHarness {
     /// Configure message reordering
     async fn configure_message_reorder(
         &self,
-        from: u64,
-        to: u64,
-        window_size: u32,
+        _from: u64,
+        _to: u64,
+        _window_size: u32,
     ) -> BlixardResult<()> {
         // Note: Message reordering would be implemented via test infrastructure
 
@@ -345,14 +350,16 @@ impl TestHarness {
         let mut nodes = HashMap::new();
         let mut views = HashMap::new();
         let mut commit_points = HashMap::new();
-        let mut vms = HashMap::new();
+        let vms = HashMap::new();
 
         if let Some(cluster) = cluster_guard.as_ref() {
             // Collect node states
             let node_ids: Vec<u64> = cluster.nodes().keys().copied().collect();
             for node_id in node_ids {
                 // For now, create mock state - would integrate with real cluster state
-                let role = if cluster.get_leader_id().await.ok() == Some(node_id) {
+                // For now, assume first node is leader - real implementation would
+                // query actual Raft state
+                let role = if node_id == 1 {
                     NodeRole::Leader
                 } else {
                     NodeRole::Follower

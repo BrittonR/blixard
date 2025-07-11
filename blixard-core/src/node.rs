@@ -441,6 +441,9 @@ impl Node {
                         packet_loss: 0.0,
                         reliability_score: 1.0,
                     },
+                    p2p_node_id: Some(bootstrap_info.p2p_node_id.clone()),
+                    p2p_addresses: vec![],
+                    p2p_relay_url: None,
                 };
                 self.shared
                     .add_peer_with_p2p(bootstrap_info.node_id, peer_info);
@@ -496,6 +499,7 @@ impl Node {
                         packet_loss: 0.0,
                         reliability_score: 1.0,
                     },
+                                                    p2p_node_id: Some(peer.p2p_node_id.clone()),
                                                 };
                                                 self.shared.add_peer(peer.id, peer_info);
                                             } else {
@@ -683,6 +687,9 @@ impl Node {
                         packet_loss: 0.0,
                         reliability_score: 1.0,
                     },
+                        p2p_node_id: Some(node_info.node_id.to_string()),
+                        p2p_addresses: node_info.addresses.iter().map(|a| a.to_string()).collect(),
+                        p2p_relay_url: None,
                     };
                     self.shared
                         .add_peer_with_p2p(leader_node_id, peer_info);
@@ -792,6 +799,9 @@ impl Node {
                         packet_loss: 0.0,
                         reliability_score: 1.0,
                     },
+                    p2p_node_id: Some(peer_info.p2p_node_id.clone()),
+                    p2p_addresses: vec![],
+                    p2p_relay_url: None,
                 };
                 self.shared
                     .add_peer_with_p2p(peer_info.id, p2p_peer_info);
@@ -1280,7 +1290,7 @@ impl Node {
     }
 
     /// Get the bind address
-    pub fn get_bind_addr(&self) -> &std::net::SocketAddr {
+    pub fn get_bind_addr(&self) -> String {
         self.shared.get_bind_addr()
     }
 
