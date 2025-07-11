@@ -849,8 +849,7 @@ impl NixImageStore {
 
         // Run nix path-info to get NAR hash and size
         let options = CommandOptions::new()
-            .env("NIX_CONFIG", "experimental-features = nix-command")
-            .build();
+            .with_env_var("NIX_CONFIG", "experimental-features = nix-command");
         
         let output = self.command_executor
             .execute("nix", &["path-info", "--json", &path.to_string_lossy()], options)
@@ -866,8 +865,7 @@ impl NixImageStore {
                 debug!("Path not in store database, trying nix store add-path");
 
                 let add_options = CommandOptions::new()
-                    .env("NIX_CONFIG", "experimental-features = nix-command")
-                    .build();
+                    .with_env_var("NIX_CONFIG", "experimental-features = nix-command");
                     
                 let add_output = self.command_executor
                     .execute("nix", &["store", "add-path", &path.to_string_lossy()], add_options)
@@ -876,7 +874,7 @@ impl NixImageStore {
                         message: format!("Failed to run nix store add-path: {}", e),
                     })?;
 
-                if !add_output.status.success() {
+                if add_output.status != 0 {
                     debug!(
                         "Failed to add path to store: {}",
                         String::from_utf8_lossy(&add_output.stderr)
@@ -886,14 +884,13 @@ impl NixImageStore {
 
                 // Try path-info again
                 let retry_options = CommandOptions::new()
-                    .env("NIX_CONFIG", "experimental-features = nix-command")
-                    .build();
+                    .with_env_var("NIX_CONFIG", "experimental-features = nix-command");
                     
                 let retry_output = self.command_executor
                     .execute("nix", &["path-info", "--json", &path.to_string_lossy()], retry_options)
                     .await?;
 
-                if !retry_output.status.success() {
+                if retry_output.status != 0 {
                     debug!(
                         "nix path-info still failed after add-path: {}",
                         String::from_utf8_lossy(&retry_output.stderr)
@@ -977,8 +974,7 @@ impl NixImageStore {
         // First try to get the NAR hash if the path is already in the store
         if path.starts_with(&self.nix_store_dir) {
             let options = CommandOptions::new()
-                .env("NIX_CONFIG", "experimental-features = nix-command")
-                .build();
+                .with_env_var("NIX_CONFIG", "experimental-features = nix-command");
                 
             let output = self.command_executor
                 .execute("nix", &["path-info", "--json", &path.to_string_lossy()], options)
@@ -1014,7 +1010,7 @@ impl NixImageStore {
                 message: format!("Failed to run nix-store --dump: {}", e),
             })?;
 
-        if !dump_output.status.success() {
+        if dump_output.status != 0 {
             return Err(BlixardError::Internal {
                 message: format!(
                     "Failed to dump NAR for {}: {}",
@@ -1036,7 +1032,7 @@ impl NixImageStore {
                 message: format!("Failed to run nix-hash: {}", e),
             })?;
 
-        if !hash_result.status.success() {
+        if hash_result.status != 0 {
             return Err(BlixardError::Internal {
                 message: format!(
                     "Failed to hash NAR: {}",

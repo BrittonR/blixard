@@ -8,9 +8,8 @@ use rand_chacha::ChaCha8Rng;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use crate::vopr::invariants::{Invariant, InvariantChecker};
 use crate::vopr::operation_generator::{Operation, OperationGenerator};
-use crate::vopr::state_tracker::StateTracker;
+use crate::{acquire_lock, error::BlixardError};
 
 /// Fuzzing mode - safety vs liveness
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,7 +190,7 @@ impl FuzzerEngine {
 
     /// Generate a random test case
     pub fn generate_test_case(&mut self, config: &FuzzConfig) -> Vec<Operation> {
-        if self.coverage_guided && !self.corpus.lock().unwrap().is_empty() {
+        if self.coverage_guided && !acquire_lock!(self.corpus.lock(), "check corpus empty").is_empty() {
             // Sometimes mutate an existing test case from the corpus
             if self.rng.gen_bool(0.5) {
                 return self.mutate_test_case(config);
@@ -228,14 +227,20 @@ impl FuzzerEngine {
 
     /// Mutate an existing test case from the corpus
     fn mutate_test_case(&mut self, config: &FuzzConfig) -> Vec<Operation> {
-        let corpus = self.corpus.lock().unwrap();
+        let corpus = acquire_lock!(self.corpus.lock(), "access corpus for mutation");
         if corpus.is_empty() {
             drop(corpus);
             return self.generate_random_operations(config);
         }
 
         // Pick a random test case
-        let test_case = corpus.choose(&mut self.rng).unwrap();
+        let test_case = match corpus.choose(&mut self.rng) {
+            Some(tc) => tc,
+            None => {
+                drop(corpus);
+                return self.generate_random_operations(config);
+            }
+        };
         let mut operations = test_case.operations.clone();
         drop(corpus);
 
@@ -301,7 +306,7 @@ impl FuzzerEngine {
         found_bug: bool,
         execution_time: std::time::Duration,
     ) {
-        let mut global_cov = self.global_coverage.lock().unwrap();
+        let mut global_cov = acquire_lock!(self.global_coverage.lock(), "record execution coverage");
 
         // Check if this execution found new coverage
         let is_interesting = global_cov.has_new_coverage(&coverage) || found_bug;
@@ -320,7 +325,7 @@ impl FuzzerEngine {
                 execution_time,
             };
 
-            self.corpus.lock().unwrap().push(test_case);
+            acquire_lock!(self.corpus.lock(), "add interesting test case to corpus").push(test_case);
         }
     }
 

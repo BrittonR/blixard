@@ -441,7 +441,7 @@ impl RaftManager {
     /// Handle a Raft message from another node
     #[instrument(skip(self, msg), fields(from, msg_type = ?msg.msg_type()))]
     async fn handle_raft_message(&self, from: u64, msg: raft::prelude::Message) -> BlixardResult<()> {
-        let _timer = Timer::new(&metrics().raft_message_duration, &[
+        let _timer = Timer::new(&metrics().raft_proposal_duration, &[
             attributes::operation("handle_message"),
         ]);
 
@@ -835,7 +835,7 @@ impl RaftManager {
                 state: format!("{:?}", node.raft.state).to_lowercase(),
             };
 
-            shared.update_raft_status(status).await;
+            shared.update_raft_status(status);
         }
     }
 

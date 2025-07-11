@@ -97,6 +97,9 @@ pub enum BlixardError {
 
     #[error("Not initialized: {component}")]
     NotInitialized { component: String },
+
+    #[error("Not leader for operation '{operation}', current leader: {leader_id:?}")]
+    NotLeader { operation: String, leader_id: Option<u64> },
     
     #[error("Invalid input for {field}: {message}")]
     InvalidInput { field: String, message: String },

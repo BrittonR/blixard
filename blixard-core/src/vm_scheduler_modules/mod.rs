@@ -5,14 +5,10 @@ use redb::Database;
 use std::sync::Arc;
 use std::collections::HashMap;
 
-use crate::anti_affinity::{AntiAffinityChecker, AntiAffinityRules};
 use crate::error::BlixardResult;
 use crate::metrics_otel;
-use crate::raft_manager::{WorkerCapabilities, WorkerStatus};
-use crate::resource_management::{ClusterResourceManager, OvercommitPolicy, ResourceReservation};
-use crate::raft_storage::{VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE};
+use crate::resource_management::{ClusterResourceManager, OvercommitPolicy};
 use crate::types::VmConfig;
-use crate::types::{LocalityPreference, NodeTopology};
 
 // Re-export types from submodules
 pub use placement_strategies::*;

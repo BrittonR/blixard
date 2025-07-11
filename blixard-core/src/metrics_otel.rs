@@ -2,6 +2,7 @@
 //!
 //! This module provides production-ready metrics using OpenTelemetry v0.20.
 
+#[cfg(feature = "observability")]
 use opentelemetry::{
     global,
     metrics::{Counter, Histogram, Meter, UpDownCounter},
@@ -10,9 +11,11 @@ use opentelemetry::{
 use std::sync::OnceLock;
 
 /// Global metrics instance
+#[cfg(feature = "observability")]
 static METRICS: OnceLock<Metrics> = OnceLock::new();
 
 /// Container for all application metrics
+#[cfg(feature = "observability")]
 pub struct Metrics {
     meter: Meter,
 
@@ -548,6 +551,7 @@ impl Metrics {
 }
 
 /// Initialize metrics with Prometheus exporter
+#[cfg(feature = "observability")]
 pub fn init_prometheus() -> Result<&'static Metrics, Box<dyn std::error::Error>> {
     use opentelemetry_sdk::metrics::MeterProvider;
 
@@ -573,10 +577,18 @@ pub fn init_prometheus() -> Result<&'static Metrics, Box<dyn std::error::Error>>
     Ok(METRICS.get().ok_or("Metrics initialization failed")?)
 }
 
+/// No-op version when observability is disabled
+#[cfg(not(feature = "observability"))]
+pub fn init_prometheus() -> Result<(), Box<dyn std::error::Error>> {
+    Ok(())
+}
+
 /// Prometheus registry instance
+#[cfg(feature = "observability")]
 static PROMETHEUS_REGISTRY: OnceLock<prometheus::Registry> = OnceLock::new();
 
 /// Get Prometheus metrics as a string
+#[cfg(feature = "observability")]
 pub fn prometheus_metrics() -> String {
     use prometheus::{Encoder, TextEncoder};
 
@@ -595,7 +607,14 @@ pub fn prometheus_metrics() -> String {
     }
 }
 
+/// No-op version when observability is disabled
+#[cfg(not(feature = "observability"))]
+pub fn prometheus_metrics() -> String {
+    String::from("# Observability disabled\n")
+}
+
 /// Update cluster resource metrics from a cluster resource summary
+#[cfg(feature = "observability")]
 pub fn update_cluster_resource_metrics(summary: &crate::vm_scheduler::ClusterResourceSummary) {
     let metrics = metrics();
 
@@ -623,7 +642,13 @@ pub fn update_cluster_resource_metrics(summary: &crate::vm_scheduler::ClusterRes
         .add(summary.used_disk_gb as i64, &[]);
 }
 
+/// No-op version when observability is disabled
+#[cfg(not(feature = "observability"))]
+pub fn update_cluster_resource_metrics(_summary: &crate::vm_scheduler::ClusterResourceSummary) {
+}
+
 /// Update node-specific resource metrics
+#[cfg(feature = "observability")]
 pub fn update_node_resource_metrics(node_id: u64, usage: &crate::vm_scheduler::NodeResourceUsage) {
     let metrics = metrics();
     let node_id_attr = attributes::node_id(node_id);
@@ -631,13 +656,15 @@ pub fn update_node_resource_metrics(node_id: u64, usage: &crate::vm_scheduler::N
     // Update per-node resource availability
     metrics
         .node_vcpus_available
-        .add(usage.available_vcpus() as i64, &[node_id_attr.clone()]);
+        .add(usage.available_vcpus() as i64, &[node_id_attr]);
+    let memory_attr = attributes::node_id(node_id);
     metrics
         .node_memory_mb_available
-        .add(usage.available_memory_mb() as i64, &[node_id_attr.clone()]);
+        .add(usage.available_memory_mb() as i64, &[memory_attr]);
+    let disk_attr = attributes::node_id(node_id);
     metrics
         .node_disk_gb_available
-        .add(usage.available_disk_gb() as i64, &[node_id_attr]);
+        .add(usage.available_disk_gb() as i64, &[disk_attr]);
 }
 
 /// Record VM placement attempt
@@ -647,15 +674,17 @@ pub fn record_vm_placement_attempt(strategy: &str, success: bool, duration_secs:
 
     metrics
         .vm_placement_attempts
-        .add(1, &[strategy_attr.clone()]);
+        .add(1, &[strategy_attr]);
     if !success {
+        let failure_attr = KeyValue::new("strategy", strategy.to_string());
         metrics
             .vm_placement_failures
-            .add(1, &[strategy_attr.clone()]);
+            .add(1, &[failure_attr]);
     }
+    let duration_attr = KeyValue::new("strategy", strategy.to_string());
     metrics
         .vm_placement_duration
-        .record(duration_secs, &[strategy_attr]);
+        .record(duration_secs, &[duration_attr]);
 }
 
 /// Record VM scheduling decision with details
@@ -674,19 +703,21 @@ pub fn record_vm_scheduling_decision(
     // Record the scheduling decision
     metrics
         .vm_placement_attempts
-        .add(1, &[strategy_attr.clone(), node_attr.clone()]);
+        .add(1, &[strategy_attr, node_attr]);
     
     // Record timing
+    let timing_attr = KeyValue::new("strategy", strategy.to_string());
     metrics
         .vm_placement_duration
-        .record(duration.as_secs_f64(), &[strategy_attr.clone()]);
+        .record(duration.as_secs_f64(), &[timing_attr]);
     
     // If there were preemptions, record them
     if !decision.preempted_vms.is_empty() {
+        let preemption_attr = KeyValue::new("target_node", decision.target_node_id.to_string());
         for _preempted_vm in &decision.preempted_vms {
             metrics
                 .vm_preemptions_total
-                .add(1, &[node_attr.clone()]);
+                .add(1, &[preemption_attr]);
         }
     }
 }
@@ -694,31 +725,35 @@ pub fn record_vm_scheduling_decision(
 /// Record VM lifecycle operation
 pub fn record_vm_operation(operation: &str, success: bool) {
     let metrics = metrics();
-    let operation_attr = KeyValue::new("operation", operation.to_string());
-
+    
+    // Create attributes for each case to avoid cloning
     match operation {
         "create" => {
-            metrics.vm_create_total.add(1, &[operation_attr.clone()]);
+            let attrs = &[KeyValue::new("operation", "create")];
+            metrics.vm_create_total.add(1, attrs);
             if !success {
-                metrics.vm_create_failed.add(1, &[operation_attr]);
+                metrics.vm_create_failed.add(1, attrs);
             }
         }
         "start" => {
-            metrics.vm_start_total.add(1, &[operation_attr.clone()]);
+            let attrs = &[KeyValue::new("operation", "start")];
+            metrics.vm_start_total.add(1, attrs);
             if !success {
-                metrics.vm_start_failed.add(1, &[operation_attr]);
+                metrics.vm_start_failed.add(1, attrs);
             }
         }
         "stop" => {
-            metrics.vm_stop_total.add(1, &[operation_attr.clone()]);
+            let attrs = &[KeyValue::new("operation", "stop")];
+            metrics.vm_stop_total.add(1, attrs);
             if !success {
-                metrics.vm_stop_failed.add(1, &[operation_attr]);
+                metrics.vm_stop_failed.add(1, attrs);
             }
         }
         "delete" => {
-            metrics.vm_delete_total.add(1, &[operation_attr.clone()]);
+            let attrs = &[KeyValue::new("operation", "delete")];
+            metrics.vm_delete_total.add(1, attrs);
             if !success {
-                metrics.vm_delete_failed.add(1, &[operation_attr]);
+                metrics.vm_delete_failed.add(1, attrs);
             }
         }
         _ => {} // Unknown operation
@@ -742,11 +777,13 @@ pub fn record_p2p_image_import(artifact_type: &str, success: bool, size_bytes: u
     let metrics = metrics();
     let type_attr = KeyValue::new("artifact_type", artifact_type.to_string());
 
-    metrics.p2p_image_imports_total.add(1, &[type_attr.clone()]);
+    metrics.p2p_image_imports_total.add(1, &[type_attr]);
     if !success {
-        metrics.p2p_image_imports_failed.add(1, &[type_attr]);
+        let failure_attr = KeyValue::new("artifact_type", artifact_type.to_string());
+        metrics.p2p_image_imports_failed.add(1, &[failure_attr]);
     } else if size_bytes > 0 {
-        metrics.p2p_bytes_transferred.add(size_bytes, &[type_attr]);
+        let bytes_attr = KeyValue::new("artifact_type", artifact_type.to_string());
+        metrics.p2p_bytes_transferred.add(size_bytes, &[bytes_attr]);
     }
 }
 

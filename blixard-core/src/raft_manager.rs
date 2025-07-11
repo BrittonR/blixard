@@ -127,7 +127,13 @@ pub fn schedule_task(
         let (worker_key, worker_data) = worker_entry.storage_context("get worker entry")?;
         let worker_id_bytes = worker_key.value();
         if worker_id_bytes.len() == 8 {
-            let worker_id = u64::from_le_bytes(worker_id_bytes.try_into().unwrap());
+            let worker_id = match worker_id_bytes.try_into() {
+                Ok(bytes) => u64::from_le_bytes(bytes),
+                Err(_) => {
+                    tracing::warn!("Invalid worker key format: expected 8 bytes");
+                    continue;
+                }
+            };
             
             // Check if worker is online
             if let Some(status_data) = status_table.get(worker_id_bytes).storage_context("get worker status")? {

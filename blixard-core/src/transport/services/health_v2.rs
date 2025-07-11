@@ -62,16 +62,13 @@ async fn check_health(
     request: HealthRequest,
 ) -> BlixardResult<HealthResponse> {
     let node_id = node.get_id().to_string();
-    let start_time = node.get_start_time();
-    let uptime = std::time::SystemTime::now()
-        .duration_since(start_time)
-        .unwrap_or_default()
-        .as_secs();
+    // TODO: Implement proper start time tracking in SharedNodeState
+    let uptime = 0u64; // Default to 0 until start time tracking is implemented
 
     let details = if request.include_details {
         Some(HealthDetails {
-            vm_count: node.get_vm_count().await,
-            active_connections: node.get_active_connection_count().await,
+            vm_count: node.get_vm_count(),
+            active_connections: node.get_active_connection_count(),
             memory_usage_mb: get_memory_usage().await,
             disk_usage_percent: get_disk_usage().await,
         })

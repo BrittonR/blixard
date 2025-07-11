@@ -7,10 +7,9 @@ use raft::prelude::Message;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-use crate::error::{BlixardError, BlixardResult};
+use crate::error::BlixardResult;
 use crate::node_shared::SharedNodeState;
 use crate::transport::config::TransportConfig;
-use crate::transport::iroh_peer_connector::IrohPeerConnector;
 use crate::transport::iroh_raft_transport::IrohRaftTransport;
 
 /// Unified Raft transport using Iroh P2P
@@ -30,7 +29,7 @@ impl RaftTransport {
         _transport_config: &TransportConfig,
     ) -> BlixardResult<Self> {
         // Get Iroh endpoint from node
-        let (endpoint, local_node_id) = node.get_iroh_endpoint().await?;
+        let (endpoint, local_node_id) = node.get_iroh_endpoint()?;
 
         let iroh_transport = Arc::new(IrohRaftTransport::new(
             node,

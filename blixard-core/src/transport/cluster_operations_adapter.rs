@@ -50,7 +50,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
 
         // Get our P2P info if available
         let (our_p2p_node_id, our_p2p_addresses, our_p2p_relay_url) =
-            if let Some(node_addr) = self.shared_state.get_p2p_node_addr().await {
+            if let Some(node_addr) = self.shared_state.get_p2p_node_addr() {
                 let p2p_id = node_addr.node_id.to_string();
                 let p2p_addrs: Vec<String> = node_addr
                     .direct_addresses()
@@ -102,7 +102,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
             // Update P2P info if provided
             if p2p_node_id.is_some() || !p2p_addresses.is_empty() {
                 // Remove and re-add to update P2P info
-                self.shared_state.remove_peer(node_id).await;
+                self.shared_state.remove_peer(node_id);
                 let peer_info = crate::p2p_manager::PeerInfo {
                     node_id: p2p_node_id.clone().unwrap_or_else(|| node_id.to_string()),
                     address: addr.to_string(),
@@ -281,7 +281,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
                 info!("Node {} successfully left cluster", node_id);
 
                 // Remove peer from our peer list
-                self.shared_state.remove_peer(node_id).await;
+                self.shared_state.remove_peer(node_id);
 
                 Ok((true, "Successfully left cluster".to_string()))
             }
@@ -307,7 +307,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
 
         // Get our P2P info if available
         let (our_p2p_node_id, our_p2p_addresses, our_p2p_relay_url) =
-            if let Some(node_addr) = self.shared_state.get_p2p_node_addr().await {
+            if let Some(node_addr) = self.shared_state.get_p2p_node_addr() {
                 let p2p_id = node_addr.node_id.to_string();
                 let p2p_addrs: Vec<String> = node_addr
                     .direct_addresses()

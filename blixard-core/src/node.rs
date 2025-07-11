@@ -75,7 +75,7 @@ impl Node {
         self.setup_p2p_infrastructure().await?;
 
         // Phase 6: Raft initialization
-        let (raft_manager, message_rx, _, proposal_tx, conf_change_tx) = 
+        let (raft_manager, _message_rx, _, proposal_tx, _conf_change_tx) = 
             self.initialize_raft(db.clone()).await?;
 
         // Phase 7: Transport setup
@@ -138,7 +138,7 @@ impl Node {
         // Initialize all database tables
         crate::raft_storage::init_database_tables(&db_arc)?;
 
-        self.shared.set_database(db_arc.clone()).await;
+        self.shared.set_database(Some(db_arc.clone())).await;
         
         Ok(db_arc)
     }
@@ -265,7 +265,7 @@ impl Node {
 
     /// Set up P2P infrastructure if enabled
     async fn setup_p2p_infrastructure(&mut self) -> BlixardResult<()> {
-        let config = crate::config_global::get()?;
+        let _config = crate::config_global::get()?;
         
         // P2P manager initialization - placeholder for future enhancement
         // The Iroh transport handles P2P functionality directly
@@ -346,7 +346,7 @@ impl Node {
         }
 
         // Create Raft manager
-        let (raft_manager, proposal_tx, message_tx, conf_change_tx, message_rx) = RaftManager::new(
+        let (raft_manager, proposal_tx, _message_tx, conf_change_tx, message_rx) = RaftManager::new(
             self.shared.config.id,
             db.clone(),
             vec![], // No initial peers for bootstrap/join
@@ -404,7 +404,7 @@ impl Node {
             // Create Iroh client to contact the join address
             // Assume the join address is for node 1 (the bootstrap node)
             if let Some(raft_transport) = &self.raft_transport {
-                let endpoint = raft_transport.endpoint();
+                let _endpoint = raft_transport.endpoint();
 
                 // Parse the join address and create a NodeAddr for the target
                 // For now, we'll create a simple connection to the leader
@@ -652,7 +652,6 @@ impl Node {
         if let Some(discovery_manager) = self
             .shared
             .get_discovery_manager::<crate::discovery::DiscoveryManager>()
-            .await
         {
             // Try to find the leader's info via discovery
             let discovered_nodes = discovery_manager.get_nodes().await;
@@ -739,10 +738,10 @@ impl Node {
     /// Execute P2P join request
     async fn execute_p2p_join_request(
         &self,
-        node_addr: &iroh::NodeAddr,
-        p2p_node_id: &Option<String>,
-        p2p_addresses: &[String],
-        p2p_relay_url: &Option<String>,
+        _node_addr: &iroh::NodeAddr,
+        _p2p_node_id: &Option<String>,
+        _p2p_addresses: &[String],
+        _p2p_relay_url: &Option<String>,
     ) -> BlixardResult<(bool, String, Vec<crate::iroh_types::NodeInfo>, Vec<u64>)> {
         // TODO: Fix to handle proper endpoint retrieval
         Err(BlixardError::NotImplemented { 
@@ -753,11 +752,11 @@ impl Node {
     /// Execute HTTP bootstrap join process  
     async fn execute_http_bootstrap_join(
         &self,
-        bootstrap_info: &crate::iroh_types::BootstrapInfo,
-        node_addr: &iroh::NodeAddr,
-        p2p_node_id: &Option<String>,
-        p2p_addresses: &[String],
-        p2p_relay_url: &Option<String>,
+        _bootstrap_info: &crate::iroh_types::BootstrapInfo,
+        _node_addr: &iroh::NodeAddr,
+        _p2p_node_id: &Option<String>,
+        _p2p_addresses: &[String],
+        _p2p_relay_url: &Option<String>,
     ) -> BlixardResult<()> {
         // TODO: Fix to handle proper endpoint retrieval
         Err(BlixardError::NotImplemented { 
@@ -768,10 +767,10 @@ impl Node {
     /// Update shared state after joining cluster
     async fn update_shared_state_after_join(
         &self,
-        peers: &[crate::iroh_types::NodeInfo],
-        p2p_node_id: &Option<String>,
-        p2p_addresses: &[String],
-        p2p_relay_url: &Option<String>,
+        _peers: &[crate::iroh_types::NodeInfo],
+        _p2p_node_id: &Option<String>,
+        _p2p_addresses: &[String],
+        _p2p_relay_url: &Option<String>,
     ) -> BlixardResult<()> {
         // TODO: Implement proper state update after join
         // Temporarily stubbed out due to missing endpoint and node_addr variables
@@ -859,7 +858,7 @@ impl Node {
                 .await?;
 
             // Create P2P client and send join request
-            let (endpoint, _our_node_id) = self.shared.get_iroh_endpoint().await?;
+            let (endpoint, _our_node_id) = p2p_manager.get_endpoint();
             let transport_client =
                 crate::transport::iroh_client::IrohClusterServiceClient::new(
                     Arc::new(endpoint),
@@ -956,7 +955,7 @@ impl Node {
     async fn setup_transport(
         &mut self,
         message_tx: mpsc::UnboundedSender<(u64, raft::prelude::Message)>,
-        conf_change_tx: mpsc::UnboundedSender<RaftConfChange>,
+        _conf_change_tx: mpsc::UnboundedSender<RaftConfChange>,
         proposal_tx: mpsc::UnboundedSender<RaftProposal>,
     ) -> BlixardResult<(Arc<crate::transport::raft_transport_adapter::RaftTransport>, mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>)> {
         // Get transport configuration - using default TransportConfig (Iroh-only now)
@@ -992,12 +991,12 @@ impl Node {
             }
         });
 
-        self.shared.set_peer_connector(peer_connector).await;
+        self.shared.set_peer_connector(peer_connector);
 
         // Create message channel for outgoing messages
-        let (outgoing_tx, outgoing_rx) = mpsc::unbounded_channel();
+        let (_outgoing_tx, outgoing_rx) = mpsc::unbounded_channel();
         // Set individual Raft channels
-        self.shared.set_raft_proposal_tx(proposal_tx).await;
+        self.shared.set_raft_proposal_tx(proposal_tx);
         self.shared.set_raft_message_tx(message_tx.clone());
 
         // Initialize discovery if configured
@@ -1220,7 +1219,7 @@ impl Node {
         let timeout = Duration::from_secs(30);
 
         while start.elapsed() < timeout {
-            if self.shared.is_initialized().await {
+            if self.shared.is_initialized() {
                 tracing::info!("Raft is ready");
                 return Ok(());
             }
@@ -1272,7 +1271,16 @@ impl Node {
 
     /// Send a VM command for processing
     pub async fn send_vm_command(&self, command: VmCommand) -> BlixardResult<()> {
-        self.shared.send_vm_command(command).await
+        let vm_name = match &command {
+            VmCommand::Create { config, .. } => &config.name,
+            VmCommand::Start { name } => name,
+            VmCommand::Stop { name } => name,
+            VmCommand::Delete { name } => name,
+            VmCommand::UpdateStatus { name, .. } => name,
+            VmCommand::Migrate { task } => &task.vm_name,
+        };
+        let command_str = format!("{:?}", command);
+        self.shared.send_vm_command(vm_name, command_str).await.map(|_| ())
     }
 
     /// Get the node ID
@@ -1289,7 +1297,8 @@ impl Node {
     pub async fn list_vms(
         &self,
     ) -> BlixardResult<Vec<(crate::types::VmConfig, crate::types::VmStatus)>> {
-        self.shared.list_vms().await
+        let vm_states = self.shared.list_vms().await?;
+        Ok(vm_states.into_iter().map(|state| (state.config, state.status)).collect())
     }
 
     /// Get status of a specific VM
@@ -1297,12 +1306,20 @@ impl Node {
         &self,
         name: &str,
     ) -> BlixardResult<Option<(crate::types::VmConfig, crate::types::VmStatus)>> {
-        self.shared.get_vm_status(name).await
+        match self.shared.get_vm_info(name).await {
+            Ok(vm_state) => Ok(Some((vm_state.config, vm_state.status))),
+            Err(BlixardError::NotFound { .. }) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     /// Get the IP address of a VM
     pub async fn get_vm_ip(&self, name: &str) -> BlixardResult<Option<String>> {
-        self.shared.get_vm_ip(name).await
+        match self.shared.get_vm_ip(name).await {
+            Ok(ip) => Ok(Some(ip)),
+            Err(BlixardError::NotFound { .. }) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     /// Join a cluster and optionally register as a worker
@@ -1311,7 +1328,7 @@ impl Node {
         peer_addr: Option<std::net::SocketAddr>,
     ) -> BlixardResult<()> {
         // Check if initialized
-        if !self.shared.is_initialized().await {
+        if !self.shared.is_initialized() {
             return Err(BlixardError::Internal {
                 message: "Node not initialized".to_string(),
             });
@@ -1402,7 +1419,7 @@ impl Node {
     /// Leave the cluster
     pub async fn leave_cluster(&mut self) -> BlixardResult<()> {
         // Check if initialized
-        if !self.shared.is_initialized().await {
+        if !self.shared.is_initialized() {
             return Err(BlixardError::Internal {
                 message: "Node not initialized".to_string(),
             });
@@ -1440,7 +1457,7 @@ impl Node {
     pub async fn start(&mut self) -> BlixardResult<()> {
         let node_id = self.shared.get_id();
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        self.shared.set_shutdown_tx(shutdown_tx).await;
+        self.shared.set_shutdown_tx(shutdown_tx);
 
         // The node doesn't need its own TCP listener since all communication
         // is handled via the gRPC server. We just need a task to manage the
@@ -1456,7 +1473,7 @@ impl Node {
         });
 
         self.handle = Some(handle);
-        self.shared.set_running(true).await;
+        self.shared.set_running(true);
 
         // Start VM health monitor
         if let Some(ref mut monitor) = self.health_monitor {
@@ -1469,7 +1486,7 @@ impl Node {
 
     /// Stop the node
     pub async fn stop(&mut self) -> BlixardResult<()> {
-        if let Some(tx) = self.shared.take_shutdown_tx().await {
+        if let Some(tx) = self.shared.take_shutdown_tx() {
             let _ = tx.send(());
         }
 
@@ -1498,8 +1515,8 @@ impl Node {
             tracing::info!("Raft transport shut down");
         }
 
-        self.shared.set_running(false).await;
-        self.shared.set_initialized(false).await;
+        self.shared.set_running(false);
+        self.shared.set_initialized(false);
 
         // Shutdown all components to release database references
         self.shared.shutdown_components().await;

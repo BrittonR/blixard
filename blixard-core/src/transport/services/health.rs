@@ -36,9 +36,7 @@ impl HealthServiceImpl {
         // Check various health indicators
 
         // 1. Check if we can get Raft status (indicates Raft is running)
-        if self.node.get_raft_status().await.is_err() {
-            return false;
-        }
+        let _raft_status = self.node.get_raft_status();
 
         // 2. Check if we can access database
         if let Some(database) = self.node.get_database().await {

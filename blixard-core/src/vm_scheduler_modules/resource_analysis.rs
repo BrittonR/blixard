@@ -1,9 +1,7 @@
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::collections::HashMap;
-use redb::{Database, ReadableTable};
+use redb::ReadableTable;
 
-use crate::anti_affinity::{AntiAffinityChecker, AntiAffinityRules};
 use crate::error::{BlixardError, BlixardResult};
 use crate::raft_manager::{WorkerCapabilities, WorkerStatus};
 use crate::raft_storage::{VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE};

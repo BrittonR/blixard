@@ -1,12 +1,15 @@
 //! Transport metrics for monitoring and debugging
 
-use prometheus::{
-    register_histogram_vec, register_int_counter_vec, register_int_gauge_vec, Histogram,
-    HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGaugeVec,
-};
 use std::time::Duration;
 
+#[cfg(feature = "observability")]
+use prometheus::{
+    register_histogram_vec, register_int_counter_vec, register_int_gauge_vec,
+    HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGaugeVec,
+};
+
 /// Transport metrics collector
+#[cfg(feature = "observability")]
 pub struct TransportMetrics {
     /// Latency histograms per transport type
     pub rpc_latency: HistogramVec,
@@ -26,6 +29,7 @@ pub struct TransportMetrics {
     pub transport_fallbacks: IntCounterVec,
 }
 
+#[cfg(feature = "observability")]
 impl TransportMetrics {
     /// Create new transport metrics
     pub fn new() -> Result<Self, prometheus::Error> {
@@ -165,7 +169,36 @@ impl TransportMetrics {
     }
 }
 
+/// No-op version when observability is disabled
+#[cfg(not(feature = "observability"))]
+pub struct TransportMetrics;
+
+#[cfg(not(feature = "observability"))]
+impl TransportMetrics {
+    pub fn new() -> Result<Self, ()> {
+        Ok(Self)
+    }
+
+    pub fn record_rpc(&self, _transport: &str, _service: &str, _method: &str, _duration: Duration) {}
+    pub fn record_connection_attempt(&self, _transport: &str, _peer_id: &str) {}
+    pub fn record_connection_error(&self, _transport: &str, _error_type: &str) {}
+    pub fn set_active_connections(&self, _transport: &str, _peer_id: &str, _count: i64) {}
+    pub fn record_transport_selection(&self, _service: &str, _transport: &str) {}
+    pub fn record_transport_fallback(&self, _from: &str, _to: &str, _reason: &str) {}
+    pub fn record_raft_message_size(&self, _transport: &str, _message_type: &str, _size: usize) {}
+    pub fn record_election_timeout(&self) {}
+}
+
 /// Global transport metrics instance
+#[cfg(feature = "observability")]
+lazy_static::lazy_static! {
+    pub static ref TRANSPORT_METRICS: TransportMetrics = {
+        TransportMetrics::new().expect("Failed to create transport metrics")
+    };
+}
+
+/// No-op global instance when observability is disabled
+#[cfg(not(feature = "observability"))]
 lazy_static::lazy_static! {
     pub static ref TRANSPORT_METRICS: TransportMetrics = {
         TransportMetrics::new().expect("Failed to create transport metrics")

@@ -6,13 +6,11 @@
 use crate::{
     error::{BlixardError, BlixardResult},
     iroh_types::{
-        ClusterStatusRequest,
         ClusterStatusResponse,
         NodeInfo,
         NodeState,
         // GetRaftStatusRequest and GetRaftStatusResponse are defined in iroh_status_service
     },
-    metrics_otel::{attributes, metrics, Timer},
     node_shared::SharedNodeState,
 };
 use async_trait::async_trait;

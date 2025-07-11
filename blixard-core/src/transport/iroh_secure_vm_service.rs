@@ -6,7 +6,7 @@ use crate::{
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
     transport::{
-        iroh_middleware::{AuthenticatedRequest, IrohMiddleware},
+        iroh_middleware::IrohMiddleware,
         iroh_protocol::{deserialize_payload, serialize_payload},
         iroh_service::IrohService,
         iroh_vm_service::{IrohVmService, VmImageRequest, VmRequest, VmResponse},
@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use iroh::endpoint::Connection;
 use std::sync::Arc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 /// Secure wrapper for IrohVmService with authorization
 pub struct SecureIrohVmService {

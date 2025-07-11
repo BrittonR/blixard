@@ -17,7 +17,7 @@ use crate::{
     metrics_otel::{attributes, metrics, Timer},
     node_shared::{PeerInfo, SharedNodeState},
     p2p_monitor::{
-        ConnectionQuality, ConnectionState, Direction, DiscoveryMethod, P2pErrorType, P2pMonitor,
+        ConnectionQuality, ConnectionState, Direction, P2pErrorType, P2pMonitor,
     },
 };
 use iroh::{Endpoint, NodeAddr, NodeId};
@@ -347,7 +347,7 @@ impl IrohPeerConnector {
         let metrics = metrics();
         let peer_attrs = vec![attributes::peer_id(peer_id)];
         let _timer =
-            Timer::with_attributes(metrics.grpc_request_duration.clone(), &peer_attrs);
+            Timer::with_attributes(metrics.grpc_request_duration.clone(), peer_attrs.clone());
         metrics.peer_reconnect_attempts.add(1, &peer_attrs);
 
         let peer_id_str = peer_id.to_string();
@@ -387,7 +387,7 @@ impl IrohPeerConnector {
                 }
 
                 // Update peer status
-                self.node.update_peer_connection(peer_id, true).await?;
+                self.node.update_peer_connection(peer_id, "connected".to_string());
 
                 // Record successful connection
                 self.p2p_monitor
@@ -409,7 +409,7 @@ impl IrohPeerConnector {
             }
             Err(e) => {
                 // Update peer status
-                self.node.update_peer_connection(peer_id, false).await?;
+                self.node.update_peer_connection(peer_id, "disconnected".to_string());
 
                 // Record failed connection
                 self.p2p_monitor
@@ -450,7 +450,7 @@ impl IrohPeerConnector {
         let metrics = metrics();
         let peer_attrs = vec![attributes::peer_id(peer_id)];
         let _timer =
-            Timer::with_attributes(metrics.grpc_request_duration.clone(), &peer_attrs);
+            Timer::with_attributes(metrics.grpc_request_duration.clone(), peer_attrs.clone());
         metrics.peer_reconnect_attempts.add(1, &peer_attrs);
 
         // Check if already connected
@@ -503,7 +503,7 @@ impl IrohPeerConnector {
         }
 
         // Get peer info and convert to NodeAddr
-        let peer_info = self.get_peer_info(peer_id).await?;
+        let peer_info = self.get_peer_info(peer_id)?;
         let node_addr = self.peer_info_to_node_addr(&peer_info)?;
 
         // Attempt connection
@@ -526,7 +526,7 @@ impl IrohPeerConnector {
                 }
 
                 // Update peer status
-                self.node.update_peer_connection(peer_id, true).await?;
+                self.node.update_peer_connection(peer_id, "connected".to_string());
 
                 // Record success
                 breaker.record_success();
@@ -548,7 +548,7 @@ impl IrohPeerConnector {
                 breaker.record_failure();
 
                 // Update peer status
-                self.node.update_peer_connection(peer_id, false).await?;
+                self.node.update_peer_connection(peer_id, "disconnected".to_string());
 
                 // Remove from connecting
                 {
@@ -562,7 +562,7 @@ impl IrohPeerConnector {
     }
 
     /// Get peer info from node state
-    async fn get_peer_info(&self, peer_id: u64) -> BlixardResult<PeerInfo> {
+    fn get_peer_info(&self, peer_id: u64) -> BlixardResult<PeerInfo> {
         let peers = self.node.get_peers();
         peers
             .into_iter()
@@ -679,7 +679,7 @@ impl IrohPeerConnector {
             *count = count.saturating_sub(1);
 
             // Update peer status
-            self.node.update_peer_connection(peer_id, false).await?;
+            self.node.update_peer_connection(peer_id, "disconnected".to_string());
 
             // Record disconnection
             self.p2p_monitor
@@ -710,7 +710,7 @@ impl IrohPeerConnector {
             Ok(client.clone())
         } else {
             // Get peer info and convert to NodeAddr
-            let peer_info = self.get_peer_info(peer_id).await?;
+            let peer_info = self.get_peer_info(peer_id)?;
             let node_addr = self.peer_info_to_node_addr(&peer_info)?;
 
             // Connect and return the client

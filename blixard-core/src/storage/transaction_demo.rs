@@ -33,7 +33,7 @@ mod traditional_patterns {
             .begin_write()
             .map_err(|e| BlixardError::Storage {
                 operation: "begin write transaction for vm state".to_string(),
-                source: Some(Box::new(e)),
+                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
             })?;
 
         // Repetitive table opening
@@ -41,7 +41,7 @@ mod traditional_patterns {
             .open_table(VM_STATE_TABLE)
             .map_err(|e| BlixardError::Storage {
                 operation: "open vm state table".to_string(),
-                source: Some(Box::new(e)),
+                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
             })?;
 
         // Repetitive serialization with error handling
@@ -55,7 +55,7 @@ mod traditional_patterns {
             .insert(vm_name, data.as_slice())
             .map_err(|e| BlixardError::Storage {
                 operation: "insert vm state".to_string(),
-                source: Some(Box::new(e)),
+                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
             })?;
 
         // Repetitive commit with error handling
@@ -63,7 +63,7 @@ mod traditional_patterns {
             .commit()
             .map_err(|e| BlixardError::Storage {
                 operation: "commit vm state transaction".to_string(),
-                source: Some(Box::new(e)),
+                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
             })?;
 
         Ok(())
@@ -79,7 +79,7 @@ mod traditional_patterns {
             .begin_read()
             .map_err(|e| BlixardError::Storage {
                 operation: "begin read transaction for vm state".to_string(),
-                source: Some(Box::new(e)),
+                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
             })?;
 
         // Repetitive table opening
@@ -87,7 +87,7 @@ mod traditional_patterns {
             .open_table(VM_STATE_TABLE)
             .map_err(|e| BlixardError::Storage {
                 operation: "open vm state table for read".to_string(),
-                source: Some(Box::new(e)),
+                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
             })?;
 
         // Repetitive get with error handling
@@ -95,7 +95,7 @@ mod traditional_patterns {
             .get(vm_name)
             .map_err(|e| BlixardError::Storage {
                 operation: "get vm state".to_string(),
-                source: Some(Box::new(e)),
+                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
             })? {
             Some(data) => {
                 // Repetitive deserialization with error handling
@@ -122,7 +122,7 @@ mod traditional_patterns {
             .begin_write()
             .map_err(|e| BlixardError::Storage {
                 operation: "begin write transaction for restore".to_string(),
-                source: Some(Box::new(e)),
+                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
             })?;
 
         // Repetitive table opening
@@ -130,7 +130,7 @@ mod traditional_patterns {
             .open_table(VM_STATE_TABLE)
             .map_err(|e| BlixardError::Storage {
                 operation: "open table for restore".to_string(),
-                source: Some(Box::new(e)),
+                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
             })?;
 
         // Repetitive clear logic with error handling
@@ -138,7 +138,7 @@ mod traditional_patterns {
             .iter()
             .map_err(|e| BlixardError::Storage {
                 operation: "iterate table for clear".to_string(),
-                source: Some(Box::new(e)),
+                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
             })?
             .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
             .collect();
@@ -148,7 +148,7 @@ mod traditional_patterns {
                 .remove(key.as_str())
                 .map_err(|e| BlixardError::Storage {
                     operation: "remove during clear".to_string(),
-                    source: Some(Box::new(e)),
+                    source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
                 })?;
         }
 
@@ -163,7 +163,7 @@ mod traditional_patterns {
                 .insert(name.as_str(), data.as_slice())
                 .map_err(|e| BlixardError::Storage {
                     operation: "insert during restore".to_string(),
-                    source: Some(Box::new(e)),
+                    source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
                 })?;
         }
 
@@ -172,7 +172,7 @@ mod traditional_patterns {
             .commit()
             .map_err(|e| BlixardError::Storage {
                 operation: "commit restore transaction".to_string(),
-                source: Some(Box::new(e)),
+                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
             })?;
 
         Ok(())

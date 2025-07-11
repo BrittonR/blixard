@@ -16,7 +16,7 @@ use crate::{
 };
 use redb::{
     Database, ReadTransaction, WriteTransaction, Table, TableDefinition,
-    ReadOnlyTable, MultimapTable, ReadableMultimapTable,
+    ReadOnlyTable, ReadableMultimapTable,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -86,7 +86,7 @@ impl DatabaseTransaction {
             TransactionInner::Read(_) => {
                 Err(BlixardError::Storage {
                     operation: format!("Cannot open mutable table in read transaction: {}", self.operation),
-                    source: None,
+                    source: Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Read-only transaction")),
                 })
             }
             TransactionInner::Write(write_txn) => {
@@ -357,7 +357,7 @@ impl TransactionExecutor {
 
         Err(last_error.unwrap_or_else(|| BlixardError::Storage {
             operation: format!("retry transaction {}", operation),
-            source: None,
+            source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, "All retry attempts failed")),
         }))
     }
 }

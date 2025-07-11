@@ -232,7 +232,6 @@ impl ErrorUtils {
 
             BlixardError::Internal {
                 message: format!("Panic in '{}': {}", context, panic_msg),
-                source: None,
             }
         })
     }

@@ -218,33 +218,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ip_allocation() {
+    fn test_ip_allocation() -> Result<(), Box<dyn std::error::Error>> {
         let mut pool = IpAddressPool::new();
         
         // First allocation should be 10.0.0.10
-        let ip1 = pool.allocate_ip().unwrap();
+        let ip1 = pool.allocate_ip()?;
         assert_eq!(ip1, Ipv4Addr::new(10, 0, 0, 10));
         
         // Second allocation should be 10.0.0.11
-        let ip2 = pool.allocate_ip().unwrap();
+        let ip2 = pool.allocate_ip()?;
         assert_eq!(ip2, Ipv4Addr::new(10, 0, 0, 11));
         
         // Check allocation tracking
         assert!(pool.is_allocated(ip1));
         assert!(pool.is_allocated(ip2));
         assert_eq!(pool.allocated_count(), 2);
+        Ok(())
     }
 
     #[test]
-    fn test_ip_release() {
+    fn test_ip_release() -> Result<(), Box<dyn std::error::Error>> {
         let mut pool = IpAddressPool::new();
         
-        let ip = pool.allocate_ip().unwrap();
+        let ip = pool.allocate_ip()?;
         assert!(pool.is_allocated(ip));
         
         pool.release_ip(ip);
         assert!(!pool.is_allocated(ip));
         assert_eq!(pool.allocated_count(), 0);
+        Ok(())
     }
 
     #[test]

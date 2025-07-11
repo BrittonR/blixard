@@ -69,7 +69,7 @@ impl RaftStateMachine {
         let proposal: ProposalData =
             bincode::deserialize(&entry.data).deserialize_context("proposal", "ProposalData")?;
 
-        let _timer = Timer::new(&metrics().raft_proposal_apply_duration, &[
+        let _timer = Timer::new(&metrics().raft_proposal_duration, &[
             attributes::operation(proposal.proposal_type()),
         ]);
 

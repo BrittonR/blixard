@@ -28,8 +28,6 @@ pub mod secure_iroh_protocol_handler;
 #[cfg(test)]
 mod tests;
 
-use crate::error::{BlixardError, BlixardResult};
-use std::net::SocketAddr;
 
 /// ALPN protocol identifier for Blixard RPC
 pub const BLIXARD_ALPN: &[u8] = b"blixard/rpc/1";

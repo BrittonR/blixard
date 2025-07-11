@@ -106,7 +106,7 @@ impl RaftConfigManager {
 
         let cc = ConfChange {
             id: 0, // Will be assigned by Raft
-            change_type: raft_conf_change_type,
+            change_type: raft_conf_change_type.into(),
             node_id: conf_change.node_id,
             context: context_data,
         };
@@ -178,7 +178,7 @@ impl RaftConfigManager {
         self.update_local_peers_after_conf_change(cc).await?;
 
         // Trigger replication if this was an addition
-        if matches!(cc.change_type, RaftConfChangeType::AddNode) {
+        if cc.change_type == RaftConfChangeType::AddNode.into() {
             let mut needs_replication = self.needs_replication_trigger.write().await;
             *needs_replication = true;
             debug!("Set replication trigger flag for new node {}", cc.node_id);
@@ -236,7 +236,7 @@ impl RaftConfigManager {
     /// Update local peer tracking after a configuration change is applied
     async fn update_local_peers_after_conf_change(&self, cc: &ConfChange) -> BlixardResult<()> {
         match cc.change_type {
-            RaftConfChangeType::AddNode => {
+            change_type if change_type == RaftConfChangeType::AddNode.into() => {
                 // Parse the context to get the address
                 if !cc.context.is_empty() {
                     match bincode::deserialize::<ConfChangeContext>(&cc.context) {
@@ -261,7 +261,7 @@ impl RaftConfigManager {
                     }
                 }
             }
-            RaftConfChangeType::RemoveNode => {
+            change_type if change_type == RaftConfChangeType::RemoveNode.into() => {
                 let mut peers = self.peers.write().await;
                 if let Some(address) = peers.remove(&cc.node_id) {
                     info!(

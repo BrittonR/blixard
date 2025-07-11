@@ -3,7 +3,7 @@
 //! This module provides macros and utilities for injecting failures in tests
 //! while maintaining compatibility with the Blixard error system.
 
-use crate::error::{BlixardError, BlixardResult};
+use crate::error::BlixardError;
 
 /// Initialize failpoints for testing
 /// Must be called at the start of tests that use failpoints
@@ -26,7 +26,7 @@ macro_rules! fail_point {
     ($name:expr) => {{
         fail::fail_point!($name, |_| {
             return Err($crate::error::BlixardError::Internal {
-                message: format!("Failpoint {} triggered", $name),
+                message: concat!("Failpoint triggered: ", $name).to_string(),
             });
         });
     }};
@@ -127,9 +127,13 @@ pub async fn with_failpoint<F, R>(name: &str, config: &str, f: F) -> R
 where
     F: std::future::Future<Output = R>,
 {
-    fail::cfg(name, config).unwrap();
+    fail::cfg(name, config).map_err(|e| {
+        tracing::error!("Failed to configure failpoint '{}': {}", name, e);
+    }).ok();
     let result = f.await;
-    fail::cfg(name, "off").unwrap();
+    fail::cfg(name, "off").map_err(|e| {
+        tracing::error!("Failed to disable failpoint '{}': {}", name, e);
+    }).ok();
     result
 }
 
@@ -141,14 +145,18 @@ where
 {
     // Enable all failpoints
     for (name, config) in failpoints {
-        fail::cfg(*name, *config).unwrap();
+        fail::cfg(*name, *config).map_err(|e| {
+            tracing::error!("Failed to configure failpoint '{}': {}", name, e);
+        }).ok();
     }
 
     let result = f.await;
 
     // Disable all failpoints
     for (name, _) in failpoints {
-        fail::cfg(*name, "off").unwrap();
+        fail::cfg(*name, "off").map_err(|e| {
+            tracing::error!("Failed to disable failpoint '{}': {}", name, e);
+        }).ok();
     }
 
     result

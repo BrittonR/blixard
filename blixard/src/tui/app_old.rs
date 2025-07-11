@@ -2764,9 +2764,9 @@ impl App {
         let found_count = found_nodes.len();
 
         // Now add any nodes that aren't already in the cluster
-        if self.vm_client.is_some() {
+        if let Some(client) = self.vm_client.as_mut() {
             // Get cluster status first
-            let cluster_status = match self.vm_client.as_mut().unwrap().get_cluster_status().await {
+            let cluster_status = match client.get_cluster_status().await {
                 Ok(status) => status,
                 Err(e) => {
                     self.add_event(
@@ -2805,12 +2805,7 @@ impl App {
                     );
 
                     // Call join_cluster on the client
-                    let join_result = self
-                        .vm_client
-                        .as_mut()
-                        .unwrap()
-                        .join_cluster(next_id, &bind_addr)
-                        .await;
+                    let join_result = client.join_cluster(next_id, &bind_addr).await;
 
                     match join_result {
                         Ok(msg) => {

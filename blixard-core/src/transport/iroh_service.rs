@@ -5,10 +5,10 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
-    common::error_context::{NetworkContext, SerializationContext},
+    common::error_context::NetworkContext,
     transport::iroh_protocol::{
         deserialize_payload, generate_request_id, read_message, serialize_payload, write_message,
-        MessageHeader, MessageType, RpcRequest, RpcResponse,
+        MessageType, RpcRequest, RpcResponse,
     },
 };
 use async_trait::async_trait;
@@ -17,7 +17,7 @@ use iroh::{
     endpoint::{Connection, RecvStream, SendStream},
     Endpoint, NodeAddr,
 };
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 

@@ -5,7 +5,6 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
-    metrics_otel::metrics,
     node_shared::SharedNodeState,
 };
 use async_trait::async_trait;
@@ -125,13 +124,11 @@ impl MonitoringServiceImpl {
         };
 
         // Get Raft metrics
-        let (raft_term, raft_commit_index) =
-            if let Ok(raft_status) = self.node.get_raft_status().await {
-                // TODO: Get actual commit index from Raft manager
-                (raft_status.term, 0u64)
-            } else {
-                (0, 0)
-            };
+        let (raft_term, raft_commit_index) = {
+            let raft_status = self.node.get_raft_status();
+            // TODO: Get actual commit index from Raft manager
+            (raft_status.term, 0u64)
+        };
 
         // TODO: Get actual pending task count
         let pending_tasks = 0;

@@ -5,13 +5,13 @@
 
 use crate::{
     error::BlixardResult,
-    iroh_types::{VmInfo, VmConfig as IrohVmConfig},
+    iroh_types::VmInfo,
     node_shared::SharedNodeState,
     transport::service_builder::{ServiceBuilder, ServiceProtocolHandler, ServiceResponse},
-    types::{VmConfig, VmStatus},
+    types::VmConfig,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 /// VM service request/response types
 #[derive(Debug, Serialize, Deserialize)]
@@ -166,9 +166,10 @@ async fn handle_create_vm(
 ) -> BlixardResult<ServiceResponse<VmOperationResponse>> {
     // Convert request to VmConfig
     let config = VmConfig {
+        name: request.name.clone(),
         config_path: request.config_path,
         vcpus: request.vcpus.unwrap_or(2),
-        memory_mb: request.memory_mb.unwrap_or(1024),
+        memory: request.memory_mb.unwrap_or(1024),
         ..Default::default()
     };
 
@@ -235,13 +236,23 @@ async fn handle_list_vms(
 ) -> BlixardResult<ServiceResponse<VmListResponse>> {
     let vms = node.list_vms(request.include_stopped).await?;
     
+    // Convert VmState to VmInfo
+    let vm_infos: Vec<VmInfo> = vms.into_iter().map(|vm| VmInfo {
+        name: vm.name,
+        state: vm.status as i32,
+        node_id: vm.node_id,
+        vcpus: vm.config.vcpus,
+        memory_mb: vm.config.memory,
+        ip_address: vm.config.ip_address.unwrap_or_default(),
+    }).collect();
+    
     // Apply filtering if requested
     let filtered_vms = if let Some(filter) = request.filter {
-        vms.into_iter()
+        vm_infos.into_iter()
             .filter(|vm| vm.name.contains(&filter))
             .collect()
     } else {
-        vms
+        vm_infos
     };
 
     let total_count = filtered_vms.len();
@@ -257,10 +268,20 @@ async fn handle_get_vm_status(
     node: Arc<SharedNodeState>,
     request: VmOperationRequest,
 ) -> BlixardResult<ServiceResponse<VmStatusResponse>> {
-    let vm_info = node.get_vm_info(&request.name).await?;
+    let vm_state = node.get_vm_info(&request.name).await?;
+    
+    // Convert VmState to VmInfo
+    let vm_info = Some(VmInfo {
+        name: vm_state.name,
+        state: vm_state.status as i32,
+        node_id: vm_state.node_id,
+        vcpus: vm_state.config.vcpus,
+        memory_mb: vm_state.config.memory,
+        ip_address: vm_state.config.ip_address.unwrap_or_default(),
+    });
     
     let response = VmStatusResponse {
-        found: vm_info.is_some(),
+        found: true,
         vm_info,
     };
 

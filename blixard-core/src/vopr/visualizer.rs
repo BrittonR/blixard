@@ -5,7 +5,6 @@
 
 use crate::vopr::operation_generator::Operation;
 use crate::vopr::state_tracker::{Event, EventType, NodeRole, StateSnapshot};
-use std::collections::HashMap;
 use std::io::Write;
 
 /// Configuration for visualization output

@@ -252,23 +252,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_console_pattern_matching() {
-        let dir = tempdir().unwrap();
+    async fn test_console_pattern_matching() -> BlixardResult<()> {
+        let dir = tempdir().map_err(|e| BlixardError::Io(e))?;
         let socket_path = dir.path().join("test.sock");
-        let socket_path_str = socket_path.to_str().unwrap().to_string();
+        let socket_path_str = socket_path.to_str()
+            .ok_or_else(|| BlixardError::InvalidConfiguration {
+                message: "Socket path contains invalid UTF-8".to_string(),
+            })?
+            .to_string();
 
         // Create a mock console server
-        let listener = UnixListener::bind(&socket_path).unwrap();
+        let listener = UnixListener::bind(&socket_path).map_err(|e| BlixardError::Io(e))?;
         
         // Spawn server task
         let server_handle = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
+            let (mut stream, _) = listener.accept().await.map_err(|e| BlixardError::Io(e))?;
             
             // Write some console output
-            stream.write_all(b"Starting VM...\n").await.unwrap();
-            stream.write_all(b"Network initialized\n").await.unwrap();
-            stream.write_all(b"System ready\n").await.unwrap();
-            stream.flush().await.unwrap();
+            stream.write_all(b"Starting VM...\n").await.map_err(|e| BlixardError::Io(e))?;
+            stream.write_all(b"Network initialized\n").await.map_err(|e| BlixardError::Io(e))?;
+            stream.write_all(b"System ready\n").await.map_err(|e| BlixardError::Io(e))?;
+            stream.flush().await.map_err(|e| BlixardError::Io(e))?;
             
             // Keep connection open briefly
             tokio::time::sleep(constants::TEST_SERVER_HOLD_TIME).await;
@@ -283,32 +287,37 @@ mod tests {
         let (is_healthy, message) = reader
             .check_patterns("System ready", None, constants::DEFAULT_PATTERN_CHECK_TIMEOUT)
             .await
-            .unwrap();
+            ?;
         
         assert!(is_healthy);
         assert!(message.contains("System ready"));
         
         server_handle.abort();
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_unhealthy_pattern_detection() {
-        let dir = tempdir().unwrap();
+    async fn test_unhealthy_pattern_detection() -> BlixardResult<()> {
+        let dir = tempdir().map_err(|e| BlixardError::Io(e))?;
         let socket_path = dir.path().join("test.sock");
-        let socket_path_str = socket_path.to_str().unwrap().to_string();
+        let socket_path_str = socket_path.to_str()
+            .ok_or_else(|| BlixardError::InvalidConfiguration {
+                message: "Socket path contains invalid UTF-8".to_string(),
+            })?
+            .to_string();
 
         // Create a mock console server
-        let listener = UnixListener::bind(&socket_path).unwrap();
+        let listener = UnixListener::bind(&socket_path).map_err(|e| BlixardError::Io(e))?;
         
         // Spawn server task
         let server_handle = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
+            let (mut stream, _) = listener.accept().await.map_err(|e| BlixardError::Io(e))?;
             
             // Write some console output with error
-            stream.write_all(b"Starting VM...\n").await.unwrap();
-            stream.write_all(b"PANIC: kernel panic\n").await.unwrap();
-            stream.write_all(b"System halted\n").await.unwrap();
-            stream.flush().await.unwrap();
+            stream.write_all(b"Starting VM...\n").await.map_err(|e| BlixardError::Io(e))?;
+            stream.write_all(b"PANIC: kernel panic\n").await.map_err(|e| BlixardError::Io(e))?;
+            stream.write_all(b"System halted\n").await.map_err(|e| BlixardError::Io(e))?;
+            stream.flush().await.map_err(|e| BlixardError::Io(e))?;
             
             // Keep connection open briefly
             tokio::time::sleep(constants::TEST_SERVER_HOLD_TIME).await;
@@ -323,11 +332,12 @@ mod tests {
         let (is_healthy, message) = reader
             .check_patterns("System ready", Some("PANIC"), constants::DEFAULT_PATTERN_CHECK_TIMEOUT)
             .await
-            .unwrap();
+            ?;
         
         assert!(!is_healthy);
         assert!(message.contains("PANIC"));
         
         server_handle.abort();
+        Ok(())
     }
 }

@@ -121,9 +121,24 @@ impl SharedNodeState {
         *self.leader_id.write().unwrap() = leader_id;
     }
     
-    /// Get cluster members
+    /// Get cluster members (returns a clone for backward compatibility)
+    /// Consider using with_cluster_members() to avoid cloning
     pub fn cluster_members(&self) -> HashMap<u64, PeerInfo> {
         self.cluster_members.read().unwrap().clone()
+    }
+    
+    /// Access cluster members without cloning
+    pub fn with_cluster_members<F, R>(&self, f: F) -> R 
+    where 
+        F: FnOnce(&HashMap<u64, PeerInfo>) -> R
+    {
+        let members = self.cluster_members.read().unwrap();
+        f(&*members)
+    }
+    
+    /// Get the number of cluster members
+    pub fn cluster_member_count(&self) -> usize {
+        self.cluster_members.read().unwrap().len()
     }
     
     /// Add or update a cluster member
@@ -177,7 +192,9 @@ impl SharedNodeState {
     }
     
     pub fn get_peers(&self) -> Vec<PeerInfo> {
-        self.cluster_members().into_values().collect()
+        self.with_cluster_members(|members| {
+            members.values().cloned().collect()
+        })
     }
     
     pub fn get_peer(&self, node_id: u64) -> Option<PeerInfo> {
@@ -280,11 +297,11 @@ impl SharedNodeState {
         None
     }
     
-    pub async fn submit_task(&self, _task: String) -> BlixardResult<String> {
+    pub async fn submit_task(&self, _task_id: &str, _task: crate::raft_manager::TaskSpec) -> BlixardResult<u64> {
         Err(BlixardError::NotImplemented { feature: "submit_task in SharedNodeState".to_string() })
     }
     
-    pub fn set_raft_proposal_tx(&self, _tx: tokio::sync::mpsc::Sender<String>) {
+    pub fn set_raft_proposal_tx(&self, _tx: tokio::sync::mpsc::UnboundedSender<crate::raft::messages::RaftProposal>) {
         // TODO: Store raft proposal channel
     }
     
@@ -292,7 +309,7 @@ impl SharedNodeState {
         // TODO: Store raft message channel
     }
     
-    pub async fn send_raft_proposal(&self, _proposal: String) -> BlixardResult<String> {
+    pub async fn send_raft_proposal(&self, _proposal: crate::raft::messages::RaftProposal) -> BlixardResult<String> {
         Err(BlixardError::NotImplemented { feature: "send_raft_proposal in SharedNodeState".to_string() })
     }
     
@@ -308,7 +325,7 @@ impl SharedNodeState {
         Err(BlixardError::NotImplemented { feature: "register_worker_through_raft in SharedNodeState".to_string() })
     }
     
-    pub async fn get_task_status(&self, _task_id: &str) -> BlixardResult<String> {
+    pub async fn get_task_status(&self, _task_id: &str) -> BlixardResult<Option<(String, Option<crate::raft_manager::TaskResult>)>> {
         Err(BlixardError::NotImplemented { feature: "get_task_status in SharedNodeState".to_string() })
     }
     
@@ -324,7 +341,7 @@ impl SharedNodeState {
         Err(BlixardError::NotImplemented { feature: "send_raft_message in SharedNodeState".to_string() })
     }
     
-    pub async fn get_cluster_status(&self) -> BlixardResult<String> {
+    pub async fn get_cluster_status(&self) -> BlixardResult<(u64, Vec<u64>, u64)> {
         Err(BlixardError::NotImplemented { feature: "get_cluster_status in SharedNodeState".to_string() })
     }
     
@@ -337,7 +354,7 @@ impl SharedNodeState {
         // TODO: Store quota manager reference  
     }
     
-    pub fn set_ip_pool_manager(&self, _ip_manager: String) {
+    pub fn set_ip_pool_manager(&self, _ip_manager: Arc<crate::ip_pool_manager::IpPoolManager>) {
         // TODO: Store IP pool manager reference
     }
     

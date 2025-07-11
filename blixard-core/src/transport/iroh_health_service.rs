@@ -4,7 +4,6 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
-    iroh_types,
     node_shared::SharedNodeState,
     transport::{
         iroh_protocol::{deserialize_payload, serialize_payload},

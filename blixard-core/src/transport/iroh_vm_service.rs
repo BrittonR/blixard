@@ -2,7 +2,6 @@
 
 use crate::{
     error::{BlixardError, BlixardResult},
-    common::error_context::VmContext,
     metrics_otel::{attributes, metrics, Timer},
     node_shared::SharedNodeState,
     transport::{
@@ -381,7 +380,6 @@ impl IrohVmService {
         let p2p_manager = self
             .node
             .get_p2p_manager()
-            .await
             .ok_or_else(|| BlixardError::P2PError("P2P manager not available".to_string()))?;
 
         // Share the image through the P2P manager using upload_resource
@@ -446,7 +444,6 @@ impl IrohVmService {
         let p2p_manager = self
             .node
             .get_p2p_manager()
-            .await
             .ok_or_else(|| BlixardError::P2PError("P2P manager not available".to_string()))?;
 
         // Download the image through the P2P manager
@@ -501,7 +498,6 @@ impl IrohVmService {
         let health_monitor =
             self.node
                 .get_vm_health_monitor()
-                .await
                 .ok_or_else(|| BlixardError::Internal {
                     message: "VM health monitor not available".to_string(),
                 })?;
@@ -521,7 +517,6 @@ impl IrohVmService {
         let health_monitor =
             self.node
                 .get_vm_health_monitor()
-                .await
                 .ok_or_else(|| BlixardError::Internal {
                     message: "VM health monitor not available".to_string(),
                 })?;
@@ -554,7 +549,6 @@ impl IrohVmService {
         let health_monitor =
             self.node
                 .get_vm_health_monitor()
-                .await
                 .ok_or_else(|| BlixardError::Internal {
                     message: "VM health monitor not available".to_string(),
                 })?;
@@ -577,7 +571,6 @@ impl IrohVmService {
         let health_monitor =
             self.node
                 .get_vm_health_monitor()
-                .await
                 .ok_or_else(|| BlixardError::Internal {
                     message: "VM health monitor not available".to_string(),
                 })?;
@@ -610,7 +603,6 @@ impl IrohVmService {
         let health_monitor =
             self.node
                 .get_vm_health_monitor()
-                .await
                 .ok_or_else(|| BlixardError::Internal {
                     message: "VM health monitor not available".to_string(),
                 })?;
@@ -641,7 +633,6 @@ impl IrohVmService {
         let recovery_service =
             self.node
                 .get_vm_auto_recovery()
-                .await
                 .ok_or_else(|| BlixardError::Internal {
                     message: "VM auto-recovery service not available".to_string(),
                 })?;

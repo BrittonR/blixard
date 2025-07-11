@@ -280,7 +280,14 @@ impl VmClient {
             return Ok(None);
         }
 
-        let vm = resp.vm_info.unwrap();
+        let vm = match resp.vm_info {
+            Some(vm) => vm,
+            None => {
+                return Err(crate::BlixardError::Internal {
+                    message: "VM info not found in response".to_string(),
+                });
+            }
+        };
         let status = match vm.state {
             0 => VmStatus::Stopped,  // VM_STATE_UNKNOWN -> Stopped
             1 => VmStatus::Creating, // VM_STATE_CREATED -> Creating

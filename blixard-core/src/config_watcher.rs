@@ -244,20 +244,24 @@ mod tests {
     #[tokio::test]
     async fn test_config_watcher_creation() {
         // Create a temporary config file
-        let temp_file = NamedTempFile::new().unwrap();
+        let temp_file = NamedTempFile::new()
+            .map_err(|e| format!("Failed to create temp file: {}", e))
+            .expect("Test setup should succeed");
         let config_content = r#"
 [node]
 bind_address = "127.0.0.1:7001"
 data_dir = "./test_data"
 "#;
-        fs::write(temp_file.path(), config_content).unwrap();
+        fs::write(temp_file.path(), config_content)
+            .map_err(|e| format!("Failed to write test config: {}", e))
+            .expect("Test setup should succeed");
 
         // Create watcher
         let watcher = ConfigWatcher::new(temp_file.path());
         assert!(watcher.is_ok());
 
         // Clean up
-        let mut watcher = watcher.unwrap();
+        let mut watcher = watcher.expect("Watcher creation should succeed in test");
         watcher.stop().await;
     }
 }

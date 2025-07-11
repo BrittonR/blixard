@@ -5,16 +5,13 @@
 use crate::{
     error::{BlixardError, BlixardResult},
     iroh_types::{
-        GetVmImageRequest, GetVmImageResponse, ListP2pImagesRequest, ListP2pImagesResponse,
-        P2pImageInfo, ShareVmImageRequest, ShareVmImageResponse,
     },
-    metrics_otel::{attributes, metrics, Timer},
     node_shared::SharedNodeState,
-    p2p_manager::{P2pManager, ResourceType},
+    p2p_manager::ResourceType,
 };
 use async_trait::async_trait;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 // Removed tonic imports - using Iroh transport
 use serde::{Deserialize, Serialize};

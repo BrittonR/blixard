@@ -4,7 +4,6 @@
 //! and their configuration options.
 
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 
 /// Type of health check to perform on a VM
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -6,23 +6,22 @@
 use crate::{
     error::{BlixardError, BlixardResult},
     transport::{
-        iroh_middleware::{AuthenticatedRequest, IrohMiddleware},
+        iroh_middleware::IrohMiddleware,
         iroh_protocol::{
-            deserialize_payload, generate_request_id, read_message, serialize_payload,
-            write_message, MessageHeader, MessageType, RpcRequest, RpcResponse,
+            deserialize_payload, read_message, serialize_payload,
+            write_message, MessageType, RpcRequest, RpcResponse,
         },
         iroh_secure_vm_service::{SecureIrohService, SecureIrohVmService},
     },
 };
-use async_trait::async_trait;
 use bytes::Bytes;
 use iroh::{
     endpoint::Connection,
     protocol::{AcceptError, ProtocolHandler},
 };
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// Registry of secure services
 pub struct SecureServiceRegistry {

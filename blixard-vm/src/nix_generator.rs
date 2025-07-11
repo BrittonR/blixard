@@ -275,22 +275,22 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn test_nix_generator_initialization() {
-        let temp_dir = TempDir::new().unwrap();
+    fn test_nix_generator_initialization() -> BlixardResult<()> {
+        let temp_dir = TempDir::new().map_err(|e| BlixardError::Io(e))?;
         let generator = NixFlakeGenerator::new(
             temp_dir.path().to_path_buf(),
             temp_dir.path().join("modules"),
-        )
-        .unwrap();
+        )?;
 
         assert_eq!(generator.template_dir, temp_dir.path());
         assert_eq!(generator.modules_dir, temp_dir.path().join("modules"));
+        Ok(())
     }
 
     #[test]
-    fn test_generate_imports() {
+    fn test_generate_imports() -> BlixardResult<()> {
         let generator =
-            NixFlakeGenerator::new(PathBuf::from("templates"), PathBuf::from("modules")).unwrap();
+            NixFlakeGenerator::new(PathBuf::from("templates"), PathBuf::from("modules"))?;
 
         let mut config = VmConfig::default();
         config.flake_modules = vec!["webserver".to_string(), "monitoring".to_string()];
@@ -299,23 +299,23 @@ mod tests {
             NixModule::FlakePart("database".to_string()),
         ];
 
-        let imports = generator.generate_imports(&config).unwrap();
+        let imports = generator.generate_imports(&config)?;
 
         assert_eq!(imports.len(), 4);
         assert!(imports.contains(&"inputs.blixard-modules.nixosModules.webserver".to_string()));
         assert!(imports.contains(&"inputs.blixard-modules.nixosModules.monitoring".to_string()));
         assert!(imports.contains(&"./custom.nix".to_string()));
         assert!(imports.contains(&"inputs.blixard-modules.nixosModules.database".to_string()));
+        Ok(())
     }
 
     #[test]
-    fn test_flake_parts_generation() {
-        let temp_dir = TempDir::new().unwrap();
+    fn test_flake_parts_generation() -> BlixardResult<()> {
+        let temp_dir = TempDir::new().map_err(|e| BlixardError::Io(e))?;
         let generator = NixFlakeGenerator::new(
             temp_dir.path().to_path_buf(),
             temp_dir.path().join("modules"),
-        )
-        .unwrap();
+        )?;
 
         let config = VmConfig {
             name: "test-vm".to_string(),
@@ -334,7 +334,7 @@ mod tests {
             init_command: Some("/run/current-system/sw/bin/echo 'Hello World'".to_string()),
         };
 
-        let flake = generator.generate_vm_flake_parts(&config).unwrap();
+        let flake = generator.generate_vm_flake_parts(&config)?;
 
         // Verify key elements of flake-parts template
         assert!(flake.contains("flake-parts.lib.mkFlake"));
@@ -347,5 +347,6 @@ mod tests {
         assert!(flake.contains("Hello World"));
         assert!(flake.contains("vcpu = 4"));
         assert!(flake.contains("mem = 2048"));
+        Ok(())
     }
 }

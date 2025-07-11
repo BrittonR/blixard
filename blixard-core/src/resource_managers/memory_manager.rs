@@ -13,7 +13,7 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::{RwLock, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::interval;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, info, warn};
 
 /// Memory-specific resource manager
 #[derive(Debug)]

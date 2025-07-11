@@ -7,7 +7,6 @@
 //! - Efficient streaming for log entries and snapshots
 //! - Integration with existing Raft manager
 
-use bytes::Bytes;
 use iroh::endpoint::{Connection, RecvStream, SendStream};
 use iroh::{Endpoint, NodeId};
 use raft::prelude::*;
@@ -353,7 +352,6 @@ impl IrohRaftTransport {
         let peer_info = self
             .node
             .get_peer(peer_id)
-            .await
             .ok_or_else(|| BlixardError::ClusterError(format!("Unknown peer {}", peer_id)))?;
 
         // Parse Iroh node ID from peer info
@@ -803,7 +801,6 @@ async fn create_connection_for_peer(
 ) -> BlixardResult<PeerConnection> {
     let peer_info = node
         .get_peer(peer_id)
-        .await
         .ok_or_else(|| BlixardError::ClusterError(format!("Unknown peer {}", peer_id)))?;
 
     let p2p_node_id = peer_info

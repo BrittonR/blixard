@@ -36,7 +36,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tracing;
 
-use crate::abstractions::command::{CommandExecutor, CommandOptions};
+use crate::abstractions::command::CommandExecutor;
 use crate::error::{BlixardError, BlixardResult};
 
 /// Platform-specific resource collector

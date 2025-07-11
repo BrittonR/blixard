@@ -330,7 +330,7 @@ impl VmService for VmServiceImpl {
             .create_vm_with_scheduling(vm_config, strategy)
             .await?;
 
-        Ok((name, decision.selected_node_id, decision.reason))
+        Ok((name, decision.target_node_id, decision.reason))
     }
 
     async fn schedule_vm_placement(
@@ -386,7 +386,7 @@ impl VmService for VmServiceImpl {
 
         // For now, return a default score since PlacementDecision doesn't have a score field
         Ok((
-            decision.selected_node_id,
+            decision.target_node_id,
             1.0, // Default score
             decision.reason,
             decision.alternative_nodes,

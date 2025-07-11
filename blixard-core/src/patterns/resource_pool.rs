@@ -13,7 +13,7 @@ use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, Semaphore, SemaphorePermit};
+use tokio::sync::{Mutex, Semaphore};
 use tokio::time::timeout;
 use tracing::{debug, warn};
 

@@ -7,6 +7,7 @@ use crate::error::BlixardResult;
 
 use super::messages::{RaftConfChange, RaftProposal};
 
+use async_trait::async_trait;
 use slog::{error, info, Logger};
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration, Interval};
@@ -112,10 +113,10 @@ pub struct RaftEventDispatcher {
     pub conf_change_rx: mpsc::UnboundedReceiver<RaftConfChange>,
     
     // Event handlers (function pointers or trait objects)
-    tick_handler: Box<dyn TickHandler + Send>,
-    proposal_handler: Box<dyn ProposalHandler + Send>,
-    message_handler: Box<dyn MessageHandler + Send>,
-    conf_change_handler: Box<dyn ConfChangeHandler + Send>,
+    tick_handler: Box<dyn TickHandler + Send + Sync>,
+    proposal_handler: Box<dyn ProposalHandler + Send + Sync>,
+    message_handler: Box<dyn MessageHandler + Send + Sync>,
+    conf_change_handler: Box<dyn ConfChangeHandler + Send + Sync>,
     
     logger: Logger,
 }
@@ -126,10 +127,10 @@ impl RaftEventDispatcher {
         proposal_rx: mpsc::UnboundedReceiver<RaftProposal>,
         message_rx: mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>,
         conf_change_rx: mpsc::UnboundedReceiver<RaftConfChange>,
-        tick_handler: Box<dyn TickHandler + Send>,
-        proposal_handler: Box<dyn ProposalHandler + Send>,
-        message_handler: Box<dyn MessageHandler + Send>,
-        conf_change_handler: Box<dyn ConfChangeHandler + Send>,
+        tick_handler: Box<dyn TickHandler + Send + Sync>,
+        proposal_handler: Box<dyn ProposalHandler + Send + Sync>,
+        message_handler: Box<dyn MessageHandler + Send + Sync>,
+        conf_change_handler: Box<dyn ConfChangeHandler + Send + Sync>,
         logger: Logger,
     ) -> Self {
         Self {
@@ -171,21 +172,25 @@ impl RaftEventDispatcher {
 // Handler traits for different event types
 
 /// Handler for tick events
+#[async_trait]
 pub trait TickHandler {
     async fn handle_tick(&self) -> BlixardResult<()>;
 }
 
 /// Handler for proposal events  
+#[async_trait]
 pub trait ProposalHandler {
     async fn handle_proposal(&self, proposal: RaftProposal) -> BlixardResult<()>;
 }
 
 /// Handler for Raft message events
+#[async_trait]
 pub trait MessageHandler {
     async fn handle_message(&self, from: u64, msg: raft::prelude::Message) -> BlixardResult<()>;
 }
 
 /// Handler for configuration change events
+#[async_trait]
 pub trait ConfChangeHandler {
     async fn handle_conf_change(&self, conf_change: RaftConfChange) -> BlixardResult<()>;
 }
@@ -199,10 +204,10 @@ impl EventLoopFactory {
         proposal_rx: mpsc::UnboundedReceiver<RaftProposal>,
         message_rx: mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>,
         conf_change_rx: mpsc::UnboundedReceiver<RaftConfChange>,
-        tick_handler: Box<dyn TickHandler + Send>,
-        proposal_handler: Box<dyn ProposalHandler + Send>,
-        message_handler: Box<dyn MessageHandler + Send>,
-        conf_change_handler: Box<dyn ConfChangeHandler + Send>,
+        tick_handler: Box<dyn TickHandler + Send + Sync>,
+        proposal_handler: Box<dyn ProposalHandler + Send + Sync>,
+        message_handler: Box<dyn MessageHandler + Send + Sync>,
+        conf_change_handler: Box<dyn ConfChangeHandler + Send + Sync>,
         logger: Logger,
     ) -> RaftEventLoop {
         let config = EventLoopConfig::default();
@@ -226,10 +231,10 @@ impl EventLoopFactory {
         proposal_rx: mpsc::UnboundedReceiver<RaftProposal>,
         message_rx: mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>,
         conf_change_rx: mpsc::UnboundedReceiver<RaftConfChange>,
-        tick_handler: Box<dyn TickHandler + Send>,
-        proposal_handler: Box<dyn ProposalHandler + Send>,
-        message_handler: Box<dyn MessageHandler + Send>,
-        conf_change_handler: Box<dyn ConfChangeHandler + Send>,
+        tick_handler: Box<dyn TickHandler + Send + Sync>,
+        proposal_handler: Box<dyn ProposalHandler + Send + Sync>,
+        message_handler: Box<dyn MessageHandler + Send + Sync>,
+        conf_change_handler: Box<dyn ConfChangeHandler + Send + Sync>,
         logger: Logger,
     ) -> RaftEventLoop {
         let dispatcher = RaftEventDispatcher::new(

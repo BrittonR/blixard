@@ -456,7 +456,7 @@ pub struct CreateVmWithSchedulingRequest {
 pub struct CreateVmWithSchedulingResponse {
     pub success: bool,
     pub message: String,
-    pub selected_node_id: u64,
+    pub target_node_id: u64,
     pub placement_reason: String,
 }
 
@@ -473,7 +473,7 @@ pub struct ScheduleVmPlacementRequest {
 pub struct ScheduleVmPlacementResponse {
     pub success: bool,
     pub message: String,
-    pub selected_node_id: u64,
+    pub target_node_id: u64,
     pub placement_reason: String,
     pub alternative_nodes: Vec<u64>,
 }

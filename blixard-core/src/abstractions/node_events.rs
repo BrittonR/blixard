@@ -6,7 +6,7 @@
 
 use crate::{
     error::BlixardResult,
-    types::{VmStatus, VmState},
+    types::VmStatus,
     raft_manager::{WorkerStatus, TaskResult},
 };
 use async_trait::async_trait;

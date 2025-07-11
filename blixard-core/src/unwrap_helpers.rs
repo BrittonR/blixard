@@ -158,6 +158,55 @@ macro_rules! acquire_write_lock {
     };
 }
 
+/// Macro for converting Option to Internal error
+/// 
+/// # Example
+/// ```rust
+/// let value = get_or_internal!(some_option, "critical component", "Component should always be present");
+/// ```
+#[macro_export]
+macro_rules! get_or_internal {
+    ($expr:expr, $context:expr, $reason:expr) => {
+        $expr.ok_or_else(|| BlixardError::Internal {
+            message: format!("{}: {}", $context, $reason),
+        })?
+    };
+}
+
+/// Macro for fire-and-forget operations where errors are logged but not propagated
+/// 
+/// # Example
+/// ```rust
+/// try_or_log!(sender.send(msg), "Failed to send notification");
+/// ```
+#[macro_export]
+macro_rules! try_or_log {
+    ($expr:expr, $error_context:expr) => {
+        if let Err(e) = $expr {
+            tracing::error!("{}: {:?}", $error_context, e);
+        }
+    };
+}
+
+/// Macro for critical operations that should log errors but continue execution
+/// 
+/// # Example
+/// ```rust
+/// let value = expect_or_log!(critical_operation(), "default_value", "Critical operation failed");
+/// ```
+#[macro_export]
+macro_rules! expect_or_log {
+    ($expr:expr, $default:expr, $error_context:expr) => {
+        match $expr {
+            Ok(val) => val,
+            Err(e) => {
+                tracing::error!("{}: {:?}", $error_context, e);
+                $default
+            }
+        }
+    };
+}
+
 /// Safe time since UNIX_EPOCH with fallback
 /// 
 /// Returns 0 if the system time is before UNIX_EPOCH (should never happen in practice).

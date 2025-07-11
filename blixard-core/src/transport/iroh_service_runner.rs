@@ -17,9 +17,7 @@ use crate::transport::{
 };
 // VM operations are handled through SharedNodeState
 use async_trait::async_trait;
-use bytes::Bytes;
 use iroh::{
-    discovery::dns::DnsDiscovery,
     endpoint::Connection,
     protocol::{AcceptError, ProtocolHandler, Router},
     Endpoint,
@@ -29,7 +27,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// Iroh service runner that handles all RPC services
 pub struct IrohServiceRunner {
@@ -222,7 +220,7 @@ pub async fn start_iroh_services(
     bind_addr: SocketAddr,
 ) -> BlixardResult<JoinHandle<()>> {
     // Get the Iroh endpoint from P2P manager
-    let endpoint = if let Some(p2p_manager) = shared_state.get_p2p_manager().await {
+    let endpoint = if let Some(p2p_manager) = shared_state.get_p2p_manager() {
         let (endpoint, _node_id) = p2p_manager.get_endpoint();
         endpoint
     } else {

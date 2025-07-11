@@ -6,7 +6,7 @@
 use crate::{
     error::BlixardResult,
     node_shared::PeerInfo,
-    types::{NodeConfig, VmState},
+    types::NodeConfig,
 };
 use async_trait::async_trait;
 use redb::Database;

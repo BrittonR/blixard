@@ -13,6 +13,7 @@
 //! - `mod`: Main coordinator with port allocation and database utilities
 
 // Re-export everything from the modular implementation
+#[allow(unused_imports)]
 pub use test_helpers_modules::*;
 
 mod test_helpers_modules;

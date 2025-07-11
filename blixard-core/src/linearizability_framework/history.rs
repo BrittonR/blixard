@@ -23,7 +23,7 @@ impl Timestamp {
     pub fn now() -> Self {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
             .as_nanos() as u64;
         Self { nanos, logical: 0 }
     }

@@ -118,7 +118,7 @@ impl RaftSnapshotManager {
         
         if applied_index > COMPACTION_THRESHOLD {
             // Check if it's time to compact (don't compact too frequently)
-            let last_compact = *self.last_compaction_index.read().await;
+            let last_compact = *self.last_compaction_index.read().unwrap();
             let should_compact = match last_compact {
                 Some(last_compact_idx) => {
                     applied_index - last_compact_idx > COMPACTION_THRESHOLD / 2
@@ -160,7 +160,7 @@ impl RaftSnapshotManager {
                         "[RAFT-COMPACT] Successfully compacted log before index {}",
                         compact_index
                     );
-                    *self.last_compaction_index.write().await = Some(compact_index);
+                    *self.last_compaction_index.write().unwrap() = Some(compact_index);
                 }
             }
             Err(e) => {
@@ -204,11 +204,8 @@ impl RaftSnapshotManager {
                   
             for follower_id in followers_needing_snapshots {
                 // Trigger snapshot sending
-                if let Err(e) = raft_node.raft.send_append(follower_id) {
-                    warn!(self.logger, "[RAFT-SNAPSHOT] Failed to trigger snapshot to follower"; "follower_id" => follower_id, "error" => %e);
-                } else {
-                    debug!("Triggered snapshot sending to follower {}", follower_id);
-                }
+                raft_node.raft.send_append(follower_id);
+                debug!("Triggered snapshot sending to follower {}", follower_id);
             }
         }
         
@@ -326,6 +323,6 @@ impl RaftSnapshotManager {
 
     /// Get the last compaction index for monitoring
     pub async fn get_last_compaction_index(&self) -> Option<u64> {
-        *self.last_compaction_index.read().await
+        *self.last_compaction_index.read().unwrap()
     }
 }

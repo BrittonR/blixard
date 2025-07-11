@@ -92,10 +92,12 @@ impl<'a, T> IterWithoutClone<'a, &'a T> for Vec<T> {
 }
 
 /// Metrics attributes builder that avoids repeated cloning
+#[cfg(feature = "observability")]
 pub struct AttributesBuilder {
     attributes: Vec<opentelemetry::KeyValue>,
 }
 
+#[cfg(feature = "observability")]
 impl AttributesBuilder {
     pub fn new() -> Self {
         Self {
@@ -135,6 +137,41 @@ impl AttributesBuilder {
     /// Build as a slice reference for immediate use
     pub fn as_slice(&self) -> &[opentelemetry::KeyValue] {
         &self.attributes
+    }
+}
+
+/// No-op version when observability is disabled
+#[cfg(not(feature = "observability"))]
+pub struct AttributesBuilder;
+
+#[cfg(not(feature = "observability"))]
+impl AttributesBuilder {
+    pub fn new() -> Self {
+        Self
+    }
+    
+    pub fn with_capacity(_capacity: usize) -> Self {
+        Self
+    }
+    
+    pub fn add_kv(self, _kv: ()) -> Self {
+        self
+    }
+    
+    pub fn add_str(self, _key: &'static str, _value: impl StringRef) -> Self {
+        self
+    }
+    
+    pub fn add_u64(self, _key: &'static str, _value: u64) -> Self {
+        self
+    }
+    
+    pub fn build(self) -> Vec<()> {
+        Vec::new()
+    }
+    
+    pub fn as_slice(&self) -> &[()] {
+        &[]
     }
 }
 

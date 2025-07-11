@@ -16,8 +16,6 @@ use crate::{
     error::{BlixardError, BlixardResult},
     patterns::resource_pool::{PoolableResource, ResourceFactory, ResourcePool, PoolConfig},
     types::VmId,
-    acquire_write_lock,
-    acquire_read_lock,
     unwrap_helpers::time_since_epoch_safe,
 };
 use async_trait::async_trait;

@@ -7,7 +7,6 @@
 use crate::{
     abstractions::command::TokioCommandExecutor,
     error::{BlixardError, BlixardResult},
-    iroh_types,
     nix_image_store::{NixArtifactType, NixImageMetadata, NixImageStore, TransferStats},
     node_shared::SharedNodeState,
 };
@@ -17,7 +16,7 @@ use std::sync::Arc;
 // Removed tonic imports - using Iroh transport
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, warn};
+use tracing::info;
 
 /// Request to import a Nix-built VM image
 #[derive(Debug, Clone, Serialize, Deserialize)]

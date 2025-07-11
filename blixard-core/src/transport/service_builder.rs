@@ -29,21 +29,21 @@ pub trait ServiceMethod<Req, Resp>: Send + Sync {
     async fn handle(&self, request: Req) -> BlixardResult<Resp>;
 }
 
-/// Macro to implement ServiceMethod for closures
-macro_rules! impl_service_method {
-    ($req:ty, $resp:ty) => {
-        #[async_trait]
-        impl<F, Fut> ServiceMethod<$req, $resp> for F
-        where
-            F: Fn($req) -> Fut + Send + Sync,
-            Fut: std::future::Future<Output = BlixardResult<$resp>> + Send,
-        {
-            async fn handle(&self, request: $req) -> BlixardResult<$resp> {
-                self(request).await
-            }
-        }
-    };
-}
+// Macro to implement ServiceMethod for closures - currently unused
+// macro_rules! impl_service_method {
+//     ($req:ty, $resp:ty) => {
+//         #[async_trait]
+//         impl<F, Fut> ServiceMethod<$req, $resp> for F
+//         where
+//             F: Fn($req) -> Fut + Send + Sync,
+//             Fut: std::future::Future<Output = BlixardResult<$resp>> + Send,
+//         {
+//             async fn handle(&self, request: $req) -> BlixardResult<$resp> {
+//                 self(request).await
+//             }
+//         }
+//     };
+// }
 
 /// Response wrapper that ensures consistent success/error formatting
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

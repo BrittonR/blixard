@@ -4,9 +4,9 @@
 //! including normal operations, fault injections, and Byzantine behaviors.
 
 use crate::vopr::fuzzer_engine::OperationWeights;
+use crate::unwrap_helpers::choose_random;
 use rand::{seq::SliceRandom, Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
-use std::time::Duration;
 
 /// An operation that can be performed on the system
 #[derive(Debug, Clone, PartialEq)]
@@ -236,11 +236,9 @@ impl OperationGenerator {
         match op {
             Operation::StartNode { .. } => {
                 // Change to stopping a random node
-                if !self.active_nodes.is_empty() {
-                    let node_id = *self.active_nodes.choose(rng).unwrap();
-                    Operation::StopNode { node_id }
-                } else {
-                    op.clone()
+                match choose_random(&self.active_nodes) {
+                    Ok(node_id) => Operation::StopNode { node_id: *node_id },
+                    Err(_) => op.clone(), // No active nodes available
                 }
             }
             Operation::ClientRequest { client_id, .. } => {
@@ -289,12 +287,10 @@ impl OperationGenerator {
     }
 
     fn generate_restart_node(&mut self, rng: &mut ChaCha8Rng) -> Operation {
-        if self.active_nodes.is_empty() {
-            return self.generate_start_node();
+        match choose_random(&self.active_nodes) {
+            Ok(node_id) => Operation::RestartNode { node_id: *node_id },
+            Err(_) => self.generate_start_node(), // No active nodes, start a new one
         }
-
-        let node_id = *self.active_nodes.choose(rng).unwrap();
-        Operation::RestartNode { node_id }
     }
 
     fn generate_client_request(&mut self, rng: &mut ChaCha8Rng) -> Operation {
@@ -329,11 +325,17 @@ impl OperationGenerator {
                 }
             }
             1 if !self.active_vms.is_empty() => {
-                let vm_id = self.active_vms.choose(rng).unwrap().clone();
+                let vm_id = match self.active_vms.choose(rng) {
+                    Some(id) => id.clone(),
+                    None => return self.generate_create_vm(),
+                };
                 ClientOp::StartVm { vm_id }
             }
             2 if !self.active_vms.is_empty() => {
-                let vm_id = self.active_vms.choose(rng).unwrap().clone();
+                let vm_id = match self.active_vms.choose(rng) {
+                    Some(id) => id.clone(),
+                    None => return self.generate_create_vm(),
+                };
                 ClientOp::StopVm { vm_id }
             }
             3 if !self.active_vms.is_empty() => {
@@ -346,7 +348,10 @@ impl OperationGenerator {
                 command: "echo test".to_string(),
             },
             5 if !self.active_vms.is_empty() => {
-                let vm_id = self.active_vms.choose(rng).unwrap().clone();
+                let vm_id = match self.active_vms.choose(rng) {
+                    Some(id) => id.clone(),
+                    None => return self.generate_create_vm(),
+                };
                 ClientOp::GetVmStatus { vm_id }
             }
             _ => ClientOp::GetClusterStatus,
@@ -377,7 +382,10 @@ impl OperationGenerator {
             return self.generate_start_node();
         }
 
-        let node_id = *self.active_nodes.choose(rng).unwrap();
+        let node_id = match self.active_nodes.choose(rng) {
+            Some(id) => *id,
+            None => return self.generate_start_node(),
+        };
         let delta_ms = rng.gen_range(-60000..=60000); // ±1 minute
 
         Operation::ClockJump { node_id, delta_ms }
@@ -388,7 +396,10 @@ impl OperationGenerator {
             return self.generate_start_node();
         }
 
-        let node_id = *self.active_nodes.choose(rng).unwrap();
+        let node_id = match self.active_nodes.choose(rng) {
+            Some(id) => *id,
+            None => return self.generate_start_node(),
+        };
         let drift_rate_ppm = rng.gen_range(-10000..=10000); // ±10,000 ppm = ±1%
 
         Operation::ClockDrift {
@@ -402,9 +413,15 @@ impl OperationGenerator {
             return self.generate_start_node();
         }
 
-        let from = *self.active_nodes.choose(rng).unwrap();
+        let from = match self.active_nodes.choose(rng) {
+            Some(id) => *id,
+            None => return self.generate_start_node(),
+        };
         let to = loop {
-            let node = *self.active_nodes.choose(rng).unwrap();
+            let node = match self.active_nodes.choose(rng) {
+                Some(id) => *id,
+                None => continue,  // This shouldn't happen but handle gracefully
+            };
             if node != from {
                 break node;
             }
@@ -424,9 +441,15 @@ impl OperationGenerator {
             return self.generate_start_node();
         }
 
-        let from = *self.active_nodes.choose(rng).unwrap();
+        let from = match self.active_nodes.choose(rng) {
+            Some(id) => *id,
+            None => return self.generate_start_node(),
+        };
         let to = loop {
-            let node = *self.active_nodes.choose(rng).unwrap();
+            let node = match self.active_nodes.choose(rng) {
+                Some(id) => *id,
+                None => continue,  // This shouldn't happen but handle gracefully
+            };
             if node != from {
                 break node;
             }
@@ -442,9 +465,15 @@ impl OperationGenerator {
             return self.generate_start_node();
         }
 
-        let from = *self.active_nodes.choose(rng).unwrap();
+        let from = match self.active_nodes.choose(rng) {
+            Some(id) => *id,
+            None => return self.generate_start_node(),
+        };
         let to = loop {
-            let node = *self.active_nodes.choose(rng).unwrap();
+            let node = match self.active_nodes.choose(rng) {
+                Some(id) => *id,
+                None => continue,  // This shouldn't happen but handle gracefully
+            };
             if node != from {
                 break node;
             }
@@ -464,7 +493,10 @@ impl OperationGenerator {
             return self.generate_start_node();
         }
 
-        let node_id = *self.active_nodes.choose(rng).unwrap();
+        let node_id = match self.active_nodes.choose(rng) {
+            Some(id) => *id,
+            None => return self.generate_start_node(),
+        };
 
         let behavior = match rng.gen_range(0..9) {
             0 => ByzantineBehavior::Equivocation,
@@ -475,7 +507,10 @@ impl OperationGenerator {
             5 => ByzantineBehavior::ReplayAttack,
             6 => {
                 let pretend_id = loop {
-                    let id = *self.active_nodes.choose(rng).unwrap();
+                    let id = match self.active_nodes.choose(rng) {
+                        Some(node_id) => *node_id,
+                        None => continue,  // This shouldn't happen but handle gracefully
+                    };
                     if id != node_id {
                         break id;
                     }

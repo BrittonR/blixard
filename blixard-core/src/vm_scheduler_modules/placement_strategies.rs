@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::metrics_otel;
-use crate::types::{LocalityPreference, VmConfig};
+use crate::types::VmConfig;
 
 use super::resource_analysis::{NodeResourceUsage, SchedulingContext, VmResourceRequirements};
 

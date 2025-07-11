@@ -14,7 +14,6 @@ use bytes::Bytes;
 use iroh::endpoint::{RecvStream, SendStream};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::debug;
 
 /// Cluster service message types
 #[derive(Debug, Clone, Serialize, Deserialize)]

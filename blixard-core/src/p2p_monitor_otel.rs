@@ -1,9 +1,12 @@
+#[cfg(feature = "observability")]
 use crate::metrics_otel::Metrics;
 use crate::p2p_monitor::{
     ConnectionQuality, ConnectionState, Direction, DiscoveryMethod, P2pErrorType, P2pMonitor,
 };
 use async_trait::async_trait;
+#[cfg(feature = "observability")]
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
+#[cfg(feature = "observability")]
 use opentelemetry::KeyValue;
 use std::sync::Arc;
 

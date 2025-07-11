@@ -490,14 +490,14 @@ impl VmManager {
         tracing::info!(
             "Scheduled VM '{}' for placement on node {}: {}",
             vm_config.name,
-            placement.selected_node_id,
+            placement.target_node_id,
             placement.reason
         );
 
         // Propose VM creation through Raft consensus
         let vm_command = VmCommand::Create {
             config: vm_config,
-            node_id: placement.selected_node_id,
+            node_id: placement.target_node_id,
         };
 
         // Submit the command through Raft for distributed consensus

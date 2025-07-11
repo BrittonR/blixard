@@ -4,7 +4,7 @@
 //! at the /metrics endpoint for Prometheus scraping and P2P bootstrap
 //! information at the /bootstrap endpoint.
 
-use crate::error::{BlixardError, BlixardResult};
+use crate::error::BlixardResult;
 use crate::iroh_types::BootstrapInfo;
 use crate::metrics_otel::prometheus_metrics;
 use crate::node_shared::SharedNodeState;
@@ -110,7 +110,7 @@ async fn handle_request(
 /// Get bootstrap information from shared state
 async fn get_bootstrap_info(shared_state: &SharedNodeState) -> BlixardResult<BootstrapInfo> {
     // Get the Iroh endpoint information
-    let (endpoint, node_id) = shared_state.get_iroh_endpoint().await?;
+    let (endpoint, node_id) = shared_state.get_iroh_endpoint()?;
 
     // Get our addresses
     let our_addrs = endpoint.bound_sockets();

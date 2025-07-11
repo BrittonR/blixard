@@ -17,7 +17,7 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::{RwLock, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::interval;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// CPU scheduling policy
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

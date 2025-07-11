@@ -9,7 +9,6 @@ use tracing::{error, info, warn};
 use async_trait::async_trait;
 
 use crate::{
-    abstractions::time::{Clock, SystemClock},
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
     patterns::LifecycleManager,

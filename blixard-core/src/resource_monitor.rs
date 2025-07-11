@@ -15,7 +15,7 @@ use crate::{
     error::{BlixardError, BlixardResult},
     metrics_otel,
     node_shared::SharedNodeState,
-    resource_collection::{SystemResourceCollector, VmResourceMetrics},
+    resource_collection::SystemResourceCollector,
     types::VmStatus,
     vm_backend::VmManager,
 };

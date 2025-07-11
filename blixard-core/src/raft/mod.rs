@@ -27,7 +27,6 @@ pub use self::proposals::ProposalData;
 
 // Internal utilities shared across modules
 pub(crate) mod utils {
-    use crate::error::BlixardResult;
     use slog::{o, Logger};
     
     /// Create a Raft logger with consistent formatting
@@ -45,7 +44,11 @@ pub(crate) mod utils {
         use std::hash::{Hash, Hasher};
         
         let mut hasher = DefaultHasher::new();
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos().hash(&mut hasher);
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+            .as_nanos()
+            .hash(&mut hasher);
         std::process::id().hash(&mut hasher);
         std::thread::current().id().hash(&mut hasher);
         

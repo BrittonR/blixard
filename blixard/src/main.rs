@@ -868,7 +868,13 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
             match client.get_vm_status(request).await {
                 Ok(resp) => {
                     if resp.found {
-                        let vm = resp.vm_info.unwrap();
+                        let vm = match resp.vm_info {
+                            Some(vm) => vm,
+                            None => {
+                                eprintln!("Error: VM info not found in response");
+                                std::process::exit(1);
+                            }
+                        };
                         println!("VM '{}' Status:", name);
                         println!("  State: {:?}", vm.state);
                         println!("  Node ID: {}", vm.node_id);
@@ -1491,11 +1497,14 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
 
             // Cleanup P2P transport
             if let Some(transport) = transport {
-                Arc::try_unwrap(transport)
-                    .map_err(|_| "Failed to unwrap transport Arc")
-                    .unwrap()
-                    .shutdown()
-                    .await?;
+                match Arc::try_unwrap(transport) {
+                    Ok(t) => {
+                        t.shutdown().await?;
+                    }
+                    Err(_) => {
+                        eprintln!("Warning: Failed to unwrap transport Arc - transport may still have references");
+                    }
+                }
             }
         }
         ClusterCommands::Import {
@@ -1540,11 +1549,14 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
 
             // Cleanup P2P transport
             if let Some(transport) = transport {
-                Arc::try_unwrap(transport)
-                    .map_err(|_| "Failed to unwrap transport Arc")
-                    .unwrap()
-                    .shutdown()
-                    .await?;
+                match Arc::try_unwrap(transport) {
+                    Ok(t) => {
+                        t.shutdown().await?;
+                    }
+                    Err(_) => {
+                        eprintln!("Warning: Failed to unwrap transport Arc - transport may still have references");
+                    }
+                }
             }
         }
         ClusterCommands::IpPool { command } => {
@@ -1735,10 +1747,16 @@ async fn handle_reset_command(
 
     if !force {
         print!("❓ Are you sure you want to continue? (y/N): ");
-        io::stdout().flush().unwrap();
+        if let Err(e) = io::stdout().flush() {
+            eprintln!("Error flushing stdout: {}", e);
+            return Err(BlixardError::Io(e));
+        }
 
         let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
+        if let Err(e) = io::stdin().read_line(&mut input) {
+            eprintln!("Error reading input: {}", e);
+            return Err(BlixardError::Io(e));
+        }
         let input = input.trim().to_lowercase();
 
         if input != "y" && input != "yes" {

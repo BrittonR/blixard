@@ -224,7 +224,7 @@ impl VmAutoRecovery {
         let current_node_id = self.node_state.get_id();
 
         // Check if the selected node is different from current
-        if placement.selected_node_id == current_node_id {
+        if placement.target_node_id == current_node_id {
             warn!(
                 "No alternative node available for VM '{}' migration",
                 vm_name
@@ -245,14 +245,14 @@ impl VmAutoRecovery {
 
         info!(
             "Migrating VM '{}' from node {} to node {}",
-            vm_name, current_node_id, placement.selected_node_id
+            vm_name, current_node_id, placement.target_node_id
         );
 
         // Create migration task
         let migration_task = crate::types::VmMigrationTask {
             vm_name: vm_name.to_string(),
             source_node_id: current_node_id,
-            target_node_id: placement.selected_node_id,
+            target_node_id: placement.target_node_id,
             live_migration: false, // Failed VMs can't do live migration
             force: true,           // Force migration since VM is failed
         };

@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use std::sync::Arc;
 
 /// Represents the connection state of a P2P peer
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

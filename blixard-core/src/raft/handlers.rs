@@ -10,15 +10,14 @@ use super::event_loop::{TickHandler, ProposalHandler, MessageHandler, ConfChange
 use super::messages::{RaftConfChange, RaftProposal};
 use super::config_manager::RaftConfigManager;
 use super::snapshot::RaftSnapshotManager;
-use super::state_machine::RaftStateMachine;
 
 use async_trait::async_trait;
 use raft::prelude::RawNode;
 use raft::StateRole;
 use std::sync::{Arc, Weak};
 use std::collections::HashMap;
-use tokio::sync::{mpsc, oneshot, RwLock};
-use slog::{error, info, warn, Logger};
+use tokio::sync::{oneshot, RwLock};
+use slog::{info, warn, Logger};
 use tracing::instrument;
 
 /// Handler for tick events that delegates to RaftManager
@@ -231,10 +230,10 @@ impl HandlerFactory {
         shared_state: Weak<crate::node_shared::SharedNodeState>,
         logger: Logger,
     ) -> (
-        Box<dyn TickHandler + Send>,
-        Box<dyn ProposalHandler + Send>, 
-        Box<dyn MessageHandler + Send>,
-        Box<dyn ConfChangeHandler + Send>,
+        Box<dyn TickHandler + Send + Sync>,
+        Box<dyn ProposalHandler + Send + Sync>, 
+        Box<dyn MessageHandler + Send + Sync>,
+        Box<dyn ConfChangeHandler + Send + Sync>,
     ) {
         let tick_handler = Box::new(RaftTickHandler::new(
             raft_node.clone(),

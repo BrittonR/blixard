@@ -20,7 +20,6 @@ pub use self::test_harness::{ClusterState, TestHarness};
 pub use self::time_accelerator::{SimulatedTime, TimeAccelerator};
 
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Configuration for the VOPR fuzzer
 #[derive(Debug, Clone)]

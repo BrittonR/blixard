@@ -6,16 +6,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use uuid::Uuid;
 
 use crate::error::BlixardResult;
-use crate::raft_manager::{ProposalData, RaftMessage, RaftProposal};
+use crate::raft_manager::ProposalData;
 use crate::test_helpers::{TestCluster, TestNode};
-use crate::types::{VmCommand, VmConfig, VmStatus as BlixardVmStatus};
+use crate::types::{VmCommand, VmConfig};
 use crate::vopr::fuzzer_engine::Coverage;
 use crate::vopr::operation_generator::{ByzantineBehavior, ClientOp, Operation};
 use crate::vopr::state_tracker::{
-    NetworkPartition, NodeRole, NodeState, ResourceUsage, StateSnapshot, VmState, VmStatus,
+    NetworkPartition, NodeRole, NodeState, ResourceUsage, StateSnapshot, VmState,
 };
 use crate::vopr::time_accelerator::TimeAccelerator;
 
