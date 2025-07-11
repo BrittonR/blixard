@@ -230,8 +230,10 @@ impl TimeAccelerator {
 
     /// Get statistics about clock skew across all nodes
     pub fn clock_skew_stats(&self) -> ClockSkewStats {
-        let clocks = self.node_clocks.lock().unwrap();
-        let global = self.global_time.lock().unwrap();
+        let (clocks, global) = match (self.node_clocks.lock(), self.global_time.lock()) {
+            (Ok(c), Ok(g)) => (c, g),
+            _ => return ClockSkewStats::default(),
+        };
 
         if clocks.is_empty() {
             return ClockSkewStats::default();
@@ -247,7 +249,11 @@ impl TimeAccelerator {
 
         let min_skew = *times.iter().min().unwrap_or(&0);
         let max_skew = *times.iter().max().unwrap_or(&0);
-        let avg_skew = times.iter().sum::<i128>() / times.len() as i128;
+        let avg_skew = if times.is_empty() {
+            0
+        } else {
+            times.iter().sum::<i128>() / times.len() as i128
+        };
 
         ClockSkewStats {
             min_skew_nanos: min_skew,
