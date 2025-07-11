@@ -1,13 +1,12 @@
 pub mod placement_strategies;
 pub mod resource_analysis;
 
-use redb::{Database, ReadableTable};
-use serde::{Deserialize, Serialize};
+use redb::Database;
 use std::sync::Arc;
 use std::collections::HashMap;
 
 use crate::anti_affinity::{AntiAffinityChecker, AntiAffinityRules};
-use crate::error::{BlixardError, BlixardResult};
+use crate::error::BlixardResult;
 use crate::metrics_otel;
 use crate::raft_manager::{WorkerCapabilities, WorkerStatus};
 use crate::resource_management::{ClusterResourceManager, OvercommitPolicy, ResourceReservation};

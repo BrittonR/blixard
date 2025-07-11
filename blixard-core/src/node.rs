@@ -773,23 +773,10 @@ impl Node {
         p2p_addresses: &[String],
         p2p_relay_url: &Option<String>,
     ) -> BlixardResult<()> {
-        // TODO: Implement proper state update after join  
-        let _transport_client = crate::transport::iroh_client::IrohClusterServiceClient::new(
-            Arc::new(endpoint),
-            node_addr.clone(),
-        );
-
-        let resp = transport_client
-            .join_cluster(
-                self.shared.get_id(),
-                self.shared.get_bind_addr().to_string(),
-                p2p_node_id.clone(),
-                p2p_addresses.to_vec(),
-                p2p_relay_url.clone(),
-            )
-            .await?;
-
-        Ok(resp)
+        // TODO: Implement proper state update after join
+        // Temporarily stubbed out due to missing endpoint and node_addr variables
+        tracing::warn!("update_shared_state_after_join not fully implemented");
+        Ok(())
     }
 
     /// Store peer information from join response
