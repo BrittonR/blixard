@@ -19,7 +19,7 @@ use super::handlers::HandlerFactory;
 use raft::prelude::{Config, Entry, RawNode, Ready};
 use raft::{GetEntriesContext, StateRole};
 use redb::Database;
-use slog::{error, info, warn, Drain, Logger};
+use slog::{error, info, warn, Logger};
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 use tokio::sync::{mpsc, oneshot, RwLock};

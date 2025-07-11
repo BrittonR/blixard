@@ -336,8 +336,8 @@ impl LifecycleManager for VmHealthMonitor {
     }
 
     async fn restart(&mut self) -> BlixardResult<()> {
-        self.stop().await?;
-        self.start().await
+        <Self as LifecycleManager>::stop(self).await?;
+        <Self as LifecycleManager>::start(self).await
     }
 
     fn is_running(&self) -> bool {
