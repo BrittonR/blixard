@@ -3,6 +3,7 @@
 //! This module provides shared functionality to reduce duplication
 //! and ensure consistency across the application.
 
+pub mod async_utils;
 pub mod error_context;
 pub mod file_io;
 // Temporarily disabled due to tonic dependencies
@@ -12,6 +13,10 @@ pub mod metrics;
 
 #[cfg(test)]
 // mod example_usage;
+pub use async_utils::{
+    quick_read, quick_read_extract, conditional_update, with_timeout,
+    BatchProcessor, AtomicCounter, OptionalArc, retry_with_backoff, concurrent_map,
+};
 pub use error_context::{ErrorContext, ResultContext};
 pub use file_io::{
     ensure_directory, file_exists, read_binary_file_with_context, read_config_file,

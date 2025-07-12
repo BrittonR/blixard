@@ -43,13 +43,13 @@ impl StatusServiceImpl {
 impl StatusService for StatusServiceImpl {
     async fn get_cluster_status(&self) -> BlixardResult<ClusterStatusResponse> {
         // Get Raft status to determine leadership and term
-        let raft_status = self.node.get_raft_status();
+        let raft_status = self.node.get_raft_status().await;
 
         let leader_id = raft_status.leader_id.unwrap_or(0);
         let term = raft_status.term;
 
         // Get all configured node IDs from peers
-        let peers = self.node.get_peers();
+        let peers = self.node.get_peers().await;
         let mut node_ids = vec![self.node.get_id()];
         node_ids.extend(peers.iter().filter_map(|p| {
             // Try to parse node_id as u64 if it's a string
@@ -61,7 +61,7 @@ impl StatusService for StatusServiceImpl {
         }));
 
         // Get peers for address information
-        let peers = self.node.get_peers();
+        let peers = self.node.get_peers().await;
 
         // Build node list from the authoritative Raft configuration
         let mut nodes = Vec::new();

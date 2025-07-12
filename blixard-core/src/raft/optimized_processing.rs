@@ -219,31 +219,31 @@ impl OptimizedRaftProcessor {
         match priority {
             BatchPriority::Election => {
                 let mut queue = self.election_queue.lock().await;
-                if queue.is_empty() || queue.back().unwrap().len() >= 32 {
+                if queue.is_empty() || queue.back().map_or(false, |b| b.len() >= 32) {
                     queue.push_back(Vec::with_capacity(32));
                 }
-                queue.back_mut().unwrap().push(message);
+                queue.back_mut().expect("queue must have an element after conditional push").push(message);
             }
             BatchPriority::Heartbeat => {
                 let mut queue = self.heartbeat_queue.lock().await;
-                if queue.is_empty() || queue.back().unwrap().len() >= 64 {
+                if queue.is_empty() || queue.back().map_or(false, |b| b.len() >= 64) {
                     queue.push_back(Vec::with_capacity(64));
                 }
-                queue.back_mut().unwrap().push(message);
+                queue.back_mut().expect("queue must have an element after conditional push").push(message);
             }
             BatchPriority::Normal => {
                 let mut queue = self.normal_queue.lock().await;
-                if queue.is_empty() || queue.back().unwrap().len() >= 16 {
+                if queue.is_empty() || queue.back().map_or(false, |b| b.len() >= 16) {
                     queue.push_back(Vec::with_capacity(16));
                 }
-                queue.back_mut().unwrap().push(message);
+                queue.back_mut().expect("queue must have an element after conditional push").push(message);
             }
             BatchPriority::Snapshot => {
                 let mut queue = self.snapshot_queue.lock().await;
-                if queue.is_empty() || queue.back().unwrap().len() >= 4 {
+                if queue.is_empty() || queue.back().map_or(false, |b| b.len() >= 4) {
                     queue.push_back(Vec::with_capacity(4));
                 }
-                queue.back_mut().unwrap().push(message);
+                queue.back_mut().expect("queue must have an element after conditional push").push(message);
             }
         }
         

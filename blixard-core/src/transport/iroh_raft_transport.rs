@@ -244,7 +244,7 @@ impl IrohRaftTransport {
     /// Send a Raft message to a peer
     pub async fn send_message(&self, to: u64, message: Message) -> BlixardResult<()> {
         // Check if we know about this peer first
-        if self.node.get_peer(to).is_none() {
+        if self.node.get_peer(to).await.is_none() {
             // Peer is not in our cluster, silently drop the message
             tracing::debug!("Dropping message to unknown peer {}", to);
             return Ok(());
@@ -358,6 +358,7 @@ impl IrohRaftTransport {
         let peer_info = self
             .node
             .get_peer(peer_id)
+            .await
             .ok_or_else(|| BlixardError::ClusterError(format!("Unknown peer {}", peer_id)))?;
 
         // Use the regular node_id as P2P node ID (temporary mapping)
@@ -591,7 +592,7 @@ async fn handle_incoming_connection(
         })?;
 
     // Find the peer ID for this Iroh node
-    let peers = node.get_peers();
+    let peers = node.get_peers().await;
     let peer_id = peers
         .iter()
         .find(|p| p.node_id == remote_node_id.to_string())
@@ -808,6 +809,7 @@ async fn create_connection_for_peer(
 ) -> BlixardResult<PeerConnection> {
     let peer_info = node
         .get_peer(peer_id)
+        .await
         .ok_or_else(|| BlixardError::ClusterError(format!("Unknown peer {}", peer_id)))?;
 
     let p2p_node_id = peer_info

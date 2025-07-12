@@ -6,7 +6,10 @@
 //! - Reference-based message passing
 //! - Efficient connection pooling
 
-use crate::error::{BlixardError, BlixardResult};
+use crate::{
+    error::{BlixardError, BlixardResult},
+    unwrap_helpers::time_since_epoch_safe,
+};
 use bytes::{Bytes, BytesMut};
 use iroh::{Endpoint, NodeAddr, NodeId};
 use std::collections::HashMap;
@@ -175,10 +178,7 @@ impl IrohConnection {
     pub async fn send_message_ref(&self, envelope: &MessageEnvelope<'_>) -> BlixardResult<Bytes> {
         // Update last used timestamp
         self.last_used.store(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            time_since_epoch_safe(),
             std::sync::atomic::Ordering::Relaxed,
         );
         
@@ -284,12 +284,7 @@ impl OptimizedConnectionPool {
             connection,
             node_addr,
             peer_id: target,
-            last_used: std::sync::atomic::AtomicU64::new(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs()
-            ),
+            last_used: std::sync::atomic::AtomicU64::new(time_since_epoch_safe()),
         });
         
         // Store the connection
@@ -320,10 +315,7 @@ impl OptimizedConnectionPool {
     
     /// Remove stale connections
     pub async fn cleanup_stale_connections(&self, max_idle_secs: u64) {
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let current_time = time_since_epoch_safe();
         
         let mut to_remove = Vec::new();
         

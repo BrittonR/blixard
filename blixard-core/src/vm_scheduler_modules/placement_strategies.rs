@@ -217,7 +217,7 @@ impl super::VmScheduler {
                     .partial_cmp(&b.calculate_availability_score())
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
-            .unwrap();
+            .expect("candidate_nodes is non-empty as checked above");
 
         let confidence_score = best_node.calculate_availability_score();
         let resource_fit_score =
@@ -269,7 +269,7 @@ impl super::VmScheduler {
                     .partial_cmp(&b.calculate_availability_score())
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
-            .unwrap();
+            .expect("candidate_nodes is non-empty as checked above");
 
         let confidence_score = 100.0 - best_node.calculate_availability_score(); // Invert for bin packing
         let resource_fit_score =
@@ -507,7 +507,7 @@ impl super::VmScheduler {
         let best_node = candidate_nodes
             .iter()
             .find(|node| node.node_id == best_node_id)
-            .unwrap();
+            .expect("best_node_id should exist in candidate_nodes");
 
         let confidence_score = 100.0 - ((best_cost - cheapest_cost) / cheapest_cost * 100.0);
         let resource_fit_score =

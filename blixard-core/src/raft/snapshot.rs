@@ -3,8 +3,11 @@
 //! This module handles creating, distributing, and applying Raft snapshots
 //! for state transfer and log compaction purposes.
 
-use crate::common::error_context::StorageContext;
-use crate::error::{BlixardError, BlixardResult};
+use crate::{
+    acquire_lock_unwrap,
+    common::error_context::StorageContext,
+    error::{BlixardError, BlixardResult},
+};
 use crate::raft_storage::{
     RedbRaftStorage, SnapshotData, CLUSTER_STATE_TABLE, IP_ALLOCATION_TABLE, IP_POOL_TABLE,
     TASK_ASSIGNMENT_TABLE, TASK_RESULT_TABLE, TASK_TABLE, VM_IP_MAPPING_TABLE, VM_STATE_TABLE,
@@ -167,7 +170,7 @@ impl RaftSnapshotManager {
 
         if applied_index > COMPACTION_THRESHOLD {
             // Check if it's time to compact (don't compact too frequently)
-            let last_compact = *self.last_compaction_index.read().unwrap();
+            let last_compact = *acquire_lock_unwrap!(self.last_compaction_index.read(), "read last_compaction_index");
             let should_compact = match last_compact {
                 Some(last_compact_idx) => {
                     applied_index - last_compact_idx > COMPACTION_THRESHOLD / 2
@@ -209,7 +212,7 @@ impl RaftSnapshotManager {
                         self.logger,
                         "[RAFT-COMPACT] Successfully compacted log before index {}", compact_index
                     );
-                    *self.last_compaction_index.write().unwrap() = Some(compact_index);
+                    *acquire_lock_unwrap!(self.last_compaction_index.write(), "write last_compaction_index") = Some(compact_index);
                 }
             }
             Err(e) => {
@@ -404,6 +407,6 @@ impl RaftSnapshotManager {
 
     /// Get the last compaction index for monitoring
     pub async fn get_last_compaction_index(&self) -> Option<u64> {
-        *self.last_compaction_index.read().unwrap()
+        *acquire_lock_unwrap!(self.last_compaction_index.read(), "read last_compaction_index")
     }
 }

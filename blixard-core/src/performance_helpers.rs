@@ -297,11 +297,15 @@ pub struct PooledObject<'a, T> {
 
 impl<'a, T> PooledObject<'a, T> {
     pub fn get(&self) -> &T {
-        self.object.as_ref().unwrap()
+        self.object
+            .as_ref()
+            .expect("PooledObject should always contain an object when constructed")
     }
 
     pub fn get_mut(&mut self) -> &mut T {
-        self.object.as_mut().unwrap()
+        self.object
+            .as_mut()
+            .expect("PooledObject should always contain an object when constructed")
     }
 }
 
@@ -321,13 +325,17 @@ impl<'a, T> std::ops::Deref for PooledObject<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.object.as_ref().unwrap()
+        self.object
+            .as_ref()
+            .expect("PooledObject should always contain an object when constructed")
     }
 }
 
 impl<'a, T> std::ops::DerefMut for PooledObject<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.object.as_mut().unwrap()
+        self.object
+            .as_mut()
+            .expect("PooledObject should always contain an object when constructed")
     }
 }
 

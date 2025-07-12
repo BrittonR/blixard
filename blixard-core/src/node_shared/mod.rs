@@ -5,6 +5,8 @@
 //! - PeerInfo: Peer information for cluster management
 
 use crate::{
+    acquire_lock_unwrap,
+    common::async_utils::{quick_read, quick_read_extract, conditional_update, OptionalArc, AtomicCounter},
     error::{BlixardError, BlixardResult},
     raft::proposals::WorkerCapabilities,
     raft_manager::ConfChangeType,
@@ -15,13 +17,12 @@ use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
 };
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock as AsyncRwLock};
 
 // Type aliases for complex types
-type DatabaseHandle = Arc<Mutex<Option<Arc<Database>>>>;
-type InitializedFlag = Arc<RwLock<bool>>;
-type ClusterMembers = Arc<RwLock<HashMap<u64, PeerInfo>>>;
-type LeaderIdState = Arc<RwLock<Option<u64>>>;
+type DatabaseHandle = OptionalArc<Database>;
+type ClusterMembers = Arc<AsyncRwLock<HashMap<u64, PeerInfo>>>;
+type LeaderIdState = Arc<AsyncRwLock<Option<u64>>>;
 
 // Re-export PeerInfo from p2p_manager for backward compatibility
 pub use crate::p2p_manager::PeerInfo;
@@ -49,7 +50,7 @@ pub struct SharedNodeState {
     database: DatabaseHandle,
 
     /// Whether the node is initialized and ready to serve requests
-    is_initialized: InitializedFlag,
+    is_initialized: AtomicCounter,
 
     /// Current cluster membership information
     cluster_members: ClusterMembers,
@@ -58,7 +59,7 @@ pub struct SharedNodeState {
     leader_id: LeaderIdState,
 
     /// Local node status flags
-    is_leader: InitializedFlag,
+    is_leader: AtomicCounter,
 }
 
 impl SharedNodeState {
@@ -66,11 +67,11 @@ impl SharedNodeState {
     pub fn new(config: NodeConfig) -> Self {
         Self {
             config,
-            database: DatabaseHandle::new(Mutex::new(None)),
-            is_initialized: InitializedFlag::new(RwLock::new(false)),
-            cluster_members: ClusterMembers::new(RwLock::new(HashMap::new())),
-            leader_id: LeaderIdState::new(RwLock::new(None)),
-            is_leader: InitializedFlag::new(RwLock::new(false)),
+            database: DatabaseHandle::new(),
+            is_initialized: AtomicCounter::new(0),
+            cluster_members: ClusterMembers::new(AsyncRwLock::new(HashMap::new())),
+            leader_id: LeaderIdState::new(AsyncRwLock::new(None)),
+            is_leader: AtomicCounter::new(0),
         }
     }
 
@@ -91,80 +92,79 @@ impl SharedNodeState {
 
     /// Check if the node is initialized
     pub fn is_initialized(&self) -> bool {
-        *self.is_initialized.read().unwrap()
+        self.is_initialized.get() > 0
     }
 
     /// Set the initialized state
     pub fn set_initialized(&self, initialized: bool) {
-        *self.is_initialized.write().unwrap() = initialized;
+        self.is_initialized.set(if initialized { 1 } else { 0 });
     }
 
     /// Get the database handle
     pub async fn database(&self) -> Option<Arc<Database>> {
-        self.database.lock().await.clone()
+        self.database.get().await
     }
 
     /// Set the database handle
     pub async fn set_database(&self, db: Option<Arc<Database>>) {
-        *self.database.lock().await = db;
+        self.database.set(db).await;
     }
 
     /// Check if this node is the current leader
     pub fn is_leader(&self) -> bool {
-        *self.is_leader.read().unwrap()
+        self.is_leader.get() > 0
     }
 
     /// Set whether this node is the leader
     pub fn set_leader(&self, is_leader: bool) {
-        *self.is_leader.write().unwrap() = is_leader;
+        self.is_leader.set(if is_leader { 1 } else { 0 });
     }
 
     /// Get the current leader ID
-    pub fn leader_id(&self) -> Option<u64> {
-        *self.leader_id.read().unwrap()
+    pub async fn leader_id(&self) -> Option<u64> {
+        quick_read_extract(&self.leader_id, |id| *id).await
     }
 
     /// Set the current leader ID
-    pub fn set_leader_id(&self, leader_id: Option<u64>) {
-        *self.leader_id.write().unwrap() = leader_id;
+    pub async fn set_leader_id(&self, leader_id: Option<u64>) {
+        let mut guard = self.leader_id.write().await;
+        *guard = leader_id;
     }
 
     /// Get cluster members (returns a clone for backward compatibility)
     /// Consider using with_cluster_members() to avoid cloning
-    pub fn cluster_members(&self) -> HashMap<u64, PeerInfo> {
-        self.cluster_members.read().unwrap().clone()
+    pub async fn cluster_members(&self) -> HashMap<u64, PeerInfo> {
+        quick_read(&self.cluster_members, |members| members.clone()).await
     }
 
     /// Access cluster members without cloning
-    pub fn with_cluster_members<F, R>(&self, f: F) -> R
+    pub async fn with_cluster_members<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&HashMap<u64, PeerInfo>) -> R,
     {
-        let members = self.cluster_members.read().unwrap();
-        f(&*members)
+        quick_read_extract(&self.cluster_members, f).await
     }
 
     /// Get the number of cluster members
-    pub fn cluster_member_count(&self) -> usize {
-        self.cluster_members.read().unwrap().len()
+    pub async fn cluster_member_count(&self) -> usize {
+        quick_read_extract(&self.cluster_members, |members| members.len()).await
     }
 
     /// Add or update a cluster member
-    pub fn add_cluster_member(&self, node_id: u64, peer_info: PeerInfo) {
-        self.cluster_members
-            .write()
-            .unwrap()
-            .insert(node_id, peer_info);
+    pub async fn add_cluster_member(&self, node_id: u64, peer_info: PeerInfo) {
+        let mut guard = self.cluster_members.write().await;
+        guard.insert(node_id, peer_info);
     }
 
     /// Remove a cluster member
-    pub fn remove_cluster_member(&self, node_id: u64) {
-        self.cluster_members.write().unwrap().remove(&node_id);
+    pub async fn remove_cluster_member(&self, node_id: u64) {
+        let mut guard = self.cluster_members.write().await;
+        guard.remove(&node_id);
     }
 
     /// Get a specific cluster member
-    pub fn get_cluster_member(&self, node_id: u64) -> Option<PeerInfo> {
-        self.cluster_members.read().unwrap().get(&node_id).cloned()
+    pub async fn get_cluster_member(&self, node_id: u64) -> Option<PeerInfo> {
+        quick_read_extract(&self.cluster_members, |members| members.get(&node_id).cloned()).await
     }
 
     // Essential getter methods needed throughout the codebase
@@ -192,11 +192,11 @@ impl SharedNodeState {
     // Placeholder stub methods for compilation
     // TODO: These need proper implementations with actual state management
 
-    pub fn get_raft_status(&self) -> RaftStatus {
+    pub async fn get_raft_status(&self) -> RaftStatus {
         RaftStatus {
             is_leader: self.is_leader(),
             node_id: self.node_id(),
-            leader_id: self.leader_id(),
+            leader_id: self.leader_id().await,
             term: 0, // TODO: track actual term
             state: if self.is_leader() {
                 "Leader".to_string()
@@ -206,12 +206,12 @@ impl SharedNodeState {
         }
     }
 
-    pub fn get_peers(&self) -> Vec<PeerInfo> {
-        self.with_cluster_members(|members| members.values().cloned().collect())
+    pub async fn get_peers(&self) -> Vec<PeerInfo> {
+        self.with_cluster_members(|members| members.values().cloned().collect()).await
     }
 
-    pub fn get_peer(&self, node_id: u64) -> Option<PeerInfo> {
-        self.get_cluster_member(node_id)
+    pub async fn get_peer(&self, node_id: u64) -> Option<PeerInfo> {
+        self.get_cluster_member(node_id).await
     }
 
     // VM-related stub methods
@@ -318,8 +318,8 @@ impl SharedNodeState {
         // TODO: Implement peer connection status tracking
     }
 
-    pub fn add_peer_with_p2p(&self, _node_id: u64, _peer_info: PeerInfo) {
-        self.add_cluster_member(_node_id, _peer_info);
+    pub async fn add_peer_with_p2p(&self, _node_id: u64, _peer_info: PeerInfo) {
+        self.add_cluster_member(_node_id, _peer_info).await;
     }
 
     pub fn get_p2p_node_addr(&self) -> Option<String> {
@@ -365,8 +365,8 @@ impl SharedNodeState {
         })
     }
 
-    pub fn remove_peer(&self, node_id: u64) {
-        self.remove_cluster_member(node_id);
+    pub async fn remove_peer(&self, node_id: u64) {
+        self.remove_cluster_member(node_id).await;
     }
 
     pub async fn update_vm_status_through_raft(
@@ -444,8 +444,8 @@ impl SharedNodeState {
         })
     }
 
-    pub fn add_peer(&self, node_id: u64, peer_info: PeerInfo) {
-        self.add_cluster_member(node_id, peer_info);
+    pub async fn add_peer(&self, node_id: u64, peer_info: PeerInfo) {
+        self.add_cluster_member(node_id, peer_info).await;
     }
 
     pub async fn send_raft_message(
@@ -510,8 +510,8 @@ impl SharedNodeState {
         0 // TODO: Track actual VM count
     }
 
-    pub fn get_active_connection_count(&self) -> u64 {
-        self.cluster_members().len() as u64
+    pub async fn get_active_connection_count(&self) -> u64 {
+        self.cluster_member_count().await as u64
     }
 
     pub fn get_start_time(&self) -> String {
