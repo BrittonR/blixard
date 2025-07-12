@@ -2,7 +2,8 @@
 
 use super::{vm_state::VmState, node_state::NodeState, monitoring_state::MonitoringState, debug_state::DebugState, ui_state::UiState};
 use crate::tui::{Event, VmClient};
-use crate::tui::types::ui::{AppTab, EventLevel, LogSourceType, LogLevel};
+use crate::tui::types::ui::{AppTab, LogSourceType, LogLevel};
+use crate::tui::types::monitoring::EventLevel;
 use crate::tui::types::monitoring::SystemEvent;
 use crate::tui::types::debug::{DebugLogEntry, DebugLevel, RaftDebugInfo, DebugMetrics};
 use crate::{BlixardError, BlixardResult};
@@ -94,6 +95,47 @@ impl App {
             context,
         };
         self.debug_state.add_debug_log(entry);
+    }
+
+    // Delegation methods for UI compatibility
+    pub fn current_tab(&self) -> &crate::tui::types::ui::AppTab {
+        &self.ui_state.current_tab
+    }
+
+    pub fn mode(&self) -> &crate::tui::types::ui::AppMode {
+        &self.ui_state.mode
+    }
+
+    pub fn search_mode(&self) -> &crate::tui::types::ui::SearchMode {
+        &self.ui_state.search_mode
+    }
+
+    pub fn p2p_enabled(&self) -> bool {
+        self.debug_state.p2p_enabled
+    }
+
+    pub fn p2p_node_id(&self) -> &str {
+        &self.debug_state.p2p_node_id
+    }
+
+    pub fn p2p_peer_count(&self) -> usize {
+        self.debug_state.p2p_peer_count
+    }
+
+    pub fn p2p_shared_images(&self) -> usize {
+        self.debug_state.p2p_shared_images
+    }
+
+    pub fn p2p_peers(&self) -> &[crate::tui::types::p2p::P2pPeer] {
+        &self.debug_state.p2p_peers
+    }
+
+    pub fn p2p_images(&self) -> &[crate::tui::types::p2p::P2pImage] {
+        &self.debug_state.p2p_images
+    }
+
+    pub fn p2p_transfers(&self) -> &[crate::tui::types::p2p::P2pTransfer] {
+        &self.debug_state.p2p_transfers
     }
 
     pub fn update_raft_debug_info(&mut self, debug_info: RaftDebugInfo) {

@@ -35,6 +35,9 @@ impl HealthCheckResultBuilder {
                 .unwrap_or_default()
                 .as_secs() as i64,
             error: None,
+            priority: blixard_core::vm_health_types::HealthCheckPriority::Quick,
+            critical: false,
+            recovery_action: None,
         }
     }
 
@@ -50,6 +53,9 @@ impl HealthCheckResultBuilder {
                 .unwrap_or_default()
                 .as_secs() as i64,
             error,
+            priority: blixard_core::vm_health_types::HealthCheckPriority::Quick,
+            critical: false,
+            recovery_action: None,
         }
     }
 
@@ -65,6 +71,9 @@ impl HealthCheckResultBuilder {
                 .unwrap_or_default()
                 .as_secs() as i64,
             error,
+            priority: blixard_core::vm_health_types::HealthCheckPriority::Quick,
+            critical: false,
+            recovery_action: None,
         }
     }
 }

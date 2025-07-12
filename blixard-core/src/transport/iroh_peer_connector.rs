@@ -21,94 +21,13 @@ use crate::{
 };
 use iroh::{Endpoint, NodeAddr, NodeId};
 
-/// Circuit breaker states
-#[derive(Debug, Clone, PartialEq)]
-enum CircuitState {
-    Closed,   // Normal operation
-    Open,     // Failing, reject all attempts
-    HalfOpen, // Testing if service has recovered
-}
-
-/// Circuit breaker for connection management
-#[derive(Debug, Clone)]
-pub struct CircuitBreaker {
-    state: CircuitState,
-    consecutive_failures: u32,
-    last_failure: Option<Instant>,
-    last_success: Option<Instant>,
-    opened_at: Option<Instant>,
-    failure_threshold: u32,
-    reset_timeout: Duration,
-}
-
-impl CircuitBreaker {
-    fn new(failure_threshold: u32, reset_timeout: Duration) -> Self {
-        Self {
-            state: CircuitState::Closed,
-            consecutive_failures: 0,
-            last_failure: None,
-            last_success: None,
-            opened_at: None,
-            failure_threshold,
-            reset_timeout,
-        }
-    }
-
-    fn should_allow_request(&mut self) -> bool {
-        match self.state {
-            CircuitState::Closed => true,
-            CircuitState::Open => {
-                if let Some(opened_at) = self.opened_at {
-                    if opened_at.elapsed() >= self.reset_timeout {
-                        self.state = CircuitState::HalfOpen;
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            }
-            CircuitState::HalfOpen => true,
-        }
-    }
-
-    fn record_success(&mut self) {
-        self.consecutive_failures = 0;
-        self.last_success = Some(Instant::now());
-
-        if self.state == CircuitState::HalfOpen {
-            tracing::info!("Circuit breaker transitioning to closed");
-        }
-
-        self.state = CircuitState::Closed;
-        self.opened_at = None;
-    }
-
-    fn record_failure(&mut self) {
-        self.consecutive_failures += 1;
-        self.last_failure = Some(Instant::now());
-
-        if self.consecutive_failures >= self.failure_threshold && self.state != CircuitState::Open {
-            tracing::warn!(
-                "Circuit breaker opening after {} failures",
-                self.consecutive_failures
-            );
-            self.state = CircuitState::Open;
-            self.opened_at = Some(Instant::now());
-        }
-
-        if self.state == CircuitState::HalfOpen {
-            self.state = CircuitState::Open;
-            self.opened_at = Some(Instant::now());
-        }
-    }
-}
 
 /// Connection metadata
 #[derive(Debug, Clone)]
 struct ConnectionInfo {
+    #[allow(dead_code)] // Future: implement node address-based routing
     node_addr: NodeAddr,
+    #[allow(dead_code)] // Future: implement connection age monitoring
     established_at: Instant,
     last_used: Instant,
     bytes_sent: u64,
@@ -118,10 +37,13 @@ struct ConnectionInfo {
 /// Buffered message for delayed sending
 #[derive(Debug, Clone)]
 struct BufferedMessage {
+    #[allow(dead_code)] // Future: implement destination-based message routing
     to: u64,
     data: Vec<u8>,
+    #[allow(dead_code)] // Future: implement message type-based handling
     message_type: MessageType,
     timestamp: Instant,
+    #[allow(dead_code)] // Future: implement retry logic with attempt tracking
     attempts: u32,
 }
 
@@ -283,8 +205,8 @@ pub struct IrohPeerConnector {
     endpoint: Endpoint,
     node: Arc<SharedNodeState>,
     connections: Arc<DashMap<u64, IrohClient>>,
+    #[allow(dead_code)] // Future: implement peer discovery and metadata storage
     peers: Arc<RwLock<HashMap<u64, PeerInfo>>>,
-    circuit_breakers: Arc<DashMap<u64, CircuitBreaker>>,
     message_buffer: Arc<Mutex<HashMap<u64, VecDeque<BufferedMessage>>>>,
     connecting: Arc<Mutex<HashMap<u64, bool>>>,
     connection_count: Arc<Mutex<usize>>,
@@ -308,7 +230,6 @@ impl IrohPeerConnector {
             node,
             connections: Arc::new(DashMap::new()),
             peers: Arc::new(RwLock::new(HashMap::new())),
-            circuit_breakers: Arc::new(DashMap::new()),
             message_buffer: Arc::new(Mutex::new(HashMap::new())),
             connecting: Arc::new(Mutex::new(HashMap::new())),
             connection_count: Arc::new(Mutex::new(0)),
@@ -478,23 +399,6 @@ impl IrohPeerConnector {
             }
         }
 
-        // Check circuit breaker
-        let failure_threshold = config_global::get()?.cluster.peer.failure_threshold;
-        let mut breaker = self
-            .circuit_breakers
-            .entry(peer_id)
-            .or_insert_with(|| CircuitBreaker::new(failure_threshold, Duration::from_secs(30)));
-
-        if !breaker.should_allow_request() {
-            self.p2p_monitor
-                .record_error(&peer_id.to_string(), P2pErrorType::ConnectionRefused)
-                .await;
-            return Err(BlixardError::ClusterError(format!(
-                "Circuit breaker open for peer {}",
-                peer_id
-            )));
-        }
-
         // Mark as connecting
         {
             let mut connecting = self.connecting.lock().await;
@@ -507,65 +411,57 @@ impl IrohPeerConnector {
             connecting.insert(peer_id, true);
         }
 
-        // Get peer info and convert to NodeAddr
-        let peer_info = self.get_peer_info(peer_id)?;
-        let node_addr = self.peer_info_to_node_addr(&peer_info)?;
+        let result = async {
+            // Get peer info and convert to NodeAddr
+            let peer_info = self.get_peer_info(peer_id)?;
+            let node_addr = self.peer_info_to_node_addr(&peer_info)?;
 
-        // Attempt connection
-        match IrohClient::new(
-            self.endpoint.clone(),
-            node_addr,
-            peer_id,
-            Some(self.p2p_monitor.clone()),
-        )
-        .await
-        {
-            Ok(client) => {
-                // Store connection
-                self.connections.insert(peer_id, client.clone());
+            // Attempt connection
+            let client = IrohClient::new(
+                self.endpoint.clone(),
+                node_addr,
+                peer_id,
+                Some(self.p2p_monitor.clone()),
+            ).await?;
 
-                // Update connection count
-                {
-                    let mut count = self.connection_count.lock().await;
-                    *count += 1;
-                }
+            // Store connection
+            self.connections.insert(peer_id, client.clone());
 
-                // Update peer status
-                self.node
-                    .update_peer_connection(peer_id, "connected".to_string());
-
-                // Record success
-                breaker.record_success();
-
-                // Remove from connecting
-                {
-                    let mut connecting = self.connecting.lock().await;
-                    connecting.remove(&peer_id);
-                }
-
-                // Process buffered messages
-                self.send_buffered_messages(peer_id).await;
-
-                tracing::info!("Connected to peer {} via Iroh", peer_id);
-                Ok(client)
+            // Update connection count
+            {
+                let mut count = self.connection_count.lock().await;
+                *count += 1;
             }
-            Err(e) => {
-                // Record failure
-                breaker.record_failure();
 
-                // Update peer status
+            // Update peer status
+            self.node
+                .update_peer_connection(peer_id, "connected".to_string());
+
+            Ok(client)
+        }.await;
+
+        // Always remove from connecting set
+        {
+            let mut connecting = self.connecting.lock().await;
+            connecting.remove(&peer_id);
+        }
+
+        // Process buffered messages on success and update status on failure
+        match &result {
+            Ok(client) => {
+                self.send_buffered_messages(peer_id).await;
+                tracing::info!("Connected to peer {} via Iroh", peer_id);
+            }
+            Err(_) => {
                 self.node
                     .update_peer_connection(peer_id, "disconnected".to_string());
-
-                // Remove from connecting
-                {
-                    let mut connecting = self.connecting.lock().await;
-                    connecting.remove(&peer_id);
-                }
-
-                Err(e)
+                self.p2p_monitor
+                    .record_error(&peer_id.to_string(), P2pErrorType::ConnectionRefused)
+                    .await;
             }
         }
+
+        result
     }
 
     /// Get peer info from node state

@@ -47,6 +47,7 @@ struct RateLimitState {
     tenant_requests: HashMap<TenantId, TenantRequestTracking>,
 
     /// Global rate limiting (if enabled)
+    #[allow(dead_code)] // Future: global rate limiting across all tenants
     global_requests: GlobalRequestTracking,
 }
 

@@ -73,6 +73,29 @@ impl Default for BackoffStrategy {
     }
 }
 
+/// Jitter strategy for retry delays
+#[derive(Debug, Clone)]
+pub enum JitterStrategy {
+    /// No jitter applied
+    None,
+    /// Add random percentage: delay * (0.5 to 1.5)
+    Proportional,
+    /// Add random percentage with custom range: delay * (min to max)
+    ProportionalRange { min: f64, max: f64 },
+    /// Add fixed random amount: delay +/- max_jitter
+    Fixed { max_jitter: Duration },
+    /// Full jitter: random delay between 0 and calculated delay
+    Full,
+    /// Decorrelated jitter: prevents synchronization across clients
+    Decorrelated { base: Duration },
+}
+
+impl Default for JitterStrategy {
+    fn default() -> Self {
+        JitterStrategy::ProportionalRange { min: 0.5, max: 1.5 }
+    }
+}
+
 /// Configuration for retry operations
 #[derive(Debug, Clone)]
 pub struct RetryConfig {
@@ -82,10 +105,16 @@ pub struct RetryConfig {
     pub backoff: BackoffStrategy,
     /// Whether to add jitter to delays (helps avoid thundering herd)
     pub jitter: bool,
+    /// Jitter strategy configuration
+    pub jitter_strategy: JitterStrategy,
     /// Maximum total time to spend retrying
     pub max_total_delay: Option<Duration>,
     /// Function to determine if an error is retryable
     pub is_retryable: fn(&BlixardError) -> bool,
+    /// Per-operation identifier for better observability
+    pub operation_name: Option<String>,
+    /// Enable detailed retry logging
+    pub enable_logging: bool,
 }
 
 impl Default for RetryConfig {
@@ -94,8 +123,11 @@ impl Default for RetryConfig {
             max_attempts: 3,
             backoff: BackoffStrategy::default(),
             jitter: true,
+            jitter_strategy: JitterStrategy::default(),
             max_total_delay: None,
             is_retryable: default_is_retryable,
+            operation_name: None,
+            enable_logging: true,
         }
     }
 }
@@ -122,6 +154,104 @@ impl RetryConfig {
             ..Default::default()
         }
     }
+
+    /// Create retry config for network operations with optimized settings
+    pub fn for_network_operations(operation_name: &str) -> Self {
+        Self {
+            max_attempts: 5,
+            backoff: BackoffStrategy::Exponential {
+                base: Duration::from_millis(100),
+                max: Duration::from_secs(10),
+                multiplier: 1.6, // Slightly more conservative than default 2.0
+            },
+            jitter: true,
+            jitter_strategy: JitterStrategy::Decorrelated {
+                base: Duration::from_millis(50),
+            },
+            max_total_delay: Some(Duration::from_secs(30)),
+            operation_name: Some(operation_name.to_string()),
+            is_retryable: |e| {
+                matches!(
+                    e,
+                    BlixardError::NetworkError(_)
+                        | BlixardError::ConnectionError { .. }
+                        | BlixardError::Timeout { .. }
+                        | BlixardError::TemporaryFailure { .. }
+                )
+            },
+            enable_logging: true,
+        }
+    }
+
+    /// Create retry config for critical operations with aggressive retry
+    pub fn for_critical_operations(operation_name: &str) -> Self {
+        Self {
+            max_attempts: 10,
+            backoff: BackoffStrategy::Exponential {
+                base: Duration::from_millis(50),
+                max: Duration::from_secs(60),
+                multiplier: 1.5,
+            },
+            jitter: true,
+            jitter_strategy: JitterStrategy::Full,
+            max_total_delay: Some(Duration::from_secs(300)), // 5 minutes
+            operation_name: Some(operation_name.to_string()),
+            is_retryable: |e| {
+                !matches!(
+                    e,
+                    BlixardError::InvalidInput { .. }
+                        | BlixardError::NotImplemented { .. }
+                        | BlixardError::ConfigError(_)
+                        | BlixardError::Validation { .. }
+                )
+            },
+            enable_logging: true,
+        }
+    }
+
+    /// Create retry config for VM operations
+    pub fn for_vm_operations(operation_name: &str) -> Self {
+        Self {
+            max_attempts: 7,
+            backoff: BackoffStrategy::Exponential {
+                base: Duration::from_millis(200),
+                max: Duration::from_secs(30),
+                multiplier: 1.8,
+            },
+            jitter: true,
+            jitter_strategy: JitterStrategy::ProportionalRange { min: 0.8, max: 1.2 },
+            max_total_delay: Some(Duration::from_secs(120)), // 2 minutes
+            operation_name: Some(operation_name.to_string()),
+            is_retryable: |e| {
+                matches!(
+                    e,
+                    BlixardError::VmOperationFailed { .. }
+                        | BlixardError::ResourceExhausted { .. }
+                        | BlixardError::TemporaryFailure { .. }
+                        | BlixardError::Timeout { .. }
+                )
+            },
+            enable_logging: true,
+        }
+    }
+
+    /// Set operation name for better observability
+    pub fn with_operation_name(mut self, name: impl Into<String>) -> Self {
+        self.operation_name = Some(name.into());
+        self
+    }
+
+    /// Enable or disable logging
+    pub fn with_logging(mut self, enable: bool) -> Self {
+        self.enable_logging = enable;
+        self
+    }
+
+    /// Set custom jitter strategy
+    pub fn with_jitter_strategy(mut self, strategy: JitterStrategy) -> Self {
+        self.jitter_strategy = strategy;
+        self
+    }
 }
 
 /// Default function to determine if an error is retryable
@@ -133,6 +263,63 @@ fn default_is_retryable(error: &BlixardError) -> bool {
             | BlixardError::ConnectionError { .. }
             | BlixardError::TemporaryFailure { .. }
     )
+}
+
+/// Apply jitter to a base delay using the specified strategy
+fn apply_jitter(base_delay: Duration, strategy: &JitterStrategy, _attempt: u32) -> Duration {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    
+    match strategy {
+        JitterStrategy::None => base_delay,
+        
+        JitterStrategy::Proportional => {
+            let jitter_factor = rng.gen_range(0.5..1.5);
+            Duration::from_millis((base_delay.as_millis() as f64 * jitter_factor) as u64)
+        }
+        
+        JitterStrategy::ProportionalRange { min, max } => {
+            let jitter_factor = rng.gen_range(*min..*max);
+            Duration::from_millis((base_delay.as_millis() as f64 * jitter_factor) as u64)
+        }
+        
+        JitterStrategy::Fixed { max_jitter } => {
+            let jitter_ms = rng.gen_range(0..=max_jitter.as_millis() as i64);
+            let jitter = if rng.gen_bool(0.5) {
+                Duration::from_millis(jitter_ms as u64)
+            } else {
+                Duration::from_millis(jitter_ms.unsigned_abs())
+            };
+            
+            if rng.gen_bool(0.5) {
+                base_delay.saturating_add(jitter)
+            } else {
+                base_delay.saturating_sub(jitter)
+            }
+        }
+        
+        JitterStrategy::Full => {
+            let max_delay_ms = base_delay.as_millis() as u64;
+            if max_delay_ms == 0 {
+                base_delay
+            } else {
+                Duration::from_millis(rng.gen_range(0..=max_delay_ms))
+            }
+        }
+        
+        JitterStrategy::Decorrelated { base } => {
+            // Decorrelated jitter: delay = random_between(base, delay * 3)
+            // This helps prevent synchronization between different clients
+            let min_delay = base.as_millis() as u64;
+            let max_delay = (base_delay.as_millis() as u64).saturating_mul(3);
+            
+            if max_delay <= min_delay {
+                *base
+            } else {
+                Duration::from_millis(rng.gen_range(min_delay..=max_delay))
+            }
+        }
+    }
 }
 
 /// Trait for operations that can be retried
@@ -167,8 +354,9 @@ where
 
         match operation().await {
             Ok(result) => {
-                if attempt > 1 {
-                    debug!("Operation succeeded after {} attempts", attempt);
+                if attempt > 1 && config.enable_logging {
+                    let operation = config.operation_name.as_deref().unwrap_or("operation");
+                    debug!("{} succeeded after {} attempts", operation, attempt);
                 }
                 return Ok(result);
             }
@@ -187,12 +375,9 @@ where
                 // Calculate delay
                 let mut delay = config.backoff.delay(attempt);
 
-                // Add jitter if configured
+                // Apply jitter if configured
                 if config.jitter {
-                    use rand::Rng;
-                    let jitter_factor = rand::thread_rng().gen_range(0.5..1.5);
-                    delay =
-                        Duration::from_millis((delay.as_millis() as f64 * jitter_factor) as u64);
+                    delay = apply_jitter(delay, &config.jitter_strategy, attempt);
                 }
 
                 // Check total delay limit
@@ -204,10 +389,13 @@ where
                     }
                 }
 
-                warn!(
-                    "Retry attempt {}/{} after error: {} (waiting {:?})",
-                    attempt, config.max_attempts, error, delay
-                );
+                if config.enable_logging {
+                    let operation = config.operation_name.as_deref().unwrap_or("operation");
+                    warn!(
+                        "Retry attempt {}/{} for {} after error: {} (waiting {:?})",
+                        attempt, config.max_attempts, operation, error, delay
+                    );
+                }
 
                 sleep(delay).await;
             }
@@ -318,6 +506,7 @@ pub mod presets {
                 multiplier: 2.0,
             },
             jitter: true,
+            jitter_strategy: JitterStrategy::default(),
             max_total_delay: Some(Duration::from_secs(30)),
             is_retryable: |e| {
                 matches!(
@@ -327,6 +516,8 @@ pub mod presets {
                         | BlixardError::Timeout { .. }
                 )
             },
+            operation_name: Some("network_operation".to_string()),
+            enable_logging: true,
         };
 
         retry(config, operation).await
@@ -341,6 +532,7 @@ pub mod presets {
             max_attempts: 3,
             backoff: BackoffStrategy::Fixed(Duration::from_millis(100)),
             jitter: false,
+            jitter_strategy: JitterStrategy::None,
             max_total_delay: Some(Duration::from_secs(5)),
             is_retryable: |e| {
                 matches!(
@@ -348,6 +540,8 @@ pub mod presets {
                     BlixardError::DatabaseError { .. } | BlixardError::TemporaryFailure { .. }
                 )
             },
+            operation_name: Some("database_operation".to_string()),
+            enable_logging: true,
         };
 
         retry(config, operation).await
@@ -365,6 +559,7 @@ pub mod presets {
                 max: Duration::from_secs(60),
             },
             jitter: true,
+            jitter_strategy: JitterStrategy::default(),
             max_total_delay: Some(Duration::from_secs(300)), // 5 minutes
             is_retryable: |e| {
                 !matches!(
@@ -374,6 +569,8 @@ pub mod presets {
                         | BlixardError::ConfigError(_)
                 )
             },
+            operation_name: Some("critical_operation".to_string()),
+            enable_logging: true,
         };
 
         retry(config, operation).await

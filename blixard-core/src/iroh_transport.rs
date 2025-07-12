@@ -79,11 +79,14 @@ pub struct IrohTransport {
     /// Active connections by peer with metadata
     connections: Arc<RwLock<HashMap<iroh::NodeId, ConnectionInfo>>>,
     /// Node ID for identification
+    #[allow(dead_code)] // Future: implement node identification features
     node_id: u64,
     /// Data directory
+    #[allow(dead_code)] // Future: implement persistent connection state
     data_dir: PathBuf,
     /// Connection pool configuration
     max_idle_duration: Duration,
+    #[allow(dead_code)] // Future: implement connection limiting per peer
     max_connections_per_peer: usize,
 }
 

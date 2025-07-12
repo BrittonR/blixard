@@ -55,9 +55,12 @@ impl DocumentType {
 /// Simplified document storage
 #[derive(Debug, Clone)]
 struct DocumentEntry {
+    #[allow(dead_code)] // Future: implement document querying by key
     key: String,
     value: Vec<u8>,
+    #[allow(dead_code)] // Future: implement author-based permissions
     author: String,
+    #[allow(dead_code)] // Future: implement document versioning and expiration
     timestamp: std::time::SystemTime,
 }
 
@@ -144,6 +147,7 @@ pub struct IrohTransportV2 {
     /// Node ID for identification
     node_id: u64,
     /// Data directory
+    #[allow(dead_code)] // Future: implement persistent document/blob storage
     data_dir: PathBuf,
     /// Discovery bridge (if discovery is enabled)
     discovery_bridge: Option<Arc<IrohDiscoveryBridge>>,

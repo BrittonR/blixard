@@ -100,6 +100,7 @@ struct EncryptedSecret {
     iv: [u8; 16],
 
     /// When the secret was stored
+    #[allow(dead_code)] // Future: implement secret expiration and rotation
     created_at: std::time::SystemTime,
 }
 

@@ -62,6 +62,7 @@ pub struct Registry<T> {
         String,
         Arc<dyn Factory<T, Config = Box<dyn std::any::Any + Send + Sync>, Error = BlixardError>>,
     >,
+    #[allow(dead_code)] // Future: implement fallback factory selection
     default_factory: Option<String>,
 }
 
@@ -205,6 +206,7 @@ pub struct AsyncRegistry<T> {
             >,
         >,
     >,
+    #[allow(dead_code)] // Future: implement fallback factory selection
     default_factory: Option<String>,
 }
 

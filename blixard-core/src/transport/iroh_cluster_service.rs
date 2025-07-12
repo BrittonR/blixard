@@ -168,6 +168,7 @@ impl IrohClusterService {
         Self { operations }
     }
 
+    #[allow(dead_code)] // Future: implement direct cluster request handling
     async fn handle_request(&self, request: ClusterRequest) -> BlixardResult<ClusterResponse> {
         match request {
             ClusterRequest::JoinCluster(req) => {

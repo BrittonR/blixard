@@ -221,6 +221,7 @@ pub mod observability;
 pub mod quota_manager;
 pub mod quota_system;
 pub mod resource_quotas;
+// pub mod resilience_integration_tests;
 pub mod security;
 // P2P implementation
 pub mod abstractions;
@@ -241,6 +242,7 @@ pub mod patterns;
 pub mod transport;
 pub mod vm_auto_recovery;
 pub mod vm_health_config;
+// pub mod vm_health_escalation;
 pub mod vm_health_monitor;
 pub mod vm_health_recovery_coordinator;
 pub mod vm_health_scheduler;

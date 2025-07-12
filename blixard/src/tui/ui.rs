@@ -54,7 +54,7 @@ pub fn render(f: &mut Frame, app: &App) {
     render_tab_bar(f, chunks[0], app);
 
     // Render main content based on current tab
-    match app.current_tab {
+    match app.current_tab() {
         AppTab::Dashboard => render_dashboard(f, chunks[1], app),
         AppTab::VirtualMachines => render_vm_management(f, chunks[1], app),
         AppTab::Nodes => render_node_management(f, chunks[1], app),
@@ -69,7 +69,7 @@ pub fn render(f: &mut Frame, app: &App) {
     render_status_bar(f, chunks[2], app);
 
     // Render overlays/popups
-    match app.mode {
+    match app.mode() {
         AppMode::CreateVmForm => render_create_vm_form(f, app),
         AppMode::CreateNodeForm => render_create_node_form(f, app),
         AppMode::CreateClusterForm => render_create_cluster_form(f, app),
@@ -89,7 +89,7 @@ pub fn render(f: &mut Frame, app: &App) {
     }
 
     // Render search overlay if in search mode
-    if app.search_mode != super::app::SearchMode::None {
+    if *app.search_mode() != super::app::SearchMode::None {
         render_search_overlay(f, app);
     }
 }
@@ -106,7 +106,7 @@ fn render_tab_bar(f: &mut Frame, area: Rect, app: &App) {
         "❓ Help",
     ];
 
-    let selected_tab = match app.current_tab {
+    let selected_tab = match app.current_tab() {
         AppTab::Dashboard => 0,
         AppTab::VirtualMachines => 1,
         AppTab::Nodes => 2,
@@ -1398,7 +1398,7 @@ fn render_configuration(f: &mut Frame, area: Rect, _app: &App) {
 }
 
 fn render_debug(f: &mut Frame, area: Rect, app: &App) {
-    match app.mode {
+    match app.mode() {
         AppMode::RaftDebug => render_raft_debug(f, area, app),
         AppMode::DebugMetrics => render_debug_metrics(f, area, app),
         AppMode::DebugLogs => render_debug_logs(f, area, app),
@@ -1846,7 +1846,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         } else {
             ""
         },
-        if app.search_mode != super::app::SearchMode::None {
+        if *app.search_mode() != super::app::SearchMode::None {
             " SEARCH"
         } else {
             ""
@@ -1891,7 +1891,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn get_current_shortcuts(app: &App) -> String {
-    if app.search_mode != super::app::SearchMode::None {
+    if *app.search_mode() != super::app::SearchMode::None {
         return "Type to filter  Enter Apply  Esc Cancel".to_string();
     }
 
@@ -1901,7 +1901,7 @@ fn get_current_shortcuts(app: &App) -> String {
         ""
     };
 
-    match app.mode {
+    match app.mode() {
         AppMode::VmList => {
             format!(
                 "↑↓ Select  Enter View  C Create  M Migrate  / Search  F Filter{}",
@@ -2742,7 +2742,7 @@ fn render_search_overlay(f: &mut Frame, app: &App) {
 
     f.render_widget(Clear, search_area);
 
-    let search_title = match app.search_mode {
+    let search_title = match *app.search_mode() {
         super::app::SearchMode::VmSearch => "🔍 Search VMs",
         super::app::SearchMode::NodeSearch => "🔍 Search Nodes",
         super::app::SearchMode::QuickFilter => "🔍 Quick Filter",

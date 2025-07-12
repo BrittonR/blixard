@@ -224,6 +224,7 @@ impl MessageHandler for RaftMessageHandler {
 pub struct RaftConfChangeHandler {
     raft_node: Arc<RwLock<RawNode<RedbRaftStorage>>>,
     config_manager: Arc<RaftConfigManager>,
+    #[allow(dead_code)] // Reserved for future logging of configuration changes
     logger: Logger,
 }
 

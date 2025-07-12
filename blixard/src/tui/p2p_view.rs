@@ -43,7 +43,7 @@ fn render_p2p_status_bar(f: &mut Frame, area: Rect, app: &App) {
         .constraints([Constraint::Min(50), Constraint::Length(50)])
         .split(area);
 
-    let status_text = if app.p2p_enabled {
+    let status_text = if app.p2p_enabled() {
         vec![
             Span::styled("🌐 P2P: ", Style::default().fg(TEXT_COLOR)),
             Span::styled(
@@ -53,15 +53,15 @@ fn render_p2p_status_bar(f: &mut Frame, area: Rect, app: &App) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(" | Node ID: ", Style::default().fg(TEXT_COLOR)),
-            Span::styled(&app.p2p_node_id, Style::default().fg(PRIMARY_COLOR)),
+            Span::styled(app.p2p_node_id(), Style::default().fg(PRIMARY_COLOR)),
             Span::styled(" | Peers: ", Style::default().fg(TEXT_COLOR)),
             Span::styled(
-                app.p2p_peer_count.to_string(),
+                app.p2p_peer_count().to_string(),
                 Style::default().fg(INFO_COLOR),
             ),
             Span::styled(" | Shared Images: ", Style::default().fg(TEXT_COLOR)),
             Span::styled(
-                app.p2p_shared_images.to_string(),
+                app.p2p_shared_images().to_string(),
                 Style::default().fg(INFO_COLOR),
             ),
         ]

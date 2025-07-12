@@ -79,6 +79,7 @@ struct BufferedRaftMessage {
     message: Message,
     priority: RaftMessagePriority,
     timestamp: Instant,
+    #[allow(dead_code)] // Future: implement retry logic with attempt tracking
     attempts: u32,
 }
 
@@ -169,12 +170,14 @@ pub struct IrohRaftTransport {
     /// Iroh endpoint for P2P communication
     endpoint: Endpoint,
     /// Our Iroh node ID
+    #[allow(dead_code)] // Future: implement node ID-based message routing
     local_node_id: NodeId,
     /// Active connections to peers
     connections: Arc<RwLock<HashMap<u64, PeerConnection>>>,
     /// Message buffer for batching and retry
     message_buffer: Arc<Mutex<HashMap<u64, VecDeque<BufferedRaftMessage>>>>,
     /// Channel to send incoming Raft messages to the Raft manager
+    #[allow(dead_code)] // Future: implement direct Raft message forwarding
     raft_rx_tx: mpsc::UnboundedSender<(u64, Message)>,
     /// Background task handles
     tasks: Mutex<Vec<JoinHandle<()>>>,
@@ -183,6 +186,7 @@ pub struct IrohRaftTransport {
     shutdown_rx: tokio::sync::watch::Receiver<bool>,
     /// Metrics
     messages_sent: Arc<Mutex<HashMap<String, u64>>>,
+    #[allow(dead_code)] // Future: implement received message metrics
     messages_received: Arc<Mutex<HashMap<String, u64>>>,
 }
 
@@ -424,6 +428,7 @@ impl IrohRaftTransport {
     }
 
     /// Spawn task to accept incoming connections
+    #[allow(dead_code)] // Future: implement automatic connection acceptance
     fn spawn_accept_task(&self) -> JoinHandle<()> {
         let endpoint = self.endpoint.clone();
         let raft_rx_tx = self.raft_rx_tx.clone();
@@ -572,6 +577,7 @@ impl IrohRaftTransport {
 }
 
 /// Handle an incoming Raft connection
+#[allow(dead_code)] // Future: implement automatic connection handling
 async fn handle_incoming_connection(
     connection: iroh::endpoint::Connection,
     raft_rx_tx: mpsc::UnboundedSender<(u64, Message)>,
@@ -621,6 +627,7 @@ async fn handle_incoming_connection(
 }
 
 /// Handle a single Raft message stream
+#[allow(dead_code)] // Future: implement stream-based message handling
 async fn handle_raft_stream(
     stream: &mut RecvStream,
     from: u64,

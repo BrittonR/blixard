@@ -88,6 +88,7 @@ impl Default for ExportOptions {
 /// Cluster state manager for export/import operations
 pub struct ClusterStateManager {
     node_id: u64,
+    #[allow(dead_code)] // Future: implement storage-based state persistence
     storage: Arc<dyn Storage>,
     transport: Option<Arc<IrohTransportV2>>,
 }

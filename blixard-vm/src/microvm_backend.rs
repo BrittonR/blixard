@@ -354,6 +354,9 @@ impl MicrovmBackend {
                     } else {
                         None
                     },
+                    priority: blixard_core::vm_health_types::HealthCheckPriority::Quick,
+                    critical: false,
+                    recovery_action: None,
                 })
             }
             Err(e) => Ok(HealthCheckResult {
@@ -366,6 +369,9 @@ impl MicrovmBackend {
                     .unwrap_or_default()
                     .as_secs() as i64,
                 error: Some(e.to_string()),
+                    priority: blixard_core::vm_health_types::HealthCheckPriority::Quick,
+                    critical: false,
+                    recovery_action: None,
             }),
         }
     }
@@ -395,6 +401,9 @@ impl MicrovmBackend {
                     .unwrap_or_default()
                     .as_secs() as i64,
                 error: Some("Console not accessible".to_string()),
+                    priority: blixard_core::vm_health_types::HealthCheckPriority::Quick,
+                    critical: false,
+                    recovery_action: None,
             });
         }
 
@@ -410,6 +419,9 @@ impl MicrovmBackend {
                 .unwrap_or_default()
                 .as_secs() as i64,
             error: None,
+                    priority: blixard_core::vm_health_types::HealthCheckPriority::Quick,
+                    critical: false,
+                    recovery_action: None,
         })
     }
 
@@ -469,6 +481,9 @@ impl MicrovmBackend {
             } else {
                 None
             },
+            priority: blixard_core::vm_health_types::HealthCheckPriority::Quick,
+            critical: false,
+            recovery_action: None,
         })
     }
 
@@ -493,6 +508,9 @@ impl MicrovmBackend {
                 .unwrap_or_default()
                 .as_secs() as i64,
             error: Some("NotImplemented".to_string()),
+                    priority: blixard_core::vm_health_types::HealthCheckPriority::Quick,
+                    critical: false,
+                    recovery_action: None,
         })
     }
 }
@@ -778,6 +796,9 @@ impl VmBackend for MicrovmBackend {
                     .unwrap_or_default()
                     .as_secs() as i64,
                 error: None,
+                    priority: blixard_core::vm_health_types::HealthCheckPriority::Quick,
+                    critical: false,
+                    recovery_action: None,
             });
         }
 

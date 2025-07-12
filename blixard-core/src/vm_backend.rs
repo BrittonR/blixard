@@ -3,11 +3,13 @@ use redb::{Database, ReadableTable};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid;
 
 use crate::error::{BlixardError, BlixardResult};
 #[cfg(feature = "observability")]
 use crate::metrics_otel::{attributes, metrics, Timer};
+// use crate::patterns::{CircuitBreaker, CircuitBreakerConfig, RetryConfig, retry};
 use crate::types::{VmCommand, VmConfig, VmStatus};
 use crate::vm_health_types::{HealthCheckResult, HealthCheckType, VmHealthStatus};
 use crate::vm_scheduler::{PlacementDecision, PlacementStrategy, VmScheduler};

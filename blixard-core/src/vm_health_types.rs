@@ -4,6 +4,7 @@
 //! and their configuration options.
 
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// Type of health check to perform on a VM
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -116,6 +117,18 @@ pub struct HealthCheck {
     /// Weight for this check in overall health score (0.0 - 1.0)
     #[serde(default = "default_weight")]
     pub weight: f32,
+
+    /// Priority level for escalation (quick, deep, comprehensive)
+    #[serde(default = "default_priority")]
+    pub priority: HealthCheckPriority,
+
+    /// Recovery actions to take if this check fails
+    #[serde(default)]
+    pub recovery_escalation: Option<RecoveryEscalation>,
+
+    /// Minimum consecutive failures before triggering recovery
+    #[serde(default = "default_failure_threshold")]
+    pub failure_threshold: u32,
 }
 
 /// VM health status with detailed information
@@ -155,8 +168,84 @@ pub enum HealthState {
     /// VM is unresponsive - cannot perform health checks
     Unresponsive,
 
+    /// VM requires immediate intervention - multiple failures
+    Critical,
+
     /// Health status is unknown (e.g., checks not started yet)
     Unknown,
+}
+
+/// Health check priority levels for escalation
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum HealthCheckPriority {
+    /// Quick health check - basic connectivity/process checks
+    Quick = 0,
+    /// Deep health check - comprehensive application-level checks
+    Deep = 1,
+    /// Comprehensive health check - full system validation
+    Comprehensive = 2,
+}
+
+impl HealthCheckPriority {
+    /// Get display name for the priority level
+    pub fn name(&self) -> &'static str {
+        match self {
+            HealthCheckPriority::Quick => "quick",
+            HealthCheckPriority::Deep => "deep",
+            HealthCheckPriority::Comprehensive => "comprehensive",
+        }
+    }
+
+    /// Get timeout multiplier for this priority level
+    pub fn timeout_multiplier(&self) -> f32 {
+        match self {
+            HealthCheckPriority::Quick => 1.0,
+            HealthCheckPriority::Deep => 2.0,
+            HealthCheckPriority::Comprehensive => 3.0,
+        }
+    }
+}
+
+/// Recovery action to take when health checks fail
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RecoveryAction {
+    /// No action - just log the failure
+    None,
+    /// Restart the failing service within the VM
+    RestartService { service_name: String },
+    /// Restart the entire VM
+    RestartVm,
+    /// Migrate VM to another node
+    MigrateVm { target_node: Option<u64> },
+    /// Stop the VM (last resort)
+    StopVm,
+    /// Custom recovery script
+    CustomScript { script_path: String, args: Vec<String> },
+}
+
+/// Recovery escalation configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecoveryEscalation {
+    /// Actions to try in order, with delays between attempts
+    pub actions: Vec<(RecoveryAction, Duration)>,
+    /// Maximum number of recovery attempts before giving up
+    pub max_attempts: u32,
+    /// Reset escalation level after this duration without failures
+    pub reset_after: Duration,
+}
+
+impl Default for RecoveryEscalation {
+    fn default() -> Self {
+        Self {
+            actions: vec![
+                (RecoveryAction::None, Duration::from_secs(30)),
+                (RecoveryAction::RestartVm, Duration::from_secs(300)),
+                (RecoveryAction::MigrateVm { target_node: None }, Duration::from_secs(600)),
+            ],
+            max_attempts: 3,
+            reset_after: Duration::from_secs(3600), // 1 hour
+        }
+    }
 }
 
 /// Result of an individual health check
@@ -180,6 +269,16 @@ pub struct HealthCheckResult {
     /// Error if the check failed
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+
+    /// Priority level of this health check
+    pub priority: HealthCheckPriority,
+
+    /// Whether this check is critical
+    pub critical: bool,
+
+    /// Recovery action taken (if any)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovery_action: Option<RecoveryAction>,
 }
 
 impl Default for VmHealthCheckConfig {
@@ -241,16 +340,36 @@ fn default_critical() -> bool {
 fn default_weight() -> f32 {
     1.0
 }
+fn default_priority() -> HealthCheckPriority {
+    HealthCheckPriority::Quick
+}
 
 impl HealthState {
     /// Check if the health state indicates the VM needs attention
     pub fn needs_attention(&self) -> bool {
-        matches!(self, HealthState::Unhealthy | HealthState::Unresponsive)
+        matches!(self, HealthState::Unhealthy | HealthState::Unresponsive | HealthState::Critical)
     }
 
     /// Check if the health state indicates the VM is operational
     pub fn is_operational(&self) -> bool {
         matches!(self, HealthState::Healthy | HealthState::Degraded)
+    }
+
+    /// Get escalation level for recovery actions
+    pub fn escalation_level(&self) -> u32 {
+        match self {
+            HealthState::Healthy => 0,
+            HealthState::Degraded => 1,
+            HealthState::Unhealthy => 2,
+            HealthState::Unresponsive => 3,
+            HealthState::Critical => 4,
+            HealthState::Unknown => 0,
+        }
+    }
+
+    /// Check if immediate action is required
+    pub fn requires_immediate_action(&self) -> bool {
+        matches!(self, HealthState::Critical | HealthState::Unresponsive)
     }
 }
 
@@ -269,15 +388,39 @@ impl VmHealthStatus {
     }
 
     /// Update health state based on check results and thresholds
-    pub fn update_state(&mut self, _config: &VmHealthCheckConfig) {
+    pub fn update_state(&mut self, config: &VmHealthCheckConfig) {
         // Check if any critical checks failed
         let critical_failures = self
             .check_results
             .iter()
-            .any(|r| !r.success && r.check_name.contains("critical"));
+            .filter(|r| r.critical && !r.success)
+            .count();
 
-        if critical_failures {
+        let _total_critical = self
+            .check_results
+            .iter()
+            .filter(|r| r.critical)
+            .count();
+
+        let comprehensive_failures = self
+            .check_results
+            .iter()
+            .filter(|r| r.priority == HealthCheckPriority::Comprehensive && !r.success)
+            .count();
+
+        let total_comprehensive = self
+            .check_results
+            .iter()
+            .filter(|r| r.priority == HealthCheckPriority::Comprehensive)
+            .count();
+
+        // Escalate health state based on failure patterns
+        if critical_failures > 0 && self.consecutive_failures >= config.failure_threshold * 2 {
+            self.state = HealthState::Critical;
+        } else if critical_failures > 0 || comprehensive_failures == total_comprehensive && total_comprehensive > 0 {
             self.state = HealthState::Unhealthy;
+        } else if self.check_results.is_empty() || self.consecutive_failures >= config.failure_threshold {
+            self.state = HealthState::Unresponsive;
         } else if self.score >= 0.9 {
             self.state = HealthState::Healthy;
         } else if self.score >= 0.5 {
@@ -300,5 +443,66 @@ impl VmHealthStatus {
             self.consecutive_failures += 1;
             self.consecutive_successes = 0;
         }
+    }
+
+    /// Get the highest priority level that has failing checks
+    pub fn get_highest_failing_priority(&self) -> Option<HealthCheckPriority> {
+        let mut highest_priority = None;
+        
+        for result in &self.check_results {
+            if !result.success {
+                match highest_priority {
+                    None => highest_priority = Some(result.priority),
+                    Some(current) => {
+                        if result.priority > current {
+                            highest_priority = Some(result.priority);
+                        }
+                    }
+                }
+            }
+        }
+        
+        highest_priority
+    }
+
+    /// Check if we should escalate to the next level of health checks
+    pub fn should_escalate_checks(&self, current_priority: HealthCheckPriority) -> bool {
+        match current_priority {
+            HealthCheckPriority::Quick => {
+                // Escalate to deep checks if quick checks are failing
+                self.check_results
+                    .iter()
+                    .any(|r| r.priority == HealthCheckPriority::Quick && !r.success)
+            }
+            HealthCheckPriority::Deep => {
+                // Escalate to comprehensive checks if deep checks are failing
+                self.check_results
+                    .iter()
+                    .any(|r| r.priority == HealthCheckPriority::Deep && !r.success)
+            }
+            HealthCheckPriority::Comprehensive => {
+                // Already at highest level
+                false
+            }
+        }
+    }
+
+    /// Determine if recovery action should be triggered
+    pub fn should_trigger_recovery(&self, check_name: &str, failure_threshold: u32) -> bool {
+        // Count consecutive failures for this specific check
+        let mut consecutive_failures = 0;
+        
+        // Look at recent results for this check (in reverse chronological order)
+        for result in self.check_results.iter().rev() {
+            if result.check_name == check_name {
+                if result.success {
+                    break; // Reset count on success
+                } else {
+                    consecutive_failures += 1;
+                }
+            }
+        }
+        
+        consecutive_failures >= failure_threshold
     }
 }

@@ -283,6 +283,9 @@ impl HealthCheckScheduler {
                             .unwrap_or(Duration::from_secs(0))
                             .as_secs() as i64,
                         error: Some(e.to_string()),
+                        priority: crate::vm_health_types::HealthCheckPriority::Quick,
+                        critical: false,
+                        recovery_action: None,
                     }
                 }
                 Err(_timeout) => {
@@ -300,6 +303,9 @@ impl HealthCheckScheduler {
                             .unwrap_or(Duration::from_secs(0))
                             .as_secs() as i64,
                         error: Some("Timeout".to_string()),
+                        priority: crate::vm_health_types::HealthCheckPriority::Quick,
+                        critical: false,
+                        recovery_action: None,
                     }
                 }
             };
@@ -345,6 +351,15 @@ impl HealthCheckScheduler {
                         &[
                             attributes::vm_name(vm_name),
                             attributes::health_state("unhealthy"),
+                        ],
+                    );
+                }
+                HealthState::Critical => {
+                    metrics.vm_health_state.add(
+                        1,
+                        &[
+                            attributes::vm_name(vm_name),
+                            attributes::health_state("critical"),
                         ],
                     );
                 }
