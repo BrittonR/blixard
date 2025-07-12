@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use tera::{Context, Tera};
 
 pub struct NixFlakeGenerator {
+    /// Template directory path (used in tests and constructor but not in generation)
+    #[allow(dead_code)]
     template_dir: PathBuf,
     modules_dir: PathBuf,
     tera: Tera,

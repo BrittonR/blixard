@@ -9,7 +9,7 @@ use blixard_core::{
     error::{BlixardError, BlixardResult},
     common::error_context::StorageContext,
     types::{VmConfig as CoreVmConfig, VmState, VmStatus},
-    vm_backend::{VmBackend, VmBackendFactory},
+    vm_backend::VmBackend,
     vm_health_types::{HealthCheckResult, HealthCheckType, VmHealthStatus},
     vm_state_persistence::{VmStatePersistence, VmPersistenceConfig},
 };
@@ -60,6 +60,8 @@ pub struct MicrovmBackend {
     /// Original VM metadata from core config
     vm_metadata: Arc<RwLock<HashMap<String, HashMap<String, String>>>>,
     /// IP address pool manager for routed networking
+    /// Currently unused pending automatic IP allocation implementation
+    #[allow(dead_code)]
     ip_pool: Arc<RwLock<IpAddressPool>>,
     /// Optional Nix image store for P2P image distribution
     nix_image_store: Option<Arc<blixard_core::nix_image_store::NixImageStore>>,
@@ -163,6 +165,8 @@ impl MicrovmBackend {
     }
 
     /// Update VM configuration to use downloaded Nix image path
+    /// Currently unused pending Nix image management implementation
+    #[allow(dead_code)]
     async fn update_vm_config_with_image_path(
         &self,
         vm_name: &str,
@@ -523,7 +527,7 @@ impl VmBackend for MicrovmBackend {
         // Check if we need to download a Nix image
         if let Some(metadata) = &config.metadata {
             if let Some(nix_image_id) = metadata.get("nix_image_id") {
-                if let Some(store) = &self.nix_image_store {
+                if let Some(_store) = &self.nix_image_store {
                     info!(
                         "VM {} requires Nix image {}, checking availability",
                         config.name, nix_image_id
@@ -988,7 +992,7 @@ impl MicrovmBackend {
         // Check if this VM uses a Nix image that needs to be downloaded
         if let Some(metadata) = self.vm_metadata.read().await.get(vm_name) {
             if let Some(nix_image_id) = metadata.get("nix_image_id") {
-                if let Some(store) = &self.nix_image_store {
+                if let Some(_store) = &self.nix_image_store {
                     info!(
                         "VM {} uses Nix image {}, ensuring availability",
                         vm_name, nix_image_id
@@ -1013,6 +1017,8 @@ impl MicrovmBackend {
     }
 
     /// Download and verify a Nix image
+    /// Currently unused pending P2P image distribution implementation
+    #[allow(dead_code)]
     async fn download_and_verify_nix_image_impl(
         &self,
         vm_name: &str,

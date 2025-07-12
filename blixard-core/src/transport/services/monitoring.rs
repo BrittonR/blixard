@@ -183,6 +183,9 @@ pub async fn prometheus_metrics_handler(
 
 /// Iroh protocol handler for monitoring service
 pub struct MonitoringProtocolHandler {
+    /// Service implementation for monitoring operations
+    /// Currently unused pending Iroh protocol implementation
+    #[allow(dead_code)]
     service: MonitoringServiceImpl,
 }
 

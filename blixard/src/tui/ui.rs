@@ -19,11 +19,12 @@ use ratatui::{
 };
 use std::time::Duration;
 
-use super::app::{
-    AlertSeverity, App, AppMode, AppTab, CreateNodeField, CreateVmField, DebugLevel,
-    ExportFormField, HealthAlert, HealthStatus, ImportFormField, LogEntry, LogLevel, LogSourceType,
-    NodeRole, NodeStatus, RaftDebugInfo, RaftNodeState,
-};
+use super::state::app_state::App;
+use super::types::ui::{AppMode, AppTab, LogEntry, LogLevel, LogSourceType};
+use super::types::monitoring::{HealthAlert, HealthStatus, AlertSeverity};
+use super::types::debug::{DebugLevel, RaftDebugInfo, RaftNodeState};
+use super::types::node::{NodeRole, NodeStatus};
+use super::forms::{CreateNodeField, CreateVmField, ExportFormField, ImportFormField};
 use blixard_core::types::VmStatus;
 
 // Color scheme for modern UI
@@ -189,8 +190,8 @@ fn render_dashboard(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_cluster_status_card(f: &mut Frame, area: Rect, app: &App) {
-    let metrics = &app.cluster_metrics;
-    let conn = &app.connection_status;
+    let metrics = &app.monitoring_state.cluster_metrics;
+    let conn = &app.ui_state.connection_status;
 
     let status_text = if metrics.healthy_nodes == metrics.total_nodes && metrics.total_nodes > 0 {
         "🟢 Healthy"
@@ -206,29 +207,14 @@ fn render_cluster_status_card(f: &mut Frame, area: Rect, app: &App) {
     };
 
     // Connection status line
-    let conn_status = match &conn.state {
-        super::app::ConnectionState::Connected => {
-            let quality = match conn.quality {
-                super::app::NetworkQuality::Excellent => "Excellent",
-                super::app::NetworkQuality::Good => "Good",
-                super::app::NetworkQuality::Fair => "Fair",
-                super::app::NetworkQuality::Poor => "Poor",
-                super::app::NetworkQuality::Bad => "Bad",
-                super::app::NetworkQuality::Unknown => "Unknown",
-            };
-            format!("🟢 {} ({})", quality, conn.endpoint)
+    let conn_status = match conn {
+        super::types::ui::ConnectionStatus::Connected => "🟢 Connected".to_string(),
+        super::types::ui::ConnectionStatus::Connecting => "🟡 Connecting".to_string(),
+        super::types::ui::ConnectionStatus::Disconnected => "🔴 Disconnected".to_string(),
+        super::types::ui::ConnectionStatus::Error(err) => format!("❌ Error: {}", err),
+        super::types::ui::ConnectionStatus::PartiallyConnected { connected, total } => {
+            format!("🟡 Partial ({}/{})", connected, total)
         }
-        super::app::ConnectionState::Connecting => format!("🟡 Connecting to {}", conn.endpoint),
-        super::app::ConnectionState::Reconnecting => {
-            format!("🟠 Reconnecting ({}x)", conn.retry_count)
-        }
-        super::app::ConnectionState::Disconnected => "🔴 Disconnected".to_string(),
-        super::app::ConnectionState::Failed => format!(
-            "❌ Failed: {}",
-            conn.error_message
-                .as_ref()
-                .unwrap_or(&"Unknown error".to_string())
-        ),
     };
 
     let mut content = vec![
@@ -283,7 +269,7 @@ fn render_cluster_status_card(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_resource_usage_card(f: &mut Frame, area: Rect, app: &App) {
-    let metrics = &app.cluster_metrics;
+    let metrics = &app.monitoring_state.cluster_metrics;
 
     let cpu_usage = if metrics.total_cpu > 0 {
         (metrics.used_cpu as f64 / metrics.total_cpu as f64) * 100.0
@@ -351,7 +337,7 @@ fn render_resource_usage_card(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_vm_status_card(f: &mut Frame, area: Rect, app: &App) {
-    let metrics = &app.cluster_metrics;
+    let metrics = &app.monitoring_state.cluster_metrics;
 
     let running_ratio = if metrics.total_vms > 0 {
         (metrics.running_vms as f64 / metrics.total_vms as f64) * 100.0
@@ -489,8 +475,8 @@ fn render_system_overview(f: &mut Frame, area: Rect, app: &App) {
         }));
 
     // CPU sparkline
-    if !app.cpu_history.is_empty() {
-        let cpu_data: Vec<u64> = app.cpu_history.iter().map(|&x| x as u64).collect();
+    if !app.monitoring_state.cpu_history.is_empty() {
+        let cpu_data: Vec<u64> = app.monitoring_state.cpu_history.iter().map(|&x| x as u64).collect();
         let cpu_sparkline = Sparkline::default()
             .block(Block::default().title("CPU History"))
             .data(&cpu_data)
@@ -499,8 +485,8 @@ fn render_system_overview(f: &mut Frame, area: Rect, app: &App) {
     }
 
     // Memory sparkline
-    if !app.memory_history.is_empty() {
-        let memory_data: Vec<u64> = app.memory_history.iter().map(|&x| x as u64).collect();
+    if !app.monitoring_state.memory_history.is_empty() {
+        let memory_data: Vec<u64> = app.monitoring_state.memory_history.iter().map(|&x| x as u64).collect();
         let memory_sparkline = Sparkline::default()
             .block(Block::default().title("Memory History"))
             .data(&memory_data)
@@ -663,7 +649,7 @@ fn render_vm_table(f: &mut Frame, area: Rect, app: &App) {
     .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
     .highlight_symbol(">> ");
 
-    f.render_stateful_widget(table, area, &mut app.vm_table_state.clone());
+    f.render_stateful_widget(table, area, &mut app.vm_state.vm_table_state.clone());
 }
 
 fn render_node_management(f: &mut Frame, area: Rect, app: &App) {
@@ -831,9 +817,8 @@ fn render_node_table(f: &mut Frame, area: Rect, app: &App) {
     .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
     .highlight_symbol(">> ");
 
-    f.render_stateful_widget(table, area, &mut app.node_table_state.clone());
+    f.render_stateful_widget(table, area, &mut app.node_state.node_table_state.clone());
 }
-
 fn render_monitoring(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -891,7 +876,7 @@ fn render_cpu_chart(f: &mut Frame, area: Rect, app: &App) {
         .title("📊 CPU Usage")
         .border_style(Style::default().fg(PRIMARY_COLOR));
 
-    if app.cpu_history.is_empty() {
+    if app.monitoring_state.cpu_history.is_empty() {
         let empty = Paragraph::new("No CPU data available")
             .block(block)
             .alignment(Alignment::Center);
@@ -903,8 +888,8 @@ fn render_cpu_chart(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(block, area);
 
     // Calculate current usage percentage
-    let current_cpu = app.cpu_history.last().copied().unwrap_or(0.0);
-    let avg_cpu = app.cpu_history.iter().sum::<f32>() / app.cpu_history.len() as f32;
+    let current_cpu = app.monitoring_state.cpu_history.last().copied().unwrap_or(0.0);
+    let avg_cpu = app.monitoring_state.cpu_history.iter().sum::<f32>() / app.monitoring_state.cpu_history.len() as f32;
 
     // Split area for value display and graph
     let chunks = Layout::default()
@@ -931,7 +916,7 @@ fn render_cpu_chart(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(cpu_info, chunks[0]);
 
     // Render sparkline
-    let data: Vec<u64> = app.cpu_history.iter().map(|&x| x as u64).collect();
+    let data: Vec<u64> = app.monitoring_state.cpu_history.iter().map(|&x| x as u64).collect();
     let sparkline = Sparkline::default()
         .data(&data)
         .style(Style::default().fg(cpu_color))
@@ -946,7 +931,7 @@ fn render_memory_chart(f: &mut Frame, area: Rect, app: &App) {
         .title("🧠 Memory Usage")
         .border_style(Style::default().fg(PRIMARY_COLOR));
 
-    if app.memory_history.is_empty() {
+    if app.monitoring_state.memory_history.is_empty() {
         let empty = Paragraph::new("No memory data available")
             .block(block)
             .alignment(Alignment::Center);
@@ -958,8 +943,8 @@ fn render_memory_chart(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(block, area);
 
     // Calculate current usage
-    let current_mem = app.memory_history.last().copied().unwrap_or(0.0);
-    let _avg_mem = app.memory_history.iter().sum::<f32>() / app.memory_history.len() as f32;
+    let current_mem = app.monitoring_state.memory_history.last().copied().unwrap_or(0.0);
+    let _avg_mem = app.monitoring_state.memory_history.iter().sum::<f32>() / app.monitoring_state.memory_history.len() as f32;
 
     // Split for value display and graph
     let chunks = Layout::default()
@@ -971,8 +956,8 @@ fn render_memory_chart(f: &mut Frame, area: Rect, app: &App) {
         .split(inner_area);
 
     // Display current and average with used/total
-    let total_mem_gb = app.cluster_metrics.total_memory as f32 / 1024.0;
-    let used_mem_gb = app.cluster_metrics.used_memory as f32 / 1024.0;
+    let total_mem_gb = app.monitoring_state.cluster_metrics.total_memory as f32 / 1024.0;
+    let used_mem_gb = app.monitoring_state.cluster_metrics.used_memory as f32 / 1024.0;
     let mem_text = format!(
         "{:.1}/{:.1} GB ({:.1}%)",
         used_mem_gb, total_mem_gb, current_mem
@@ -991,7 +976,7 @@ fn render_memory_chart(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(mem_info, chunks[0]);
 
     // Render sparkline
-    let data: Vec<u64> = app.memory_history.iter().map(|&x| x as u64).collect();
+    let data: Vec<u64> = app.monitoring_state.memory_history.iter().map(|&x| x as u64).collect();
     let sparkline = Sparkline::default()
         .data(&data)
         .style(Style::default().fg(mem_color))
@@ -1006,7 +991,7 @@ fn render_network_chart(f: &mut Frame, area: Rect, app: &App) {
         .title("🌐 Network I/O")
         .border_style(Style::default().fg(PRIMARY_COLOR));
 
-    if app.network_history.is_empty() {
+    if app.monitoring_state.network_history.is_empty() {
         let empty = Paragraph::new("No network data available")
             .block(block)
             .alignment(Alignment::Center);
@@ -1018,8 +1003,8 @@ fn render_network_chart(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(block, area);
 
     // Calculate current network usage
-    let current_net = app.network_history.last().copied().unwrap_or(0.0);
-    let avg_net = app.network_history.iter().sum::<f32>() / app.network_history.len() as f32;
+    let current_net = app.monitoring_state.network_history.last().copied().unwrap_or(0.0);
+    let avg_net = app.monitoring_state.network_history.iter().sum::<f32>() / app.monitoring_state.network_history.len() as f32;
 
     // Split for value display and graph
     let chunks = Layout::default()
@@ -1048,7 +1033,7 @@ fn render_network_chart(f: &mut Frame, area: Rect, app: &App) {
 
     // Render sparkline
     let data: Vec<u64> = app
-        .network_history
+        .monitoring_state.network_history
         .iter()
         .map(|&x| (x * 10.0) as u64)
         .collect();
@@ -1067,7 +1052,7 @@ fn render_disk_io_chart(f: &mut Frame, area: Rect, app: &App) {
 
     // For now, use network history as placeholder for disk I/O
     // In real implementation, would track actual disk metrics
-    let has_data = !app.network_history.is_empty();
+    let has_data = !app.monitoring_state.network_history.is_empty();
 
     if !has_data {
         let empty = Paragraph::new("No disk I/O data available")
@@ -1192,7 +1177,7 @@ fn render_node_resource_grid(f: &mut Frame, area: Rect, app: &App) {
     .highlight_style(Style::default().add_modifier(Modifier::BOLD))
     .highlight_symbol("➤ ");
 
-    f.render_stateful_widget(table, area, &mut app.node_table_state.clone());
+    f.render_stateful_widget(table, area, &mut app.node_state.node_table_state.clone());
 }
 
 fn render_performance_metrics(f: &mut Frame, area: Rect, app: &App) {
@@ -1221,15 +1206,15 @@ fn render_performance_metrics(f: &mut Frame, area: Rect, app: &App) {
     };
 
     // Average CPU and memory from history
-    let avg_cpu = if app.cpu_history.is_empty() {
+    let avg_cpu = if app.monitoring_state.cpu_history.is_empty() {
         0.0
     } else {
-        app.cpu_history.iter().sum::<f32>() / app.cpu_history.len() as f32
+        app.monitoring_state.cpu_history.iter().sum::<f32>() / app.monitoring_state.cpu_history.len() as f32
     };
-    let avg_mem = if app.memory_history.is_empty() {
+    let avg_mem = if app.monitoring_state.memory_history.is_empty() {
         0.0
     } else {
-        app.memory_history.iter().sum::<f32>() / app.memory_history.len() as f32
+        app.monitoring_state.memory_history.iter().sum::<f32>() / app.monitoring_state.memory_history.len() as f32
     };
 
     let content = vec![
@@ -1288,7 +1273,7 @@ fn render_performance_metrics(f: &mut Frame, area: Rect, app: &App) {
             Span::styled(
                 format!(
                     "{} ({} running)",
-                    app.cluster_metrics.total_vms, app.cluster_metrics.running_vms
+                    app.monitoring_state.cluster_metrics.total_vms, app.monitoring_state.cluster_metrics.running_vms
                 ),
                 Style::default().fg(INFO_COLOR),
             ),
@@ -1822,18 +1807,18 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         }
     };
 
-    let leader_info = match app.cluster_metrics.leader_id {
+    let leader_info = match app.monitoring_state.cluster_metrics.leader_id {
         Some(id) => format!("Leader: Node {}", id),
         None => "Leader: None".to_string(),
     };
 
     let vm_count = format!(
         "VMs: {}/{}",
-        app.cluster_metrics.running_vms, app.cluster_metrics.total_vms
+        app.monitoring_state.cluster_metrics.running_vms, app.monitoring_state.cluster_metrics.total_vms
     );
     let node_count = format!(
         "Nodes: {}/{}",
-        app.cluster_metrics.healthy_nodes, app.cluster_metrics.total_nodes
+        app.monitoring_state.cluster_metrics.healthy_nodes, app.monitoring_state.cluster_metrics.total_nodes
     );
 
     // Add performance and mode indicators

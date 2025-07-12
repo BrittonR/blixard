@@ -91,6 +91,9 @@ pub struct ServiceBuilder {
 #[async_trait]
 trait MethodHandler: Send + Sync {
     async fn handle(&self, payload: Bytes) -> BlixardResult<Bytes>;
+    /// Get the method name for this handler
+    /// Currently unused pending external service inspection API
+    #[allow(dead_code)]
     fn method_name(&self) -> &str;
 }
 

@@ -29,12 +29,18 @@ mod constants {
     pub const SOCKET_PATH_SUFFIX: &str = "-console.sock";
     
     /// Server startup delay in tests
+    /// Currently unused pending test implementation
+    #[allow(dead_code)]
     pub const TEST_SERVER_STARTUP_DELAY: Duration = Duration::from_millis(10);
     
     /// Server connection hold time in tests
+    /// Currently unused pending test implementation
+    #[allow(dead_code)]
     pub const TEST_SERVER_HOLD_TIME: Duration = Duration::from_millis(100);
     
     /// Default pattern check timeout
+    /// Currently unused pending pattern matching implementation
+    #[allow(dead_code)]
     pub const DEFAULT_PATTERN_CHECK_TIMEOUT: Duration = Duration::from_secs(1);
 }
 

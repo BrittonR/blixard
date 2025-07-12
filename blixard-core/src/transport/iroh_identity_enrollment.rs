@@ -13,12 +13,12 @@ use iroh::NodeId;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::Arc,
     time::{Duration, SystemTime},
 };
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info};
 
 /// Enrollment token for automatic node registration
 #[derive(Debug, Clone, Serialize, Deserialize)]

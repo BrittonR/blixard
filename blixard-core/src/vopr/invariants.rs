@@ -363,6 +363,9 @@ impl Invariant for ConsistentViewInvariant {
 
 /// System should make progress
 struct ProgressInvariant {
+    /// Number of snapshots without progress before violation
+    /// Currently unused pending advanced progress tracking implementation
+    #[allow(dead_code)]
     no_progress_threshold: usize,
 }
 
@@ -398,6 +401,9 @@ impl Invariant for ProgressInvariant {
 
 /// Leader should be elected eventually
 struct LeaderElectionInvariant {
+    /// Number of snapshots without leader before violation
+    /// Currently unused pending advanced leader tracking implementation
+    #[allow(dead_code)]
     no_leader_threshold: usize,
 }
 
@@ -439,6 +445,9 @@ impl Invariant for LeaderElectionInvariant {
 
 /// Client requests should complete eventually
 struct RequestCompletionInvariant {
+    /// Number of snapshots before request timeout violation
+    /// Currently unused pending advanced request tracking implementation
+    #[allow(dead_code)]
     timeout_threshold: usize,
 }
 

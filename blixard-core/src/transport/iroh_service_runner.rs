@@ -32,6 +32,9 @@ use tracing::{debug, error, info};
 /// Iroh service runner that handles all RPC services
 pub struct IrohServiceRunner {
     shared_state: Arc<SharedNodeState>,
+    /// Iroh endpoint for P2P communication
+    /// Currently unused pending full Iroh protocol implementation
+    #[allow(dead_code)]
     endpoint: Arc<Endpoint>,
     services: HashMap<String, Arc<dyn IrohService>>,
 }

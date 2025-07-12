@@ -15,6 +15,8 @@ pub struct VmProcessManager {
     /// Currently running VM processes
     processes: Arc<RwLock<HashMap<String, VmProcess>>>,
     /// Runtime directory for VM artifacts
+    /// Currently only used in unused build_vm_runner method
+    #[allow(dead_code)]
     runtime_dir: PathBuf,
     /// Command executor for testing
     command_executor: Box<dyn CommandExecutor>,
@@ -222,6 +224,8 @@ impl VmProcessManager {
     }
 
     /// Build the VM runner using nix
+    /// Currently unused pending Nix build integration
+    #[allow(dead_code)]
     async fn build_vm_runner(&self, name: &str, flake_path: &Path) -> BlixardResult<PathBuf> {
         let out_link = self.runtime_dir.join(format!("{}-runner", name));
 
@@ -257,6 +261,8 @@ impl VmProcessManager {
     }
 
     /// Detect the hypervisor type from the runner script
+    /// Currently unused pending dynamic hypervisor detection
+    #[allow(dead_code)]
     async fn detect_hypervisor(&self, _runner_path: &Path) -> BlixardResult<Hypervisor> {
         // For now, default to cloud-hypervisor
         // In a real implementation, we could inspect the runner script

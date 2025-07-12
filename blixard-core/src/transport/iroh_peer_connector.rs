@@ -448,7 +448,7 @@ impl IrohPeerConnector {
 
         // Process buffered messages on success and update status on failure
         match &result {
-            Ok(client) => {
+            Ok(_client) => {
                 self.send_buffered_messages(peer_id).await;
                 tracing::info!("Connected to peer {} via Iroh", peer_id);
             }

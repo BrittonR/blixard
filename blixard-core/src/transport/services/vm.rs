@@ -413,6 +413,7 @@ impl VmService for VmServiceImpl {
             confidence_score: 100.0,
             preempted_vms: Vec::new(),
             resource_fit_score: 100.0,
+            selected_node_id: 1, // Same as target_node_id for compatibility
             alternative_nodes: Vec::new(),
             reason: "Default assignment".to_string(),
         };

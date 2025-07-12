@@ -49,6 +49,9 @@ pub enum NixImageType {
 
 /// Service implementation for Nix VM images
 pub struct NixVmImageServiceImpl {
+    /// Node state for potential future operations (node metadata, authentication, etc.)
+    /// Currently unused - state is accessed during construction only
+    #[allow(dead_code)]
     node: Arc<SharedNodeState>,
     image_store: Arc<NixImageStore>,
 }

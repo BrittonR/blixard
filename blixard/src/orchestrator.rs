@@ -1,7 +1,5 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
-
-use base64::Engine;
 use blixard_core::{
     config_global,
     // tracing_otel, // Temporarily disabled: uses tonic which we're removing
@@ -140,23 +138,29 @@ impl BlixardOrchestrator {
         }
 
         // Start metrics server if enabled
-        let config = config_global::get();
-        if config.network.metrics.enabled {
-            let bind_addr = *self.node.shared().get_bind_addr();
-            let metrics_port = bind_addr.port() + config.network.metrics.port_offset;
-            let metrics_addr = SocketAddr::new(bind_addr.ip(), metrics_port);
+        if let Ok(config) = config_global::get() {
+            if config.network.metrics.enabled {
+                let bind_addr_str = self.node.shared().get_bind_addr();
+                let bind_addr: SocketAddr = bind_addr_str.parse()
+                    .map_err(|e| tracing::warn!("Failed to parse bind address '{}': {}", bind_addr_str, e))
+                    .unwrap_or_else(|_| "127.0.0.1:7001".parse().unwrap());
+                let metrics_port = bind_addr.port() + config.network.metrics.port_offset;
+                let metrics_addr = SocketAddr::new(bind_addr.ip(), metrics_port);
 
-            self.metrics_handle = Some(metrics_server::spawn_metrics_server(
-                metrics_addr,
-                self.node.shared().clone(),
-            ));
-            tracing::info!(
-                "Metrics server started on http://{}{}",
-                metrics_addr,
-                config.network.metrics.path
-            );
+                self.metrics_handle = Some(metrics_server::spawn_metrics_server(
+                    metrics_addr,
+                    self.node.shared().clone(),
+                ));
+                tracing::info!(
+                    "Metrics server started on http://{}{}",
+                    metrics_addr,
+                    config.network.metrics.path
+                );
+            } else {
+                tracing::info!("Metrics server disabled by configuration");
+            }
         } else {
-            tracing::info!("Metrics server disabled by configuration");
+            tracing::warn!("Failed to get configuration for metrics server");
         }
 
         tracing::info!("Blixard node started successfully");
@@ -193,7 +197,9 @@ impl BlixardOrchestrator {
 
     /// Get the bind address of the gRPC server
     pub fn bind_address(&self) -> std::net::SocketAddr {
-        *self.node.shared().get_bind_addr()
+        self.node.shared().get_bind_addr()
+            .parse()
+            .unwrap_or_else(|_| "127.0.0.1:7001".parse().unwrap())
     }
 
     /// Write node registry information for discovery
@@ -205,8 +211,7 @@ impl BlixardOrchestrator {
         // Get P2P information from Iroh transport
         let (iroh_node_id, direct_addresses, relay_url) =
             if let Some(node_addr) = shared.get_p2p_node_addr().await {
-                let node_id_base64 = base64::Engine::encode(
-                    &base64::engine::general_purpose::STANDARD,
+                let node_id_base64 = base64::engine::general_purpose::STANDARD.encode(
                     node_addr.node_id.as_bytes(),
                 );
                 let addresses: Vec<String> = node_addr

@@ -144,6 +144,9 @@ impl StatusService for StatusServiceImpl {
 
 /// Iroh protocol handler for status service
 pub struct StatusProtocolHandler {
+    /// Service implementation for status operations
+    /// Currently unused pending Iroh protocol implementation
+    #[allow(dead_code)]
     service: StatusServiceImpl,
 }
 

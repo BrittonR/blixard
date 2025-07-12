@@ -100,12 +100,12 @@ async fn test_storage_failures_during_replication() {
             .create_vm(CreateVmRequest {
                 name: format!("storage-test-vm-{}", i),
                 config: VmConfig {
-                    memory: 1024 * 1024 * 1024,
+                    name: format!("storage-test-vm-{}", i),
+                    config_path: "/tmp/test.nix".to_string(),
+                    memory: 1024,
                     vcpus: 1,
-                    disk_size: 10 * 1024 * 1024 * 1024,
-                    image: "test-image".to_string(),
-                    network_interfaces: vec![],
-                    metadata: HashMap::new(),
+                    metadata: Some(HashMap::new()),
+                    ..Default::default()
                 },
             })
             .await;
@@ -167,12 +167,12 @@ async fn test_state_machine_apply_failures() {
             .create_vm(CreateVmRequest {
                 name: format!("apply-test-vm-{}", i),
                 config: VmConfig {
-                    memory: 1024 * 1024 * 1024,
+                    name: "test-vm".to_string(),
+                    config_path: "/tmp/test.nix".to_string(),
+                    memory: 1024,
                     vcpus: 1,
-                    disk_size: 10 * 1024 * 1024 * 1024,
-                    image: "test-image".to_string(),
-                    network_interfaces: vec![],
-                    metadata: HashMap::new(),
+                    metadata: Some(HashMap::new()),
+                    ..Default::default()
                 },
             })
             .await
@@ -217,12 +217,12 @@ async fn test_leader_step_down_failpoints() {
             .create_vm(CreateVmRequest {
                 name: format!("step-down-vm-{}", i),
                 config: VmConfig {
-                    memory: 1024 * 1024 * 1024,
+                    name: "test-vm".to_string(),
+                    config_path: "/tmp/test.nix".to_string(),
+                    memory: 1024,
                     vcpus: 1,
-                    disk_size: 10 * 1024 * 1024 * 1024,
-                    image: "test-image".to_string(),
-                    network_interfaces: vec![],
-                    metadata: HashMap::new(),
+                    metadata: Some(HashMap::new()),
+                    ..Default::default()
                 },
             })
             .await;
@@ -264,12 +264,12 @@ async fn test_snapshot_failures() {
             .create_vm(CreateVmRequest {
                 name: format!("snapshot-vm-{}", i),
                 config: VmConfig {
-                    memory: 1024 * 1024 * 1024,
+                    name: "test-vm".to_string(),
+                    config_path: "/tmp/test.nix".to_string(),
+                    memory: 1024,
                     vcpus: 1,
-                    disk_size: 10 * 1024 * 1024 * 1024,
-                    image: "test-image".to_string(),
-                    network_interfaces: vec![],
-                    metadata: HashMap::new(),
+                    metadata: Some(HashMap::new()),
+                    ..Default::default()
                 },
             })
             .await
@@ -342,12 +342,12 @@ async fn test_chaos_engineering_scenario() {
             .create_vm(CreateVmRequest {
                 name: format!("chaos-vm-{}", i),
                 config: VmConfig {
-                    memory: 1024 * 1024 * 1024,
+                    name: "test-vm".to_string(),
+                    config_path: "/tmp/test.nix".to_string(),
+                    memory: 1024,
                     vcpus: 1,
-                    disk_size: 10 * 1024 * 1024 * 1024,
-                    image: "test-image".to_string(),
-                    network_interfaces: vec![],
-                    metadata: HashMap::new(),
+                    metadata: Some(HashMap::new()),
+                    ..Default::default()
                 },
             })
             .await;
@@ -425,12 +425,12 @@ async fn test_cascading_failure_recovery() {
             .create_vm(CreateVmRequest {
                 name: format!("initial-vm-{}", i),
                 config: VmConfig {
-                    memory: 1024 * 1024 * 1024,
+                    name: "test-vm".to_string(),
+                    config_path: "/tmp/test.nix".to_string(),
+                    memory: 1024,
                     vcpus: 1,
-                    disk_size: 10 * 1024 * 1024 * 1024,
-                    image: "test-image".to_string(),
-                    network_interfaces: vec![],
-                    metadata: HashMap::new(),
+                    metadata: Some(HashMap::new()),
+                    ..Default::default()
                 },
             })
             .await

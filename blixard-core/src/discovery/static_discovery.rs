@@ -27,6 +27,9 @@ pub struct StaticDiscoveryProvider {
 
     /// Event channel for subscribers
     event_sender: mpsc::Sender<DiscoveryEvent>,
+    /// Event receiver for external subscribers to discovery events
+    /// Currently unused pending external event subscription API
+    #[allow(dead_code)]
     event_receiver: Arc<RwLock<Option<mpsc::Receiver<DiscoveryEvent>>>>,
 }
 

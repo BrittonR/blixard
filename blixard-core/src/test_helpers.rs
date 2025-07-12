@@ -156,6 +156,16 @@ impl TestCluster {
         &self.nodes
     }
 
+    /// Create cluster with specific number of nodes (alias for with_size)
+    pub async fn with_nodes(node_count: usize) -> BlixardResult<Self> {
+        Self::with_size(node_count).await
+    }
+
+    /// Wait for leader election and return leader node
+    pub async fn wait_for_leader(&self, timeout: std::time::Duration) -> BlixardResult<u64> {
+        self.wait_for_convergence(timeout).await
+    }
+
     /// Get a specific node by ID
     pub fn get_node(&self, node_id: u64) -> Option<&TestNode> {
         self.nodes.get(&node_id)

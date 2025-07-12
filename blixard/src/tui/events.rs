@@ -9,6 +9,7 @@ pub enum Event {
     Tick,
     #[allow(dead_code)]
     LogLine(String),
+    Reconnect,
     P2pPeersUpdate(Vec<crate::tui::app::P2pPeer>),
     P2pTransfersUpdate(Vec<crate::tui::app::P2pTransfer>),
     P2pImagesUpdate(Vec<crate::tui::app::P2pImage>),

@@ -14,7 +14,7 @@ pub mod visualizer;
 
 pub use self::fuzzer_engine::{FuzzConfig, FuzzMode, FuzzerEngine};
 pub use self::invariants::{Invariant, InvariantChecker, LivenessInvariant, SafetyInvariant};
-pub use self::operation_generator::{Operation, OperationGenerator};
+pub use self::operation_generator::{ByzantineBehavior, ClientOp, Operation, OperationGenerator};
 pub use self::state_tracker::{StateSnapshot, StateTracker};
 pub use self::test_harness::{ClusterState, TestHarness};
 pub use self::time_accelerator::{SimulatedTime, TimeAccelerator};

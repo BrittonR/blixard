@@ -171,7 +171,7 @@ fn render_peer_connections(f: &mut Frame, area: Rect, app: &App) {
     ]);
 
     let rows: Vec<Row> = app
-        .p2p_peers
+        .p2p_peers()
         .iter()
         .map(|peer| {
             let status_color = match peer.status.as_str() {
@@ -242,7 +242,7 @@ fn render_shared_resources(f: &mut Frame, area: Rect, app: &App) {
     ]);
 
     let rows: Vec<Row> = app
-        .p2p_images
+        .p2p_images()
         .iter()
         .map(|image| {
             let status_color = if image.is_cached {
@@ -300,7 +300,7 @@ fn render_transfer_activity(f: &mut Frame, area: Rect, app: &App) {
 
     // Active transfers
     let transfers: Vec<ListItem> = app
-        .p2p_transfers
+        .p2p_transfers()
         .iter()
         .map(|transfer| {
             let progress =

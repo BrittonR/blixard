@@ -163,12 +163,16 @@ pub struct FuzzerEngine {
 #[derive(Debug, Clone)]
 struct TestCase {
     /// Seed that generated this test case
+    /// Currently unused pending corpus management implementation
+    #[allow(dead_code)]
     seed: u64,
 
     /// Operations in this test case
     operations: Vec<Operation>,
 
     /// Coverage achieved by this test case
+    /// Currently unused pending coverage analysis implementation
+    #[allow(dead_code)]
     coverage: Coverage,
 
     /// Whether this test case found a bug

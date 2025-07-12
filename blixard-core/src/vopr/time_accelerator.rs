@@ -58,6 +58,8 @@ impl SimulatedTime {
 #[derive(Debug)]
 struct NodeClock {
     /// Base time (shared across all nodes)
+    /// Currently unused pending clock synchronization implementation
+    #[allow(dead_code)]
     base_time: SimulatedTime,
 
     /// Clock skew for this node (positive or negative)

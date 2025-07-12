@@ -90,6 +90,9 @@ impl MessageFilter for RandomDropFilter {
 
 /// A filter that adds latency to messages (would need async support)
 pub struct LatencyFilter {
+    /// Latency to add in milliseconds
+    /// Currently unused pending async message filtering implementation
+    #[allow(dead_code)]
     latency_ms: u64,
 }
 

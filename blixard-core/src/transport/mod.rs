@@ -349,6 +349,7 @@ pub mod config;
 pub mod iroh_client;
 pub mod iroh_cluster_service;
 pub mod iroh_health_service;
+pub mod iroh_identity_enrollment;
 pub mod iroh_peer_connector;
 pub mod iroh_protocol;
 pub mod iroh_raft_transport;

@@ -87,6 +87,9 @@ impl HealthService for HealthServiceImpl {
 
 /// Iroh protocol handler for health service
 pub struct HealthProtocolHandler {
+    /// Service implementation for health operations
+    /// Currently unused pending Iroh protocol implementation
+    #[allow(dead_code)]
     service: HealthServiceImpl,
 }
 

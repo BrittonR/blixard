@@ -3,7 +3,6 @@ use redb::{Database, ReadableTable};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 use uuid;
 
 use crate::error::{BlixardError, BlixardResult};
@@ -809,6 +808,14 @@ impl VmManager {
     ) -> BlixardResult<crate::vm_scheduler::ClusterResourceSummary> {
         let scheduler = VmScheduler::new(Arc::clone(&self.database));
         scheduler.get_cluster_resource_summary().await
+    }
+
+    /// Create a VM with automatic placement using default strategy
+    ///
+    /// This is a convenience method that creates a VM using the default
+    /// MostAvailable placement strategy.
+    pub async fn create_vm(&self, vm_config: VmConfig) -> BlixardResult<PlacementDecision> {
+        self.create_vm_with_scheduling(vm_config, PlacementStrategy::MostAvailable).await
     }
 
     /// Create a VM with automatic placement

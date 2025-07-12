@@ -384,6 +384,7 @@ async fn execute_scenario(
                                 hex::encode(data),
                             )])),
                             anti_affinity: None,
+                            ..Default::default()
                         },
                         node_id: leader_id,
                     };

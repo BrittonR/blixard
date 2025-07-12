@@ -198,7 +198,9 @@ pub struct StateTracker {
     /// Event log
     events: Vec<Event>,
 
-    /// Latency tracking
+    /// Latency tracking for performance analysis
+    /// Currently unused pending latency analysis implementation
+    #[allow(dead_code)]
     latency_tracker: LatencyTracker,
 
     /// Anomaly detection
