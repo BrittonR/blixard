@@ -200,7 +200,7 @@ pub struct TenantUsage {
 }
 
 /// Current VM resource usage
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct VmResourceUsage {
     /// Number of active VMs
     pub active_vms: u32,
@@ -219,7 +219,7 @@ pub struct VmResourceUsage {
 }
 
 /// Current API usage tracking
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct ApiUsage {
     /// Requests in current second
     pub requests_current_second: u32,
@@ -241,7 +241,7 @@ pub struct ApiUsage {
 }
 
 /// Per-operation usage tracking
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct OperationUsage {
     /// VM creation requests in current minute
     pub vm_create_current_minute: u32,
@@ -260,7 +260,7 @@ pub struct OperationUsage {
 }
 
 /// Current storage usage
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct StorageUsage {
     /// Total storage used in GB
     pub used_storage_gb: u64,
@@ -430,53 +430,9 @@ impl Default for StorageLimits {
     }
 }
 
-impl Default for VmResourceUsage {
-    fn default() -> Self {
-        Self {
-            active_vms: 0,
-            used_vcpus: 0,
-            used_memory_mb: 0,
-            used_disk_gb: 0,
-            vms_per_node: HashMap::new(),
-        }
-    }
-}
 
-impl Default for ApiUsage {
-    fn default() -> Self {
-        Self {
-            requests_current_second: 0,
-            requests_current_minute: 0,
-            requests_current_hour: 0,
-            concurrent_requests: 0,
-            operation_usage: OperationUsage::default(),
-            request_timestamps: Vec::new(),
-        }
-    }
-}
 
-impl Default for OperationUsage {
-    fn default() -> Self {
-        Self {
-            vm_create_current_minute: 0,
-            vm_delete_current_minute: 0,
-            cluster_join_current_hour: 0,
-            status_query_current_second: 0,
-            config_change_current_hour: 0,
-        }
-    }
-}
 
-impl Default for StorageUsage {
-    fn default() -> Self {
-        Self {
-            used_storage_gb: 0,
-            disk_image_count: 0,
-            backup_storage_gb: 0,
-            current_iops: 0,
-        }
-    }
-}
 
 impl TenantQuota {
     /// Create a new tenant quota with default limits

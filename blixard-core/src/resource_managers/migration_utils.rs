@@ -28,7 +28,7 @@ pub struct ResourceManagerMigrationWrapper {
     migration_state: MigrationState,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct MigrationState {
     /// Whether legacy systems have been migrated
     memory_migrated: bool,
@@ -38,16 +38,6 @@ struct MigrationState {
     warnings_issued: Vec<String>,
 }
 
-impl Default for MigrationState {
-    fn default() -> Self {
-        Self {
-            memory_migrated: false,
-            cpu_migrated: false,
-            disk_migrated: false,
-            warnings_issued: Vec::new(),
-        }
-    }
-}
 
 impl ResourceManagerMigrationWrapper {
     /// Create a new migration wrapper

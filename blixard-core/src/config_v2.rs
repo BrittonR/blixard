@@ -144,7 +144,7 @@ pub struct NodeConfig {
 }
 
 /// Cluster configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct ClusterConfig {
     /// Bootstrap as single-node cluster
@@ -337,7 +337,7 @@ pub struct BackupConfig {
 }
 
 /// Network configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct NetworkConfig {
     /// Iroh transport settings
@@ -416,7 +416,7 @@ pub struct DiscoveryConfig {
 }
 
 /// Static nodes configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct StaticNodesConfig {
     /// List of static seed nodes
@@ -424,7 +424,7 @@ pub struct StaticNodesConfig {
 }
 
 /// A static node entry
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StaticNodeEntry {
     /// Node ID (base32-encoded)
     pub node_id: String,
@@ -468,7 +468,7 @@ pub struct MdnsDiscoveryConfig {
 }
 
 /// VM configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct VmConfig {
     /// Default VM settings
@@ -534,7 +534,7 @@ pub struct ResourceLimits {
 }
 
 /// Observability configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct ObservabilityConfig {
     /// Logging configuration
@@ -616,7 +616,7 @@ pub struct TracingConfig {
 }
 
 /// Security configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct SecurityConfig {
     /// TLS configuration
@@ -627,7 +627,7 @@ pub struct SecurityConfig {
 }
 
 /// TLS configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct TlsConfig {
     /// Enable TLS
@@ -726,17 +726,6 @@ impl Default for NodeConfig {
     }
 }
 
-impl Default for ClusterConfig {
-    fn default() -> Self {
-        Self {
-            bootstrap: false,
-            join_address: None,
-            raft: RaftConfig::default(),
-            peer: PeerConfig::default(),
-            worker: WorkerConfig::default(),
-        }
-    }
-}
 
 impl Default for RaftConfig {
     fn default() -> Self {
@@ -830,15 +819,6 @@ impl Default for BackupConfig {
     }
 }
 
-impl Default for NetworkConfig {
-    fn default() -> Self {
-        Self {
-            iroh: IrohTransportConfig::default(),
-            metrics: MetricsServerConfig::default(),
-            discovery: DiscoveryConfig::default(),
-        }
-    }
-}
 
 impl Default for IrohTransportConfig {
     fn default() -> Self {
@@ -862,15 +842,6 @@ impl Default for MetricsServerConfig {
     }
 }
 
-impl Default for VmConfig {
-    fn default() -> Self {
-        Self {
-            defaults: VmDefaults::default(),
-            scheduler: SchedulerConfig::default(),
-            limits: ResourceLimits::default(),
-        }
-    }
-}
 
 impl Default for VmDefaults {
     fn default() -> Self {
@@ -905,15 +876,6 @@ impl Default for ResourceLimits {
     }
 }
 
-impl Default for ObservabilityConfig {
-    fn default() -> Self {
-        Self {
-            logging: LoggingConfig::default(),
-            metrics: MetricsConfig::default(),
-            tracing: TracingConfig::default(),
-        }
-    }
-}
 
 impl Default for LoggingConfig {
     fn default() -> Self {
@@ -959,26 +921,7 @@ impl Default for TracingConfig {
     }
 }
 
-impl Default for SecurityConfig {
-    fn default() -> Self {
-        Self {
-            tls: TlsConfig::default(),
-            auth: AuthConfig::default(),
-        }
-    }
-}
 
-impl Default for TlsConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            cert_file: None,
-            key_file: None,
-            ca_file: None,
-            require_client_cert: false,
-        }
-    }
-}
 
 impl Default for AuthConfig {
     fn default() -> Self {
@@ -1028,11 +971,6 @@ impl Default for DiscoveryConfig {
     }
 }
 
-impl Default for StaticNodesConfig {
-    fn default() -> Self {
-        Self { seeds: Vec::new() }
-    }
-}
 
 impl Default for DnsDiscoveryConfig {
     fn default() -> Self {

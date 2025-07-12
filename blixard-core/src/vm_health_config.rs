@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// Comprehensive configuration for VM health monitoring system
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct VmHealthMonitorConfig {
     /// Health check scheduler configuration
     pub scheduler: HealthCheckSchedulerConfig,
@@ -20,16 +20,6 @@ pub struct VmHealthMonitorConfig {
     pub features: HealthMonitorFeatures,
 }
 
-impl Default for VmHealthMonitorConfig {
-    fn default() -> Self {
-        Self {
-            scheduler: HealthCheckSchedulerConfig::default(),
-            state_manager: HealthStateManagerConfig::default(),
-            recovery: RecoveryCoordinatorConfig::default(),
-            features: HealthMonitorFeatures::default(),
-        }
-    }
-}
 
 /// Configuration for the health check scheduler component
 #[derive(Debug, Clone, Serialize, Deserialize)]

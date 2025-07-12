@@ -210,7 +210,7 @@ pub struct VmMigrationTask {
 }
 
 /// Locality preferences for VM placement across datacenters
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LocalityPreference {
     /// Preferred datacenter for primary placement
     pub preferred_datacenter: Option<String>,
@@ -226,18 +226,6 @@ pub struct LocalityPreference {
     pub excluded_datacenters: Vec<String>,
 }
 
-impl Default for LocalityPreference {
-    fn default() -> Self {
-        Self {
-            preferred_datacenter: None,
-            preferred_zone: None,
-            enforce_same_datacenter: false,
-            spread_across_zones: false,
-            max_latency_ms: None,
-            excluded_datacenters: Vec::new(),
-        }
-    }
-}
 
 impl Default for NodeConfig {
     fn default() -> Self {
