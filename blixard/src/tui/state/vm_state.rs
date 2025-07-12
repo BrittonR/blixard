@@ -60,8 +60,16 @@ impl VmState {
                 .filter(|vm| matches!(vm.status, blixard_core::types::VmStatus::Stopped))
                 .cloned()
                 .collect(),
+            VmFilter::Failed => self.vms.iter()
+                .filter(|vm| matches!(vm.status, blixard_core::types::VmStatus::Failed))
+                .cloned()
+                .collect(),
             VmFilter::ByNode(node_id) => self.vms.iter()
                 .filter(|vm| vm.node_id == *node_id)
+                .cloned()
+                .collect(),
+            VmFilter::ByName(name) => self.vms.iter()
+                .filter(|vm| vm.name.contains(name))
                 .cloned()
                 .collect(),
         };

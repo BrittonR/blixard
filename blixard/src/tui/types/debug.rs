@@ -61,7 +61,15 @@ pub struct DebugMetrics {
     pub raft_proposals: u64,
     pub raft_commits: u64,
     pub snapshot_count: u64,
+    pub snapshot_creations: u64,
+    pub log_compactions: u64,
+    pub network_partitions_detected: u64,
     pub last_snapshot_size: u64,
+    pub last_reset: Instant,
+    pub proposals_committed: u64,
+    pub proposals_submitted: u64,
+    pub elections_started: u64,
+    pub leadership_changes: u64,
 }
 
 #[derive(Debug, Clone)]

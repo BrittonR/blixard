@@ -6,7 +6,7 @@ use crate::tui::types::ui::{AppTab, LogSourceType, LogLevel};
 use crate::tui::types::monitoring::EventLevel;
 use crate::tui::types::monitoring::SystemEvent;
 use crate::tui::types::debug::{DebugLogEntry, DebugLevel, RaftDebugInfo, DebugMetrics};
-use crate::{BlixardError, BlixardResult};
+use crate::BlixardResult;
 use std::time::{Duration, Instant};
 
 pub struct App {
@@ -226,7 +226,7 @@ impl App {
         // For testing/demo purposes
         let sources = vec![
             LogSourceType::System,
-            LogSourceType::VM("vm-001".to_string()),
+            LogSourceType::Vm("vm-001".to_string()),
             LogSourceType::Node(1),
             LogSourceType::Cluster,
         ];
@@ -315,7 +315,7 @@ impl App {
     }
 
     // Event handling - this is simplified, the full implementation remains in app.rs
-    pub async fn handle_key_event(&mut self, key: crossterm::event::KeyEvent) -> BlixardResult<()> {
+    pub async fn handle_key_event(&mut self, _key: crossterm::event::KeyEvent) -> BlixardResult<()> {
         // This is a placeholder - the full implementation should be moved to handlers/
         Ok(())
     }

@@ -79,6 +79,7 @@ pub struct EditNodeForm {
     pub data_dir: String,
     pub vm_backend: String,
     pub current_field: EditNodeField,
+    pub original_address: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -96,6 +97,7 @@ impl EditNodeForm {
             data_dir: format!("./data/node-{}", node.id), // Default guess
             vm_backend: "microvm".to_string(),
             current_field: EditNodeField::BindAddress,
+            original_address: node.address.clone(),
         }
     }
 }

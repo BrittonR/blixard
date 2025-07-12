@@ -670,6 +670,9 @@ async fn main() -> BlixardResult<()> {
         Commands::Tui {} => {
             handle_tui_command().await?;
         }
+        Commands::IpPool { command } => {
+            handle_ip_pool_command(command).await?;
+        }
     }
 
     Ok(())
@@ -948,7 +951,7 @@ async fn handle_vm_health_command(
     command: VmHealthCommands,
     client: &mut crate::client::UnifiedClient,
 ) -> BlixardResult<()> {
-    use blixard_core::vm_health_types::{HealthCheckType, VmHealthCheckConfig};
+    use blixard_core::vm_health_types::HealthCheckType;
 
     match command {
         VmHealthCommands::Status { name } => {
@@ -1010,13 +1013,16 @@ async fn handle_vm_health_command(
                 }
             };
 
-            use blixard_core::vm_health_types::HealthCheck;
+            use blixard_core::vm_health_types::{HealthCheck, HealthCheckPriority};
 
             let health_check = HealthCheck {
                 name: check_name.clone(),
                 check_type: health_check_type,
                 weight: weight.unwrap_or(1.0),
                 critical,
+                priority: HealthCheckPriority::Quick,
+                recovery_escalation: None,
+                failure_threshold: 3,
             };
 
             match client
@@ -1451,12 +1457,13 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
             use blixard_core::cluster_state::{ClusterStateManager, ExportOptions};
             use blixard_core::iroh_transport_v2::IrohTransportV2;
             use blixard_core::storage::RedbRaftStorage;
+            use blixard_core::raft_storage::Storage;
             use std::sync::Arc;
 
             // Initialize storage
             let db_path = std::path::Path::new(&data_dir).join("blixard.db");
             let database = Arc::new(redb::Database::create(&db_path)?);
-            let storage: Arc<dyn blixard_core::storage::Storage> =
+            let storage: Arc<dyn Storage> =
                 Arc::new(RedbRaftStorage { database });
 
             // Initialize P2P transport if needed
@@ -1517,12 +1524,13 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
             use blixard_core::cluster_state::ClusterStateManager;
             use blixard_core::iroh_transport_v2::IrohTransportV2;
             use blixard_core::storage::RedbRaftStorage;
+            use blixard_core::raft_storage::Storage;
             use std::sync::Arc;
 
             // Initialize storage
             let db_path = std::path::Path::new(&data_dir).join("blixard.db");
             let database = Arc::new(redb::Database::create(&db_path)?);
-            let storage: Arc<dyn blixard_core::storage::Storage> =
+            let storage: Arc<dyn Storage> =
                 Arc::new(RedbRaftStorage { database });
 
             // Initialize P2P transport if needed
@@ -1876,14 +1884,11 @@ async fn handle_tui_command() -> BlixardResult<()> {
     })?;
 
     // Create modern app and event handler
-    let mut app = tui::app::App::new().await?;
+    let mut app = tui::app::App::new();
     let mut event_handler = tui::events::EventHandler::new(250); // 250ms tick rate
 
-    // Connect the event sender to the app
-    app.set_event_sender(event_handler.sender());
-
-    // Initial data refresh
-    let _ = app.refresh_all_data().await;
+    // Note: The new App struct doesn't have set_event_sender or refresh_all_data methods yet
+    // These will need to be implemented as part of the migration
 
     // Main loop
     let result = loop {
@@ -1897,11 +1902,16 @@ async fn handle_tui_command() -> BlixardResult<()> {
         // Handle events
         match event_handler.next().await {
             Ok(event) => {
-                if let Err(e) = app.handle_event(event).await {
-                    eprintln!("Error handling event: {}", e);
+                // Note: handle_event method needs to be implemented in the new App struct
+                // For now, we'll just check if we should quit
+                use tui::events::Event;
+                if let Event::Key(key_event) = event {
+                    if key_event.code == crossterm::event::KeyCode::Char('q') {
+                        app.ui_state.should_quit = true;
+                    }
                 }
 
-                if app.should_quit {
+                if app.ui_state.should_quit {
                     break Ok(());
                 }
             }
@@ -1935,7 +1945,7 @@ async fn handle_tui_command() -> BlixardResult<()> {
 #[cfg(not(madsim))]
 async fn handle_security_command(command: SecurityCommands) -> BlixardResult<()> {
     use blixard_core::cert_generator::{
-        generate_cluster_pki, CertGenerator, CertGeneratorConfig, KeyAlgorithm,
+        generate_cluster_pki, KeyAlgorithm,
     };
     use std::path::PathBuf;
 

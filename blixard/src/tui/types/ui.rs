@@ -1,6 +1,6 @@
 //! UI-related types for the TUI
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AppTab {
@@ -95,6 +95,9 @@ pub enum SearchMode {
     None,
     Filter,
     Fuzzy,
+    VmSearch,
+    NodeSearch,
+    QuickFilter,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -135,11 +138,14 @@ impl ConnectionStatus {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LogSourceType {
+    All,
     System,
-    VM(String),
+    Vm(String),
     Node(u64),
     Cluster,
     Debug,
+    Raft,
+    GrpcServer,
 }
 
 #[derive(Debug, Clone)]
@@ -157,4 +163,15 @@ pub struct LogStreamConfig {
     pub sources: Vec<LogSourceType>,
     pub level_filter: LogLevel,
     pub max_buffer_size: usize,
+    pub selected_source: LogSourceType,
+    pub filters: LogFilters,
+    pub follow_mode: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct LogFilters {
+    pub log_level: LogLevel,
+    pub search_text: String,
+    pub show_timestamps: bool,
+    pub highlight_errors: bool,
 }

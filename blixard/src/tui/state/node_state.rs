@@ -71,7 +71,19 @@ impl NodeState {
                 .filter(|n| !matches!(n.status, crate::tui::types::node::NodeStatus::Healthy))
                 .cloned()
                 .collect(),
+            NodeFilter::Warning => self.nodes.iter()
+                .filter(|n| matches!(n.status, crate::tui::types::node::NodeStatus::Warning))
+                .cloned()
+                .collect(),
+            NodeFilter::Critical => self.nodes.iter()
+                .filter(|n| matches!(n.status, crate::tui::types::node::NodeStatus::Critical))
+                .cloned()
+                .collect(),
             NodeFilter::Leader => self.nodes.iter()
+                .filter(|n| matches!(n.role, crate::tui::types::node::NodeRole::Leader))
+                .cloned()
+                .collect(),
+            NodeFilter::Leaders => self.nodes.iter()
                 .filter(|n| matches!(n.role, crate::tui::types::node::NodeRole::Leader))
                 .cloned()
                 .collect(),

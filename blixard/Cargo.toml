@@ -62,6 +62,9 @@ iroh = { workspace = true }
 # Encoding
 base64 = { workspace = true }
 
+# Network utilities
+ipnet = "2.9"
+
 [features]
 default = []
 test-helpers = ["blixard-core/test-helpers"]

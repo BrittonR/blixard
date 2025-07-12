@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use base64::prelude::*;
 use blixard_core::{
     config_global,
     // tracing_otel, // Temporarily disabled: uses tonic which we're removing
@@ -9,7 +10,7 @@ use blixard_core::{
     metrics_server,
     node::Node,
     types::NodeConfig,
-    vm_backend::{VmBackendRegistry, VmManager},
+    vm_backend::{VmBackend, VmBackendRegistry},
 };
 use blixard_vm::MicrovmBackendFactory;
 use tokio::task::JoinHandle;
@@ -190,9 +191,9 @@ impl BlixardOrchestrator {
         &self.node
     }
 
-    /// Get the VM manager for direct access to VM operations
-    pub async fn vm_manager(&self) -> Option<Arc<VmManager>> {
-        self.node.shared().get_vm_manager().await
+    /// Get the VM backend for direct access to VM operations
+    pub async fn vm_backend(&self) -> Option<Arc<dyn VmBackend>> {
+        self.node.shared().get_vm_manager()
     }
 
     /// Get the bind address of the gRPC server
@@ -206,19 +207,18 @@ impl BlixardOrchestrator {
     async fn write_node_registry(&self) -> BlixardResult<()> {
         let shared = self.node.shared();
         let node_id = shared.config.id;
-        let bind_addr = *shared.get_bind_addr();
+        let bind_addr = shared.get_bind_addr();
 
         // Get P2P information from Iroh transport
         let (iroh_node_id, direct_addresses, relay_url) =
-            if let Some(node_addr) = shared.get_p2p_node_addr().await {
-                let node_id_base64 = base64::engine::general_purpose::STANDARD.encode(
-                    node_addr.node_id.as_bytes(),
+            if let Some(node_addr_str) = shared.get_p2p_node_addr() {
+                // For now, we'll use the node address string as the node ID
+                // TODO: Parse the actual node address structure when available
+                let node_id_base64 = base64::prelude::BASE64_STANDARD.encode(
+                    node_addr_str.as_bytes(),
                 );
-                let addresses: Vec<String> = node_addr
-                    .direct_addresses()
-                    .map(|addr| addr.to_string())
-                    .collect();
-                let relay = node_addr.relay_url.as_ref().map(|url| url.to_string());
+                let addresses = vec![node_addr_str.clone()];
+                let relay = None; // TODO: Extract relay URL when structure is available
                 (node_id_base64, addresses, relay)
             } else {
                 tracing::warn!("P2P node address not available, using placeholder values");

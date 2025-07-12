@@ -52,7 +52,10 @@ pub enum NodeFilter {
     All,
     Healthy,
     Unhealthy,
+    Warning,
+    Critical,
     Leader,
+    Leaders,
     Followers,
 }
 

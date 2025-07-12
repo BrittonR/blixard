@@ -21,6 +21,17 @@ pub enum P2pPeerStatus {
     Error,
 }
 
+impl P2pPeerStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            P2pPeerStatus::Connected => "Connected",
+            P2pPeerStatus::Connecting => "Connecting",
+            P2pPeerStatus::Disconnected => "Disconnected",
+            P2pPeerStatus::Error => "Error",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct P2pImage {
     pub name: String,
@@ -29,6 +40,11 @@ pub struct P2pImage {
     pub availability: u32, // number of peers with this image
     pub is_local: bool,
     pub last_accessed: Option<Instant>,
+    pub is_cached: bool,
+    pub is_downloading: bool,
+    pub version: String,
+    pub size: u64,
+    pub available_peers: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +56,11 @@ pub struct P2pTransfer {
     pub speed_mbps: f32,
     pub started_at: Instant,
     pub estimated_completion: Option<Instant>,
+    pub bytes_transferred: u64,
+    pub total_bytes: u64,
+    pub speed_bps: u64,
+    pub is_upload: bool,
+    pub resource_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -54,6 +75,7 @@ pub enum NetworkQuality {
     Good,
     Fair,
     Poor,
+    Bad,
     Unknown,
 }
 

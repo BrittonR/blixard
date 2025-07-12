@@ -1,7 +1,6 @@
 //! VM-related types for the TUI
 
 use blixard_core::types::VmStatus;
-use std::time::Instant;
 
 #[derive(Debug, Clone)]
 pub struct VmInfo {
@@ -27,7 +26,9 @@ pub enum VmFilter {
     All,
     Running,
     Stopped,
+    Failed,
     ByNode(u64),
+    ByName(String),
 }
 
 #[derive(Debug, Clone)]

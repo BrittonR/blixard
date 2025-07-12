@@ -185,7 +185,10 @@ fn render_peer_connections(f: &mut Frame, area: Rect, app: &App) {
                 Cell::from(peer.node_id.chars().take(8).collect::<String>()),
                 Cell::from(peer.address.as_str()),
                 Cell::from(peer.status.as_str()).style(Style::default().fg(status_color)),
-                Cell::from(format!("{}ms", peer.latency_ms)),
+                Cell::from(match peer.latency_ms {
+                    Some(latency) => format!("{}ms", latency),
+                    None => "N/A".to_string(),
+                }),
                 Cell::from(format!("{} images", peer.shared_images)),
             ])
         })
