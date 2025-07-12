@@ -3,16 +3,16 @@
 //! This module handles Raft cluster membership changes including adding and
 //! removing nodes, managing peer connections, and maintaining configuration consistency.
 
-use crate::error::{BlixardError, BlixardResult};
 use crate::common::error_context::StorageContext;
+use crate::error::{BlixardError, BlixardResult};
 use crate::raft_storage::RedbRaftStorage;
 
-use super::messages::{RaftConfChange, ConfChangeType, ConfChangeContext};
+use super::messages::{ConfChangeContext, ConfChangeType, RaftConfChange};
 
 use raft::prelude::{ConfChange, ConfChangeType as RaftConfChangeType, Entry, RawNode};
 use redb::Database;
-use serde::{Serialize, Deserialize};
-use slog::{info, warn, error, Logger};
+use serde::{Deserialize, Serialize};
+use slog::{error, info, warn, Logger};
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
@@ -59,7 +59,7 @@ pub struct RaftConfigManager {
     peers: Arc<RwLock<HashMap<u64, String>>>,
     logger: Logger,
     shared_state: Weak<crate::node_shared::SharedNodeState>,
-    
+
     // Flag to trigger replication after config changes
     needs_replication_trigger: Arc<RwLock<bool>>,
 }
@@ -104,18 +104,24 @@ impl RaftConfigManager {
                 raft_node.raft.state
             );
             warn!(self.logger, "{}", error_msg);
-            
+
             if let Some(response_tx) = conf_change.response_tx {
                 let _ = response_tx.send(Err(BlixardError::NotLeader {
                     operation: "propose configuration change".to_string(),
-                    leader_id: if raft_node.raft.leader_id == 0 { None } else { Some(raft_node.raft.leader_id) },
+                    leader_id: if raft_node.raft.leader_id == 0 {
+                        None
+                    } else {
+                        Some(raft_node.raft.leader_id)
+                    },
                 }));
             }
             return Ok(());
         }
 
         // Check if this node is the one being removed
-        if matches!(conf_change.change_type, ConfChangeType::RemoveNode) && conf_change.node_id == self.node_id {
+        if matches!(conf_change.change_type, ConfChangeType::RemoveNode)
+            && conf_change.node_id == self.node_id
+        {
             warn!(self.logger, "Node is removing itself from cluster");
             // Allow self-removal, but we'll shut down after processing
         }
@@ -134,10 +140,11 @@ impl RaftConfigManager {
             p2p_relay_url: conf_change.p2p_relay_url.clone(),
         };
 
-        let context_data = bincode::serialize(&context).map_err(|e| BlixardError::Serialization {
-            operation: "serialize conf change context".to_string(),
-            source: Box::new(e),
-        })?;
+        let context_data =
+            bincode::serialize(&context).map_err(|e| BlixardError::Serialization {
+                operation: "serialize conf change context".to_string(),
+                source: Box::new(e),
+            })?;
 
         let cc = ConfChange {
             id: 0, // Will be assigned by Raft
@@ -153,18 +160,21 @@ impl RaftConfigManager {
                     self.logger,
                     "[CONF-CHANGE] Proposed configuration change successfully"
                 );
-                
+
                 // For single-node clusters, immediately handle the change
                 if self.is_single_node_cluster(raft_node) {
-                    info!(self.logger, "Single-node cluster detected, applying configuration change immediately");
+                    info!(
+                        self.logger,
+                        "Single-node cluster detected, applying configuration change immediately"
+                    );
                     self.apply_conf_change_immediately(&cc, raft_node).await?;
                 }
-                
+
                 // Handle successful addition by updating local peer list and establishing connections
                 if matches!(conf_change.change_type, ConfChangeType::AddNode) {
                     self.handle_successful_node_addition(&conf_change).await?;
                 }
-                
+
                 if let Some(response_tx) = conf_change.response_tx {
                     let _ = response_tx.send(Ok(()));
                 }
@@ -175,7 +185,7 @@ impl RaftConfigManager {
                     "[CONF-CHANGE] Failed to propose configuration change";
                     "error" => %e
                 );
-                
+
                 if let Some(response_tx) = conf_change.response_tx {
                     let _ = response_tx.send(Err(BlixardError::Raft {
                         operation: "propose configuration change".to_string(),
@@ -223,7 +233,10 @@ impl RaftConfigManager {
     }
 
     /// Handle successful node addition by updating peers and establishing connections
-    async fn handle_successful_node_addition(&self, conf_change: &RaftConfChange) -> BlixardResult<()> {
+    async fn handle_successful_node_addition(
+        &self,
+        conf_change: &RaftConfChange,
+    ) -> BlixardResult<()> {
         // Update local peer list
         {
             let mut peers = self.peers.write().await;
@@ -236,14 +249,21 @@ impl RaftConfigManager {
                 if let Some(peer_connector) = shared.get_peer_connector() {
                     let node_addr = if let Some(relay_url) = &conf_change.p2p_relay_url {
                         // Use relay for connection
-                        self.create_node_addr_with_relay(p2p_node_id, &conf_change.p2p_addresses, relay_url)?
+                        self.create_node_addr_with_relay(
+                            p2p_node_id,
+                            &conf_change.p2p_addresses,
+                            relay_url,
+                        )?
                     } else {
                         // Direct connection
                         self.create_node_addr_direct(p2p_node_id, &conf_change.p2p_addresses)?
                     };
 
                     // Attempt to connect to the new peer
-                    match peer_connector.connect_to_peer(conf_change.node_id, node_addr).await {
+                    match peer_connector
+                        .connect_to_peer(conf_change.node_id, node_addr)
+                        .await
+                    {
                         Ok(_) => {
                             info!(
                                 self.logger,
@@ -302,9 +322,7 @@ impl RaftConfigManager {
                 if let Some(address) = peers.remove(&cc.node_id) {
                     info!(
                         self.logger,
-                        "Removed node {} with address {} from local peer list",
-                        cc.node_id,
-                        address
+                        "Removed node {} with address {} from local peer list", cc.node_id, address
                     );
                 }
 
@@ -315,7 +333,10 @@ impl RaftConfigManager {
                 }
             }
             _ => {
-                warn!(self.logger, "Unknown conf change type: {:?}", cc.change_type);
+                warn!(
+                    self.logger,
+                    "Unknown conf change type: {:?}", cc.change_type
+                );
             }
         }
 
@@ -324,27 +345,28 @@ impl RaftConfigManager {
 
     /// Save the configuration state to persistent storage
     async fn save_conf_state(&self, conf_state: &raft::prelude::ConfState) -> BlixardResult<()> {
-        let write_txn = self.database.begin_write().storage_context("begin conf state transaction")?;
-        
+        let write_txn = self
+            .database
+            .begin_write()
+            .storage_context("begin conf state transaction")?;
+
         {
             let mut table = write_txn.open_table(crate::raft_storage::CLUSTER_STATE_TABLE)?;
             let serializable_conf_state = SerializableConfState::from(conf_state);
-            let conf_data = bincode::serialize(&serializable_conf_state).map_err(|e| BlixardError::serialization(
-                "serialize conf state",
-                e
-            ))?;
-            
+            let conf_data = bincode::serialize(&serializable_conf_state)
+                .map_err(|e| BlixardError::serialization("serialize conf state", e))?;
+
             table.insert("conf_state", conf_data.as_slice())?;
         }
-        
+
         write_txn.commit().storage_context("commit conf state")?;
-        
+
         debug!(
             "Saved configuration state with {} voters and {} learners",
             conf_state.voters.len(),
             conf_state.learners.len()
         );
-        
+
         Ok(())
     }
 
@@ -357,12 +379,12 @@ impl RaftConfigManager {
         let conf_state = raft_node.apply_conf_change(cc)?;
         self.save_conf_state(&conf_state).await?;
         self.update_local_peers_after_conf_change(cc).await?;
-        
+
         info!(
             self.logger,
             "Applied configuration change immediately for single-node cluster"
         );
-        
+
         Ok(())
     }
 
@@ -382,25 +404,25 @@ impl RaftConfigManager {
         relay_url: &str,
     ) -> BlixardResult<iroh::NodeAddr> {
         use std::str::FromStr;
-        
+
         let node_id = iroh::NodeId::from_str(p2p_node_id).map_err(|e| BlixardError::Internal {
             message: format!("Invalid P2P node ID {}: {}", p2p_node_id, e),
         })?;
-        
+
         let mut addr = iroh::NodeAddr::new(node_id);
-        
+
         // Add direct addresses
         for addr_str in p2p_addresses {
             if let Ok(socket_addr) = addr_str.parse::<std::net::SocketAddr>() {
                 addr = addr.with_direct_addresses([socket_addr]);
             }
         }
-        
+
         // Add relay
         if let Ok(relay_url_parsed) = relay_url.parse() {
             addr = addr.with_relay_url(relay_url_parsed);
         }
-        
+
         Ok(addr)
     }
 
@@ -411,19 +433,19 @@ impl RaftConfigManager {
         p2p_addresses: &[String],
     ) -> BlixardResult<iroh::NodeAddr> {
         use std::str::FromStr;
-        
+
         let node_id = iroh::NodeId::from_str(p2p_node_id).map_err(|e| BlixardError::Internal {
             message: format!("Invalid P2P node ID {}: {}", p2p_node_id, e),
         })?;
-        
+
         let mut addr = iroh::NodeAddr::new(node_id);
-        
+
         // Add direct addresses
         let socket_addrs: Result<Vec<std::net::SocketAddr>, _> = p2p_addresses
             .iter()
             .map(|addr_str| addr_str.parse())
             .collect();
-            
+
         match socket_addrs {
             Ok(addrs) => {
                 addr = addr.with_direct_addresses(addrs);
@@ -431,7 +453,7 @@ impl RaftConfigManager {
             }
             Err(e) => Err(BlixardError::Internal {
                 message: format!("Failed to parse P2P addresses: {}", e),
-            })
+            }),
         }
     }
 

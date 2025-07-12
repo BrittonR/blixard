@@ -57,11 +57,14 @@ impl RaftEventLoop {
     pub async fn run(mut self) -> BlixardResult<()> {
         let mut tick_timer = interval(Duration::from_millis(self.config.tick_interval_ms));
         let mut tick_count = 0u64;
-        
+
         info!(self.logger, "[EVENT-LOOP] Starting main event loop");
-        
+
         loop {
-            match self.process_next_event(&mut tick_timer, &mut tick_count).await {
+            match self
+                .process_next_event(&mut tick_timer, &mut tick_count)
+                .await
+            {
                 Ok(()) => continue,
                 Err(e) => {
                     error!(self.logger, "[EVENT-LOOP] Event processing failed, exiting"; "error" => %e);
@@ -96,11 +99,11 @@ impl RaftEventLoop {
     /// Handle periodic tick events
     async fn handle_tick(&self, tick_count: &mut u64) -> BlixardResult<()> {
         *tick_count += 1;
-        
+
         if *tick_count % self.config.tick_log_interval == 0 {
             info!(self.logger, "[TICK] Tick #{}", tick_count);
         }
-        
+
         self.event_dispatcher.handle_tick().await
     }
 }
@@ -111,13 +114,13 @@ pub struct RaftEventDispatcher {
     pub proposal_rx: mpsc::UnboundedReceiver<RaftProposal>,
     pub message_rx: mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>,
     pub conf_change_rx: mpsc::UnboundedReceiver<RaftConfChange>,
-    
+
     // Event handlers (function pointers or trait objects)
     tick_handler: Box<dyn TickHandler + Send + Sync>,
     proposal_handler: Box<dyn ProposalHandler + Send + Sync>,
     message_handler: Box<dyn MessageHandler + Send + Sync>,
     conf_change_handler: Box<dyn ConfChangeHandler + Send + Sync>,
-    
+
     logger: Logger,
 }
 
@@ -157,15 +160,27 @@ impl RaftEventDispatcher {
     }
 
     /// Handle a Raft message event
-    async fn handle_raft_message(&self, from: u64, msg: raft::prelude::Message) -> BlixardResult<()> {
-        info!(self.logger, "[EVENT-DISPATCHER] Handling message from {}", from);
+    async fn handle_raft_message(
+        &self,
+        from: u64,
+        msg: raft::prelude::Message,
+    ) -> BlixardResult<()> {
+        info!(
+            self.logger,
+            "[EVENT-DISPATCHER] Handling message from {}", from
+        );
         self.message_handler.handle_message(from, msg).await
     }
 
     /// Handle a configuration change event
     async fn handle_conf_change(&self, conf_change: RaftConfChange) -> BlixardResult<()> {
-        info!(self.logger, "[EVENT-DISPATCHER] Handling configuration change");
-        self.conf_change_handler.handle_conf_change(conf_change).await
+        info!(
+            self.logger,
+            "[EVENT-DISPATCHER] Handling configuration change"
+        );
+        self.conf_change_handler
+            .handle_conf_change(conf_change)
+            .await
     }
 }
 
@@ -221,7 +236,7 @@ impl EventLoopFactory {
             conf_change_handler,
             logger.clone(),
         );
-        
+
         RaftEventLoop::new(config, dispatcher, logger)
     }
 
@@ -247,7 +262,7 @@ impl EventLoopFactory {
             conf_change_handler,
             logger.clone(),
         );
-        
+
         RaftEventLoop::new(config, dispatcher, logger)
     }
 }
@@ -279,7 +294,11 @@ mod tests {
 
     #[async_trait]
     impl MessageHandler for MockMessageHandler {
-        async fn handle_message(&self, _from: u64, _msg: raft::prelude::Message) -> BlixardResult<()> {
+        async fn handle_message(
+            &self,
+            _from: u64,
+            _msg: raft::prelude::Message,
+        ) -> BlixardResult<()> {
             Ok(())
         }
     }
@@ -315,7 +334,7 @@ mod tests {
             Box::new(MockConfChangeHandler),
             logger,
         );
-        
+
         // Test that factory creates event loop without panicking
     }
 }

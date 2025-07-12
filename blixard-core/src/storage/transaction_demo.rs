@@ -4,7 +4,6 @@
 //! transaction patterns and provides consistent error handling.
 
 #![allow(unused_imports, unused_variables, dead_code)]
-
 // Only compile this demo when test-helpers or observability features are enabled
 #![cfg(any(feature = "test-helpers", feature = "observability"))]
 
@@ -14,7 +13,7 @@ mod traditional_patterns {
         common::error_context::StorageContext,
         error::{BlixardError, BlixardResult},
     };
-    use redb::{Database, TableDefinition, WriteTransaction, ReadTransaction};
+    use redb::{Database, ReadTransaction, TableDefinition, WriteTransaction};
     use serde::{Deserialize, Serialize};
 
     const VM_STATE_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vm_states");
@@ -32,20 +31,19 @@ mod traditional_patterns {
         state: &VmState,
     ) -> BlixardResult<()> {
         // Repetitive transaction setup
-        let write_txn = database
-            .begin_write()
-            .map_err(|e| BlixardError::Storage {
-                operation: "begin write transaction for vm state".to_string(),
-                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
-            })?;
+        let write_txn = database.begin_write().map_err(|e| BlixardError::Storage {
+            operation: "begin write transaction for vm state".to_string(),
+            source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
+        })?;
 
         // Repetitive table opening
-        let mut table = write_txn
-            .open_table(VM_STATE_TABLE)
-            .map_err(|e| BlixardError::Storage {
-                operation: "open vm state table".to_string(),
-                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
-            })?;
+        let mut table =
+            write_txn
+                .open_table(VM_STATE_TABLE)
+                .map_err(|e| BlixardError::Storage {
+                    operation: "open vm state table".to_string(),
+                    source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
+                })?;
 
         // Repetitive serialization with error handling
         let data = bincode::serialize(state).map_err(|e| BlixardError::Serialization {
@@ -65,12 +63,10 @@ mod traditional_patterns {
         drop(table);
 
         // Repetitive commit with error handling
-        write_txn
-            .commit()
-            .map_err(|e| BlixardError::Storage {
-                operation: "commit vm state transaction".to_string(),
-                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
-            })?;
+        write_txn.commit().map_err(|e| BlixardError::Storage {
+            operation: "commit vm state transaction".to_string(),
+            source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
+        })?;
 
         Ok(())
     }
@@ -81,12 +77,10 @@ mod traditional_patterns {
         vm_name: &str,
     ) -> BlixardResult<Option<VmState>> {
         // Repetitive read transaction setup
-        let read_txn = database
-            .begin_read()
-            .map_err(|e| BlixardError::Storage {
-                operation: "begin read transaction for vm state".to_string(),
-                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
-            })?;
+        let read_txn = database.begin_read().map_err(|e| BlixardError::Storage {
+            operation: "begin read transaction for vm state".to_string(),
+            source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
+        })?;
 
         // Repetitive table opening
         let table = read_txn
@@ -97,12 +91,10 @@ mod traditional_patterns {
             })?;
 
         // Repetitive get with error handling
-        match table
-            .get(vm_name)
-            .map_err(|e| BlixardError::Storage {
-                operation: "get vm state".to_string(),
-                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
-            })? {
+        match table.get(vm_name).map_err(|e| BlixardError::Storage {
+            operation: "get vm state".to_string(),
+            source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
+        })? {
             Some(data) => {
                 // Repetitive deserialization with error handling
                 let state = bincode::deserialize(data.value()).map_err(|e| {
@@ -124,20 +116,19 @@ mod traditional_patterns {
         new_states: Vec<(String, VmState)>,
     ) -> BlixardResult<()> {
         // Repetitive transaction setup
-        let write_txn = database
-            .begin_write()
-            .map_err(|e| BlixardError::Storage {
-                operation: "begin write transaction for restore".to_string(),
-                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
-            })?;
+        let write_txn = database.begin_write().map_err(|e| BlixardError::Storage {
+            operation: "begin write transaction for restore".to_string(),
+            source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
+        })?;
 
         // Repetitive table opening
-        let mut table = write_txn
-            .open_table(VM_STATE_TABLE)
-            .map_err(|e| BlixardError::Storage {
-                operation: "open table for restore".to_string(),
-                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
-            })?;
+        let mut table =
+            write_txn
+                .open_table(VM_STATE_TABLE)
+                .map_err(|e| BlixardError::Storage {
+                    operation: "open table for restore".to_string(),
+                    source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
+                })?;
 
         // TODO: Fix redb table iteration - iter() method not available on this table type
         // For now, skip the clear operation
@@ -171,12 +162,10 @@ mod traditional_patterns {
         drop(table);
 
         // Repetitive commit
-        write_txn
-            .commit()
-            .map_err(|e| BlixardError::Storage {
-                operation: "commit restore transaction".to_string(),
-                source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
-            })?;
+        write_txn.commit().map_err(|e| BlixardError::Storage {
+            operation: "commit restore transaction".to_string(),
+            source: Box::new(e) as Box<dyn std::error::Error + Send + Sync>,
+        })?;
 
         Ok(())
     }
@@ -208,26 +197,31 @@ mod wrapper_patterns {
     #[allow(dead_code)]
     pub async fn wrapper_insert_vm_state(
         database: &Database,
-        vm_name: String,  // Take owned String to avoid lifetime issues
-        state: VmState,   // Take owned state
+        vm_name: String, // Take owned String to avoid lifetime issues
+        state: VmState,  // Take owned state
     ) -> BlixardResult<()> {
         // Temporary workaround: Use traditional pattern until wrapper design is fixed
         let write_txn = database.begin_write().map_err(|e| BlixardError::Storage {
             operation: "begin write transaction".to_string(),
             source: Box::new(e),
         })?;
-        let mut table = write_txn.open_table(VM_STATE_TABLE).map_err(|e| BlixardError::Storage {
-            operation: "open table".to_string(),
-            source: Box::new(e),
-        })?;
+        let mut table =
+            write_txn
+                .open_table(VM_STATE_TABLE)
+                .map_err(|e| BlixardError::Storage {
+                    operation: "open table".to_string(),
+                    source: Box::new(e),
+                })?;
         let data = bincode::serialize(&state).map_err(|e| BlixardError::Serialization {
             operation: "serialize vm state".to_string(),
             source: Box::new(e),
         })?;
-        table.insert(vm_name.as_str(), data.as_slice()).map_err(|e| BlixardError::Storage {
-            operation: "insert vm state".to_string(),
-            source: Box::new(e),
-        })?;
+        table
+            .insert(vm_name.as_str(), data.as_slice())
+            .map_err(|e| BlixardError::Storage {
+                operation: "insert vm state".to_string(),
+                source: Box::new(e),
+            })?;
         drop(table);
         write_txn.commit().map_err(|e| BlixardError::Storage {
             operation: "commit transaction".to_string(),
@@ -241,26 +235,32 @@ mod wrapper_patterns {
     #[allow(dead_code)]
     pub async fn wrapper_get_vm_state(
         database: &Database,
-        vm_name: String,  // Take owned String to avoid lifetime issues
+        vm_name: String, // Take owned String to avoid lifetime issues
     ) -> BlixardResult<Option<VmState>> {
         // Temporary workaround: Use traditional pattern until wrapper design is fixed
         let read_txn = database.begin_read().map_err(|e| BlixardError::Storage {
             operation: "begin read transaction".to_string(),
             source: Box::new(e),
         })?;
-        let table = read_txn.open_table(VM_STATE_TABLE).map_err(|e| BlixardError::Storage {
-            operation: "open table".to_string(),
-            source: Box::new(e),
-        })?;
-        
-        match table.get(vm_name.as_str()).map_err(|e| BlixardError::Storage {
-            operation: "get vm state".to_string(),
-            source: Box::new(e),
-        })? {
+        let table = read_txn
+            .open_table(VM_STATE_TABLE)
+            .map_err(|e| BlixardError::Storage {
+                operation: "open table".to_string(),
+                source: Box::new(e),
+            })?;
+
+        match table
+            .get(vm_name.as_str())
+            .map_err(|e| BlixardError::Storage {
+                operation: "get vm state".to_string(),
+                source: Box::new(e),
+            })? {
             Some(data) => {
-                let state: VmState = bincode::deserialize(data.value()).map_err(|e| BlixardError::Serialization {
-                    operation: "deserialize vm state".to_string(),
-                    source: Box::new(e),
+                let state: VmState = bincode::deserialize(data.value()).map_err(|e| {
+                    BlixardError::Serialization {
+                        operation: "deserialize vm state".to_string(),
+                        source: Box::new(e),
+                    }
                 })?;
                 Ok(Some(state))
             }
@@ -269,7 +269,7 @@ mod wrapper_patterns {
     }
 
     /// DatabaseTransaction pattern - clear and restore in one call
-    /// Note: This is a demo method that shows the pattern, but clearing all entries 
+    /// Note: This is a demo method that shows the pattern, but clearing all entries
     /// in redb requires more complex logic than this simplified demo
     pub async fn wrapper_clear_and_restore(
         database: &Database,
@@ -280,7 +280,7 @@ mod wrapper_patterns {
         let write_txn = database.begin_write()?;
         {
             let mut table = write_txn.open_table(VM_STATE_TABLE)?;
-            
+
             // Insert new data (will overwrite existing keys)
             for (name, state) in &new_states {
                 let serialized = bincode::serialize(state)?;
@@ -318,8 +318,20 @@ mod wrapper_patterns {
 
         // Bulk operation with retry
         let states = vec![
-            ("vm1".to_string(), VmState { name: "vm1".to_string(), status: "running".to_string() }),
-            ("vm2".to_string(), VmState { name: "vm2".to_string(), status: "stopped".to_string() }),
+            (
+                "vm1".to_string(),
+                VmState {
+                    name: "vm1".to_string(),
+                    status: "running".to_string(),
+                },
+            ),
+            (
+                "vm2".to_string(),
+                VmState {
+                    name: "vm2".to_string(),
+                    status: "stopped".to_string(),
+                },
+            ),
         ];
 
         let states_clone = states.clone();
@@ -434,8 +446,8 @@ pub mod analysis {
 #[cfg(test)]
 mod comparison_tests {
     use super::*;
-    use tempfile::NamedTempFile;
     use redb::Database;
+    use tempfile::NamedTempFile;
 
     #[tokio::test]
     async fn test_traditional_vs_wrapper_equivalence() {
@@ -453,9 +465,10 @@ mod comparison_tests {
             .await
             .unwrap();
 
-        let traditional_result = traditional_patterns::traditional_get_vm_state(&database, "test-vm")
-            .await
-            .unwrap();
+        let traditional_result =
+            traditional_patterns::traditional_get_vm_state(&database, "test-vm")
+                .await
+                .unwrap();
 
         // Wrapper approach: ~6 lines per operation
         wrapper_patterns::wrapper_insert_vm_state(&database, "test-vm-2", &test_state)
@@ -476,7 +489,8 @@ mod comparison_tests {
         // Verify our code reduction calculations
         let traditional_lines = 2030;
         let wrapper_lines = 302;
-        let reduction = ((traditional_lines - wrapper_lines) as f64 / traditional_lines as f64) * 100.0;
+        let reduction =
+            ((traditional_lines - wrapper_lines) as f64 / traditional_lines as f64) * 100.0;
 
         assert!(reduction > 84.0, "Should achieve >84% code reduction");
         assert_eq!(traditional_lines - wrapper_lines, 1728); // Lines eliminated

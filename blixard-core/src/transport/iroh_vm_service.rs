@@ -1,5 +1,7 @@
 //! Iroh transport implementation for VM service
 
+#[cfg(feature = "observability")]
+use crate::metrics_otel::{attributes, metrics, Timer};
 use crate::{
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
@@ -11,8 +13,6 @@ use crate::{
         },
     },
 };
-#[cfg(feature = "observability")]
-use crate::metrics_otel::{attributes, metrics, Timer};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -129,7 +129,10 @@ impl IrohVmService {
                 target_node_id,
                 live_migration,
                 force,
-            } => self.handle_migrate_vm(vm_name, target_node_id, live_migration, force).await,
+            } => {
+                self.handle_migrate_vm(vm_name, target_node_id, live_migration, force)
+                    .await
+            }
             VmOperationRequest::CreateWithScheduling {
                 name,
                 vcpus,
@@ -138,7 +141,18 @@ impl IrohVmService {
                 constraints,
                 features,
                 priority,
-            } => self.handle_create_vm_with_scheduling(name, vcpus, memory_mb, strategy, constraints, features, priority).await,
+            } => {
+                self.handle_create_vm_with_scheduling(
+                    name,
+                    vcpus,
+                    memory_mb,
+                    strategy,
+                    constraints,
+                    features,
+                    priority,
+                )
+                .await
+            }
             VmOperationRequest::SchedulePlacement {
                 name,
                 vcpus,
@@ -146,13 +160,32 @@ impl IrohVmService {
                 strategy,
                 constraints,
                 features,
-            } => self.handle_schedule_placement(name, vcpus, memory_mb, strategy, constraints, features).await,
+            } => {
+                self.handle_schedule_placement(
+                    name,
+                    vcpus,
+                    memory_mb,
+                    strategy,
+                    constraints,
+                    features,
+                )
+                .await
+            }
         }
     }
 
     /// Handle VM creation operation
-    async fn handle_create_vm(&self, name: String, vcpus: u32, memory_mb: u32) -> BlixardResult<VmOperationResponse> {
-        match self.vm_service.create_vm(name.clone(), vcpus, memory_mb).await {
+    async fn handle_create_vm(
+        &self,
+        name: String,
+        vcpus: u32,
+        memory_mb: u32,
+    ) -> BlixardResult<VmOperationResponse> {
+        match self
+            .vm_service
+            .create_vm(name.clone(), vcpus, memory_mb)
+            .await
+        {
             Ok(vm_id) => Ok(VmOperationResponse::Create {
                 success: true,
                 message: format!("VM '{}' created successfully", name),
@@ -239,13 +272,17 @@ impl IrohVmService {
 
     /// Handle VM migration operation
     async fn handle_migrate_vm(
-        &self, 
-        vm_name: String, 
-        target_node_id: u64, 
-        live_migration: bool, 
-        force: bool
+        &self,
+        vm_name: String,
+        target_node_id: u64,
+        live_migration: bool,
+        force: bool,
     ) -> BlixardResult<VmOperationResponse> {
-        match self.vm_service.migrate_vm(&vm_name, target_node_id, live_migration, force).await {
+        match self
+            .vm_service
+            .migrate_vm(&vm_name, target_node_id, live_migration, force)
+            .await
+        {
             Ok(()) => Ok(VmOperationResponse::Migrate {
                 success: true,
                 message: format!("Migration of VM '{}' started", vm_name),
@@ -276,15 +313,19 @@ impl IrohVmService {
         features: Option<Vec<String>>,
         priority: Option<u32>,
     ) -> BlixardResult<VmOperationResponse> {
-        match self.vm_service.create_vm_with_scheduling(
-            name.clone(),
-            vcpus,
-            memory_mb,
-            strategy,
-            constraints,
-            features,
-            priority,
-        ).await {
+        match self
+            .vm_service
+            .create_vm_with_scheduling(
+                name.clone(),
+                vcpus,
+                memory_mb,
+                strategy,
+                constraints,
+                features,
+                priority,
+            )
+            .await
+        {
             Ok((vm_id, node_id, reason)) => Ok(VmOperationResponse::CreateWithScheduling {
                 success: true,
                 message: format!("VM '{}' created successfully on node {}", name, node_id),
@@ -312,14 +353,20 @@ impl IrohVmService {
         constraints: Option<Vec<String>>,
         features: Option<Vec<String>>,
     ) -> BlixardResult<VmOperationResponse> {
-        match self.vm_service.schedule_vm_placement(&name, vcpus, memory_mb, strategy, constraints, features).await {
-            Ok((node_id, score, reason, alternatives)) => Ok(VmOperationResponse::SchedulePlacement {
-                success: true,
-                assigned_node_id: node_id,
-                placement_score: score,
-                placement_reason: reason,
-                alternative_nodes: alternatives,
-            }),
+        match self
+            .vm_service
+            .schedule_vm_placement(&name, vcpus, memory_mb, strategy, constraints, features)
+            .await
+        {
+            Ok((node_id, score, reason, alternatives)) => {
+                Ok(VmOperationResponse::SchedulePlacement {
+                    success: true,
+                    assigned_node_id: node_id,
+                    placement_score: score,
+                    placement_reason: reason,
+                    alternative_nodes: alternatives,
+                })
+            }
             Err(e) => Ok(VmOperationResponse::SchedulePlacement {
                 success: false,
                 assigned_node_id: 0,
@@ -331,7 +378,11 @@ impl IrohVmService {
     }
 
     /// Helper function to convert VM config and status to VmInfoData
-    fn config_to_vm_info(&self, config: crate::types::VmConfig, status: crate::types::VmStatus) -> VmInfoData {
+    fn config_to_vm_info(
+        &self,
+        config: crate::types::VmConfig,
+        status: crate::types::VmStatus,
+    ) -> VmInfoData {
         VmInfoData {
             name: config.name,
             state: format!("{:?}", status),

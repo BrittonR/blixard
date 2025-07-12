@@ -7,14 +7,14 @@ use std::time::Duration;
 #[cfg(feature = "test-helpers")]
 pub async fn create_converged_cluster(size: usize) -> BlixardResult<TestCluster> {
     let mut cluster = TestCluster::new();
-    
+
     // Add the requested number of nodes
     for _ in 0..size {
         cluster.add_node().await?;
     }
-    
+
     // TODO: Add convergence waiting logic if needed
-    
+
     Ok(cluster)
 }
 

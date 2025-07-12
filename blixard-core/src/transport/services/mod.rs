@@ -9,8 +9,8 @@ pub mod monitoring;
 pub mod nix_vm_image;
 pub mod status;
 pub mod vm;
-pub mod vm_v2;
 pub mod vm_image;
+pub mod vm_v2;
 
 pub use health::{HealthService, HealthServiceImpl};
 pub use monitoring::{MonitoringService, MonitoringServiceImpl};

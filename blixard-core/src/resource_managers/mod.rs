@@ -4,15 +4,18 @@
 //! for different resource types, providing unified interfaces that eliminate
 //! code duplication across the resource management system.
 
-pub mod memory_manager;
 pub mod cpu_manager;
-pub mod migration_utils;
 pub mod integration_example;
+pub mod memory_manager;
+pub mod migration_utils;
 
 // Re-export the managers for easy access
-pub use memory_manager::{MemoryResourceManager, MemoryResourceManagerBuilder};
 pub use cpu_manager::{CpuResourceManager, CpuResourceManagerBuilder, CpuSchedulingPolicy};
-pub use migration_utils::{ResourceManagerMigrationWrapper, MigrationStatus, convert_tenant_quota_to_limits, generate_migration_report};
+pub use memory_manager::{MemoryResourceManager, MemoryResourceManagerBuilder};
+pub use migration_utils::{
+    convert_tenant_quota_to_limits, generate_migration_report, MigrationStatus,
+    ResourceManagerMigrationWrapper,
+};
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::resource_manager::*;
@@ -102,11 +105,9 @@ impl ResourceManagerFactory for DefaultResourceManagerFactory {
                     feature: "GPU resource manager".to_string(),
                 })
             }
-            ResourceType::Custom(ref name) => {
-                Err(BlixardError::NotImplemented {
-                    feature: format!("Custom resource manager: {}", name),
-                })
-            }
+            ResourceType::Custom(ref name) => Err(BlixardError::NotImplemented {
+                feature: format!("Custom resource manager: {}", name),
+            }),
         }
     }
 
@@ -186,7 +187,10 @@ pub async fn create_standard_composite_manager(
     cpu_cores: u32,
 ) -> BlixardResult<CompositeResourceManager> {
     let composite = CompositeResourceManager::new();
-    let factory = Arc::new(DefaultResourceManagerFactory::new(memory_capacity, cpu_cores));
+    let factory = Arc::new(DefaultResourceManagerFactory::new(
+        memory_capacity,
+        cpu_cores,
+    ));
 
     // Create memory manager
     let memory_config = ResourceManagerConfigBuilder::new(ResourceType::Memory)
@@ -196,7 +200,9 @@ pub async fn create_standard_composite_manager(
         .build();
 
     let memory_manager = factory.create(memory_config).await?;
-    composite.add_manager(ResourceType::Memory, memory_manager).await?;
+    composite
+        .add_manager(ResourceType::Memory, memory_manager)
+        .await?;
 
     // Create CPU manager
     let cpu_config = ResourceManagerConfigBuilder::new(ResourceType::Cpu)
@@ -206,7 +212,9 @@ pub async fn create_standard_composite_manager(
         .build();
 
     let cpu_manager = factory.create(cpu_config).await?;
-    composite.add_manager(ResourceType::Cpu, cpu_manager).await?;
+    composite
+        .add_manager(ResourceType::Cpu, cpu_manager)
+        .await?;
 
     Ok(composite)
 }
@@ -269,12 +277,14 @@ mod tests {
     async fn test_factory_unsupported_resource() {
         let factory = DefaultResourceManagerFactory::new(8192, 4);
 
-        let config = ResourceManagerConfigBuilder::new(ResourceType::Gpu)
-            .build();
+        let config = ResourceManagerConfigBuilder::new(ResourceType::Gpu).build();
 
         let result = factory.create(config).await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), BlixardError::NotImplemented { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            BlixardError::NotImplemented { .. }
+        ));
     }
 
     #[tokio::test]
@@ -292,14 +302,16 @@ mod tests {
             ..Default::default()
         };
 
-        let result = factory.validate_config(&ResourceType::Memory, &invalid_config).await;
+        let result = factory
+            .validate_config(&ResourceType::Memory, &invalid_config)
+            .await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn test_standard_composite_manager_creation() {
         let composite = create_standard_composite_manager(8192, 4).await.unwrap();
-        
+
         let resource_types = composite.get_resource_types().await;
         assert_eq!(resource_types.len(), 2);
         assert!(resource_types.contains(&ResourceType::Memory));
@@ -310,7 +322,7 @@ mod tests {
     async fn test_helper_memory_manager_creation() {
         let manager = create_memory_manager(4096).await.unwrap();
         assert_eq!(manager.resource_type(), ResourceType::Memory);
-        
+
         let usage = manager.get_usage().await.unwrap();
         assert_eq!(usage.total_capacity, 4096);
     }
@@ -319,7 +331,7 @@ mod tests {
     async fn test_helper_cpu_manager_creation() {
         let manager = create_cpu_manager(8).await.unwrap();
         assert_eq!(manager.resource_type(), ResourceType::Cpu);
-        
+
         let usage = manager.get_usage().await.unwrap();
         assert_eq!(usage.total_capacity, 8);
     }
@@ -328,7 +340,7 @@ mod tests {
     async fn test_factory_supported_types() {
         let factory = DefaultResourceManagerFactory::with_system_defaults();
         let supported = factory.supported_types();
-        
+
         assert!(supported.contains(&ResourceType::Memory));
         assert!(supported.contains(&ResourceType::Cpu));
         assert!(!supported.contains(&ResourceType::Gpu)); // Not yet implemented

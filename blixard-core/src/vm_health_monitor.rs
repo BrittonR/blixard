@@ -3,10 +3,10 @@
 //! This module provides a refactored VM health monitoring system that uses
 //! the LifecycleManager pattern to coordinate multiple specialized components.
 
+use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{error, info, warn};
-use async_trait::async_trait;
 
 use crate::{
     error::{BlixardError, BlixardResult},
@@ -15,8 +15,8 @@ use crate::{
     vm_auto_recovery::{RecoveryPolicy, VmAutoRecovery},
     vm_backend::VmManager,
     vm_health_config::{
-        VmHealthMonitorConfig, VmHealthMonitorDependencies,
-        HealthCheckSchedulerConfig, RecoveryCoordinatorConfig,
+        HealthCheckSchedulerConfig, RecoveryCoordinatorConfig, VmHealthMonitorConfig,
+        VmHealthMonitorDependencies,
     },
     vm_health_recovery_coordinator::RecoveryCoordinator,
     vm_health_scheduler::HealthCheckScheduler,
@@ -137,10 +137,8 @@ impl VmHealthMonitor {
         self.scheduler = Some(scheduler);
 
         // Create HealthStateManager
-        let state_manager = HealthStateManager::new(
-            self.config.state_manager.clone(),
-            self.deps.clone(),
-        );
+        let state_manager =
+            HealthStateManager::new(self.config.state_manager.clone(), self.deps.clone());
         self.state_manager = Some(state_manager);
 
         // Create RecoveryCoordinator
@@ -210,7 +208,11 @@ impl VmHealthMonitor {
     }
 
     /// Trigger recovery for a failed VM (delegates to RecoveryCoordinator)
-    pub async fn trigger_recovery(&self, vm_name: &str, vm_config: &crate::types::VmConfig) -> BlixardResult<()> {
+    pub async fn trigger_recovery(
+        &self,
+        vm_name: &str,
+        vm_config: &crate::types::VmConfig,
+    ) -> BlixardResult<()> {
         match &self.recovery_coordinator {
             Some(coordinator) => coordinator.trigger_recovery(vm_name, vm_config).await,
             None => Err(BlixardError::Internal {
@@ -220,7 +222,10 @@ impl VmHealthMonitor {
     }
 
     /// Get recovery status for a VM (delegates to RecoveryCoordinator)
-    pub async fn get_recovery_status(&self, vm_name: &str) -> Option<crate::vm_health_recovery_coordinator::RecoveryOperation> {
+    pub async fn get_recovery_status(
+        &self,
+        vm_name: &str,
+    ) -> Option<crate::vm_health_recovery_coordinator::RecoveryOperation> {
         match &self.recovery_coordinator {
             Some(coordinator) => coordinator.get_recovery_status(vm_name).await,
             None => None,
@@ -286,7 +291,8 @@ impl LifecycleManager for VmHealthMonitor {
         // For now, create minimal dependencies - in practice these would be provided
         // This is a temporary implementation to satisfy the trait
         Err(BlixardError::NotImplemented {
-            feature: "VmHealthMonitor::new requires dependencies - use new_with_deps instead".to_string(),
+            feature: "VmHealthMonitor::new requires dependencies - use new_with_deps instead"
+                .to_string(),
         })
     }
 
@@ -316,7 +322,10 @@ impl LifecycleManager for VmHealthMonitor {
         }
 
         // Initialize components if not already done
-        if self.scheduler.is_none() || self.state_manager.is_none() || self.recovery_coordinator.is_none() {
+        if self.scheduler.is_none()
+            || self.state_manager.is_none()
+            || self.recovery_coordinator.is_none()
+        {
             self.initialize_components()?;
         }
 
@@ -375,7 +384,6 @@ impl LifecycleManager for VmHealthMonitor {
     fn is_running(&self) -> bool {
         self.is_running
     }
-
 }
 
 impl Drop for VmHealthMonitor {

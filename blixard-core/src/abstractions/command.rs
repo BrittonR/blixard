@@ -52,7 +52,9 @@ impl CommandOptions {
 
     /// Add a single environment variable
     pub fn with_env_var<K: Into<String>, V: Into<String>>(mut self, key: K, value: V) -> Self {
-        self.env.get_or_insert_with(HashMap::new).insert(key.into(), value.into());
+        self.env
+            .get_or_insert_with(HashMap::new)
+            .insert(key.into(), value.into());
         self
     }
 
@@ -194,7 +196,7 @@ pub trait CommandExecutor: Send + Sync {
     async fn spawn(
         &self,
         program: &str,
-        args: &[&str], 
+        args: &[&str],
         options: CommandOptions,
     ) -> BlixardResult<ProcessHandle>;
 
@@ -206,7 +208,8 @@ pub trait CommandExecutor: Send + Sync {
 
     /// Execute a command with a simplified interface
     async fn execute_simple(&self, program: &str, args: &[&str]) -> BlixardResult<CommandOutput> {
-        self.execute(program, args, CommandOptions::new().with_output_capture()).await
+        self.execute(program, args, CommandOptions::new().with_output_capture())
+            .await
     }
 
     /// Execute a command in a specific directory
@@ -220,7 +223,8 @@ pub trait CommandExecutor: Send + Sync {
             program,
             args,
             CommandOptions::new().with_cwd(cwd).with_output_capture(),
-        ).await
+        )
+        .await
     }
 
     /// Execute a command with timeout
@@ -233,8 +237,11 @@ pub trait CommandExecutor: Send + Sync {
         self.execute(
             program,
             args,
-            CommandOptions::new().with_timeout(timeout).with_output_capture(),
-        ).await
+            CommandOptions::new()
+                .with_timeout(timeout)
+                .with_output_capture(),
+        )
+        .await
     }
 }
 
@@ -316,9 +323,13 @@ impl CommandExecutor for TokioCommandExecutor {
 
         // Execute with or without timeout
         let result = if let Some(timeout_duration) = timeout {
-            tokio::time::timeout(timeout_duration, self.execute_command(cmd, &options)).await
+            tokio::time::timeout(timeout_duration, self.execute_command(cmd, &options))
+                .await
                 .map_err(|_| BlixardError::Internal {
-                    message: format!("Command '{}' timed out after {:?}", program, timeout_duration),
+                    message: format!(
+                        "Command '{}' timed out after {:?}",
+                        program, timeout_duration
+                    ),
                 })?
         } else {
             self.execute_command(cmd, &options).await
@@ -329,7 +340,10 @@ impl CommandExecutor for TokioCommandExecutor {
         match result {
             Ok(mut output) => {
                 output.duration = duration;
-                info!("Command completed successfully in {:?}: {}", duration, program);
+                info!(
+                    "Command completed successfully in {:?}: {}",
+                    duration, program
+                );
                 Ok(output)
             }
             Err(e) => {
@@ -451,7 +465,11 @@ impl CommandExecutor for TokioCommandExecutor {
 
 impl TokioCommandExecutor {
     /// Internal method to execute a command
-    async fn execute_command(&self, mut cmd: Command, options: &CommandOptions) -> BlixardResult<CommandOutput> {
+    async fn execute_command(
+        &self,
+        mut cmd: Command,
+        options: &CommandOptions,
+    ) -> BlixardResult<CommandOutput> {
         let mut child = cmd.spawn().map_err(|e| BlixardError::Internal {
             message: format!("Failed to spawn command: {}", e),
         })?;
@@ -461,9 +479,12 @@ impl TokioCommandExecutor {
             if let Some(stdin) = child.stdin.take() {
                 use tokio::io::AsyncWriteExt;
                 let mut stdin = stdin;
-                stdin.write_all(stdin_data).await.map_err(|e| BlixardError::Internal {
-                    message: format!("Failed to write to stdin: {}", e),
-                })?;
+                stdin
+                    .write_all(stdin_data)
+                    .await
+                    .map_err(|e| BlixardError::Internal {
+                        message: format!("Failed to write to stdin: {}", e),
+                    })?;
                 stdin.shutdown().await.map_err(|e| BlixardError::Internal {
                     message: format!("Failed to close stdin: {}", e),
                 })?;
@@ -471,9 +492,12 @@ impl TokioCommandExecutor {
         }
 
         // Wait for completion
-        let output = child.wait_with_output().await.map_err(|e| BlixardError::Internal {
-            message: format!("Failed to wait for command: {}", e),
-        })?;
+        let output = child
+            .wait_with_output()
+            .await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to wait for command: {}", e),
+            })?;
 
         let exit_code = output.status.code().unwrap_or(-1);
         let success = output.status.success();
@@ -557,10 +581,11 @@ impl CommandExecutor for MockCommandExecutor {
         _options: CommandOptions,
     ) -> BlixardResult<CommandOutput> {
         let mut expectations = self.expectations.lock().unwrap();
-        
-        if let Some(pos) = expectations.iter().position(|exp| {
-            exp.program == program && exp.args == args
-        }) {
+
+        if let Some(pos) = expectations
+            .iter()
+            .position(|exp| exp.program == program && exp.args == args)
+        {
             let expectation = expectations.remove(pos);
             expectation.response
         } else {
@@ -578,7 +603,10 @@ impl CommandExecutor for MockCommandExecutor {
     ) -> BlixardResult<ProcessHandle> {
         // For mock, just return a fake handle
         debug!("Mock spawn: {} {}", program, args.join(" "));
-        Ok(ProcessHandle::new(12345, tokio::process::Command::new("true").spawn().unwrap()))
+        Ok(ProcessHandle::new(
+            12345,
+            tokio::process::Command::new("true").spawn().unwrap(),
+        ))
     }
 
     async fn kill(&self, pid: u32) -> BlixardResult<()> {
@@ -624,7 +652,10 @@ mod tests {
             .with_output_capture();
 
         assert_eq!(options.cwd, Some(PathBuf::from("/tmp")));
-        assert_eq!(options.env.as_ref().unwrap().get("TEST"), Some(&"value".to_string()));
+        assert_eq!(
+            options.env.as_ref().unwrap().get("TEST"),
+            Some(&"value".to_string())
+        );
         assert_eq!(options.timeout, Some(Duration::from_secs(30)));
         assert!(options.capture_output);
     }
@@ -632,7 +663,7 @@ mod tests {
     #[tokio::test]
     async fn test_mock_executor() {
         let executor = MockCommandExecutor::new();
-        
+
         let expected_output = CommandOutput {
             status: 0,
             stdout: b"test output".to_vec(),
@@ -640,13 +671,13 @@ mod tests {
             success: true,
             duration: Duration::from_millis(100),
         };
-        
+
         executor.expect("echo", &["hello"], Ok(expected_output.clone()));
-        
+
         let result = executor.execute_simple("echo", &["hello"]).await.unwrap();
         assert_eq!(result.stdout, expected_output.stdout);
         assert!(result.success);
-        
+
         executor.verify().unwrap();
     }
 
@@ -654,7 +685,7 @@ mod tests {
     async fn test_tokio_executor_simple() {
         let executor = TokioCommandExecutor::new();
         let result = executor.execute_simple("echo", &["hello"]).await.unwrap();
-        
+
         assert!(result.success);
         assert_eq!(result.stdout_string().unwrap().trim(), "hello");
     }

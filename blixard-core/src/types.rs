@@ -13,16 +13,16 @@ impl VmId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
-    
+
     /// Create a VM ID from a string (deterministic based on input)
     pub fn from_string(s: &str) -> Self {
-        use std::hash::{Hash, Hasher};
         use std::collections::hash_map::DefaultHasher;
-        
+        use std::hash::{Hash, Hasher};
+
         let mut hasher = DefaultHasher::new();
         s.hash(&mut hasher);
         let hash = hasher.finish();
-        
+
         // Create a deterministic UUID v4 from the hash
         let bytes = [
             (hash >> 56) as u8,
@@ -42,7 +42,7 @@ impl VmId {
             hash as u8,
             (hash >> 56) as u8,
         ];
-        
+
         Self(Uuid::from_bytes(bytes))
     }
 }
@@ -244,7 +244,7 @@ impl Default for NodeConfig {
         Self {
             id: 1,
             data_dir: "./data".to_string(),
-            bind_addr: "127.0.0.1:7001".parse().unwrap(),
+            bind_addr: "127.0.0.1:7001".parse().expect("Invalid default bind address"),
             join_addr: None,
             use_tailscale: false,
             vm_backend: "mock".to_string(),

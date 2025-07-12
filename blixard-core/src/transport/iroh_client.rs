@@ -402,7 +402,10 @@ impl IrohClient {
         let response: VmOperationResponse = self.call_service("vm", "get_status", request).await?;
 
         match response {
-            crate::transport::services::vm::VmOperationResponse::GetStatus { found: _found, vm_info } => {
+            crate::transport::services::vm::VmOperationResponse::GetStatus {
+                found: _found,
+                vm_info,
+            } => {
                 let vm_info = vm_info.map(|data| crate::iroh_types::VmInfo {
                     name: data.name,
                     state: match data.state.as_str() {

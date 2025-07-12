@@ -25,7 +25,7 @@ async fn test_p2p_cluster_formation_and_operations() -> BlixardResult<()> {
     tracing::info!("Starting P2P end-to-end cluster test");
 
     // Step 1: Create a 3-node cluster
-    let mut cluster = TestCluster::new(3).await?;
+    let mut cluster = TestCluster::with_size(3).await?;
 
     // Step 2: Wait for cluster convergence
     cluster
@@ -172,7 +172,7 @@ async fn test_p2p_data_sharing() -> BlixardResult<()> {
     tracing::info!("Starting P2P data sharing test");
 
     // Create a 2-node cluster
-    let cluster = TestCluster::new(2).await?;
+    let cluster = TestCluster::with_size(2).await?;
     cluster
         .wait_for_convergence(Duration::from_secs(20))
         .await?;

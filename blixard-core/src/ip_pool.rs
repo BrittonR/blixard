@@ -7,17 +7,17 @@
 //! - Automatic IP release on VM deletion
 //! - Comprehensive metrics and monitoring
 
-use std::collections::{BTreeSet, HashMap};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeSet, HashMap};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::{
+    acquire_write_lock,
     error::{BlixardError, BlixardResult},
-    patterns::resource_pool::{PoolableResource, ResourceFactory, ResourcePool, PoolConfig},
+    patterns::resource_pool::{PoolConfig, PoolableResource, ResourceFactory, ResourcePool},
     types::VmId,
     unwrap_helpers::time_since_epoch_safe,
-    acquire_write_lock,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -48,7 +48,7 @@ impl PoolableResource for IpAddress {
     fn is_valid(&self) -> bool {
         self.is_valid
     }
-    
+
     fn reset(&mut self) -> BlixardResult<()> {
         // Reset any temporary state - IP addresses don't need special reset
         self.is_valid = true;
@@ -63,7 +63,7 @@ pub struct IpAddressFactory {
     /// Currently allocated IPs (shared with pool state)
     allocated_ips: Arc<std::sync::RwLock<BTreeSet<IpAddr>>>,
     /// Next IP to try (for efficiency)
-    next_ip_hint: Arc<std::sync::RwLock<Option<IpAddr>>>,
+    _next_ip_hint: Arc<std::sync::RwLock<Option<IpAddr>>>,
 }
 
 impl IpAddressFactory {
@@ -75,26 +75,28 @@ impl IpAddressFactory {
         Self {
             config,
             allocated_ips,
-            next_ip_hint: Arc::new(std::sync::RwLock::new(None)),
+            _next_ip_hint: Arc::new(std::sync::RwLock::new(None)),
         }
     }
-    
+
     /// Find the next available IP in the allocation range
     fn find_next_available_ip(&self) -> crate::error::BlixardResult<Option<IpAddr>> {
-        let allocated = self.allocated_ips.read()
-            .map_err(|e| crate::error::BlixardError::LockPoisoned {
-                operation: "read allocated IPs".to_string(),
-                source: Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Lock poisoned: {}", e)
-                )),
-            })?;
-        
+        let allocated =
+            self.allocated_ips
+                .read()
+                .map_err(|e| crate::error::BlixardError::LockPoisoned {
+                    operation: "read allocated IPs".to_string(),
+                    source: Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("Lock poisoned: {}", e),
+                    )),
+                })?;
+
         match (self.config.allocation_start, self.config.allocation_end) {
             (IpAddr::V4(start), IpAddr::V4(end)) => {
                 let start_u32 = u32::from(start);
                 let end_u32 = u32::from(end);
-                
+
                 for i in start_u32..=end_u32 {
                     let ip = IpAddr::V4(Ipv4Addr::from(i));
                     if self.is_ip_available(&ip, &allocated) {
@@ -106,7 +108,7 @@ impl IpAddressFactory {
             (IpAddr::V6(start), IpAddr::V6(end)) => {
                 let start_u128 = u128::from(start);
                 let end_u128 = u128::from(end);
-                
+
                 // For IPv6, limit iteration to prevent performance issues
                 let max_iterations = 10000;
                 for i in 0..max_iterations.min(end_u128 - start_u128 + 1) {
@@ -120,7 +122,7 @@ impl IpAddressFactory {
             _ => Ok(None),
         }
     }
-    
+
     /// Check if an IP is available for allocation
     fn is_ip_available(&self, ip: &IpAddr, allocated: &BTreeSet<IpAddr>) -> bool {
         !allocated.contains(ip)
@@ -133,28 +135,30 @@ impl IpAddressFactory {
 #[async_trait]
 impl ResourceFactory<IpAddress> for IpAddressFactory {
     async fn create(&self) -> BlixardResult<IpAddress> {
-        let ip = self.find_next_available_ip()?.ok_or_else(|| {
-            BlixardError::ResourceExhausted {
+        let ip = self
+            .find_next_available_ip()?
+            .ok_or_else(|| BlixardError::ResourceExhausted {
                 resource: format!("IP addresses in pool {}", self.config.id),
-            }
-        })?;
-        
+            })?;
+
         // Mark IP as allocated
         {
-            let mut allocated = acquire_write_lock!(self.allocated_ips.write(), "allocate IP address");
+            let mut allocated =
+                acquire_write_lock!(self.allocated_ips.write(), "allocate IP address");
             allocated.insert(ip);
         }
-        
+
         Ok(IpAddress {
             ip,
             pool_id: self.config.id,
             is_valid: true,
         })
     }
-    
+
     async fn destroy(&self, resource: IpAddress) -> BlixardResult<()> {
         // Remove IP from allocated set
-        let mut allocated = acquire_write_lock!(self.allocated_ips.write(), "deallocate IP address");
+        let mut allocated =
+            acquire_write_lock!(self.allocated_ips.write(), "deallocate IP address");
         allocated.remove(&resource.ip);
         Ok(())
     }
@@ -353,7 +357,7 @@ impl EnhancedIpPoolState {
     pub async fn new(config: IpPoolConfig) -> BlixardResult<Self> {
         let state = IpPoolState::new(config.clone());
         let allocated_ips_shared = Arc::new(std::sync::RwLock::new(state.allocated_ips.clone()));
-        
+
         // Create resource pool configuration
         let pool_config = PoolConfig {
             max_size: config.total_capacity() as usize,
@@ -362,25 +366,25 @@ impl EnhancedIpPoolState {
             validate_on_acquire: true,
             reset_on_acquire: false,
         };
-        
+
         // Create factory and resource pool
         let factory = Arc::new(IpAddressFactory::new(config, allocated_ips_shared.clone()));
         let resource_pool = ResourcePool::new(factory, pool_config);
-        
+
         // Initialize the resource pool
         resource_pool.initialize().await?;
-        
+
         Ok(Self {
             state,
             resource_pool: Some(resource_pool),
             allocated_ips_shared,
         })
     }
-    
+
     /// Create from existing state (for loading from storage)
     pub async fn from_existing_state(state: IpPoolState) -> BlixardResult<Self> {
         let allocated_ips_shared = Arc::new(std::sync::RwLock::new(state.allocated_ips.clone()));
-        
+
         // Create resource pool configuration
         let pool_config = PoolConfig {
             max_size: state.config.total_capacity() as usize,
@@ -389,61 +393,69 @@ impl EnhancedIpPoolState {
             validate_on_acquire: true,
             reset_on_acquire: false,
         };
-        
+
         // Create factory and resource pool
-        let factory = Arc::new(IpAddressFactory::new(state.config.clone(), allocated_ips_shared.clone()));
+        let factory = Arc::new(IpAddressFactory::new(
+            state.config.clone(),
+            allocated_ips_shared.clone(),
+        ));
         let resource_pool = ResourcePool::new(factory, pool_config);
-        
+
         // Initialize the resource pool
         resource_pool.initialize().await?;
-        
+
         Ok(Self {
             state,
             resource_pool: Some(resource_pool),
             allocated_ips_shared,
         })
     }
-    
+
     /// Allocate an IP address using ResourcePool
     pub async fn allocate_ip(&mut self) -> BlixardResult<IpAddress> {
-        let resource_pool = self.resource_pool.as_ref()
+        let resource_pool = self
+            .resource_pool
+            .as_ref()
             .ok_or_else(|| BlixardError::Internal {
                 message: "Resource pool not initialized".to_string(),
             })?;
-        
+
         let pooled_ip = resource_pool.acquire().await?;
         let ip_address = pooled_ip.take()?; // Take ownership, removing from pool
-        
+
         // Update state tracking
         self.state.allocated_ips.insert(ip_address.ip);
         self.state.total_allocated += 1;
         self.state.last_allocation = Some(time_since_epoch_safe() as i64);
-        
+
         Ok(ip_address)
     }
-    
+
     /// Release an IP address back to the pool
     pub async fn release_ip(&mut self, ip: IpAddr) -> BlixardResult<()> {
         // Remove from tracking
         if self.state.allocated_ips.remove(&ip) {
             self.state.total_allocated = self.state.total_allocated.saturating_sub(1);
         }
-        
+
         // Remove from shared state
         {
-            let mut allocated = acquire_write_lock!(self.allocated_ips_shared.write(), "remove allocated IP from shared state");
+            let mut allocated = acquire_write_lock!(
+                self.allocated_ips_shared.write(),
+                "remove allocated IP from shared state"
+            );
             allocated.remove(&ip);
         }
-        
+
         Ok(())
     }
-    
+
     /// Check if the pool has available capacity using ResourcePool
     pub async fn has_capacity(&self) -> bool {
         if !self.state.config.enabled {
             return false;
         }
-        
+
         if let Some(resource_pool) = &self.resource_pool {
             let stats = resource_pool.stats().await;
             stats.in_use < stats.max_size
@@ -452,7 +464,7 @@ impl EnhancedIpPoolState {
             self.state.has_capacity()
         }
     }
-    
+
     /// Get pool utilization using ResourcePool stats
     pub async fn utilization_percent(&self) -> f64 {
         if let Some(resource_pool) = &self.resource_pool {
@@ -466,7 +478,7 @@ impl EnhancedIpPoolState {
             self.state.utilization_percent()
         }
     }
-    
+
     /// Get current resource pool statistics
     pub async fn get_pool_stats(&self) -> Option<crate::patterns::resource_pool::PoolStats> {
         if let Some(resource_pool) = &self.resource_pool {
@@ -475,12 +487,12 @@ impl EnhancedIpPoolState {
             None
         }
     }
-    
+
     /// Sync state from ResourcePool to maintain consistency
     pub async fn sync_state(&mut self) {
         if let Some(resource_pool) = &self.resource_pool {
             let _stats = resource_pool.stats().await;
-            
+
             // Update allocated IPs from shared state
             match self.allocated_ips_shared.read() {
                 Ok(allocated) => {
@@ -520,7 +532,7 @@ impl IpPoolState {
             (IpAddr::V4(start), IpAddr::V4(end)) => {
                 let start_u32 = u32::from(start);
                 let end_u32 = u32::from(end);
-                
+
                 for i in start_u32..=end_u32 {
                     let ip = IpAddr::V4(Ipv4Addr::from(i));
                     if self.is_available(&ip) {
@@ -532,7 +544,7 @@ impl IpPoolState {
             (IpAddr::V6(start), IpAddr::V6(end)) => {
                 let start_u128 = u128::from(start);
                 let end_u128 = u128::from(end);
-                
+
                 // For IPv6, limit iteration to prevent performance issues
                 let max_iterations = 10000;
                 for i in 0..max_iterations.min(end_u128 - start_u128 + 1) {
@@ -636,8 +648,10 @@ mod tests {
                 IpAddr::from_str("8.8.8.8").expect("Test DNS server should be valid"),
                 IpAddr::from_str("8.8.4.4").expect("Test DNS server should be valid"),
             ],
-            allocation_start: IpAddr::from_str("10.0.0.10").expect("Test allocation start should be valid"),
-            allocation_end: IpAddr::from_str("10.0.0.250").expect("Test allocation end should be valid"),
+            allocation_start: IpAddr::from_str("10.0.0.10")
+                .expect("Test allocation start should be valid"),
+            allocation_end: IpAddr::from_str("10.0.0.250")
+                .expect("Test allocation end should be valid"),
             topology_hint: Some("zone-1".to_string()),
             reserved_ips: BTreeSet::new(),
             enabled: true,
@@ -673,8 +687,12 @@ mod tests {
         assert_eq!(pool.total_capacity(), 241);
 
         let mut pool_with_reserved = pool.clone();
-        pool_with_reserved.reserved_ips.insert(IpAddr::from_str("10.0.0.100").expect("Test IP should be valid"));
-        pool_with_reserved.reserved_ips.insert(IpAddr::from_str("10.0.0.101").expect("Test IP should be valid"));
+        pool_with_reserved
+            .reserved_ips
+            .insert(IpAddr::from_str("10.0.0.100").expect("Test IP should be valid"));
+        pool_with_reserved
+            .reserved_ips
+            .insert(IpAddr::from_str("10.0.0.101").expect("Test IP should be valid"));
         assert_eq!(pool_with_reserved.total_capacity(), 239);
     }
 
@@ -690,8 +708,12 @@ mod tests {
         );
 
         // Allocate some IPs
-        state.allocated_ips.insert(IpAddr::from_str("10.0.0.10").expect("Test IP should be valid"));
-        state.allocated_ips.insert(IpAddr::from_str("10.0.0.11").expect("Test IP should be valid"));
+        state
+            .allocated_ips
+            .insert(IpAddr::from_str("10.0.0.10").expect("Test IP should be valid"));
+        state
+            .allocated_ips
+            .insert(IpAddr::from_str("10.0.0.11").expect("Test IP should be valid"));
 
         // Next available should be 10.0.0.12
         assert_eq!(
@@ -712,9 +734,13 @@ mod tests {
             subnet: IpNet::from_str("2001:db8::/64").expect("Test IPv6 subnet should be valid"),
             vlan_id: None,
             gateway: IpAddr::from_str("2001:db8::1").expect("Test IPv6 gateway should be valid"),
-            dns_servers: vec![IpAddr::from_str("2001:4860:4860::8888").expect("Test IPv6 DNS should be valid")],
-            allocation_start: IpAddr::from_str("2001:db8::1000").expect("Test IPv6 start should be valid"),
-            allocation_end: IpAddr::from_str("2001:db8::2000").expect("Test IPv6 end should be valid"),
+            dns_servers: vec![
+                IpAddr::from_str("2001:4860:4860::8888").expect("Test IPv6 DNS should be valid")
+            ],
+            allocation_start: IpAddr::from_str("2001:db8::1000")
+                .expect("Test IPv6 start should be valid"),
+            allocation_end: IpAddr::from_str("2001:db8::2000")
+                .expect("Test IPv6 end should be valid"),
             topology_hint: None,
             reserved_ips: BTreeSet::new(),
             enabled: true,

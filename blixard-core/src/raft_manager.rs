@@ -5,11 +5,10 @@
 
 // Re-export main types from the new modular structure
 pub use crate::raft::core::RaftManager;
-pub use crate::raft::messages::{RaftMessage, RaftConfChange, ConfChangeType, ConfChangeContext};
 pub use crate::raft::messages::RaftProposal;
+pub use crate::raft::messages::{ConfChangeContext, ConfChangeType, RaftConfChange, RaftMessage};
 pub use crate::raft::proposals::{
-    ProposalData, TaskSpec, TaskResult, ResourceRequirements,
-    WorkerCapabilities, WorkerStatus
+    ProposalData, ResourceRequirements, TaskResult, TaskSpec, WorkerCapabilities, WorkerStatus,
 };
 
 // Legacy compatibility exports - these may be removed in future versions
@@ -17,7 +16,7 @@ pub use crate::raft::messages::RaftConfChange as ConfChange;
 pub use crate::raft::proposals::ProposalData as RaftProposalData;
 
 /// Create a new RaftManager instance
-/// 
+///
 /// This is a convenience function that delegates to the modular implementation.
 pub async fn create_raft_manager(
     node_id: u64,
@@ -83,7 +82,9 @@ pub fn validate_task_spec(spec: &TaskSpec) -> crate::error::BlixardResult<()> {
 }
 
 /// Create a batch proposal from multiple individual proposals
-pub fn create_batch_proposal(proposals: Vec<ProposalData>) -> crate::error::BlixardResult<ProposalData> {
+pub fn create_batch_proposal(
+    proposals: Vec<ProposalData>,
+) -> crate::error::BlixardResult<ProposalData> {
     if proposals.is_empty() {
         return Err(crate::error::BlixardError::Validation {
             field: "proposals".to_string(),
@@ -112,13 +113,19 @@ pub fn schedule_task(
     task_spec: &TaskSpec,
 ) -> crate::error::BlixardResult<u64> {
     use crate::common::error_context::StorageContext;
-    use crate::raft_storage::{WORKER_TABLE, WORKER_STATUS_TABLE};
+    use crate::raft_storage::{WORKER_STATUS_TABLE, WORKER_TABLE};
     use redb::ReadableTable;
 
     // Read available workers
-    let read_txn = database.begin_read().storage_context("begin read transaction")?;
-    let worker_table = read_txn.open_table(WORKER_TABLE).storage_context("open worker table")?;
-    let status_table = read_txn.open_table(WORKER_STATUS_TABLE).storage_context("open worker status table")?;
+    let read_txn = database
+        .begin_read()
+        .storage_context("begin read transaction")?;
+    let worker_table = read_txn
+        .open_table(WORKER_TABLE)
+        .storage_context("open worker table")?;
+    let status_table = read_txn
+        .open_table(WORKER_STATUS_TABLE)
+        .storage_context("open worker status table")?;
 
     let mut available_workers = Vec::new();
 
@@ -134,22 +141,30 @@ pub fn schedule_task(
                     continue;
                 }
             };
-            
+
             // Check if worker is online
-            if let Some(status_data) = status_table.get(worker_id_bytes).storage_context("get worker status")? {
-                if status_data.value().len() == 1 && status_data.value()[0] == WorkerStatus::Online as u8 {
+            if let Some(status_data) = status_table
+                .get(worker_id_bytes)
+                .storage_context("get worker status")?
+            {
+                if status_data.value().len() == 1
+                    && status_data.value()[0] == WorkerStatus::Online as u8
+                {
                     // Check capabilities
-                    let worker_info: (String, WorkerCapabilities) = bincode::deserialize(worker_data.value())
-                        .map_err(|e| crate::error::BlixardError::Serialization {
-                            operation: "deserialize worker info".to_string(),
-                            source: Box::new(e),
+                    let worker_info: (String, WorkerCapabilities) =
+                        bincode::deserialize(worker_data.value()).map_err(|e| {
+                            crate::error::BlixardError::Serialization {
+                                operation: "deserialize worker info".to_string(),
+                                source: Box::new(e),
+                            }
                         })?;
-                    
+
                     let (_, capabilities) = worker_info;
-                    
+
                     // Check if worker has sufficient resources
-                    if capabilities.cpu_cores >= task_spec.resources.cpu_cores 
-                        && capabilities.memory_mb >= task_spec.resources.memory_mb {
+                    if capabilities.cpu_cores >= task_spec.resources.cpu_cores
+                        && capabilities.memory_mb >= task_spec.resources.memory_mb
+                    {
                         available_workers.push(worker_id);
                     }
                 }
@@ -166,11 +181,11 @@ pub fn schedule_task(
     // Simple round-robin: use task_id hash to pick a worker
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
-    
+
     let mut hasher = DefaultHasher::new();
     task_id.hash(&mut hasher);
     let index = (hasher.finish() as usize) % available_workers.len();
-    
+
     Ok(available_workers[index])
 }
 
@@ -273,7 +288,10 @@ mod tests {
         let deserialized = deserialize_proposal_data(&serialized).unwrap();
 
         match (proposal, deserialized) {
-            (ProposalData::RegisterWorker { node_id: id1, .. }, ProposalData::RegisterWorker { node_id: id2, .. }) => {
+            (
+                ProposalData::RegisterWorker { node_id: id1, .. },
+                ProposalData::RegisterWorker { node_id: id2, .. },
+            ) => {
                 assert_eq!(id1, id2);
             }
             _ => panic!("Serialization/deserialization failed"),

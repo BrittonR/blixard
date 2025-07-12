@@ -489,14 +489,17 @@ pub async fn generate_cluster_pki(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
-    use x509_parser::{parse_x509_certificate, public_key::PublicKey, certificate::X509Certificate};
     use std::time::SystemTime;
+    use tempfile::TempDir;
+    use x509_parser::{
+        certificate::X509Certificate, parse_x509_certificate, public_key::PublicKey,
+    };
 
     /// Helper function to parse certificate and validate basic structure
     fn parse_certificate_pem(cert_pem: &str) -> X509Certificate {
         let cert_der = pem::parse(cert_pem).expect("Failed to parse PEM");
-        let (_, cert) = parse_x509_certificate(&cert_der.contents).expect("Failed to parse certificate");
+        let (_, cert) =
+            parse_x509_certificate(&cert_der.contents).expect("Failed to parse certificate");
         cert
     }
 
@@ -534,23 +537,23 @@ mod tests {
 
         // Parse and validate CA certificate structure
         let cert = parse_certificate_pem(&ca_bundle.cert_pem);
-        
+
         // Verify it's a CA certificate
         assert!(cert.is_ca());
-        
+
         // Verify subject contains expected fields
         assert!(cert.subject().to_string().contains("CN=test-ca"));
         assert!(cert.subject().to_string().contains("O=Blixard Cluster"));
-        
+
         // Verify key usage includes certificate signing
         if let Some(key_usage) = cert.key_usage() {
             assert!(key_usage.key_cert_sign());
             assert!(key_usage.crl_sign());
         }
-        
+
         // Verify validity period
         assert!(cert.validity().not_before <= cert.validity().not_after);
-        
+
         // Verify serial number and fingerprint are populated
         assert!(!ca_bundle.serial_number.is_empty());
         assert!(!ca_bundle.fingerprint.is_empty());
@@ -595,26 +598,29 @@ mod tests {
             .unwrap();
 
         let cert = parse_certificate_pem(&server_bundle.cert_pem);
-        
+
         // Verify it's NOT a CA certificate
         assert!(!cert.is_ca());
-        
+
         // Verify subject contains server name
-        assert!(cert.subject().to_string().contains("CN=node1.blixard.local"));
-        
+        assert!(cert
+            .subject()
+            .to_string()
+            .contains("CN=node1.blixard.local"));
+
         // Verify Subject Alternative Names
         if let Some(san_ext) = cert.subject_alternative_name() {
             let san_names: Vec<_> = san_ext.value.general_names.iter().collect();
             assert!(!san_names.is_empty());
             // Should contain both DNS name and IP address
         }
-        
+
         // Verify key usage for server authentication
         if let Some(key_usage) = cert.key_usage() {
             assert!(key_usage.digital_signature());
             assert!(key_usage.key_agreement());
         }
-        
+
         // Verify extended key usage includes server auth
         if let Some(ext_key_usage) = cert.extended_key_usage() {
             assert!(ext_key_usage.server_auth);
@@ -652,13 +658,16 @@ mod tests {
             .unwrap();
 
         let cert = parse_certificate_pem(&client_bundle.cert_pem);
-        
+
         // Verify it's NOT a CA certificate
         assert!(!cert.is_ca());
-        
+
         // Verify subject contains client name
-        assert!(cert.subject().to_string().contains("CN=admin@blixard.local"));
-        
+        assert!(cert
+            .subject()
+            .to_string()
+            .contains("CN=admin@blixard.local"));
+
         // Verify extended key usage includes client auth only
         if let Some(ext_key_usage) = cert.extended_key_usage() {
             assert!(ext_key_usage.client_auth);
@@ -669,7 +678,7 @@ mod tests {
     #[tokio::test]
     async fn test_key_algorithm_support() {
         let (mut config, _temp_dir) = create_test_config();
-        
+
         // Test all supported key algorithms
         let algorithms = vec![
             KeyAlgorithm::EcdsaP256,
@@ -677,15 +686,19 @@ mod tests {
             KeyAlgorithm::Rsa2048,
             KeyAlgorithm::Rsa4096,
         ];
-        
+
         for algorithm in algorithms {
             config.key_algorithm = algorithm;
             let generator = CertGenerator::new(config.clone());
-            
+
             // Test key generation doesn't fail
             let key_pair = generator.generate_key_pair();
-            assert!(key_pair.is_ok(), "Failed to generate key pair for {:?}", algorithm);
-            
+            assert!(
+                key_pair.is_ok(),
+                "Failed to generate key pair for {:?}",
+                algorithm
+            );
+
             // Test CA generation works with this algorithm
             let (_, ca_bundle) = generator.generate_ca("test-ca").await.unwrap();
             assert!(!ca_bundle.cert_pem.is_empty());
@@ -697,17 +710,17 @@ mod tests {
     async fn test_certificate_validity_period() {
         let (mut config, _temp_dir) = create_test_config();
         config.validity_days = 7; // Short validity for testing
-        
+
         let generator = CertGenerator::new(config);
         let (_, ca_bundle) = generator.generate_ca("test-ca").await.unwrap();
-        
+
         let cert = parse_certificate_pem(&ca_bundle.cert_pem);
         let validity = cert.validity();
-        
+
         // Check validity period is approximately 7 days
         let duration = validity.not_after.timestamp() - validity.not_before.timestamp();
         let expected_duration = 7 * 24 * 60 * 60; // 7 days in seconds
-        
+
         // Allow some tolerance for execution time
         assert!(duration >= expected_duration - 60);
         assert!(duration <= expected_duration + 60);
@@ -720,23 +733,23 @@ mod tests {
 
         // Generate CA
         let (ca_cert, ca_bundle) = generator.generate_ca("test-ca").await.unwrap();
-        
+
         // Generate server certificate signed by CA
         let server_bundle = generator
             .generate_server_cert("node1", vec!["node1".to_string()], &ca_cert)
             .await
             .unwrap();
-        
+
         // Parse both certificates
         let ca_x509 = parse_certificate_pem(&ca_bundle.cert_pem);
         let server_x509 = parse_certificate_pem(&server_bundle.cert_pem);
-        
+
         // Verify server certificate is signed by CA
         // This is a basic check - in production you'd use proper certificate chain validation
         assert_ne!(ca_x509.subject(), server_x509.subject());
         assert!(ca_x509.is_ca());
         assert!(!server_x509.is_ca());
-        
+
         // Verify different serial numbers
         assert_ne!(ca_bundle.serial_number, server_bundle.serial_number);
     }
@@ -760,7 +773,7 @@ mod tests {
         assert!(temp_dir.path().join("server-node2.crt").exists());
         assert!(temp_dir.path().join("client-admin.crt").exists());
         assert!(temp_dir.path().join("client-operator.crt").exists());
-        
+
         // Check all corresponding key files exist
         assert!(temp_dir.path().join("ca-test-cluster-ca.key").exists());
         assert!(temp_dir.path().join("server-node1.key").exists());
@@ -792,19 +805,19 @@ mod tests {
             let cert = parse_certificate_pem(&bundle.cert_pem);
             assert!(!cert.is_ca());
             assert!(cert.subject().to_string().contains(&format!("CN={}", name)));
-            
+
             // Verify has server auth capability
             if let Some(ext_key_usage) = cert.extended_key_usage() {
                 assert!(ext_key_usage.server_auth);
             }
         }
 
-        // Validate all client certificates  
+        // Validate all client certificates
         for (name, bundle) in &pki.client_bundles {
             let cert = parse_certificate_pem(&bundle.cert_pem);
             assert!(!cert.is_ca());
             assert!(cert.subject().to_string().contains(&format!("CN={}", name)));
-            
+
             // Verify has client auth capability
             if let Some(ext_key_usage) = cert.extended_key_usage() {
                 assert!(ext_key_usage.client_auth);
@@ -845,10 +858,10 @@ mod tests {
     async fn test_error_handling_invalid_validity() {
         let (mut config, _temp_dir) = create_test_config();
         config.validity_days = -1; // Invalid negative validity
-        
+
         let generator = CertGenerator::new(config);
         let result = generator.generate_ca("test-ca").await;
-        
+
         // Should handle the error gracefully
         assert!(result.is_err());
     }
@@ -859,7 +872,7 @@ mod tests {
         let generator = CertGenerator::new(config);
 
         let (ca_cert, _) = generator.generate_ca("test-ca").await.unwrap();
-        
+
         // Test with mixed DNS names and IP addresses
         let san_list = vec![
             "node1.example.com".to_string(),
@@ -868,14 +881,14 @@ mod tests {
             "::1".to_string(),
             "192.168.1.100".to_string(),
         ];
-        
+
         let server_bundle = generator
             .generate_server_cert("node1", san_list, &ca_cert)
             .await
             .unwrap();
-            
+
         let cert = parse_certificate_pem(&server_bundle.cert_pem);
-        
+
         // Verify SAN extension exists
         assert!(cert.subject_alternative_name().is_some());
     }
@@ -888,12 +901,15 @@ mod tests {
         // Generate multiple certificates
         let (_, ca1) = generator.generate_ca("ca1").await.unwrap();
         let (_, ca2) = generator.generate_ca("ca2").await.unwrap();
-        
+
         // Fingerprints should be different
         assert_ne!(ca1.fingerprint, ca2.fingerprint);
-        
+
         // Fingerprints should be in expected format (hex with colons)
         assert!(ca1.fingerprint.matches(':').count() > 0);
-        assert!(ca1.fingerprint.chars().all(|c| c.is_ascii_hexdigit() || c == ':'));
+        assert!(ca1
+            .fingerprint
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() || c == ':'));
     }
 }

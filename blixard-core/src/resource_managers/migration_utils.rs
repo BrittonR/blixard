@@ -5,9 +5,12 @@
 //! ResourceManager trait interface.
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::resource_manager::{ResourceManager, ResourceType, ResourceAllocationRequest, CompositeResourceManager, ResourceAllocation, ResourceLimits};
-use crate::resource_managers::{DefaultResourceManagerFactory, create_standard_composite_manager};
-use crate::resource_quotas::{TenantId, TenantQuota, ResourceRequest, QuotaViolation};
+use crate::resource_manager::{
+    CompositeResourceManager, ResourceAllocation, ResourceAllocationRequest, ResourceLimits,
+    ResourceManager, ResourceType,
+};
+use crate::resource_managers::{create_standard_composite_manager, DefaultResourceManagerFactory};
+use crate::resource_quotas::{QuotaViolation, ResourceRequest, TenantId, TenantQuota};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,6 +22,7 @@ pub struct ResourceManagerMigrationWrapper {
     /// New unified resource managers
     composite_manager: CompositeResourceManager,
     /// Factory for creating new managers
+    #[allow(dead_code)] // Factory reserved for future dynamic manager creation
     factory: Arc<DefaultResourceManagerFactory>,
     /// Migration state tracking
     migration_state: MigrationState,
@@ -48,8 +52,12 @@ impl Default for MigrationState {
 impl ResourceManagerMigrationWrapper {
     /// Create a new migration wrapper
     pub async fn new(memory_capacity: u64, cpu_cores: u32) -> BlixardResult<Self> {
-        let composite_manager = create_standard_composite_manager(memory_capacity, cpu_cores).await?;
-        let factory = Arc::new(DefaultResourceManagerFactory::new(memory_capacity, cpu_cores));
+        let composite_manager =
+            create_standard_composite_manager(memory_capacity, cpu_cores).await?;
+        let factory = Arc::new(DefaultResourceManagerFactory::new(
+            memory_capacity,
+            cpu_cores,
+        ));
 
         Ok(Self {
             composite_manager,
@@ -79,11 +87,17 @@ impl ResourceManagerMigrationWrapper {
                     metadata: [
                         ("migrated_from".to_string(), "quota_manager".to_string()),
                         ("original_tenant".to_string(), tenant_id.clone()),
-                    ].iter().cloned().collect(),
+                    ]
+                    .iter()
+                    .cloned()
+                    .collect(),
                 };
 
                 if let Err(e) = self.composite_manager.allocate(memory_request).await {
-                    warn!("Failed to migrate memory quota for tenant {}: {}", tenant_id, e);
+                    warn!(
+                        "Failed to migrate memory quota for tenant {}: {}",
+                        tenant_id, e
+                    );
                 }
             }
 
@@ -100,12 +114,21 @@ impl ResourceManagerMigrationWrapper {
                     metadata: [
                         ("migrated_from".to_string(), "quota_manager".to_string()),
                         ("original_tenant".to_string(), tenant_id.clone()),
-                        ("overcommit_ratio".to_string(), quota.vm_limits.overcommit_ratio.to_string()),
-                    ].iter().cloned().collect(),
+                        (
+                            "overcommit_ratio".to_string(),
+                            quota.vm_limits.overcommit_ratio.to_string(),
+                        ),
+                    ]
+                    .iter()
+                    .cloned()
+                    .collect(),
                 };
 
                 if let Err(e) = self.composite_manager.allocate(cpu_request).await {
-                    warn!("Failed to migrate CPU quota for tenant {}: {}", tenant_id, e);
+                    warn!(
+                        "Failed to migrate CPU quota for tenant {}: {}",
+                        tenant_id, e
+                    );
                 }
             }
         }
@@ -113,7 +136,10 @@ impl ResourceManagerMigrationWrapper {
         self.migration_state.memory_migrated = true;
         self.migration_state.cpu_migrated = true;
 
-        info!("Successfully migrated {} tenant quotas to unified resource managers", legacy_quotas.len());
+        info!(
+            "Successfully migrated {} tenant quotas to unified resource managers",
+            legacy_quotas.len()
+        );
         Ok(())
     }
 
@@ -127,7 +153,11 @@ impl ResourceManagerMigrationWrapper {
         // Create memory allocation request
         if legacy_request.memory_mb > 0 {
             requests.push(ResourceAllocationRequest {
-                request_id: format!("mem-{}-{}", legacy_request.tenant_id, chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)),
+                request_id: format!(
+                    "mem-{}-{}",
+                    legacy_request.tenant_id,
+                    chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+                ),
                 tenant_id: legacy_request.tenant_id.clone(),
                 resource_type: ResourceType::Memory,
                 amount: legacy_request.memory_mb,
@@ -135,17 +165,33 @@ impl ResourceManagerMigrationWrapper {
                 is_temporary: false,
                 expires_at: None,
                 metadata: [
-                    ("converted_from".to_string(), "legacy_resource_request".to_string()),
-                    ("original_vcpus".to_string(), legacy_request.vcpus.to_string()),
-                    ("original_disk_gb".to_string(), legacy_request.disk_gb.to_string()),
-                ].iter().cloned().collect(),
+                    (
+                        "converted_from".to_string(),
+                        "legacy_resource_request".to_string(),
+                    ),
+                    (
+                        "original_vcpus".to_string(),
+                        legacy_request.vcpus.to_string(),
+                    ),
+                    (
+                        "original_disk_gb".to_string(),
+                        legacy_request.disk_gb.to_string(),
+                    ),
+                ]
+                .iter()
+                .cloned()
+                .collect(),
             });
         }
 
         // Create CPU allocation request
         if legacy_request.vcpus > 0 {
             requests.push(ResourceAllocationRequest {
-                request_id: format!("cpu-{}-{}", legacy_request.tenant_id, chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)),
+                request_id: format!(
+                    "cpu-{}-{}",
+                    legacy_request.tenant_id,
+                    chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+                ),
                 tenant_id: legacy_request.tenant_id.clone(),
                 resource_type: ResourceType::Cpu,
                 amount: legacy_request.vcpus as u64,
@@ -153,10 +199,22 @@ impl ResourceManagerMigrationWrapper {
                 is_temporary: false,
                 expires_at: None,
                 metadata: [
-                    ("converted_from".to_string(), "legacy_resource_request".to_string()),
-                    ("original_memory_mb".to_string(), legacy_request.memory_mb.to_string()),
-                    ("original_disk_gb".to_string(), legacy_request.disk_gb.to_string()),
-                ].iter().cloned().collect(),
+                    (
+                        "converted_from".to_string(),
+                        "legacy_resource_request".to_string(),
+                    ),
+                    (
+                        "original_memory_mb".to_string(),
+                        legacy_request.memory_mb.to_string(),
+                    ),
+                    (
+                        "original_disk_gb".to_string(),
+                        legacy_request.disk_gb.to_string(),
+                    ),
+                ]
+                .iter()
+                .cloned()
+                .collect(),
             });
         }
 
@@ -166,47 +224,87 @@ impl ResourceManagerMigrationWrapper {
     /// Convert legacy quota violation to resource manager error
     pub fn convert_quota_violation(&self, violation: &QuotaViolation) -> BlixardError {
         match violation {
-            QuotaViolation::VmLimitExceeded { limit, current, requested } => {
-                BlixardError::QuotaExceeded {
-                    resource: "VMs".to_string(),
-                    limit: *limit as u64,
-                    requested: (*current + *requested) as u64,
-                }
-            }
-            QuotaViolation::CpuLimitExceeded { limit, current, requested } => {
-                BlixardError::InsufficientResources {
-                    requested: format!("{} vCPUs", requested),
-                    available: format!("{} vCPUs (limit: {}, current: {})", limit.saturating_sub(*current), limit, current),
-                }
-            }
-            QuotaViolation::MemoryLimitExceeded { limit, current, requested } => {
-                BlixardError::InsufficientResources {
-                    requested: format!("{}MB memory", requested),
-                    available: format!("{}MB memory (limit: {}, current: {})", limit.saturating_sub(*current), limit, current),
-                }
-            }
-            QuotaViolation::DiskLimitExceeded { limit, current, requested } => {
-                BlixardError::InsufficientResources {
-                    requested: format!("{}GB disk", requested),
-                    available: format!("{}GB disk (limit: {}, current: {})", limit.saturating_sub(*current), limit, current),
-                }
-            }
-            QuotaViolation::PerNodeVmLimitExceeded { node_id, limit, current } => {
-                BlixardError::SchedulingError {
-                    message: format!("Node {} VM limit exceeded: {}/{} VMs", node_id, current, limit),
-                }
-            }
-            QuotaViolation::RateLimitExceeded { operation, limit, current } => {
-                BlixardError::ResourceExhausted {
-                    resource: format!("Rate limit for operation '{}': {}/{} per minute", operation, current, limit),
-                }
-            }
-            QuotaViolation::StorageLimitExceeded { limit, current, requested } => {
-                BlixardError::InsufficientResources {
-                    requested: format!("{}GB storage", requested),
-                    available: format!("{}GB storage (limit: {}, current: {})", limit.saturating_sub(*current), limit, current),
-                }
-            }
+            QuotaViolation::VmLimitExceeded {
+                limit,
+                current,
+                requested,
+            } => BlixardError::QuotaExceeded {
+                resource: "VMs".to_string(),
+                limit: *limit as u64,
+                requested: (*current + *requested) as u64,
+            },
+            QuotaViolation::CpuLimitExceeded {
+                limit,
+                current,
+                requested,
+            } => BlixardError::InsufficientResources {
+                requested: format!("{} vCPUs", requested),
+                available: format!(
+                    "{} vCPUs (limit: {}, current: {})",
+                    limit.saturating_sub(*current),
+                    limit,
+                    current
+                ),
+            },
+            QuotaViolation::MemoryLimitExceeded {
+                limit,
+                current,
+                requested,
+            } => BlixardError::InsufficientResources {
+                requested: format!("{}MB memory", requested),
+                available: format!(
+                    "{}MB memory (limit: {}, current: {})",
+                    limit.saturating_sub(*current),
+                    limit,
+                    current
+                ),
+            },
+            QuotaViolation::DiskLimitExceeded {
+                limit,
+                current,
+                requested,
+            } => BlixardError::InsufficientResources {
+                requested: format!("{}GB disk", requested),
+                available: format!(
+                    "{}GB disk (limit: {}, current: {})",
+                    limit.saturating_sub(*current),
+                    limit,
+                    current
+                ),
+            },
+            QuotaViolation::PerNodeVmLimitExceeded {
+                node_id,
+                limit,
+                current,
+            } => BlixardError::SchedulingError {
+                message: format!(
+                    "Node {} VM limit exceeded: {}/{} VMs",
+                    node_id, current, limit
+                ),
+            },
+            QuotaViolation::RateLimitExceeded {
+                operation,
+                limit,
+                current,
+            } => BlixardError::ResourceExhausted {
+                resource: format!(
+                    "Rate limit for operation '{}': {}/{} per minute",
+                    operation, current, limit
+                ),
+            },
+            QuotaViolation::StorageLimitExceeded {
+                limit,
+                current,
+                requested,
+            } => BlixardError::InsufficientResources {
+                requested: format!("{}GB storage", requested),
+                available: format!(
+                    "{}GB storage (limit: {}, current: {})",
+                    limit.saturating_sub(*current),
+                    limit,
+                    current
+                ),
+            },
         }
     }
 
@@ -242,10 +340,16 @@ impl ResourceManagerMigrationWrapper {
             priority: 100,
             is_temporary: true,
             expires_at: Some(std::time::SystemTime::now() + Duration::from_secs(1)),
-            metadata: [("operation".to_string(), "availability_check".to_string())].iter().cloned().collect(),
+            metadata: [("operation".to_string(), "availability_check".to_string())]
+                .iter()
+                .cloned()
+                .collect(),
         };
 
-        let memory_available = self.composite_manager.check_availability(&memory_request).await?;
+        let memory_available = self
+            .composite_manager
+            .check_availability(&memory_request)
+            .await?;
 
         // Check CPU availability
         let cpu_request = ResourceAllocationRequest {
@@ -256,10 +360,16 @@ impl ResourceManagerMigrationWrapper {
             priority: 100,
             is_temporary: true,
             expires_at: Some(std::time::SystemTime::now() + Duration::from_secs(1)),
-            metadata: [("operation".to_string(), "availability_check".to_string())].iter().cloned().collect(),
+            metadata: [("operation".to_string(), "availability_check".to_string())]
+                .iter()
+                .cloned()
+                .collect(),
         };
 
-        let cpu_available = self.composite_manager.check_availability(&cpu_request).await?;
+        let cpu_available = self
+            .composite_manager
+            .check_availability(&cpu_request)
+            .await?;
 
         Ok(memory_available && cpu_available)
     }
@@ -286,7 +396,10 @@ impl ResourceManagerMigrationWrapper {
             metadata: [
                 ("vm_name".to_string(), vm_name.to_string()),
                 ("resource_class".to_string(), "vm_allocation".to_string()),
-            ].iter().cloned().collect(),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
         };
 
         let memory_allocation = self.composite_manager.allocate(memory_request).await?;
@@ -304,24 +417,32 @@ impl ResourceManagerMigrationWrapper {
             metadata: [
                 ("vm_name".to_string(), vm_name.to_string()),
                 ("resource_class".to_string(), "vm_allocation".to_string()),
-            ].iter().cloned().collect(),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
         };
 
         let cpu_allocation = self.composite_manager.allocate(cpu_request).await?;
         allocations.push(cpu_allocation);
 
-        info!("Allocated resources for VM {}: {}MB memory, {} vCPUs", vm_name, memory_mb, vcpus);
+        info!(
+            "Allocated resources for VM {}: {}MB memory, {} vCPUs",
+            vm_name, memory_mb, vcpus
+        );
         Ok(allocations)
     }
 
     /// Release all resources for a VM
     pub async fn deallocate_for_vm(&self, vm_name: &str) -> BlixardResult<()> {
         let allocations = self.composite_manager.get_allocations().await?;
-        
+
         for allocation in allocations {
             if let Some(allocated_vm_name) = allocation.request.metadata.get("vm_name") {
                 if allocated_vm_name == vm_name {
-                    self.composite_manager.deallocate(&allocation.allocation_id).await?;
+                    self.composite_manager
+                        .deallocate(&allocation.allocation_id)
+                        .await?;
                 }
             }
         }
@@ -398,29 +519,57 @@ pub fn convert_tenant_quota_to_limits(quota: &TenantQuota) -> Vec<ResourceLimits
 /// Generate migration report
 pub fn generate_migration_report(status: &MigrationStatus) -> String {
     let mut report = String::with_capacity(512);
-    
+
     report.push_str(&format!("Resource Manager Migration Report\n"));
     report.push_str(&format!("=====================================\n\n"));
-    
-    report.push_str(&format!("Migration Status: {:.1}% complete\n", status.completion_percentage()));
-    report.push_str(&format!("Memory Migration: {}\n", if status.memory_migrated { "✓ Complete" } else { "✗ Pending" }));
-    report.push_str(&format!("CPU Migration: {}\n", if status.cpu_migrated { "✓ Complete" } else { "✗ Pending" }));
-    report.push_str(&format!("Disk Migration: {}\n", if status.disk_migrated { "✓ Complete" } else { "✗ Pending" }));
-    
+
+    report.push_str(&format!(
+        "Migration Status: {:.1}% complete\n",
+        status.completion_percentage()
+    ));
+    report.push_str(&format!(
+        "Memory Migration: {}\n",
+        if status.memory_migrated {
+            "✓ Complete"
+        } else {
+            "✗ Pending"
+        }
+    ));
+    report.push_str(&format!(
+        "CPU Migration: {}\n",
+        if status.cpu_migrated {
+            "✓ Complete"
+        } else {
+            "✗ Pending"
+        }
+    ));
+    report.push_str(&format!(
+        "Disk Migration: {}\n",
+        if status.disk_migrated {
+            "✓ Complete"
+        } else {
+            "✗ Pending"
+        }
+    ));
+
     if !status.warnings.is_empty() {
         report.push_str(&format!("\nWarnings ({}):\n", status.warnings_count));
         for (i, warning) in status.warnings.iter().enumerate() {
             report.push_str(&format!("  {}. {}\n", i + 1, warning));
         }
     }
-    
+
     if status.is_complete() {
         report.push_str(&format!("\n✓ Migration completed successfully!\n"));
-        report.push_str(&format!("You can now use the unified ResourceManager interface.\n"));
+        report.push_str(&format!(
+            "You can now use the unified ResourceManager interface.\n"
+        ));
     } else {
-        report.push_str(&format!("\n⚠ Migration is incomplete. Continue with remaining steps.\n"));
+        report.push_str(&format!(
+            "\n⚠ Migration is incomplete. Continue with remaining steps.\n"
+        ));
     }
-    
+
     report
 }
 
@@ -431,7 +580,7 @@ mod tests {
     #[tokio::test]
     async fn test_migration_wrapper_creation() {
         let wrapper = ResourceManagerMigrationWrapper::new(8192, 4).await.unwrap();
-        
+
         let status = wrapper.migration_status();
         assert!(!status.is_complete());
         assert_eq!(status.completion_percentage(), 0.0);
@@ -453,8 +602,11 @@ mod tests {
 
         let limits = convert_tenant_quota_to_limits(&quota);
         assert_eq!(limits.len(), 3);
-        
-        let memory_limits = limits.iter().find(|l| l.resource_type == ResourceType::Memory).unwrap();
+
+        let memory_limits = limits
+            .iter()
+            .find(|l| l.resource_type == ResourceType::Memory)
+            .unwrap();
         assert_eq!(memory_limits.hard_limit, 8192);
         assert_eq!(memory_limits.overcommit_ratio, 1.5);
     }
@@ -462,7 +614,7 @@ mod tests {
     #[tokio::test]
     async fn test_resource_request_conversion() {
         let wrapper = ResourceManagerMigrationWrapper::new(8192, 4).await.unwrap();
-        
+
         let legacy_request = ResourceRequest {
             tenant_id: "test-tenant".to_string(),
             node_id: Some(1),
@@ -474,25 +626,34 @@ mod tests {
 
         let new_requests = wrapper.convert_resource_request(&legacy_request);
         assert_eq!(new_requests.len(), 2); // Memory + CPU
-        
-        let memory_request = new_requests.iter().find(|r| r.resource_type == ResourceType::Memory).unwrap();
+
+        let memory_request = new_requests
+            .iter()
+            .find(|r| r.resource_type == ResourceType::Memory)
+            .unwrap();
         assert_eq!(memory_request.amount, 4096);
-        
-        let cpu_request = new_requests.iter().find(|r| r.resource_type == ResourceType::Cpu).unwrap();
+
+        let cpu_request = new_requests
+            .iter()
+            .find(|r| r.resource_type == ResourceType::Cpu)
+            .unwrap();
         assert_eq!(cpu_request.amount, 2);
     }
 
     #[tokio::test]
     async fn test_vm_resource_allocation() {
         let wrapper = ResourceManagerMigrationWrapper::new(8192, 8).await.unwrap();
-        
+
         // Initialize the composite manager
         wrapper.composite_manager.initialize().await.unwrap();
         wrapper.composite_manager.start().await.unwrap();
-        
-        let allocations = wrapper.allocate_for_vm("test-vm", "test-tenant", 2048, 2).await.unwrap();
+
+        let allocations = wrapper
+            .allocate_for_vm("test-vm", "test-tenant", 2048, 2)
+            .await
+            .unwrap();
         assert_eq!(allocations.len(), 2);
-        
+
         // Test deallocation
         wrapper.deallocate_for_vm("test-vm").await.unwrap();
     }
@@ -509,7 +670,7 @@ mod tests {
 
         assert!(!status.is_complete());
         assert_eq!(status.completion_percentage(), 66.66666666666666);
-        
+
         let report = generate_migration_report(&status);
         assert!(report.contains("66.7% complete"));
         assert!(report.contains("✓ Complete"));

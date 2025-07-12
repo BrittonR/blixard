@@ -22,7 +22,7 @@ async fn test_vm_create_through_raft() -> BlixardResult<()> {
     let _ = tracing_subscriber::fmt::try_init();
 
     // Create a 3-node cluster
-    let cluster = TestCluster::new(3).await?;
+    let cluster = TestCluster::with_size(3).await?;
 
     // Wait for cluster to converge
     cluster
@@ -75,7 +75,7 @@ async fn test_vm_operations_require_leader() -> BlixardResult<()> {
     let _ = tracing_subscriber::fmt::try_init();
 
     // Create a 3-node cluster
-    let mut cluster = TestCluster::new(3).await?;
+    let mut cluster = TestCluster::with_size(3).await?;
 
     // Wait for leader election
     let leader_id = cluster
@@ -120,7 +120,7 @@ async fn test_vm_lifecycle_with_raft() -> BlixardResult<()> {
     let _ = tracing_subscriber::fmt::try_init();
 
     // Create a 3-node cluster
-    let mut cluster = TestCluster::new(3).await?;
+    let mut cluster = TestCluster::with_size(3).await?;
 
     // Wait for leader election
     let leader_id = cluster
@@ -217,7 +217,7 @@ async fn test_vm_state_persistence() -> BlixardResult<()> {
     let _ = tracing_subscriber::fmt::try_init();
 
     // Create a 3-node cluster (persistence is handled by test infrastructure)
-    let mut cluster = TestCluster::new(3).await?;
+    let mut cluster = TestCluster::with_size(3).await?;
 
     // Wait for leader election
     let leader_id = cluster
@@ -283,7 +283,7 @@ async fn test_concurrent_vm_operations() -> BlixardResult<()> {
     let _ = tracing_subscriber::fmt::try_init();
 
     // Create a 3-node cluster
-    let mut cluster = TestCluster::new(3).await?;
+    let mut cluster = TestCluster::with_size(3).await?;
 
     // Wait for leader election
     let leader_id = cluster

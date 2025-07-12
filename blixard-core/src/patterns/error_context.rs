@@ -54,9 +54,7 @@ where
     where
         F: FnOnce() -> String,
     {
-        self.map_err(|_e| BlixardError::Internal {
-            message: f(),
-        })
+        self.map_err(|_e| BlixardError::Internal { message: f() })
     }
 
     fn context(self, msg: &'static str) -> BlixardResult<T> {
@@ -82,7 +80,12 @@ where
     }
 
     fn with_network_context(self, endpoint: &str, operation: &str) -> BlixardResult<T> {
-        self.with_context(|| format!("Network operation '{}' failed for endpoint '{}'", operation, endpoint))
+        self.with_context(|| {
+            format!(
+                "Network operation '{}' failed for endpoint '{}'",
+                operation, endpoint
+            )
+        })
     }
 
     fn with_raft_context(self, node_id: u64, operation: &str) -> BlixardResult<T> {
@@ -90,7 +93,12 @@ where
     }
 
     fn with_p2p_context(self, peer_id: &str, operation: &str) -> BlixardResult<T> {
-        self.with_context(|| format!("P2P operation '{}' failed for peer '{}'", operation, peer_id))
+        self.with_context(|| {
+            format!(
+                "P2P operation '{}' failed for peer '{}'",
+                operation, peer_id
+            )
+        })
     }
 
     fn with_config_context(self, config_key: &str) -> BlixardResult<T> {
@@ -98,10 +106,14 @@ where
     }
 
     fn with_security_context(self, operation: &str, resource: &str) -> BlixardResult<T> {
-        self.with_context(|| format!("Security operation '{}' failed for resource '{}'", operation, resource))
+        self.with_context(|| {
+            format!(
+                "Security operation '{}' failed for resource '{}'",
+                operation, resource
+            )
+        })
     }
 }
-
 
 /// Error aggregation for collecting multiple errors
 #[derive(Debug)]
@@ -198,7 +210,7 @@ impl ErrorUtils {
                 Ok(result) => return Ok(result),
                 Err(error) => {
                     last_error = Some(error);
-                    
+
                     if attempt < max_attempts {
                         tokio::time::sleep(delay).await;
                         delay = delay.mul_f64(1.5); // Exponential backoff
@@ -210,9 +222,12 @@ impl ErrorUtils {
         Err(BlixardError::Internal {
             message: format!(
                 "Operation '{}' failed after {} attempts: {}",
-                context, 
+                context,
                 max_attempts,
-                last_error.as_ref().map(|e| e.to_string()).unwrap_or_else(|| "unknown error".to_string())
+                last_error
+                    .as_ref()
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "unknown error".to_string())
             ),
         })
     }
@@ -244,19 +259,17 @@ impl ErrorUtils {
         Fut: std::future::Future<Output = T> + Send + 'static,
         T: Send + 'static,
     {
-        tokio::task::spawn(f())
-            .await
-            .map_err(|join_error| {
-                if join_error.is_panic() {
-                    BlixardError::Internal {
-                        message: format!("Async panic in '{}': {:?}", context, join_error),
-                    }
-                } else {
-                    BlixardError::Internal {
-                        message: format!("Async task cancelled in '{}'", context),
-                    }
+        tokio::task::spawn(f()).await.map_err(|join_error| {
+            if join_error.is_panic() {
+                BlixardError::Internal {
+                    message: format!("Async panic in '{}': {:?}", context, join_error),
                 }
-            })
+            } else {
+                BlixardError::Internal {
+                    message: format!("Async task cancelled in '{}'", context),
+                }
+            }
+        })
     }
 
     /// Timeout an operation
@@ -327,9 +340,10 @@ mod tests {
     fn test_error_context() {
         let io_error = io::Error::new(io::ErrorKind::NotFound, "File not found");
         let result: Result<(), _> = Err(io_error);
-        
-        let blixard_result = result.with_context(|| "Failed to read configuration file".to_string());
-        
+
+        let blixard_result =
+            result.with_context(|| "Failed to read configuration file".to_string());
+
         assert!(blixard_result.is_err());
         if let Err(BlixardError::Internal { message, source }) = blixard_result {
             assert_eq!(message, "Failed to read configuration file");
@@ -343,9 +357,9 @@ mod tests {
     fn test_domain_context() {
         let io_error = io::Error::new(io::ErrorKind::PermissionDenied, "Access denied");
         let result: Result<(), _> = Err(io_error);
-        
+
         let blixard_result = result.with_vm_context("test-vm", "start");
-        
+
         assert!(blixard_result.is_err());
         if let Err(BlixardError::Internal { message, .. }) = blixard_result {
             assert!(message.contains("VM operation 'start' failed for VM 'test-vm'"));
@@ -357,11 +371,11 @@ mod tests {
     #[test]
     fn test_error_collector() {
         let mut collector = ErrorCollector::new("Test operations");
-        
+
         // Add some successful results
         assert_eq!(collector.add_result(Ok::<i32, BlixardError>(1)), Some(1));
         assert_eq!(collector.add_result(Ok::<i32, BlixardError>(2)), Some(2));
-        
+
         // Add some errors
         collector.add_result(Err::<i32, _>(BlixardError::Internal {
             message: "Error 1".to_string(),
@@ -371,10 +385,10 @@ mod tests {
             message: "Error 2".to_string(),
             source: None,
         }));
-        
+
         assert!(collector.has_errors());
         assert_eq!(collector.error_count(), 2);
-        
+
         let result = collector.into_result(());
         assert!(result.is_err());
     }
@@ -382,7 +396,7 @@ mod tests {
     #[tokio::test]
     async fn test_retry_with_backoff() {
         let mut attempt_count = 0;
-        
+
         let operation = || {
             attempt_count += 1;
             async move {
@@ -396,14 +410,15 @@ mod tests {
                 }
             }
         };
-        
+
         let result = ErrorUtils::retry_with_backoff(
             operation,
             5,
             std::time::Duration::from_millis(10),
             "test operation",
-        ).await;
-        
+        )
+        .await;
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "Success");
         assert_eq!(attempt_count, 3);
@@ -413,9 +428,9 @@ mod tests {
     fn test_context_macro() {
         let io_error = io::Error::new(io::ErrorKind::NotFound, "File not found");
         let result: Result<(), _> = Err(io_error);
-        
+
         let blixard_result = context!(result, "Reading config file");
-        
+
         assert!(blixard_result.is_err());
     }
 
@@ -423,18 +438,21 @@ mod tests {
     fn test_vm_context_macro() {
         let io_error = io::Error::new(io::ErrorKind::TimedOut, "Operation timed out");
         let result: Result<(), _> = Err(io_error);
-        
+
         let blixard_result = vm_context!(result, "test-vm", "start");
-        
+
         assert!(blixard_result.is_err());
     }
 
     #[test]
     fn test_error_utils_catch_panic() {
-        let result = ErrorUtils::catch_panic(|| {
-            panic!("Test panic");
-        }, "test operation");
-        
+        let result = ErrorUtils::catch_panic(
+            || {
+                panic!("Test panic");
+            },
+            "test operation",
+        );
+
         assert!(result.is_err());
         if let Err(BlixardError::Internal { message, .. }) = result {
             assert!(message.contains("Panic in 'test operation'"));
@@ -451,11 +469,12 @@ mod tests {
             || async { Ok::<_, BlixardError>("success") },
             std::time::Duration::from_millis(100),
             "fast operation",
-        ).await;
-        
+        )
+        .await;
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "success");
-        
+
         // Test operation that times out
         let result = ErrorUtils::with_timeout(
             || async {
@@ -464,8 +483,9 @@ mod tests {
             },
             std::time::Duration::from_millis(50),
             "slow operation",
-        ).await;
-        
+        )
+        .await;
+
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), BlixardError::Timeout { .. }));
     }

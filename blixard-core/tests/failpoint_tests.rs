@@ -21,7 +21,7 @@ use blixard_core::{
 async fn test_storage_write_failures() {
     failpoints::init();
 
-    let cluster = TestCluster::new(3).await.unwrap();
+    let cluster = TestCluster::with_size(3).await.unwrap();
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await
@@ -67,7 +67,7 @@ async fn test_storage_write_failures() {
 async fn test_network_partition_handling() {
     failpoints::init();
 
-    let cluster = TestCluster::new(5).await.unwrap();
+    let cluster = TestCluster::with_size(5).await.unwrap();
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await
@@ -108,7 +108,7 @@ async fn test_network_partition_handling() {
 async fn test_resource_exhaustion() {
     failpoints::init();
 
-    let cluster = TestCluster::new(3).await.unwrap();
+    let cluster = TestCluster::with_size(3).await.unwrap();
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await
@@ -151,7 +151,7 @@ async fn test_resource_exhaustion() {
 async fn test_deterministic_failure_injection() {
     failpoints::init();
 
-    let cluster = TestCluster::new(3).await.unwrap();
+    let cluster = TestCluster::with_size(3).await.unwrap();
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await
@@ -176,7 +176,7 @@ async fn test_deterministic_failure_injection() {
 async fn test_split_brain_prevention() {
     failpoints::init();
 
-    let cluster = TestCluster::new(5).await.unwrap();
+    let cluster = TestCluster::with_size(5).await.unwrap();
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await
@@ -213,7 +213,7 @@ async fn test_split_brain_prevention() {
 async fn test_byzantine_node_behavior() {
     failpoints::init();
 
-    let cluster = TestCluster::new(5).await.unwrap();
+    let cluster = TestCluster::with_size(5).await.unwrap();
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await
@@ -250,7 +250,7 @@ async fn test_byzantine_node_behavior() {
 async fn test_failure_observability() {
     failpoints::init();
 
-    let cluster = TestCluster::new(3).await.unwrap();
+    let cluster = TestCluster::with_size(3).await.unwrap();
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await
@@ -293,7 +293,7 @@ async fn test_production_debugging_configuration() {
     // Test environment variable configuration
     std::env::set_var("FAILPOINTS", "raft::propose=1%return;storage::write=off");
 
-    let cluster = TestCluster::new(3).await.unwrap();
+    let cluster = TestCluster::with_size(3).await.unwrap();
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await

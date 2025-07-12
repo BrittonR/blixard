@@ -14,7 +14,7 @@ async fn test_network_partition_demonstration() {
     eprintln!("\n=== Network Partition Test Demonstration ===\n");
 
     // Create a 5-node cluster
-    let mut cluster = TestCluster::new(5).await.expect("Failed to create cluster");
+    let mut cluster = TestCluster::with_size(5).await.expect("Failed to create cluster");
 
     // Wait for convergence
     cluster
@@ -78,7 +78,7 @@ async fn test_network_partition_demonstration() {
 #[ignore = "This is a template, not a real test"]
 async fn test_network_partition_template() {
     // Step 1: Create cluster
-    let cluster = TestCluster::new(5).await.expect("Failed to create cluster");
+    let cluster = TestCluster::with_size(5).await.expect("Failed to create cluster");
     cluster
         .wait_for_convergence(Duration::from_secs(10))
         .await
@@ -110,7 +110,7 @@ async fn test_network_partition_template() {
 /// Demonstrates why the current test approach doesn't test partitions
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_clean_removal_vs_partition() {
-    let mut cluster = TestCluster::new(5).await.expect("Failed to create cluster");
+    let mut cluster = TestCluster::with_size(5).await.expect("Failed to create cluster");
     cluster
         .wait_for_convergence(Duration::from_secs(10))
         .await

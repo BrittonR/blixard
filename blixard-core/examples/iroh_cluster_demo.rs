@@ -72,7 +72,7 @@ async fn create_cluster_nodes(
                 None
             },
             use_tailscale: false,
-            transport_config: Some(TransportConfig::Iroh(IrohConfig::default())),
+            transport_config: Some(IrohConfig::default()),
         };
 
         let node = Arc::new(SharedNodeState::new(config));

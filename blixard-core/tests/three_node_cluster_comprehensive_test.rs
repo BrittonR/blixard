@@ -235,7 +235,7 @@ async fn test_cluster_formation_stress() {
     for i in 1..=3 {
         println!("\nIteration {}/3", i);
 
-        let cluster = TestCluster::new(3).await.expect("Failed to create cluster");
+        let cluster = TestCluster::with_size(3).await.expect("Failed to create cluster");
 
         cluster
             .wait_for_convergence(Duration::from_secs(30))

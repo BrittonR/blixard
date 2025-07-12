@@ -2,7 +2,7 @@
 //!
 //! This module provides a builder pattern for creating Iroh services with consistent
 //! patterns for protocol handling, error management, metrics, and client generation.
-//! 
+//!
 //! Key benefits:
 //! - Eliminates ~2,500 lines of duplicate code across services
 //! - Provides consistent error handling and response formatting
@@ -10,14 +10,14 @@
 //! - Generates client wrappers from service definitions
 //! - Ensures protocol consistency across all services
 
+#[cfg(feature = "observability")]
+use crate::metrics_otel::{attributes, metrics, Timer};
 use crate::{
     common::error_context::NetworkContext,
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
     transport::iroh_protocol::{deserialize_payload, serialize_payload},
 };
-#[cfg(feature = "observability")]
-use crate::metrics_otel::{attributes, metrics, Timer};
 use async_trait::async_trait;
 use bytes::Bytes;
 use serde::{de::DeserializeOwned, Serialize};
@@ -115,7 +115,10 @@ where
         debug!("Handling {}: {:?}", self.method_name, request);
 
         // Execute handler with error context
-        let response = self.handler.handle(request).await
+        let response = self
+            .handler
+            .handle(request)
+            .await
             .map_err(|e| BlixardError::Internal {
                 message: format!("execute_{}: {}", self.method_name, e),
             })?;
@@ -159,11 +162,7 @@ impl ServiceBuilder {
     }
 
     /// Add a simple method handler using a closure
-    pub fn simple_method<Req, Resp, F, Fut>(
-        self,
-        name: impl Into<String>,
-        handler: F,
-    ) -> Self
+    pub fn simple_method<Req, Resp, F, Fut>(self, name: impl Into<String>, handler: F) -> Self
     where
         Req: DeserializeOwned + Send + Sync + std::fmt::Debug + 'static,
         Resp: Serialize + Send + Sync + 'static,
@@ -267,10 +266,7 @@ impl BuiltService {
                 result
             }
             None => {
-                warn!(
-                    "Unknown method {} called on service {}",
-                    method, self.name
-                );
+                warn!("Unknown method {} called on service {}", method, self.name);
                 Err(BlixardError::NotImplemented {
                     feature: format!("Method {} on service {}", method, self.name),
                 })
@@ -342,11 +338,7 @@ impl ServiceProtocolHandler {
     }
 
     /// Handle protocol requests with consistent error handling
-    pub async fn handle_request(
-        &self,
-        method: &str,
-        payload: Bytes,
-    ) -> BlixardResult<Bytes> {
+    pub async fn handle_request(&self, method: &str, payload: Bytes) -> BlixardResult<Bytes> {
         self.service.handle_call(method, payload).await
     }
 

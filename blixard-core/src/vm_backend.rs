@@ -22,21 +22,335 @@ use crate::fail_point;
 /// This trait defines the contract that all VM backends must implement,
 /// allowing the core distributed systems logic to be decoupled from
 /// specific VM implementations (microvm.nix, Docker, Firecracker, etc.)
+///
+/// ## Design Principles
+///
+/// ### 1. Async-First Architecture
+/// All operations are async to handle potentially long-running VM operations
+/// without blocking the event loop. Implementations must be careful about:
+/// - **Cancellation Safety**: Operations should handle task cancellation gracefully
+/// - **Resource Cleanup**: Failed operations must clean up partial state
+/// - **Timeout Handling**: Long operations should respect reasonable timeouts
+///
+/// ### 2. Error Recovery
+/// Operations may fail at any point due to:
+/// - **Resource Exhaustion**: Out of memory, disk space, or CPU cores
+/// - **Network Issues**: Unable to reach hypervisor or VM
+/// - **Configuration Errors**: Invalid VM configuration or missing files
+/// - **Hardware Failures**: Host system issues or hardware faults
+///
+/// ### 3. Thread Safety
+/// Implementations must be `Send + Sync` for multi-threaded access:
+/// - **Concurrent Operations**: Multiple VMs can be managed simultaneously
+/// - **Shared State**: Backend state must be protected with appropriate synchronization
+/// - **No Blocking**: Must not perform blocking I/O in async contexts
+///
+/// ### 4. Observability
+/// All operations should provide comprehensive logging and metrics:
+/// - **Structured Logging**: Use `tracing` for contextual log messages
+/// - **Error Context**: Include detailed error information for debugging
+/// - **Performance Metrics**: Track operation latency and resource usage
+///
+/// ## Implementation Guidelines
+///
+/// ### Resource Management
+/// ```rust,no_run
+/// use blixard_core::{VmBackend, VmConfig, BlixardResult};
+/// use async_trait::async_trait;
+///
+/// struct MyVmBackend {
+///     // Keep resource tracking state
+///     resource_tracker: Arc<ResourceTracker>,
+/// }
+///
+/// #[async_trait]
+/// impl VmBackend for MyVmBackend {
+///     async fn create_vm(&self, config: &VmConfig, node_id: u64) -> BlixardResult<()> {
+///         // 1. Validate configuration
+///         self.validate_vm_config(config).await?;
+///         
+///         // 2. Check resource availability
+///         self.resource_tracker.reserve_resources(config).await?;
+///         
+///         // 3. Create VM with rollback on failure
+///         match self.do_create_vm(config, node_id).await {
+///             Ok(()) => Ok(()),
+///             Err(e) => {
+///                 // Clean up on failure
+///                 self.resource_tracker.release_resources(config).await?;
+///                 Err(e)
+///             }
+///         }
+///     }
+/// }
+/// ```
+///
+/// ### Error Handling Patterns
+/// ```rust,no_run
+/// use blixard_core::{BlixardError, BlixardResult};
+///
+/// async fn start_vm_example(&self, name: &str) -> BlixardResult<()> {
+///     // Check if VM exists
+///     let vm_config = self.get_vm_config(name).await
+///         .map_err(|e| BlixardError::VmError(format!("VM '{}' not found: {}", name, e)))?;
+///     
+///     // Validate VM can be started
+///     if !self.can_start_vm(&vm_config).await? {
+///         return Err(BlixardError::VmError(
+///             format!("VM '{}' cannot be started (insufficient resources)", name)
+///         ));
+///     }
+///     
+///     // Start with timeout
+///     tokio::time::timeout(
+///         std::time::Duration::from_secs(30),
+///         self.hypervisor_start_vm(name)
+///     ).await
+///     .map_err(|_| BlixardError::Timeout {
+///         operation: format!("start VM '{}'", name),
+///         timeout_secs: 30,
+///     })?
+/// }
+/// ```
+///
+/// ### Health Check Implementation
+/// ```rust,no_run
+/// use blixard_core::{HealthCheckType, HealthCheckResult};
+///
+/// async fn perform_health_check_example(
+///     &self,
+///     vm_name: &str,
+///     check_name: &str,
+///     check_type: &HealthCheckType,
+/// ) -> BlixardResult<HealthCheckResult> {
+///     match check_type {
+///         HealthCheckType::Tcp { host, port } => {
+///             // Try TCP connection with timeout
+///             let result = tokio::time::timeout(
+///                 std::time::Duration::from_secs(5),
+///                 tokio::net::TcpStream::connect((host.as_str(), *port))
+///             ).await;
+///             
+///             match result {
+///                 Ok(Ok(_)) => Ok(HealthCheckResult::healthy()),
+///                 Ok(Err(e)) => Ok(HealthCheckResult::unhealthy(
+///                     format!("TCP connection failed: {}", e)
+///                 )),
+///                 Err(_) => Ok(HealthCheckResult::unhealthy("Health check timeout")),
+///             }
+///         },
+///         HealthCheckType::Http { url, expected_status } => {
+///             // Implement HTTP health check
+///             // ...
+///         },
+///         // Handle other check types
+///     }
+/// }
+/// ```
+///
+/// ## Common Failure Modes
+///
+/// ### 1. Resource Exhaustion
+/// - **Symptom**: create_vm() fails with resource errors
+/// - **Recovery**: Implement resource admission control and queueing
+/// - **Monitoring**: Track resource utilization metrics
+///
+/// ### 2. Network Connectivity
+/// - **Symptom**: Operations timeout or fail with network errors
+/// - **Recovery**: Implement retry logic with exponential backoff
+/// - **Monitoring**: Track operation success/failure rates
+///
+/// ### 3. Hypervisor Issues
+/// - **Symptom**: VMs fail to start or respond to commands
+/// - **Recovery**: Restart hypervisor service or failover to other nodes
+/// - **Monitoring**: Track hypervisor health and VM success rates
+///
+/// ### 4. Configuration Errors
+/// - **Symptom**: VMs fail to create with validation errors
+/// - **Recovery**: Validate configuration before submission
+/// - **Monitoring**: Track configuration validation failure rates
+///
+/// ## Performance Considerations
+///
+/// - **Parallel Operations**: Support concurrent VM operations where possible
+/// - **Resource Caching**: Cache frequently accessed VM metadata
+/// - **Lazy Loading**: Only load VM state when needed
+/// - **Connection Pooling**: Reuse connections to hypervisor APIs
+/// - **Batch Operations**: Group similar operations for efficiency
+///
+/// ## Security Considerations
+///
+/// - **Input Validation**: Sanitize all configuration inputs
+/// - **Resource Isolation**: Ensure VMs cannot access unauthorized resources
+/// - **Credential Management**: Secure storage of hypervisor credentials
+/// - **Network Security**: Proper firewall and network segmentation
+/// - **Audit Logging**: Log all VM lifecycle events for security analysis
 #[async_trait]
 pub trait VmBackend: Send + Sync {
     /// Create a new VM with the given configuration
+    ///
+    /// This operation allocates resources and prepares the VM for execution,
+    /// but does not start it. The VM will be in `Creating` status initially,
+    /// transitioning to `Stopped` when creation completes successfully.
+    ///
+    /// # Arguments
+    /// * `config` - VM configuration including resource requirements and hypervisor settings
+    /// * `node_id` - Target node where the VM should be created
+    ///
+    /// # Errors
+    /// * `BlixardError::ResourceExhausted` - Insufficient resources (CPU, memory, disk)
+    /// * `BlixardError::ConfigError` - Invalid VM configuration
+    /// * `BlixardError::VmError` - VM already exists or hypervisor failure
+    /// * `BlixardError::NetworkError` - Network isolation setup failure
+    /// * `BlixardError::Timeout` - Operation exceeded reasonable time limit
+    ///
+    /// # Async Behavior
+    /// - **Duration**: Typically 1-5 seconds for resource allocation
+    /// - **Cancellation**: Safe to cancel, will clean up partial state
+    /// - **Concurrency**: Multiple VMs can be created simultaneously
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # use blixard_core::{VmBackend, VmConfig};
+    /// # async fn example(backend: &dyn VmBackend) -> Result<(), Box<dyn std::error::Error>> {
+    /// let config = VmConfig {
+    ///     name: "web-server".to_string(),
+    ///     vcpus: 2,
+    ///     memory: 1024, // MB
+    ///     ..Default::default()
+    /// };
+    /// 
+    /// backend.create_vm(&config, 1).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     async fn create_vm(&self, config: &VmConfig, node_id: u64) -> BlixardResult<()>;
 
     /// Start an existing VM
+    ///
+    /// Transitions the VM from `Stopped` to `Running` state. The VM must have
+    /// been previously created and be in a startable state.
+    ///
+    /// # Arguments
+    /// * `name` - Unique identifier of the VM to start
+    ///
+    /// # Errors
+    /// * `BlixardError::VmError` - VM not found, already running, or failed to start
+    /// * `BlixardError::ResourceExhausted` - Resources no longer available
+    /// * `BlixardError::NetworkError` - Network configuration failure
+    /// * `BlixardError::Timeout` - VM failed to start within timeout period
+    ///
+    /// # Async Behavior
+    /// - **Duration**: Typically 100ms-2s depending on hypervisor and VM size
+    /// - **Cancellation**: Unsafe to cancel during critical startup phases
+    /// - **Concurrency**: Multiple VMs can be started simultaneously
+    /// - **Retry**: Safe to retry if operation fails
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # use blixard_core::VmBackend;
+    /// # async fn example(backend: &dyn VmBackend) -> Result<(), Box<dyn std::error::Error>> {
+    /// // Start VM and wait for it to be fully running
+    /// backend.start_vm("web-server").await?;
+    /// 
+    /// // Verify it's running
+    /// if let Some(status) = backend.get_vm_status("web-server").await? {
+    ///     println!("VM status: {:?}", status);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     async fn start_vm(&self, name: &str) -> BlixardResult<()>;
 
     /// Stop a running VM
+    ///
+    /// Gracefully shuts down the VM, transitioning from `Running` to `Stopped`.
+    /// This operation attempts a clean shutdown first, falling back to forced
+    /// termination if the graceful shutdown times out.
+    ///
+    /// # Arguments
+    /// * `name` - Unique identifier of the VM to stop
+    ///
+    /// # Errors
+    /// * `BlixardError::VmError` - VM not found or already stopped
+    /// * `BlixardError::Timeout` - VM failed to stop within timeout period
+    /// * `BlixardError::Internal` - Hypervisor communication failure
+    ///
+    /// # Async Behavior
+    /// - **Duration**: Typically 2-30 seconds depending on guest OS and workload
+    /// - **Cancellation**: Unsafe to cancel, may leave VM in inconsistent state
+    /// - **Concurrency**: Multiple VMs can be stopped simultaneously
+    /// - **Graceful Period**: 30 seconds for guest shutdown, then forced termination
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # use blixard_core::VmBackend;
+    /// # async fn example(backend: &dyn VmBackend) -> Result<(), Box<dyn std::error::Error>> {
+    /// // Gracefully stop VM
+    /// backend.stop_vm("web-server").await?;
+    /// 
+    /// // VM is now stopped and can be restarted later
+    /// # Ok(())
+    /// # }
+    /// ```
     async fn stop_vm(&self, name: &str) -> BlixardResult<()>;
 
     /// Delete a VM and its resources
+    ///
+    /// Permanently removes the VM and releases all associated resources including
+    /// storage, network interfaces, and metadata. This operation is irreversible.
+    ///
+    /// # Arguments
+    /// * `name` - Unique identifier of the VM to delete
+    ///
+    /// # Errors
+    /// * `BlixardError::VmError` - VM not found or still running
+    /// * `BlixardError::StorageError` - Failed to remove VM storage
+    /// * `BlixardError::NetworkError` - Failed to clean up network resources
+    /// * `BlixardError::Internal` - Hypervisor or system error
+    ///
+    /// # Safety
+    /// VM must be stopped before deletion. Attempting to delete a running VM
+    /// will result in an error to prevent data loss.
+    ///
+    /// # Async Behavior
+    /// - **Duration**: Typically 1-10 seconds depending on storage cleanup
+    /// - **Cancellation**: Unsafe to cancel, may leave partial cleanup
+    /// - **Concurrency**: Multiple VMs can be deleted simultaneously
+    /// - **Atomicity**: Either fully succeeds or rolls back changes
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # use blixard_core::VmBackend;
+    /// # async fn example(backend: &dyn VmBackend) -> Result<(), Box<dyn std::error::Error>> {
+    /// // Ensure VM is stopped first
+    /// backend.stop_vm("web-server").await?;
+    /// 
+    /// // Permanently delete VM and all resources
+    /// backend.delete_vm("web-server").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     async fn delete_vm(&self, name: &str) -> BlixardResult<()>;
 
     /// Update VM status (for health monitoring)
+    ///
+    /// Updates the backend's internal tracking of VM status. This is typically
+    /// called by health monitoring systems to reflect the actual VM state.
+    ///
+    /// # Arguments
+    /// * `name` - Unique identifier of the VM
+    /// * `status` - New status to record
+    ///
+    /// # Errors
+    /// * `BlixardError::VmError` - VM not found
+    /// * `BlixardError::StorageError` - Failed to persist status update
+    ///
+    /// # Async Behavior
+    /// - **Duration**: Typically <100ms for metadata update
+    /// - **Cancellation**: Safe to cancel, operation is idempotent
+    /// - **Concurrency**: Status updates can occur concurrently
+    /// - **Consistency**: Ensures status changes are persisted
     async fn update_vm_status(&self, name: &str, status: VmStatus) -> BlixardResult<()>;
 
     /// Get the current status of a VM
@@ -174,10 +488,7 @@ impl VmManager {
             otel.kind = ?opentelemetry::trace::SpanKind::Internal,
         );
         #[cfg(not(feature = "observability"))]
-        let span = tracing::span!(
-            tracing::Level::INFO,
-            "vm.process_command",
-        );
+        let span = tracing::span!(tracing::Level::INFO, "vm.process_command",);
         let _enter = span.enter();
 
         #[cfg(feature = "observability")]
@@ -307,17 +618,17 @@ impl VmManager {
     pub async fn list_vms(&self) -> BlixardResult<Vec<(VmConfig, VmStatus)>> {
         // Read from database instead of backend to ensure Raft consistency
         let read_txn = self.database.begin_read()?;
-        
+
         if let Ok(table) = read_txn.open_table(crate::raft_storage::VM_STATE_TABLE) {
             // Pre-allocate with estimated capacity
             let mut result = Vec::with_capacity(16); // Reasonable default for most clusters
-            
+
             for entry in table.iter()? {
                 let (_key, value) = entry?;
                 let vm_state: crate::types::VmState = bincode::deserialize(value.value())?;
                 result.push((vm_state.config, vm_state.status));
             }
-            
+
             Ok(result)
         } else {
             Ok(Vec::new())
@@ -428,10 +739,7 @@ impl VmManager {
 
                         // Trigger Raft status update
                         match node_state
-                            .update_vm_status_through_raft(
-                                &name,
-                                format!("{:?}", actual_status),
-                            )
+                            .update_vm_status_through_raft(&name, format!("{:?}", actual_status))
                             .await
                         {
                             Ok(_) => {
@@ -547,10 +855,10 @@ impl VmManager {
     /// VM state from the database and attempts to restart VMs that were
     /// previously running.
     pub async fn recover_persisted_vms(&self) -> BlixardResult<()> {
-        use crate::vm_state_persistence::{VmStatePersistence, VmPersistenceConfig};
-        
+        use crate::vm_state_persistence::{VmPersistenceConfig, VmStatePersistence};
+
         tracing::info!("Starting VM recovery from persisted state");
-        
+
         // Create persistence manager with default config
         let persistence_config = VmPersistenceConfig {
             auto_recovery_enabled: true,
@@ -558,12 +866,12 @@ impl VmManager {
             max_parallel_recovery: 3,
             recovery_delay_secs: 2,
         };
-        
+
         let persistence = VmStatePersistence::new(self.database.clone(), persistence_config);
-        
+
         // Call the recovery method with the Arc<dyn VmBackend>
         let recovery_report = persistence.recover_vms(self.backend.clone()).await?;
-        
+
         tracing::info!(
             "VM recovery completed - Total: {}, Recovered: {}, Failed: {}, Skipped: {}",
             recovery_report.total_vms,
@@ -571,14 +879,14 @@ impl VmManager {
             recovery_report.failed_recoveries.len(),
             recovery_report.skipped_vms.len()
         );
-        
+
         if !recovery_report.failed_recoveries.is_empty() {
             tracing::warn!(
                 "Some VMs failed to recover: {:?}",
                 recovery_report.failed_recoveries
             );
         }
-        
+
         Ok(())
     }
 }

@@ -17,13 +17,13 @@ mod observability_impl {
     pub trait MetricsRecorder {
         /// Record a counter increment
         fn record_count(&self, metric_name: &str, value: u64, labels: &[KeyValue]);
-        
+
         /// Record a gauge value
         fn record_gauge(&self, metric_name: &str, value: i64, labels: &[KeyValue]);
-        
+
         /// Record a histogram value
         fn record_histogram(&self, metric_name: &str, value: f64, labels: &[KeyValue]);
-        
+
         /// Start a timer for duration recording
         fn start_timer(&self, metric_name: &str, labels: Vec<KeyValue>) -> MetricTimer;
     }
@@ -32,18 +32,18 @@ mod observability_impl {
 #[cfg(not(feature = "observability"))]
 mod stub_impl {
     use super::*;
-    
+
     /// Stub trait for when observability is disabled
     pub trait MetricsRecorder {
         /// Record a counter increment (no-op)
         fn record_count(&self, _metric_name: &str, _value: u64) {}
-        
+
         /// Record a gauge value (no-op)
         fn record_gauge(&self, _metric_name: &str, _value: i64) {}
-        
+
         /// Record a histogram value (no-op)
         fn record_histogram(&self, _metric_name: &str, _value: f64) {}
-        
+
         /// Start a timer for duration recording (no-op)
         fn start_timer(&self, metric_name: &str) -> MetricTimer {
             MetricTimer::new_stub(metric_name.to_string())
@@ -72,7 +72,7 @@ impl MetricsRecorder for GlobalMetricsRecorder {
             }
         }
     }
-    
+
     fn record_gauge(&self, metric_name: &str, value: i64, labels: &[KeyValue]) {
         if let Some(metrics) = crate::metrics_otel::try_metrics() {
             match metric_name {
@@ -82,7 +82,7 @@ impl MetricsRecorder for GlobalMetricsRecorder {
             }
         }
     }
-    
+
     fn record_histogram(&self, metric_name: &str, value: f64, labels: &[KeyValue]) {
         if let Some(metrics) = crate::metrics_otel::try_metrics() {
             match metric_name {
@@ -92,7 +92,7 @@ impl MetricsRecorder for GlobalMetricsRecorder {
             }
         }
     }
-    
+
     fn start_timer(&self, metric_name: &str, labels: Vec<KeyValue>) -> MetricTimer {
         MetricTimer::new(metric_name.to_string(), labels)
     }
@@ -126,7 +126,7 @@ impl MetricTimer {
             start: Instant::now(),
         }
     }
-    
+
     /// Create a new timer stub (without observability features)
     #[cfg(not(feature = "observability"))]
     pub fn new_stub(metric_name: String) -> Self {
@@ -135,7 +135,7 @@ impl MetricTimer {
             start: Instant::now(),
         }
     }
-    
+
     /// Record the duration and consume the timer
     #[cfg(feature = "observability")]
     pub fn record(self) {
@@ -143,7 +143,7 @@ impl MetricTimer {
         let recorder = GlobalMetricsRecorder;
         recorder.record_histogram(&self.metric_name, duration, &self.labels);
     }
-    
+
     /// Record the duration and consume the timer (stub version)
     #[cfg(not(feature = "observability"))]
     pub fn record(self) {
@@ -185,41 +185,45 @@ impl<'a> MetricBuilder<'a> {
             labels: Vec::new(),
         }
     }
-    
+
     /// Add a label
     pub fn label(mut self, key: &str, value: impl ToString) -> Self {
-        self.labels.push(KeyValue::new(key.to_string(), value.to_string()));
+        self.labels
+            .push(KeyValue::new(key.to_string(), value.to_string()));
         self
     }
-    
+
     /// Add method label
     pub fn method(mut self, method: &str) -> Self {
-        self.labels.push(KeyValue::new("method", method.to_string()));
+        self.labels
+            .push(KeyValue::new("method", method.to_string()));
         self
     }
-    
+
     /// Add node ID label
     pub fn node_id(mut self, node_id: u64) -> Self {
-        self.labels.push(KeyValue::new("node_id", node_id.to_string()));
+        self.labels
+            .push(KeyValue::new("node_id", node_id.to_string()));
         self
     }
-    
+
     /// Add error label
     pub fn error(mut self, is_error: bool) -> Self {
-        self.labels.push(KeyValue::new("error", is_error.to_string()));
+        self.labels
+            .push(KeyValue::new("error", is_error.to_string()));
         self
     }
-    
+
     /// Record a counter
     pub fn count(self, metric_name: &str, value: u64) {
         self.recorder.record_count(metric_name, value, &self.labels);
     }
-    
+
     /// Record a gauge
     pub fn gauge(self, metric_name: &str, value: i64) {
         self.recorder.record_gauge(metric_name, value, &self.labels);
     }
-    
+
     /// Start a timer
     pub fn timer(self, metric_name: &str) -> MetricTimer {
         self.recorder.start_timer(metric_name, self.labels)
@@ -230,39 +234,41 @@ impl<'a> MetricBuilder<'a> {
 impl<'a> MetricBuilder<'a> {
     /// Create a new metric builder (stub)
     pub fn new(recorder: &'a dyn MetricsRecorder) -> Self {
-        Self { _recorder: recorder }
+        Self {
+            _recorder: recorder,
+        }
     }
-    
+
     /// Add a label (stub)
     pub fn label(self, _key: &str, _value: impl ToString) -> Self {
         self
     }
-    
+
     /// Add method label (stub)
     pub fn method(self, _method: &str) -> Self {
         self
     }
-    
+
     /// Add node ID label (stub)
     pub fn node_id(self, _node_id: u64) -> Self {
         self
     }
-    
+
     /// Add error label (stub)
     pub fn error(self, _is_error: bool) -> Self {
         self
     }
-    
+
     /// Record a counter (stub)
     pub fn count(self, _metric_name: &str, _value: u64) {
         // No-op when observability is disabled
     }
-    
+
     /// Record a gauge (stub)
     pub fn gauge(self, _metric_name: &str, _value: i64) {
         // No-op when observability is disabled
     }
-    
+
     /// Start a timer (stub)
     pub fn timer(self, metric_name: &str) -> MetricTimer {
         MetricTimer::new_stub(metric_name.to_string())
@@ -279,19 +285,19 @@ pub fn record_metric<'a>(recorder: &'a dyn MetricsRecorder) -> MetricBuilder<'a>
 /// Record a gRPC request
 pub fn record_grpc_request(method: &str, node_id: u64, success: bool, duration_secs: f64) {
     let recorder = GlobalMetricsRecorder;
-    
+
     record_metric(&recorder)
         .method(method)
         .node_id(node_id)
         .count("grpc_requests_total", 1);
-        
+
     if !success {
         record_metric(&recorder)
             .method(method)
             .error(true)
             .count("grpc_requests_failed", 1);
     }
-    
+
     record_metric(&recorder)
         .method(method)
         .node_id(node_id)
@@ -301,19 +307,19 @@ pub fn record_grpc_request(method: &str, node_id: u64, success: bool, duration_s
 /// Record a VM operation
 pub fn record_vm_operation(operation: &str, success: bool, duration_secs: Option<f64>) {
     let recorder = GlobalMetricsRecorder;
-    
+
     let metric_name = format!("vm_{}_total", operation);
     record_metric(&recorder)
         .label("operation", operation)
         .count(&metric_name, 1);
-        
+
     if !success {
         let failed_metric = format!("vm_{}_failed", operation);
         record_metric(&recorder)
             .label("operation", operation)
             .count(&failed_metric, 1);
     }
-    
+
     if let Some(duration) = duration_secs {
         let duration_metric = format!("vm_{}_duration", operation);
         record_metric(&recorder)
@@ -338,7 +344,7 @@ impl<'a> ScopedTimer<'a> {
             start: Instant::now(),
         }
     }
-    
+
     /// Set node ID for the timer
     pub fn with_node_id(mut self, node_id: u64) -> Self {
         self.node_id = Some(node_id);
@@ -356,11 +362,11 @@ impl<'a> Drop for ScopedTimer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     struct MockMetricsRecorder {
         counts: std::sync::Mutex<Vec<(String, u64)>>,
     }
-    
+
     impl MockMetricsRecorder {
         fn new() -> Self {
             Self {
@@ -368,28 +374,31 @@ mod tests {
             }
         }
     }
-    
+
     impl MetricsRecorder for MockMetricsRecorder {
         fn record_count(&self, metric_name: &str, value: u64, _labels: &[KeyValue]) {
-            self.counts.lock().unwrap().push((metric_name.to_string(), value));
+            self.counts
+                .lock()
+                .unwrap()
+                .push((metric_name.to_string(), value));
         }
-        
+
         fn record_gauge(&self, _metric_name: &str, _value: i64, _labels: &[KeyValue]) {}
         fn record_histogram(&self, _metric_name: &str, _value: f64, _labels: &[KeyValue]) {}
         fn start_timer(&self, metric_name: &str, labels: Vec<KeyValue>) -> MetricTimer {
             MetricTimer::new(metric_name.to_string(), labels)
         }
     }
-    
+
     #[test]
     fn test_metric_builder() {
         let recorder = MockMetricsRecorder::new();
-        
+
         record_metric(&recorder)
             .method("test_method")
             .node_id(42)
             .count("test_metric", 5);
-            
+
         let counts = recorder.counts.lock().unwrap();
         assert_eq!(counts.len(), 1);
         assert_eq!(counts[0].0, "test_metric");

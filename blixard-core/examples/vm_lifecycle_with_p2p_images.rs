@@ -18,10 +18,10 @@ use blixard_core::{
     vm_backend::{VmBackend, VmBackendRegistry},
 };
 use blixard_vm::microvm_backend::MicrovmBackend;
+use redb::Database;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use tempfile::TempDir;
 use tracing::info;
-use redb::Database;
 
 #[tokio::main]
 async fn main() -> BlixardResult<()> {
@@ -169,7 +169,14 @@ async fn setup_build_node(node_dir: &std::path::Path) -> BlixardResult<(String, 
     let p2p_manager = Arc::new(P2pManager::new(1, node_dir, P2pConfig::default()).await?);
     let command_executor = Arc::new(TokioCommandExecutor::new());
 
-    let image_store = NixImageStore::new(1, p2p_manager, node_dir, Some(nix_store_dir), command_executor).await?;
+    let image_store = NixImageStore::new(
+        1,
+        p2p_manager,
+        node_dir,
+        Some(nix_store_dir),
+        command_executor,
+    )
+    .await?;
 
     let metadata = image_store
         .import_microvm("demo-nixos-microvm", &system_path, Some(&kernel_path))
@@ -226,7 +233,14 @@ async fn setup_node_with_image_store(
     let command_executor = Arc::new(TokioCommandExecutor::new());
 
     let image_store = Arc::new(
-        NixImageStore::new(node.get_config().id, p2p_manager.clone(), node_dir, None, command_executor).await?,
+        NixImageStore::new(
+            node.get_config().id,
+            p2p_manager.clone(),
+            node_dir,
+            None,
+            command_executor,
+        )
+        .await?,
     );
 
     // Set P2P manager on node (which includes image store access)

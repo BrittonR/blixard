@@ -92,7 +92,7 @@ async fn create_node(id: u64) -> BlixardResult<TestNode> {
         vm_backend: "test".to_string(),
         join_addr: None,
         use_tailscale: false,
-        transport_config: Some(TransportConfig::Iroh(IrohConfig::default())),
+        transport_config: Some(IrohConfig::default()),
     };
 
     // Create Iroh endpoint

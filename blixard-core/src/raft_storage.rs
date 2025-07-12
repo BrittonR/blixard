@@ -48,8 +48,7 @@ pub const RAFT_HARD_STATE_TABLE: TableDefinition<&str, &[u8]> =
     TableDefinition::new("raft_hard_state");
 pub const RAFT_CONF_STATE_TABLE: TableDefinition<&str, &[u8]> =
     TableDefinition::new("raft_conf_state");
-pub const RAFT_SNAPSHOT_TABLE: TableDefinition<&str, &[u8]> =
-    TableDefinition::new("raft_snapshot");
+pub const RAFT_SNAPSHOT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("raft_snapshot");
 
 // Task management tables
 pub const TASK_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("tasks");
@@ -69,11 +68,14 @@ pub const TENANT_QUOTA_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::ne
 
 // IP pool management tables
 pub const IP_POOL_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("ip_pools");
-pub const IP_ALLOCATION_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("ip_allocations");
-pub const VM_IP_MAPPING_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vm_ip_mappings");
+pub const IP_ALLOCATION_TABLE: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("ip_allocations");
+pub const VM_IP_MAPPING_TABLE: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("vm_ip_mappings");
 
 // Resource management tables
-pub const RESOURCE_POLICY_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("resource_policies");
+pub const RESOURCE_POLICY_TABLE: TableDefinition<&[u8], &[u8]> =
+    TableDefinition::new("resource_policies");
 
 #[derive(Clone, Debug)]
 pub struct RedbRaftStorage {
@@ -175,7 +177,7 @@ impl raft::Storage for RedbRaftStorage {
             .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
 
         // Pre-allocate with estimated capacity to avoid reallocations
-        let estimated_entries = std::cmp::min(high - low, 100) as usize; 
+        let estimated_entries = std::cmp::min(high - low, 100) as usize;
         let mut entries = Vec::with_capacity(estimated_entries);
         let mut size = 0u64;
 
@@ -183,14 +185,14 @@ impl raft::Storage for RedbRaftStorage {
             if let Ok(Some(data)) = table.get(&idx) {
                 let entry_data = data.value();
                 let entry_size = entry_data.len() as u64;
-                
+
                 // Check size limit before expensive deserialization
                 if let Some(max) = max_size {
                     if size + entry_size > max {
                         break;
                     }
                 }
-                
+
                 let entry = raft_codec::deserialize_entry(entry_data)
                     .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
 

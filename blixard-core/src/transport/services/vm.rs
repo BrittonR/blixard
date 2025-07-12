@@ -237,13 +237,11 @@ impl VmService for VmServiceImpl {
             config: vm_config,
             node_id: self.node.get_id(),
         };
-        let command_str = serde_json::to_string(&command)
-            .map_err(|e| crate::error::BlixardError::Internal {
+        let command_str =
+            serde_json::to_string(&command).map_err(|e| crate::error::BlixardError::Internal {
                 message: format!("Failed to serialize VM command: {}", e),
             })?;
-        self.node
-            .send_vm_command(&name, command_str)
-            .await?;
+        self.node.send_vm_command(&name, command_str).await?;
 
         Ok(name)
     }
@@ -252,8 +250,8 @@ impl VmService for VmServiceImpl {
         let command = VmCommand::Start {
             name: name.to_string(),
         };
-        let command_str = serde_json::to_string(&command)
-            .map_err(|e| crate::error::BlixardError::Internal {
+        let command_str =
+            serde_json::to_string(&command).map_err(|e| crate::error::BlixardError::Internal {
                 message: format!("Failed to serialize VM command: {}", e),
             })?;
         self.node
@@ -266,8 +264,8 @@ impl VmService for VmServiceImpl {
         let command = VmCommand::Stop {
             name: name.to_string(),
         };
-        let command_str = serde_json::to_string(&command)
-            .map_err(|e| crate::error::BlixardError::Internal {
+        let command_str =
+            serde_json::to_string(&command).map_err(|e| crate::error::BlixardError::Internal {
                 message: format!("Failed to serialize VM command: {}", e),
             })?;
         self.node
@@ -280,8 +278,8 @@ impl VmService for VmServiceImpl {
         let command = VmCommand::Delete {
             name: name.to_string(),
         };
-        let command_str = serde_json::to_string(&command)
-            .map_err(|e| crate::error::BlixardError::Internal {
+        let command_str =
+            serde_json::to_string(&command).map_err(|e| crate::error::BlixardError::Internal {
                 message: format!("Failed to serialize VM command: {}", e),
             })?;
         self.node
@@ -292,7 +290,10 @@ impl VmService for VmServiceImpl {
 
     async fn list_vms(&self) -> BlixardResult<Vec<(VmConfig, InternalVmStatus)>> {
         let vm_states = self.node.list_vms().await?;
-        Ok(vm_states.into_iter().map(|state| (state.config, state.status)).collect())
+        Ok(vm_states
+            .into_iter()
+            .map(|state| (state.config, state.status))
+            .collect())
     }
 
     async fn get_vm_status(
@@ -352,11 +353,8 @@ impl VmService for VmServiceImpl {
 
         let _strategy = Self::parse_strategy(strategy);
 
-        // Use the scheduling method from SharedNodeState  
-        let _result = self
-            .node
-            .create_vm_with_scheduling(vm_config)
-            .await?;
+        // Use the scheduling method from SharedNodeState
+        let _result = self.node.create_vm_with_scheduling(vm_config).await?;
 
         // TODO: Integrate with proper scheduler that returns PlacementDecision
         // For now, return placeholder values since create_vm_with_scheduling returns String, not PlacementDecision
@@ -454,13 +452,11 @@ impl VmService for VmServiceImpl {
         let command = VmCommand::Migrate {
             task: migration_task,
         };
-        let command_str = serde_json::to_string(&command)
-            .map_err(|e| crate::error::BlixardError::Internal {
+        let command_str =
+            serde_json::to_string(&command).map_err(|e| crate::error::BlixardError::Internal {
                 message: format!("Failed to serialize VM command: {}", e),
             })?;
-        self.node
-            .send_vm_command(vm_name, command_str)
-            .await?;
+        self.node.send_vm_command(vm_name, command_str).await?;
         Ok(())
     }
 }

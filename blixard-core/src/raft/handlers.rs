@@ -6,26 +6,32 @@
 use crate::error::{BlixardError, BlixardResult};
 use crate::raft_storage::RedbRaftStorage;
 
-use super::event_loop::{TickHandler, ProposalHandler, MessageHandler, ConfChangeHandler};
-use super::messages::{RaftConfChange, RaftProposal};
 use super::config_manager::RaftConfigManager;
+use super::event_loop::{ConfChangeHandler, MessageHandler, ProposalHandler, TickHandler};
+use super::messages::{RaftConfChange, RaftProposal};
 use super::snapshot::RaftSnapshotManager;
 
 use async_trait::async_trait;
 use raft::prelude::RawNode;
 use raft::StateRole;
-use std::sync::{Arc, Weak};
-use std::collections::HashMap;
-use tokio::sync::{oneshot, RwLock};
 use slog::{info, warn, Logger};
+use std::collections::HashMap;
+use std::sync::{Arc, Weak};
+use tokio::sync::{oneshot, RwLock};
 use tracing::instrument;
 
 /// Handler for tick events that delegates to RaftManager
 pub struct RaftTickHandler {
     raft_node: Arc<RwLock<RawNode<RedbRaftStorage>>>,
     snapshot_manager: Arc<RaftSnapshotManager>,
-    on_ready_fn: Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>> + Send + Sync>,
+    on_ready_fn: Arc<
+        dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>
+            + Send
+            + Sync,
+    >,
+    #[allow(dead_code)] // Shared state reserved for future Raft handler coordination
     shared_state: Weak<crate::node_shared::SharedNodeState>,
+    #[allow(dead_code)] // Logger reserved for future Raft event logging
     logger: Logger,
 }
 
@@ -33,7 +39,12 @@ impl RaftTickHandler {
     pub fn new(
         raft_node: Arc<RwLock<RawNode<RedbRaftStorage>>>,
         snapshot_manager: Arc<RaftSnapshotManager>,
-        on_ready_fn: Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>> + Send + Sync>,
+        on_ready_fn: Arc<
+            dyn Fn()
+                    -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>
+                + Send
+                + Sync,
+        >,
         shared_state: Weak<crate::node_shared::SharedNodeState>,
         logger: Logger,
     ) -> Self {
@@ -64,7 +75,9 @@ impl TickHandler for RaftTickHandler {
         {
             let mut node = self.raft_node.write().await;
             if node.raft.state == StateRole::Leader {
-                self.snapshot_manager.check_and_send_snapshots(&mut node).await?;
+                self.snapshot_manager
+                    .check_and_send_snapshots(&mut node)
+                    .await?;
             }
         }
 
@@ -76,7 +89,12 @@ impl TickHandler for RaftTickHandler {
 pub struct RaftProposalHandler {
     raft_node: Arc<RwLock<RawNode<RedbRaftStorage>>>,
     pending_proposals: Arc<RwLock<HashMap<Vec<u8>, oneshot::Sender<BlixardResult<()>>>>>,
-    on_ready_fn: Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>> + Send + Sync>,
+    on_ready_fn: Arc<
+        dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>
+            + Send
+            + Sync,
+    >,
+    #[allow(dead_code)] // Logger reserved for future proposal event logging
     logger: Logger,
 }
 
@@ -84,7 +102,12 @@ impl RaftProposalHandler {
     pub fn new(
         raft_node: Arc<RwLock<RawNode<RedbRaftStorage>>>,
         pending_proposals: Arc<RwLock<HashMap<Vec<u8>, oneshot::Sender<BlixardResult<()>>>>>,
-        on_ready_fn: Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>> + Send + Sync>,
+        on_ready_fn: Arc<
+            dyn Fn()
+                    -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>
+                + Send
+                + Sync,
+        >,
         logger: Logger,
     ) -> Self {
         Self {
@@ -117,7 +140,7 @@ impl ProposalHandler for RaftProposalHandler {
         // Propose through Raft
         {
             let mut node = self.raft_node.write().await;
-            
+
             if node.raft.state != StateRole::Leader {
                 // Remove from pending since we're not leader
                 let mut pending = self.pending_proposals.write().await;
@@ -143,14 +166,23 @@ impl ProposalHandler for RaftProposalHandler {
 /// Handler for Raft message events that delegates to RaftManager
 pub struct RaftMessageHandler {
     raft_node: Arc<RwLock<RawNode<RedbRaftStorage>>>,
-    on_ready_fn: Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>> + Send + Sync>,
+    on_ready_fn: Arc<
+        dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>
+            + Send
+            + Sync,
+    >,
     logger: Logger,
 }
 
 impl RaftMessageHandler {
     pub fn new(
         raft_node: Arc<RwLock<RawNode<RedbRaftStorage>>>,
-        on_ready_fn: Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>> + Send + Sync>,
+        on_ready_fn: Arc<
+            dyn Fn()
+                    -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>
+                + Send
+                + Sync,
+        >,
         logger: Logger,
     ) -> Self {
         Self {
@@ -213,7 +245,9 @@ impl RaftConfChangeHandler {
 impl ConfChangeHandler for RaftConfChangeHandler {
     async fn handle_conf_change(&self, conf_change: RaftConfChange) -> BlixardResult<()> {
         let mut node = self.raft_node.write().await;
-        self.config_manager.handle_conf_change(conf_change, &mut node).await
+        self.config_manager
+            .handle_conf_change(conf_change, &mut node)
+            .await
     }
 }
 
@@ -227,12 +261,17 @@ impl HandlerFactory {
         config_manager: Arc<RaftConfigManager>,
         snapshot_manager: Arc<RaftSnapshotManager>,
         pending_proposals: Arc<RwLock<HashMap<Vec<u8>, oneshot::Sender<BlixardResult<()>>>>>,
-        on_ready_fn: Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>> + Send + Sync>,
+        on_ready_fn: Arc<
+            dyn Fn()
+                    -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>
+                + Send
+                + Sync,
+        >,
         shared_state: Weak<crate::node_shared::SharedNodeState>,
         logger: Logger,
     ) -> (
         Box<dyn TickHandler + Send + Sync>,
-        Box<dyn ProposalHandler + Send + Sync>, 
+        Box<dyn ProposalHandler + Send + Sync>,
         Box<dyn MessageHandler + Send + Sync>,
         Box<dyn ConfChangeHandler + Send + Sync>,
     ) {
@@ -263,7 +302,12 @@ impl HandlerFactory {
             logger,
         ));
 
-        (tick_handler, proposal_handler, message_handler, conf_change_handler)
+        (
+            tick_handler,
+            proposal_handler,
+            message_handler,
+            conf_change_handler,
+        )
     }
 }
 
@@ -271,7 +315,7 @@ impl HandlerFactory {
 mod tests {
     use super::*;
     use crate::test_helpers;
-    
+
     #[cfg(feature = "test-helpers")]
     mod handler_tests {
         use super::*;
@@ -281,13 +325,18 @@ mod tests {
             // This test verifies that handlers can be created without panicking
             let (database, _temp_dir) = test_helpers::create_test_database().await;
             let logger = super::super::super::utils::create_raft_logger(1);
-            
+
             // Create minimal required components for testing
-            let storage = crate::raft_storage::RedbRaftStorage { database: database.clone() };
-            let config = raft::Config { id: 1, ..Default::default() };
+            let storage = crate::raft_storage::RedbRaftStorage {
+                database: database.clone(),
+            };
+            let config = raft::Config {
+                id: 1,
+                ..Default::default()
+            };
             let raft_node = raft::RawNode::new(&config, storage, &logger).unwrap();
             let raft_node = Arc::new(RwLock::new(raft_node));
-            
+
             let config_manager = Arc::new(RaftConfigManager::new(
                 1,
                 database.clone(),
@@ -295,15 +344,18 @@ mod tests {
                 logger.clone(),
                 std::sync::Weak::new(),
             ));
-            
+
             let snapshot_manager = Arc::new(RaftSnapshotManager::new(database, logger.clone()));
             let pending_proposals = Arc::new(RwLock::new(HashMap::new()));
-            
+
             let on_ready_fn = Arc::new(|| {
-                Box::pin(async { Ok(()) }) as std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>
+                Box::pin(async { Ok(()) })
+                    as std::pin::Pin<
+                        Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>,
+                    >
             });
-            
-            let (tick_handler, proposal_handler, message_handler, conf_change_handler) = 
+
+            let (tick_handler, proposal_handler, message_handler, conf_change_handler) =
                 HandlerFactory::create_handlers(
                     raft_node,
                     config_manager,
@@ -313,12 +365,24 @@ mod tests {
                     std::sync::Weak::new(),
                     logger,
                 );
-            
+
             // Test that all handlers were created successfully
-            assert!(!std::ptr::eq(tick_handler.as_ref() as *const _, std::ptr::null()));
-            assert!(!std::ptr::eq(proposal_handler.as_ref() as *const _, std::ptr::null()));
-            assert!(!std::ptr::eq(message_handler.as_ref() as *const _, std::ptr::null()));
-            assert!(!std::ptr::eq(conf_change_handler.as_ref() as *const _, std::ptr::null()));
+            assert!(!std::ptr::eq(
+                tick_handler.as_ref() as *const _,
+                std::ptr::null()
+            ));
+            assert!(!std::ptr::eq(
+                proposal_handler.as_ref() as *const _,
+                std::ptr::null()
+            ));
+            assert!(!std::ptr::eq(
+                message_handler.as_ref() as *const _,
+                std::ptr::null()
+            ));
+            assert!(!std::ptr::eq(
+                conf_change_handler.as_ref() as *const _,
+                std::ptr::null()
+            ));
         }
     }
 }

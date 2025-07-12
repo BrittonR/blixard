@@ -180,7 +180,8 @@ impl P2pManager {
         let transport = Arc::new(
             IrohTransportV2::new_with_discovery(node_id, data_dir, discovery_manager).await?,
         );
-        let image_store = Arc::new(P2pImageStore::with_default_filesystem(node_id, data_dir).await?);
+        let image_store =
+            Arc::new(P2pImageStore::with_default_filesystem(node_id, data_dir).await?);
 
         let (event_tx, event_rx) = mpsc::channel(1000);
 
@@ -285,7 +286,10 @@ impl P2pManager {
                 reliability_score: 1.0,
             },
             p2p_node_id: Some(peer_addr.node_id.to_string()),
-            p2p_addresses: peer_addr.direct_addresses().map(|addr| addr.to_string()).collect(),
+            p2p_addresses: peer_addr
+                .direct_addresses()
+                .map(|addr| addr.to_string())
+                .collect(),
             p2p_relay_url: peer_addr.relay_url().map(|url| url.to_string()),
         };
 
@@ -704,19 +708,6 @@ impl P2pManager {
                 message: format!("Peer address '{}' missing node ID", address),
             })
         }
-    }
-}
-
-/// Format bytes to human readable string
-fn format_bytes(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{} B", bytes)
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else if bytes < 1024 * 1024 * 1024 {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-    } else {
-        format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
     }
 }
 

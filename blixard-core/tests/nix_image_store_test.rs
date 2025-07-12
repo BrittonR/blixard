@@ -227,8 +227,14 @@ async fn test_nix_verification() -> BlixardResult<()> {
     let p2p_manager = Arc::new(P2pManager::new(1, temp_dir.path(), P2pConfig::default()).await?);
     let command_executor = Arc::new(TokioCommandExecutor::new());
 
-    let store =
-        NixImageStore::new(1, p2p_manager, temp_dir.path(), Some(nix_store_dir.clone()), command_executor).await?;
+    let store = NixImageStore::new(
+        1,
+        p2p_manager,
+        temp_dir.path(),
+        Some(nix_store_dir.clone()),
+        command_executor,
+    )
+    .await?;
 
     // Create a Nix store path
     let store_hash = "abc123def456";

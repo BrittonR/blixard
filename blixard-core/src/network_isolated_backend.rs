@@ -8,13 +8,13 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
+use crate::abstractions::command::TokioCommandExecutor;
 use crate::error::{BlixardError, BlixardResult};
 use crate::types::{VmConfig, VmStatus};
 use crate::vm_backend::VmBackend;
 use crate::vm_network_isolation::{
     check_firewall_privileges, NetworkIsolationConfig, NetworkIsolationManager,
 };
-use crate::abstractions::command::TokioCommandExecutor;
 
 /// A VM backend wrapper that adds network isolation
 pub struct NetworkIsolatedBackend {

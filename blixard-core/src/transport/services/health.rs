@@ -70,12 +70,16 @@ impl HealthService for HealthServiceImpl {
         Ok(HealthCheckResponse {
             healthy,
             message,
-            status: Some(if healthy { "OK".to_string() } else { "ERROR".to_string() }),
+            status: Some(if healthy {
+                "OK".to_string()
+            } else {
+                "ERROR".to_string()
+            }),
             timestamp: Some(chrono::Utc::now().timestamp() as u64),
             node_id: Some(self.node.get_id().to_string()),
-            uptime_seconds: Some(0), // TODO: Track actual uptime
-            vm_count: Some(0), // TODO: Get actual VM count
-            memory_usage_mb: Some(0), // TODO: Get actual memory usage
+            uptime_seconds: Some(0),     // TODO: Track actual uptime
+            vm_count: Some(0),           // TODO: Get actual VM count
+            memory_usage_mb: Some(0),    // TODO: Get actual memory usage
             active_connections: Some(0), // TODO: Get actual connection count
         })
     }

@@ -5,7 +5,7 @@
 //! and IP pool management.
 
 use crate::error::BlixardError;
-use crate::types::{VmCommand, VmStatus, NodeTopology, VmId};
+use crate::types::{NodeTopology, VmCommand, VmId, VmStatus};
 use serde::{Deserialize, Serialize};
 
 /// Main proposal data enum containing all possible proposals
@@ -151,36 +151,34 @@ impl ProposalData {
             ProposalData::Batch(_) => "batch",
         }
     }
-    
+
     /// Check if this proposal modifies cluster resources
     pub fn modifies_resources(&self) -> bool {
         match self {
-            ProposalData::AssignTask { .. } |
-            ProposalData::RegisterWorker { .. } |
-            ProposalData::RemoveWorker { .. } |
-            ProposalData::CreateVm(_) |
-            ProposalData::MigrateVm { .. } |
-            ProposalData::AllocateIp { .. } |
-            ProposalData::ReleaseVmIps { .. } => true,
-            
-            ProposalData::CompleteTask { .. } |
-            ProposalData::ReassignTask { .. } |
-            ProposalData::UpdateWorkerStatus { .. } |
-            ProposalData::UpdateVmStatus { .. } |
-            ProposalData::IpPoolCommand(_) => false,
-            
-            ProposalData::Batch(proposals) => {
-                proposals.iter().any(|p| p.modifies_resources())
-            }
+            ProposalData::AssignTask { .. }
+            | ProposalData::RegisterWorker { .. }
+            | ProposalData::RemoveWorker { .. }
+            | ProposalData::CreateVm(_)
+            | ProposalData::MigrateVm { .. }
+            | ProposalData::AllocateIp { .. }
+            | ProposalData::ReleaseVmIps { .. } => true,
+
+            ProposalData::CompleteTask { .. }
+            | ProposalData::ReassignTask { .. }
+            | ProposalData::UpdateWorkerStatus { .. }
+            | ProposalData::UpdateVmStatus { .. }
+            | ProposalData::IpPoolCommand(_) => false,
+
+            ProposalData::Batch(proposals) => proposals.iter().any(|p| p.modifies_resources()),
         }
     }
-    
+
     /// Check if this proposal requires admission control
     pub fn requires_admission_control(&self) -> bool {
         match self {
-            ProposalData::AssignTask { .. } |
-            ProposalData::CreateVm(VmCommand::Create { .. }) |
-            ProposalData::MigrateVm { .. } => true,
+            ProposalData::AssignTask { .. }
+            | ProposalData::CreateVm(VmCommand::Create { .. })
+            | ProposalData::MigrateVm { .. } => true,
             _ => false,
         }
     }
@@ -197,12 +195,12 @@ impl BatchProposalBuilder {
             proposals: Vec::new(),
         }
     }
-    
+
     pub fn add(mut self, proposal: ProposalData) -> Self {
         self.proposals.push(proposal);
         self
     }
-    
+
     pub fn build(self) -> ProposalData {
         ProposalData::Batch(self.proposals)
     }

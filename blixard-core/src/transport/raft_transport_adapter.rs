@@ -29,16 +29,16 @@ impl RaftTransport {
         _transport_config: &TransportConfig,
     ) -> BlixardResult<Self> {
         // Get Iroh endpoint from node (stub implementation)
-        let _endpoint_str = node.get_iroh_endpoint().ok_or_else(|| {
-            crate::error::BlixardError::NotInitialized {
-                component: "Iroh endpoint".to_string()
-            }
-        })?;
-        
+        let _endpoint_str =
+            node.get_iroh_endpoint()
+                .ok_or_else(|| crate::error::BlixardError::NotInitialized {
+                    component: "Iroh endpoint".to_string(),
+                })?;
+
         // TODO: Replace with actual Iroh endpoint and node ID when available
         // For now, return a placeholder error since we need proper Iroh integration
         return Err(crate::error::BlixardError::NotImplemented {
-            feature: "Iroh transport adapter".to_string()
+            feature: "Iroh transport adapter".to_string(),
         });
     }
 

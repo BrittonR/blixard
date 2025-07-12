@@ -38,7 +38,7 @@ impl RaftBootstrapCoordinator {
 
         // Only bootstrap if we have no peers AND no join address
         let should_bootstrap = peers.is_empty() && !has_join_addr;
-        
+
         if should_bootstrap {
             info!(
                 self.logger,
@@ -50,7 +50,7 @@ impl RaftBootstrapCoordinator {
                   "peers" => ?peer_ids, 
                   "has_join_addr" => has_join_addr);
         }
-        
+
         should_bootstrap
     }
 
@@ -60,14 +60,13 @@ impl RaftBootstrapCoordinator {
         &self,
         raft_node: &tokio::sync::RwLock<RawNode<RedbRaftStorage>>,
         peers: &std::collections::HashMap<u64, String>,
-        on_ready_fn: impl Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>,
+        on_ready_fn: impl Fn() -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>,
+        >,
     ) -> BlixardResult<()> {
         if self.should_bootstrap(peers).await {
-            info!(
-                self.logger,
-                "Executing single-node cluster bootstrap"
-            );
-            
+            info!(self.logger, "Executing single-node cluster bootstrap");
+
             match self.bootstrap_single_node(raft_node, on_ready_fn).await {
                 Ok(_) => {
                     info!(self.logger, "[BOOTSTRAP] Bootstrap succeeded");
@@ -88,7 +87,9 @@ impl RaftBootstrapCoordinator {
     async fn bootstrap_single_node(
         &self,
         raft_node: &tokio::sync::RwLock<RawNode<RedbRaftStorage>>,
-        on_ready_fn: impl Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>,
+        on_ready_fn: impl Fn() -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>,
+        >,
     ) -> BlixardResult<()> {
         {
             let mut node = raft_node.write().await;
@@ -162,7 +163,7 @@ mod tests {
     async fn test_should_bootstrap_with_no_peers_no_join_addr() {
         let coordinator = create_test_coordinator();
         let peers = HashMap::new();
-        
+
         let result = coordinator.should_bootstrap(&peers).await;
         assert!(result);
     }
@@ -172,7 +173,7 @@ mod tests {
         let coordinator = create_test_coordinator();
         let mut peers = HashMap::new();
         peers.insert(2, "127.0.0.1:8001".to_string());
-        
+
         let result = coordinator.should_bootstrap(&peers).await;
         assert!(!result);
     }

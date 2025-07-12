@@ -20,14 +20,14 @@ async fn test_ip_pool_creation_and_allocation() -> BlixardResult<()> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("blixard=debug,blixard_core=debug")
         .try_init();
-    
+
     // Create a 3-node cluster
-    let mut cluster = TestCluster::new(3).await?;
+    let mut cluster = TestCluster::with_size(3).await?;
     cluster.wait_for_leader().await?;
-    
+
     let leader_id = cluster.get_leader_id().await?;
     info!("Leader elected: node {}", leader_id);
-    
+
     // Create an IP pool
     let pool_config = IpPoolConfig {
         id: IpPoolId(1),
@@ -46,17 +46,17 @@ async fn test_ip_pool_creation_and_allocation() -> BlixardResult<()> {
         enabled: true,
         tags: HashMap::new(),
     };
-    
+
     // Submit pool creation through Raft
     let create_command = IpPoolCommand::CreatePool(pool_config.clone());
     let proposal = ProposalData::IpPoolCommand(create_command);
-    
+
     let leader_node = cluster.get_node(leader_id);
     leader_node.propose(proposal).await?;
-    
+
     // Wait for proposal to be applied
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-    
+
     // Allocate an IP address
     let allocation_request = IpAllocationRequest {
         vm_id: VmId::new(),
@@ -66,21 +66,21 @@ async fn test_ip_pool_creation_and_allocation() -> BlixardResult<()> {
         selection_strategy: IpPoolSelectionStrategy::LeastUtilized,
         mac_address: "02:00:00:00:00:01".to_string(),
     };
-    
+
     let allocate_proposal = ProposalData::AllocateIp {
         request: allocation_request.clone(),
         response_tx: None,
     };
-    
+
     leader_node.propose(allocate_proposal).await?;
-    
+
     // Wait for allocation to be applied
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-    
+
     // Verify IP was allocated by checking the state
     // Note: In a real test, we'd query the IP pool manager state
     info!("IP pool created and allocation submitted successfully");
-    
+
     Ok(())
 }
 
@@ -90,13 +90,13 @@ async fn test_ip_pool_deletion_with_allocations() -> BlixardResult<()> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("blixard=debug,blixard_core=debug")
         .try_init();
-    
+
     // Create a single node cluster
-    let mut cluster = TestCluster::new(1).await?;
+    let mut cluster = TestCluster::with_size(1).await?;
     cluster.wait_for_leader().await?;
-    
+
     let leader_node = cluster.get_node(1);
-    
+
     // Create an IP pool
     let pool_config = IpPoolConfig {
         id: IpPoolId(2),
@@ -112,11 +112,13 @@ async fn test_ip_pool_deletion_with_allocations() -> BlixardResult<()> {
         enabled: true,
         tags: HashMap::new(),
     };
-    
+
     // Create pool
     let create_command = IpPoolCommand::CreatePool(pool_config);
-    leader_node.propose(ProposalData::IpPoolCommand(create_command)).await?;
-    
+    leader_node
+        .propose(ProposalData::IpPoolCommand(create_command))
+        .await?;
+
     // Allocate an IP
     let allocation_request = IpAllocationRequest {
         vm_id: VmId::new(),
@@ -126,23 +128,27 @@ async fn test_ip_pool_deletion_with_allocations() -> BlixardResult<()> {
         selection_strategy: IpPoolSelectionStrategy::LeastUtilized,
         mac_address: "02:00:00:00:00:02".to_string(),
     };
-    
-    leader_node.propose(ProposalData::AllocateIp {
-        request: allocation_request,
-        response_tx: None,
-    }).await?;
-    
+
+    leader_node
+        .propose(ProposalData::AllocateIp {
+            request: allocation_request,
+            response_tx: None,
+        })
+        .await?;
+
     // Wait for operations to complete
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-    
+
     // Try to delete pool (should fail due to allocations)
     let delete_command = IpPoolCommand::DeletePool(IpPoolId(2));
-    leader_node.propose(ProposalData::IpPoolCommand(delete_command)).await?;
-    
+    leader_node
+        .propose(ProposalData::IpPoolCommand(delete_command))
+        .await?;
+
     // The deletion should fail, but we can't easily check that in this test
     // In a real implementation, we'd verify the pool still exists
     info!("Attempted to delete pool with allocations");
-    
+
     Ok(())
 }
 
@@ -152,13 +158,13 @@ async fn test_ip_pool_enable_disable() -> BlixardResult<()> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("blixard=debug,blixard_core=debug")
         .try_init();
-    
+
     // Create a single node cluster
-    let mut cluster = TestCluster::new(1).await?;
+    let mut cluster = TestCluster::with_size(1).await?;
     cluster.wait_for_leader().await?;
-    
+
     let leader_node = cluster.get_node(1);
-    
+
     // Create an IP pool
     let pool_config = IpPoolConfig {
         id: IpPoolId(3),
@@ -174,24 +180,28 @@ async fn test_ip_pool_enable_disable() -> BlixardResult<()> {
         enabled: true,
         tags: HashMap::new(),
     };
-    
+
     // Create pool
     let create_command = IpPoolCommand::CreatePool(pool_config);
-    leader_node.propose(ProposalData::IpPoolCommand(create_command)).await?;
-    
+    leader_node
+        .propose(ProposalData::IpPoolCommand(create_command))
+        .await?;
+
     // Wait for creation
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-    
+
     // Disable the pool
     let disable_command = IpPoolCommand::SetPoolEnabled {
         pool_id: IpPoolId(3),
         enabled: false,
     };
-    leader_node.propose(ProposalData::IpPoolCommand(disable_command)).await?;
-    
+    leader_node
+        .propose(ProposalData::IpPoolCommand(disable_command))
+        .await?;
+
     // Wait for disable
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-    
+
     // Try to allocate from disabled pool (should fail in real implementation)
     let allocation_request = IpAllocationRequest {
         vm_id: VmId::new(),
@@ -201,21 +211,25 @@ async fn test_ip_pool_enable_disable() -> BlixardResult<()> {
         selection_strategy: IpPoolSelectionStrategy::LeastUtilized,
         mac_address: "02:00:00:00:00:03".to_string(),
     };
-    
-    leader_node.propose(ProposalData::AllocateIp {
-        request: allocation_request,
-        response_tx: None,
-    }).await?;
-    
+
+    leader_node
+        .propose(ProposalData::AllocateIp {
+            request: allocation_request,
+            response_tx: None,
+        })
+        .await?;
+
     // Re-enable the pool
     let enable_command = IpPoolCommand::SetPoolEnabled {
         pool_id: IpPoolId(3),
         enabled: true,
     };
-    leader_node.propose(ProposalData::IpPoolCommand(enable_command)).await?;
-    
+    leader_node
+        .propose(ProposalData::IpPoolCommand(enable_command))
+        .await?;
+
     info!("Pool enable/disable operations completed");
-    
+
     Ok(())
 }
 
@@ -225,14 +239,14 @@ async fn test_concurrent_ip_allocations() -> BlixardResult<()> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("blixard=debug,blixard_core=debug")
         .try_init();
-    
+
     // Create a 3-node cluster for better concurrency testing
-    let mut cluster = TestCluster::new(3).await?;
+    let mut cluster = TestCluster::with_size(3).await?;
     cluster.wait_for_leader().await?;
-    
+
     let leader_id = cluster.get_leader_id().await?;
     let leader_node = cluster.get_node(leader_id);
-    
+
     // Create a small IP pool
     let pool_config = IpPoolConfig {
         id: IpPoolId(4),
@@ -248,17 +262,19 @@ async fn test_concurrent_ip_allocations() -> BlixardResult<()> {
         enabled: true,
         tags: HashMap::new(),
     };
-    
+
     // Create pool
     let create_command = IpPoolCommand::CreatePool(pool_config);
-    leader_node.propose(ProposalData::IpPoolCommand(create_command)).await?;
-    
+    leader_node
+        .propose(ProposalData::IpPoolCommand(create_command))
+        .await?;
+
     // Wait for creation
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-    
+
     // Submit multiple concurrent allocation requests
     let mut handles = vec![];
-    
+
     for i in 0..10 {
         let node = leader_node.clone();
         let handle = tokio::spawn(async move {
@@ -270,23 +286,24 @@ async fn test_concurrent_ip_allocations() -> BlixardResult<()> {
                 selection_strategy: IpPoolSelectionStrategy::LeastUtilized,
                 mac_address: format!("02:00:00:00:01:{:02x}", i),
             };
-            
+
             node.propose(ProposalData::AllocateIp {
                 request: allocation_request,
                 response_tx: None,
-            }).await
+            })
+            .await
         });
-        
+
         handles.push(handle);
     }
-    
+
     // Wait for all allocations to complete
     for handle in handles {
         let _ = handle.await;
     }
-    
+
     info!("Concurrent allocation test completed");
-    
+
     Ok(())
 }
 
@@ -296,13 +313,13 @@ async fn test_ip_pool_reserve_and_release() -> BlixardResult<()> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("blixard=debug,blixard_core=debug")
         .try_init();
-    
+
     // Create a single node cluster
-    let mut cluster = TestCluster::new(1).await?;
+    let mut cluster = TestCluster::with_size(1).await?;
     cluster.wait_for_leader().await?;
-    
+
     let leader_node = cluster.get_node(1);
-    
+
     // Create an IP pool
     let pool_config = IpPoolConfig {
         id: IpPoolId(5),
@@ -318,36 +335,42 @@ async fn test_ip_pool_reserve_and_release() -> BlixardResult<()> {
         enabled: true,
         tags: HashMap::new(),
     };
-    
+
     // Create pool
     let create_command = IpPoolCommand::CreatePool(pool_config);
-    leader_node.propose(ProposalData::IpPoolCommand(create_command)).await?;
-    
+    leader_node
+        .propose(ProposalData::IpPoolCommand(create_command))
+        .await?;
+
     // Reserve some IPs
     let mut reserved_ips = BTreeSet::new();
     reserved_ips.insert(IpAddr::from_str("10.2.0.15").unwrap());
     reserved_ips.insert(IpAddr::from_str("10.2.0.16").unwrap());
-    
+
     let reserve_command = IpPoolCommand::ReserveIps {
         pool_id: IpPoolId(5),
         ips: reserved_ips.clone(),
     };
-    leader_node.propose(ProposalData::IpPoolCommand(reserve_command)).await?;
-    
+    leader_node
+        .propose(ProposalData::IpPoolCommand(reserve_command))
+        .await?;
+
     // Wait for reservation
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-    
+
     // Release one of the reserved IPs
     let mut release_ips = BTreeSet::new();
     release_ips.insert(IpAddr::from_str("10.2.0.15").unwrap());
-    
+
     let release_command = IpPoolCommand::ReleaseReservedIps {
         pool_id: IpPoolId(5),
         ips: release_ips,
     };
-    leader_node.propose(ProposalData::IpPoolCommand(release_command)).await?;
-    
+    leader_node
+        .propose(ProposalData::IpPoolCommand(release_command))
+        .await?;
+
     info!("IP reservation and release test completed");
-    
+
     Ok(())
 }

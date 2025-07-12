@@ -1,5 +1,5 @@
-use crate::error::{BlixardError, BlixardResult};
 use crate::common::error_context::SerializationContext;
+use crate::error::{BlixardError, BlixardResult};
 use protobuf::Message as ProtobufMessage;
 use raft::prelude::*;
 
@@ -37,20 +37,25 @@ pub fn serialize_entry(entry: &Entry) -> BlixardResult<Vec<u8>> {
 pub fn deserialize_entry(data: &[u8]) -> BlixardResult<Entry> {
     if data.len() < 26 {
         // Minimum size: 8+8+1+4+4+1
-        return Err::<Entry, &str>("insufficient data")
-            .deserialize_context("entry", "Entry");
+        return Err::<Entry, &str>("insufficient data").deserialize_context("entry", "Entry");
     }
 
     let mut cursor = 0;
 
     // Read index
-    let index = u64::from_le_bytes(data[cursor..cursor + 8].try_into()
-        .deserialize_context("entry index", "u64")?);
+    let index = u64::from_le_bytes(
+        data[cursor..cursor + 8]
+            .try_into()
+            .deserialize_context("entry index", "u64")?,
+    );
     cursor += 8;
 
     // Read term
-    let term = u64::from_le_bytes(data[cursor..cursor + 8].try_into()
-        .deserialize_context("entry term", "u64")?);
+    let term = u64::from_le_bytes(
+        data[cursor..cursor + 8]
+            .try_into()
+            .deserialize_context("entry term", "u64")?,
+    );
     cursor += 8;
 
     // Read entry type
@@ -62,16 +67,21 @@ pub fn deserialize_entry(data: &[u8]) -> BlixardResult<Entry> {
         return Err::<Entry, &str>("insufficient data for data length")
             .deserialize_context("entry", "Entry");
     }
-    let data_len = u32::from_le_bytes(data[cursor..cursor + 4].try_into()
-        .deserialize_context("entry data length", "u32")?) as usize;
+    let data_len = u32::from_le_bytes(
+        data[cursor..cursor + 4]
+            .try_into()
+            .deserialize_context("entry data length", "u32")?,
+    ) as usize;
     cursor += 4;
 
     // Check if we have enough bytes for data
     if cursor + data_len > data.len() {
-        let msg = format!("insufficient data for entry data: need {} bytes, have {}",
-            cursor + data_len, data.len());
-        return Err::<Entry, String>(msg)
-            .deserialize_context("entry", "Entry");
+        let msg = format!(
+            "insufficient data for entry data: need {} bytes, have {}",
+            cursor + data_len,
+            data.len()
+        );
+        return Err::<Entry, String>(msg).deserialize_context("entry", "Entry");
     }
     let entry_data = data[cursor..cursor + data_len].to_vec();
     cursor += data_len;
@@ -362,8 +372,7 @@ pub fn deserialize_conf_state(data: &[u8]) -> BlixardResult<ConfState> {
 
 pub fn serialize_message(msg: &Message) -> BlixardResult<Vec<u8>> {
     // Raft messages have protobuf methods from raft-proto
-    let bytes = msg.write_to_bytes()
-        .serialize_context("raft message")?;
+    let bytes = msg.write_to_bytes().serialize_context("raft message")?;
 
     Ok(bytes)
 }

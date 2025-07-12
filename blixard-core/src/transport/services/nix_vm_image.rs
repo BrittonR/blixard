@@ -57,11 +57,11 @@ impl NixVmImageServiceImpl {
     /// Create a new Nix VM image service
     pub async fn new(node: Arc<SharedNodeState>) -> BlixardResult<Self> {
         // Get P2P manager
-        let p2p_manager =
-            node.get_p2p_manager()
-                .ok_or_else(|| BlixardError::NotInitialized {
-                    component: "P2P manager".to_string(),
-                })?;
+        let p2p_manager = node
+            .get_p2p_manager()
+            .ok_or_else(|| BlixardError::NotInitialized {
+                component: "P2P manager".to_string(),
+            })?;
 
         // Get data directory
         let data_dir = PathBuf::from(&node.config.data_dir);

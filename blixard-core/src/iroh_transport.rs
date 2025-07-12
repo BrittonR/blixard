@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant};
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 /// Types of data channels used in Blixard
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -61,12 +61,12 @@ impl ConnectionInfo {
             use_count: 1,
         }
     }
-    
+
     fn mark_used(&mut self) {
         self.last_used = Instant::now();
         self.use_count += 1;
     }
-    
+
     fn is_stale(&self, max_idle: Duration) -> bool {
         self.last_used.elapsed() > max_idle
     }
@@ -125,7 +125,7 @@ impl IrohTransport {
             node_id,
             data_dir: data_dir.to_path_buf(),
             max_idle_duration: Duration::from_secs(300), // 5 minutes idle timeout
-            max_connections_per_peer: 1, // For now, limit to 1 connection per peer
+            max_connections_per_peer: 1,                 // For now, limit to 1 connection per peer
         })
     }
 
@@ -152,24 +152,24 @@ impl IrohTransport {
         // Try to get existing healthy connection first
         {
             let mut connections = self.connections.write().await;
-            
+
             // Clean up stale connections
             let stale_keys: Vec<_> = connections
                 .iter()
                 .filter(|(_, info)| info.is_stale(self.max_idle_duration))
                 .map(|(key, _)| *key)
                 .collect();
-            
+
             for key in stale_keys {
                 debug!("Removing stale connection to peer: {:?}", key);
                 connections.remove(&key);
             }
-            
+
             // Check for existing healthy connection
             if let Some(info) = connections.get_mut(&addr.node_id) {
                 info.mark_used();
                 debug!(
-                    "Reusing existing connection to peer: {:?} (use count: {})", 
+                    "Reusing existing connection to peer: {:?} (use count: {})",
                     addr.node_id, info.use_count
                 );
                 return Ok(info.connection.clone());
@@ -195,12 +195,12 @@ impl IrohTransport {
 
         Ok(conn)
     }
-    
+
     /// Cleanup stale connections (can be called periodically)
     pub async fn cleanup_stale_connections(&self) {
         let mut connections = self.connections.write().await;
         let initial_count = connections.len();
-        
+
         connections.retain(|peer_id, info| {
             let keep = !info.is_stale(self.max_idle_duration);
             if !keep {
@@ -208,7 +208,7 @@ impl IrohTransport {
             }
             keep
         });
-        
+
         let removed_count = initial_count - connections.len();
         if removed_count > 0 {
             info!("Cleaned up {} stale connections", removed_count);

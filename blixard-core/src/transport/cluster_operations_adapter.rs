@@ -77,8 +77,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
                     p2p_addresses: p2p_addresses.clone(),
                     p2p_relay_url: p2p_relay_url.clone(),
                 };
-                self.shared_state
-                    .add_peer_with_p2p(node_id, peer_info);
+                self.shared_state.add_peer_with_p2p(node_id, peer_info);
             } else {
                 let peer_info = crate::p2p_manager::PeerInfo {
                     node_id: node_id.to_string(),
@@ -96,8 +95,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
                     p2p_addresses: Vec::new(),
                     p2p_relay_url: None,
                 };
-                self.shared_state
-                    .add_peer(node_id, peer_info);
+                self.shared_state.add_peer(node_id, peer_info);
             }
         } else {
             debug!("Peer {} already exists, updating P2P info", node_id);
@@ -121,8 +119,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
                     p2p_addresses: p2p_addresses.clone(),
                     p2p_relay_url: p2p_relay_url.clone(),
                 };
-                self.shared_state
-                    .add_peer_with_p2p(node_id, peer_info);
+                self.shared_state.add_peer_with_p2p(node_id, peer_info);
             }
         }
 

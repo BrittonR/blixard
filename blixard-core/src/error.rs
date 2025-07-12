@@ -1,5 +1,412 @@
+//! Error handling and recovery strategies for Blixard
+//!
+//! This module provides a comprehensive error handling framework designed for
+//! distributed systems. It includes structured error types, context propagation,
+//! recovery strategies, and observability integration.
+//!
+//! ## Error Handling Philosophy
+//!
+//! Blixard follows these principles for robust error handling:
+//!
+//! ### 1. Structured Error Types
+//! All errors are structured with sufficient context for debugging and recovery:
+//! - **Operation Context**: What operation was being performed
+//! - **Resource Context**: Which resource was involved
+//! - **Cause Chain**: Full error chain from root cause to user error
+//! - **Actionable Information**: What the user can do to fix the issue
+//!
+//! ### 2. Error Recovery
+//! Different error types have different recovery strategies:
+//! - **Transient Errors**: Automatic retry with exponential backoff
+//! - **Resource Errors**: Graceful degradation or resource cleanup
+//! - **Logic Errors**: Fail fast with detailed context
+//! - **System Errors**: Escalate to higher-level recovery mechanisms
+//!
+//! ### 3. Observability
+//! All errors are instrumented for monitoring and alerting:
+//! - **Structured Logging**: Consistent error logging with context
+//! - **Metrics**: Error rate tracking by type and operation
+//! - **Tracing**: Full request traces including error propagation
+//! - **Alerting**: Critical errors trigger immediate notifications
+//!
+//! ## Error Categories
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────┐
+//! │                    Blixard Error Taxonomy                       │
+//! ├─────────────────────────────────────────────────────────────────┤
+//! │  System Errors          │  Resource Errors     │  Logic Errors  │
+//! │  ┌─────────────────┐    │  ┌─────────────────┐  │  ┌───────────┐ │
+//! │  │ • Storage       │    │  │ • Quota Exceed  │  │  │ • Config  │ │
+//! │  │ • Network       │    │  │ • Not Found     │  │  │ • Invalid │ │
+//! │  │ • IO            │    │  │ • Unavailable   │  │  │ • Validate│ │
+//! │  │ • Internal      │    │  │ • Exhausted     │  │  │ • Auth    │ │
+//! │  └─────────────────┘    │  └─────────────────┘  │  └───────────┘ │
+//! ├─────────────────────────────────────────────────────────────────┤
+//! │  Distributed Errors     │  Operational Errors  │  Temporary     │
+//! │  ┌─────────────────┐    │  ┌─────────────────┐  │  ┌───────────┐ │
+//! │  │ • Raft          │    │  │ • Timeout       │  │  │ • Lock    │ │
+//! │  │ • Cluster       │    │  │ • Not Leader    │  │  │ • Busy    │ │
+//! │  │ • P2P           │    │  │ • Not Init      │  │  │ • Retry   │ │
+//! │  │ • Consensus     │    │  │ • Already Exist │  │  │ • Circuit │ │
+//! │  └─────────────────┘    │  └─────────────────┘  │  └───────────┘ │
+//! └─────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Usage Patterns
+//!
+//! ### Basic Error Handling
+//! ```rust,no_run
+//! use blixard_core::{BlixardError, BlixardResult};
+//!
+//! async fn create_vm(name: &str) -> BlixardResult<()> {
+//!     // Validate input
+//!     if name.is_empty() {
+//!         return Err(BlixardError::InvalidInput {
+//!             field: "name".to_string(),
+//!             message: "VM name cannot be empty".to_string(),
+//!         });
+//!     }
+//!     
+//!     // Check resources
+//!     if !has_sufficient_resources().await? {
+//!         return Err(BlixardError::ResourceExhausted {
+//!             resource: "memory".to_string(),
+//!         });
+//!     }
+//!     
+//!     // Create VM with proper error context
+//!     create_vm_impl(name)
+//!         .await
+//!         .map_err(|e| BlixardError::VmOperationFailed {
+//!             operation: "create".to_string(),
+//!             details: e.to_string(),
+//!         })
+//! }
+//! ```
+//!
+//! ### Error Context Propagation
+//! ```rust,no_run
+//! use blixard_core::BlixardError;
+//!
+//! async fn save_vm_config(config: &VmConfig) -> BlixardResult<()> {
+//!     let serialized = serde_json::to_vec(config)
+//!         .map_err(|e| BlixardError::serialization("serialize VM config", e))?;
+//!     
+//!     write_to_database("vm_configs", &config.name, &serialized)
+//!         .await
+//!         .map_err(|e| BlixardError::storage("save VM config", e))?;
+//!     
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ### Retry Patterns
+//! ```rust,no_run
+//! use blixard_core::{BlixardError, BlixardResult};
+//! use tokio::time::{sleep, Duration};
+//!
+//! async fn with_retry<F, T>(
+//!     operation_name: &str,
+//!     mut operation: F,
+//!     max_retries: u32,
+//! ) -> BlixardResult<T>
+//! where
+//!     F: FnMut() -> BlixardResult<T>,
+//! {
+//!     let mut last_error = None;
+//!     
+//!     for attempt in 0..=max_retries {
+//!         match operation() {
+//!             Ok(result) => return Ok(result),
+//!             Err(e) => {
+//!                 last_error = Some(e);
+//!                 
+//!                 // Check if error is retryable
+//!                 if !is_retryable_error(&last_error.as_ref().unwrap()) {
+//!                     break;
+//!                 }
+//!                 
+//!                 if attempt < max_retries {
+//!                     let delay = Duration::from_millis(100 * (1 << attempt));
+//!                     sleep(delay).await;
+//!                 }
+//!             }
+//!         }
+//!     }
+//!     
+//!     Err(last_error.unwrap())
+//! }
+//!
+//! fn is_retryable_error(error: &BlixardError) -> bool {
+//!     match error {
+//!         BlixardError::TemporaryFailure { .. } |
+//!         BlixardError::Timeout { .. } |
+//!         BlixardError::ConnectionError { .. } => true,
+//!         BlixardError::InvalidInput { .. } |
+//!         BlixardError::NotFound { .. } |
+//!         BlixardError::AlreadyExists { .. } => false,
+//!         _ => false, // Conservative: don't retry unknown errors
+//!     }
+//! }
+//! ```
+//!
+//! ### Circuit Breaker Pattern
+//! ```rust,no_run
+//! use std::sync::atomic::{AtomicU32, Ordering};
+//! use std::sync::Arc;
+//! use tokio::time::{Duration, Instant};
+//!
+//! #[derive(Clone)]
+//! pub struct CircuitBreaker {
+//!     failure_count: Arc<AtomicU32>,
+//!     last_failure: Arc<parking_lot::Mutex<Option<Instant>>>,
+//!     threshold: u32,
+//!     timeout: Duration,
+//! }
+//!
+//! impl CircuitBreaker {
+//!     pub fn new(threshold: u32, timeout: Duration) -> Self {
+//!         Self {
+//!             failure_count: Arc::new(AtomicU32::new(0)),
+//!             last_failure: Arc::new(parking_lot::Mutex::new(None)),
+//!             threshold,
+//!             timeout,
+//!         }
+//!     }
+//!     
+//!     pub async fn call<F, T>(&self, operation: F) -> BlixardResult<T>
+//!     where
+//!         F: FnOnce() -> BlixardResult<T>,
+//!     {
+//!         // Check if circuit is open
+//!         if self.is_open() {
+//!             return Err(BlixardError::TemporaryFailure {
+//!                 details: "Circuit breaker is open".to_string(),
+//!             });
+//!         }
+//!         
+//!         match operation() {
+//!             Ok(result) => {
+//!                 self.on_success();
+//!                 Ok(result)
+//!             }
+//!             Err(e) => {
+//!                 self.on_failure();
+//!                 Err(e)
+//!             }
+//!         }
+//!     }
+//!     
+//!     fn is_open(&self) -> bool {
+//!         let count = self.failure_count.load(Ordering::Relaxed);
+//!         if count >= self.threshold {
+//!             let last_failure = self.last_failure.lock();
+//!             if let Some(time) = *last_failure {
+//!                 time.elapsed() < self.timeout
+//!             } else {
+//!                 true
+//!             }
+//!         } else {
+//!             false
+//!         }
+//!     }
+//!     
+//!     fn on_success(&self) {
+//!         self.failure_count.store(0, Ordering::Relaxed);
+//!     }
+//!     
+//!     fn on_failure(&self) {
+//!         self.failure_count.fetch_add(1, Ordering::Relaxed);
+//!         *self.last_failure.lock() = Some(Instant::now());
+//!     }
+//! }
+//! ```
+//!
+//! ## Error Recovery Strategies
+//!
+//! ### Graceful Degradation
+//! ```rust,no_run
+//! use blixard_core::{BlixardError, BlixardResult};
+//!
+//! async fn get_cluster_status() -> BlixardResult<ClusterStatus> {
+//!     // Try to get status from leader
+//!     match get_status_from_leader().await {
+//!         Ok(status) => Ok(status),
+//!         Err(BlixardError::NotLeader { .. }) => {
+//!             // Fallback to local status
+//!             tracing::warn!("Leader unavailable, returning local status");
+//!             get_local_status().await
+//!         }
+//!         Err(BlixardError::ConnectionError { .. }) => {
+//!             // Network issue, use cached status
+//!             tracing::warn!("Network error, using cached status");
+//!             get_cached_status().await
+//!         }
+//!         Err(e) => Err(e), // Propagate other errors
+//!     }
+//! }
+//! ```
+//!
+//! ### Resource Cleanup
+//! ```rust,no_run
+//! use blixard_core::{BlixardError, BlixardResult};
+//!
+//! async fn allocate_vm_resources(config: &VmConfig) -> BlixardResult<VmResources> {
+//!     let mut allocated_resources = Vec::new();
+//!     
+//!     // Try to allocate each resource
+//!     for resource_type in &config.required_resources {
+//!         match allocate_resource(resource_type).await {
+//!             Ok(resource) => allocated_resources.push(resource),
+//!             Err(e) => {
+//!                 // Clean up already allocated resources
+//!                 for resource in allocated_resources {
+//!                     if let Err(cleanup_error) = release_resource(resource).await {
+//!                         tracing::error!("Failed to clean up resource: {}", cleanup_error);
+//!                     }
+//!                 }
+//!                 return Err(e);
+//!             }
+//!         }
+//!     }
+//!     
+//!     Ok(VmResources { resources: allocated_resources })
+//! }
+//! ```
+//!
+//! ## Error Monitoring and Alerting
+//!
+//! ### Structured Logging
+//! ```rust,no_run
+//! use tracing::{error, warn, info};
+//! use blixard_core::BlixardError;
+//!
+//! fn log_error_with_context(error: &BlixardError, operation: &str, resource: &str) {
+//!     match error {
+//!         BlixardError::ResourceExhausted { resource } => {
+//!             error!(
+//!                 operation = operation,
+//!                 resource = resource,
+//!                 error_type = "resource_exhausted",
+//!                 "Resource exhausted during operation"
+//!             );
+//!         }
+//!         BlixardError::Timeout { operation, duration } => {
+//!             warn!(
+//!                 operation = operation,
+//!                 timeout_ms = duration.as_millis(),
+//!                 error_type = "timeout",
+//!                 "Operation timed out"
+//!             );
+//!         }
+//!         BlixardError::NotLeader { operation, leader_id } => {
+//!             info!(
+//!                 operation = operation,
+//!                 leader_id = ?leader_id,
+//!                 error_type = "not_leader",
+//!                 "Operation requires leader"
+//!             );
+//!         }
+//!         _ => {
+//!             error!(
+//!                 operation = operation,
+//!                 resource = resource,
+//!                 error = %error,
+//!                 error_type = "unknown",
+//!                 "Unexpected error during operation"
+//!             );
+//!         }
+//!     }
+//! }
+//! ```
+//!
+//! ### Metrics Integration
+//! ```rust,no_run
+//! use blixard_core::BlixardError;
+//! use opentelemetry::metrics::{Counter, Histogram};
+//!
+//! pub struct ErrorMetrics {
+//!     error_count: Counter<u64>,
+//!     error_duration: Histogram<f64>,
+//! }
+//!
+//! impl ErrorMetrics {
+//!     pub fn record_error(&self, error: &BlixardError, operation: &str, duration: Duration) {
+//!         let error_type = match error {
+//!             BlixardError::ResourceExhausted { .. } => "resource_exhausted",
+//!             BlixardError::Timeout { .. } => "timeout",
+//!             BlixardError::NotLeader { .. } => "not_leader",
+//!             BlixardError::ValidationError { .. } => "validation",
+//!             _ => "other",
+//!         };
+//!         
+//!         self.error_count.add(1, &[
+//!             ("operation", operation.into()),
+//!             ("error_type", error_type.into()),
+//!         ]);
+//!         
+//!         self.error_duration.record(duration.as_secs_f64(), &[
+//!             ("operation", operation.into()),
+//!             ("error_type", error_type.into()),
+//!         ]);
+//!     }
+//! }
+//! ```
+//!
+//! ## Testing Error Conditions
+//!
+//! ### Error Injection
+//! ```rust,no_run
+//! #[cfg(feature = "failpoints")]
+//! use fail::fail_point;
+//!
+//! async fn save_data_with_failpoint(data: &[u8]) -> BlixardResult<()> {
+//!     #[cfg(feature = "failpoints")]
+//!     fail_point!("save_data_disk_full", |_| {
+//!         Err(BlixardError::ResourceExhausted {
+//!             resource: "disk_space".to_string(),
+//!         })
+//!     });
+//!     
+//!     // Normal implementation
+//!     save_data_impl(data).await
+//! }
+//! 
+//! #[cfg(test)]
+//! mod tests {
+//!     use super::*;
+//!     
+//!     #[tokio::test]
+//!     async fn test_disk_full_handling() {
+//!         #[cfg(feature = "failpoints")]
+//!         {
+//!             fail::cfg("save_data_disk_full", "return").unwrap();
+//!             
+//!             let result = save_data_with_failpoint(b"test data").await;
+//!             assert!(matches!(result, Err(BlixardError::ResourceExhausted { .. })));
+//!             
+//!             fail::cfg("save_data_disk_full", "off").unwrap();
+//!         }
+//!     }
+//! }
+//! ```
+
 use thiserror::Error;
 
+/// Comprehensive error type for all Blixard operations
+///
+/// This enum covers all possible error conditions in the Blixard system,
+/// providing structured error information with proper context and recovery hints.
+///
+/// # Error Categories
+///
+/// - **System Errors**: Infrastructure failures (storage, network, IO)
+/// - **Resource Errors**: Resource management issues (quotas, exhaustion, unavailability)
+/// - **Logic Errors**: Application logic issues (validation, configuration, authorization)
+/// - **Distributed Errors**: Consensus and cluster coordination failures
+/// - **Operational Errors**: Runtime operational issues (timeouts, leadership, initialization)
+/// - **Temporary Errors**: Transient failures that may succeed on retry
 #[derive(Error, Debug)]
 pub enum BlixardError {
     #[error("Service not found: {0}")]
@@ -99,11 +506,14 @@ pub enum BlixardError {
     NotInitialized { component: String },
 
     #[error("Not leader for operation '{operation}', current leader: {leader_id:?}")]
-    NotLeader { operation: String, leader_id: Option<u64> },
-    
+    NotLeader {
+        operation: String,
+        leader_id: Option<u64>,
+    },
+
     #[error("Invalid input for {field}: {message}")]
     InvalidInput { field: String, message: String },
-    
+
     #[error("Validation error for {field}: {message}")]
     Validation { field: String, message: String },
 
@@ -136,13 +546,13 @@ pub enum BlixardError {
     ResourceExhausted { resource: String },
 
     #[error("Resource unavailable: {resource_type} - {message}")]
-    ResourceUnavailable { 
+    ResourceUnavailable {
         resource_type: String,
-        message: String 
+        message: String,
     },
 
     #[error("Lock poisoned during {operation}")]
-    LockPoisoned { 
+    LockPoisoned {
         operation: String,
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
@@ -158,29 +568,24 @@ pub enum BlixardError {
     InvalidConfiguration { message: String },
 
     #[error("Operation timed out: {operation} after {duration:?}")]
-    Timeout { 
-        operation: String, 
-        duration: std::time::Duration 
+    Timeout {
+        operation: String,
+        duration: std::time::Duration,
     },
 
     #[error("Connection error to {address}: {details}")]
-    ConnectionError { 
-        address: String, 
-        details: String 
-    },
+    ConnectionError { address: String, details: String },
 
     #[error("Temporary failure: {details}")]
-    TemporaryFailure { 
-        details: String 
-    },
+    TemporaryFailure { details: String },
 
     #[error("Database error: {operation} failed")]
-    DatabaseError { 
-        operation: String, 
-        #[source] 
-        source: Box<dyn std::error::Error + Send + Sync> 
+    DatabaseError {
+        operation: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
-    
+
     #[error("Multiple errors in {context}: {}", format_errors(.errors))]
     Multiple {
         context: String,
@@ -203,39 +608,54 @@ pub type BlixardResult<T> = std::result::Result<T, BlixardError>;
 
 impl BlixardError {
     /// Create a Storage error with a boxed source
-    pub fn storage<E: std::error::Error + Send + Sync + 'static>(operation: impl Into<String>, source: E) -> Self {
+    pub fn storage<E: std::error::Error + Send + Sync + 'static>(
+        operation: impl Into<String>,
+        source: E,
+    ) -> Self {
         BlixardError::Storage {
             operation: operation.into(),
             source: Box::new(source),
         }
     }
-    
+
     /// Create a Raft error with a boxed source
-    pub fn raft<E: std::error::Error + Send + Sync + 'static>(operation: impl Into<String>, source: E) -> Self {
+    pub fn raft<E: std::error::Error + Send + Sync + 'static>(
+        operation: impl Into<String>,
+        source: E,
+    ) -> Self {
         BlixardError::Raft {
             operation: operation.into(),
             source: Box::new(source),
         }
     }
-    
+
     /// Create a Serialization error with a boxed source
-    pub fn serialization<E: std::error::Error + Send + Sync + 'static>(operation: impl Into<String>, source: E) -> Self {
+    pub fn serialization<E: std::error::Error + Send + Sync + 'static>(
+        operation: impl Into<String>,
+        source: E,
+    ) -> Self {
         BlixardError::Serialization {
             operation: operation.into(),
             source: Box::new(source),
         }
     }
-    
+
     /// Create a LockPoisoned error with a boxed source
-    pub fn lock_poisoned<E: std::error::Error + Send + Sync + 'static>(operation: impl Into<String>, source: E) -> Self {
+    pub fn lock_poisoned<E: std::error::Error + Send + Sync + 'static>(
+        operation: impl Into<String>,
+        source: E,
+    ) -> Self {
         BlixardError::LockPoisoned {
             operation: operation.into(),
             source: Box::new(source),
         }
     }
-    
+
     /// Create a DatabaseError with a boxed source
-    pub fn database<E: std::error::Error + Send + Sync + 'static>(operation: impl Into<String>, source: E) -> Self {
+    pub fn database<E: std::error::Error + Send + Sync + 'static>(
+        operation: impl Into<String>,
+        source: E,
+    ) -> Self {
         BlixardError::DatabaseError {
             operation: operation.into(),
             source: Box::new(source),

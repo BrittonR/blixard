@@ -76,8 +76,8 @@
 //! token_file = "/path/to/tokens.json"
 //! ```
 
-use crate::error::{BlixardError, BlixardResult};
 use crate::common::file_io::read_config_file;
+use crate::error::{BlixardError, BlixardResult};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -899,7 +899,7 @@ impl Default for ResourceLimits {
         Self {
             max_vms_per_node: 100,
             max_total_vcpus: 512,
-            max_total_memory_mb: 131072, // 128GB
+            max_total_memory_mb: 131_072, // 128GB
             max_total_disk_gb: 4096,     // 4TB
         }
     }
@@ -1063,18 +1063,16 @@ impl Config {
         // Use blocking read since this is called from sync context
         let runtime = tokio::runtime::Handle::try_current()
             .map_err(|_| BlixardError::ConfigError("No tokio runtime available".to_string()))?;
-        
-        let config = runtime.block_on(async {
-            Self::from_file_async(path).await
-        })?;
+
+        let config = runtime.block_on(async { Self::from_file_async(path).await })?;
 
         Ok(config)
     }
-    
+
     /// Load configuration from a TOML file (async version)
     pub async fn from_file_async<P: AsRef<Path>>(path: P) -> BlixardResult<Self> {
         let mut config: Config = read_config_file(path, "blixard").await?;
-        
+
         // Apply environment variable overrides
         config.apply_env_overrides();
 

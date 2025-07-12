@@ -37,17 +37,13 @@ pub struct HealthDetails {
 /// Create health service using ServiceBuilder
 pub fn create_health_service(node: Arc<SharedNodeState>) -> ServiceProtocolHandler {
     let node_clone = node.clone();
-    
+
     let service = ServiceBuilder::new("health", node)
         .simple_method("check", move |req: HealthRequest| {
             let node = node_clone.clone();
-            async move {
-                check_health(node, req).await
-            }
+            async move { check_health(node, req).await }
         })
-        .simple_method("ping", |_req: ()| async move {
-            Ok("pong".to_string())
-        })
+        .simple_method("ping", |_req: ()| async move { Ok("pong".to_string()) })
         .simple_method("version", |_req: ()| async move {
             Ok(env!("CARGO_PKG_VERSION").to_string())
         })
@@ -124,25 +120,31 @@ impl HealthServiceV2 {
 
         // Serialize request
         let payload = crate::transport::iroh_protocol::serialize_payload(&health_req)?;
-        
+
         // Call through ServiceBuilder
         let response_payload = self.handler.handle_request("check", payload).await?;
-        
+
         // Deserialize response
-        let health_resp: HealthResponse = 
+        let health_resp: HealthResponse =
             crate::transport::iroh_protocol::deserialize_payload(&response_payload)?;
 
         // Convert to legacy format
         Ok(HealthCheckResponse {
             healthy: health_resp.status == "healthy",
-            message: format!("Node {} health status: {}", health_resp.node_id, health_resp.status),
+            message: format!(
+                "Node {} health status: {}",
+                health_resp.node_id, health_resp.status
+            ),
             status: Some(health_resp.status),
             timestamp: Some(health_resp.timestamp),
             node_id: Some(health_resp.node_id),
             uptime_seconds: Some(health_resp.uptime_seconds),
             vm_count: health_resp.details.as_ref().map(|d| d.vm_count as u32),
             memory_usage_mb: health_resp.details.as_ref().map(|d| d.memory_usage_mb),
-            active_connections: health_resp.details.as_ref().map(|d| d.active_connections as u32),
+            active_connections: health_resp
+                .details
+                .as_ref()
+                .map(|d| d.active_connections as u32),
         })
     }
 }
@@ -155,7 +157,7 @@ mod tests {
     async fn test_health_service_creation() {
         let node = Arc::new(SharedNodeState::new());
         let handler = create_health_service(node);
-        
+
         assert_eq!(handler.service_name(), "health");
         let methods = handler.available_methods();
         assert!(methods.contains(&"check"));
@@ -185,7 +187,7 @@ mod tests {
         let response = check_health(node, request).await.unwrap();
         assert_eq!(response.status, "healthy");
         assert!(response.details.is_some());
-        
+
         let details = response.details.unwrap();
         assert_eq!(details.memory_usage_mb, 1024);
         assert_eq!(details.disk_usage_percent, 45.2);
@@ -195,7 +197,7 @@ mod tests {
     async fn test_legacy_compatibility() {
         let node = Arc::new(SharedNodeState::new());
         let service = HealthServiceV2::new(node);
-        
+
         let request = HealthCheckRequest {
             include_details: Some(true),
         };

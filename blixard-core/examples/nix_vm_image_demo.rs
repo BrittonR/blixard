@@ -99,7 +99,7 @@ async fn create_node(
         join_addr: None,
         use_tailscale: false,
         vm_backend: "mock".to_string(),
-        transport_config: Some(TransportConfig::Iroh(IrohConfig::default())),
+        transport_config: Some(IrohConfig::default()),
     };
 
     let node = Arc::new(SharedNodeState::new(config));

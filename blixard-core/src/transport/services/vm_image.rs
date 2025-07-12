@@ -142,12 +142,12 @@ impl VmImageService for VmImageServiceImpl {
         _metadata: HashMap<String, String>,
     ) -> BlixardResult<String> {
         // Get P2P manager
-        let p2p_manager =
-            self.node
-                .get_p2p_manager()
-                .ok_or_else(|| BlixardError::Internal {
-                    message: "P2P manager not available".to_string(),
-                })?;
+        let p2p_manager = self
+            .node
+            .get_p2p_manager()
+            .ok_or_else(|| BlixardError::Internal {
+                message: "P2P manager not available".to_string(),
+            })?;
 
         // Calculate image hash
         let path = Path::new(image_path);
@@ -184,12 +184,12 @@ impl VmImageService for VmImageServiceImpl {
         _image_hash: &str,
     ) -> BlixardResult<(String, HashMap<String, String>)> {
         // Get P2P manager
-        let p2p_manager =
-            self.node
-                .get_p2p_manager()
-                .ok_or_else(|| BlixardError::Internal {
-                    message: "P2P manager not available".to_string(),
-                })?;
+        let p2p_manager = self
+            .node
+            .get_p2p_manager()
+            .ok_or_else(|| BlixardError::Internal {
+                message: "P2P manager not available".to_string(),
+            })?;
 
         // TODO: Check if image is already cached when image store is available
         // if let Some(image_store) = p2p_manager.get_image_store() {
@@ -225,12 +225,12 @@ impl VmImageService for VmImageServiceImpl {
 
     async fn list_images(&self) -> BlixardResult<Vec<ImageInfo>> {
         // Get P2P manager
-        let _p2p_manager =
-            self.node
-                .get_p2p_manager()
-                .ok_or_else(|| BlixardError::Internal {
-                    message: "P2P manager not available".to_string(),
-                })?;
+        let _p2p_manager = self
+            .node
+            .get_p2p_manager()
+            .ok_or_else(|| BlixardError::Internal {
+                message: "P2P manager not available".to_string(),
+            })?;
 
         // Get image store
         // TODO: Get image store when available

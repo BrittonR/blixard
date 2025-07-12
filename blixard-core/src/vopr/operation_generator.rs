@@ -3,8 +3,8 @@
 //! This module generates operations that stress the distributed system,
 //! including normal operations, fault injections, and Byzantine behaviors.
 
-use crate::vopr::fuzzer_engine::OperationWeights;
 use crate::unwrap_helpers::choose_random;
+use crate::vopr::fuzzer_engine::OperationWeights;
 use rand::{seq::SliceRandom, Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
@@ -421,7 +421,7 @@ impl OperationGenerator {
         let to = loop {
             let node = match self.active_nodes.choose(rng) {
                 Some(id) => *id,
-                None => continue,  // This shouldn't happen but handle gracefully
+                None => continue, // This shouldn't happen but handle gracefully
             };
             if node != from {
                 break node;
@@ -449,7 +449,7 @@ impl OperationGenerator {
         let to = loop {
             let node = match self.active_nodes.choose(rng) {
                 Some(id) => *id,
-                None => continue,  // This shouldn't happen but handle gracefully
+                None => continue, // This shouldn't happen but handle gracefully
             };
             if node != from {
                 break node;
@@ -473,7 +473,7 @@ impl OperationGenerator {
         let to = loop {
             let node = match self.active_nodes.choose(rng) {
                 Some(id) => *id,
-                None => continue,  // This shouldn't happen but handle gracefully
+                None => continue, // This shouldn't happen but handle gracefully
             };
             if node != from {
                 break node;
@@ -510,7 +510,7 @@ impl OperationGenerator {
                 let pretend_id = loop {
                     let id = match self.active_nodes.choose(rng) {
                         Some(node_id) => *node_id,
-                        None => continue,  // This shouldn't happen but handle gracefully
+                        None => continue, // This shouldn't happen but handle gracefully
                     };
                     if id != node_id {
                         break id;
@@ -539,7 +539,7 @@ impl OperationGenerator {
 
         ClientOp::CreateVm {
             vm_id,
-            cpu: 2,    // Default CPU count
+            cpu: 2,       // Default CPU count
             memory: 1024, // Default memory in MB
         }
     }

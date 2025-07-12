@@ -152,10 +152,7 @@ impl LatencyTracker {
     pub fn complete_operation(&mut self, request_id: u64) -> Option<Duration> {
         if let Some((op_type, start)) = self.in_flight.remove(&request_id) {
             let duration = start.elapsed();
-            self.latencies
-                .entry(op_type)
-                .or_default()
-                .push(duration);
+            self.latencies.entry(op_type).or_default().push(duration);
             Some(duration)
         } else {
             None

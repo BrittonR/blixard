@@ -10,9 +10,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-use chrono::{DateTime, Utc};
 
 /// Operation types that can be performed on the distributed system
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]

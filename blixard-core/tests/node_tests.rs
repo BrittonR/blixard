@@ -28,6 +28,8 @@ async fn create_test_node(id: u64) -> (Node, TempDir) {
         join_addr: None,
         use_tailscale: false,
         vm_backend: "mock".to_string(),
+        transport_config: None,
+        topology: Default::default(),
     };
 
     (Node::new(config), temp_dir)

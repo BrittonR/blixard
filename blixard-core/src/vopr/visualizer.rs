@@ -40,6 +40,7 @@ impl Default for VisualizerConfig {
 
 /// Main visualizer for fuzzer output
 pub struct Visualizer {
+    #[allow(dead_code)] // Config reserved for future visualization customization
     config: VisualizerConfig,
 }
 

@@ -10,13 +10,9 @@ use crate::{
     node::Node,
     types::NodeConfig,
 };
-use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    sync::Arc,
-};
-use tokio::sync::Mutex;
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tempfile::TempDir;
+use tokio::sync::Mutex;
 
 // Re-export concurrent test utilities
 pub use crate::test_helpers_concurrent::*;
@@ -32,6 +28,68 @@ pub struct TestNode {
     pub addr: SocketAddr,
     pub node: Arc<Mutex<Node>>,
     pub data_dir: TempDir,
+    pub shared_state: Arc<crate::node_shared::SharedNodeState>,
+}
+
+impl TestNode {
+    /// Create a new test node
+    pub async fn new(node_id: u64) -> BlixardResult<Self> {
+        let addr: SocketAddr = format!("127.0.0.1:{}", 50000 + node_id).parse().unwrap();
+        let data_dir = TempDir::new()?;
+        let config = NodeConfig {
+            id: node_id,
+            bind_addr: addr,
+            data_dir: data_dir.path().to_string_lossy().to_string(),
+            ..Default::default()
+        };
+
+        let node = Node::new(config);
+        let shared_state = node.shared();
+        let node = Arc::new(Mutex::new(node));
+
+        Ok(TestNode {
+            id: node_id,
+            addr,
+            node,
+            data_dir,
+            shared_state,
+        })
+    }
+
+    /// Get reference to the node
+    pub fn node(&self) -> &Arc<Mutex<Node>> {
+        &self.node
+    }
+
+    /// Get mutable reference to the node
+    pub fn node_mut(&mut self) -> &mut Arc<Mutex<Node>> {
+        &mut self.node
+    }
+
+    /// Start the node
+    pub async fn start(&self) -> BlixardResult<()> {
+        let mut node = self.node.lock().await;
+        node.initialize().await
+    }
+
+    /// Stop the node
+    pub async fn stop(&self) -> BlixardResult<()> {
+        let mut node = self.node.lock().await;
+        node.stop().await
+    }
+
+    /// Check if node is running
+    pub async fn is_running(&self) -> bool {
+        let _node = self.node.lock().await;
+        // This is a simple check - in reality we'd need to check the node state
+        true // TODO: Implement proper running state check
+    }
+
+    /// Get the shared state of the node (async access)
+    pub async fn shared_state(&self) -> Arc<crate::node_shared::SharedNodeState> {
+        let node = self.node.lock().await;
+        node.shared()
+    }
 }
 
 /// Test cluster for multi-node testing
@@ -54,6 +112,15 @@ impl TestCluster {
         Self::new()
     }
 
+    /// Create a cluster with a specific number of nodes
+    pub async fn with_size(node_count: usize) -> BlixardResult<Self> {
+        let mut cluster = Self::new();
+        for _ in 0..node_count {
+            cluster.add_node().await?;
+        }
+        Ok(cluster)
+    }
+
     /// Add a new node to the cluster
     pub async fn add_node(&mut self) -> BlixardResult<u64> {
         let node_id = self.nodes.len() as u64 + 1;
@@ -69,6 +136,7 @@ impl TestCluster {
         };
 
         let node = Node::new(config);
+        let shared_state = node.shared();
         let node = Arc::new(Mutex::new(node));
 
         let test_node = TestNode {
@@ -76,6 +144,7 @@ impl TestCluster {
             addr,
             node: node.clone(),
             data_dir,
+            shared_state,
         };
 
         self.nodes.insert(node_id, test_node);
@@ -95,6 +164,38 @@ impl TestCluster {
     /// Remove a node from the cluster
     pub fn remove_node(&mut self, node_id: u64) -> Option<TestNode> {
         self.nodes.remove(&node_id)
+    }
+
+    /// Wait for cluster convergence (leader election)
+    pub async fn wait_for_convergence(&self, timeout: std::time::Duration) -> BlixardResult<u64> {
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            if let Ok(leader_id) = self.get_leader_id().await {
+                return Ok(leader_id);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        Err(BlixardError::Timeout {
+            operation: "wait_for_convergence".to_string(),
+            duration: timeout,
+        })
+    }
+
+    /// Get the current leader ID
+    pub async fn get_leader_id(&self) -> BlixardResult<u64> {
+        for (node_id, test_node) in &self.nodes {
+            if test_node.shared_state.is_leader() {
+                return Ok(*node_id);
+            }
+        }
+        Err(BlixardError::NodeNotFound {
+            node_id: 0, // Use 0 to indicate "no leader found"
+        })
+    }
+
+    /// Check if cluster is formed (has a leader)
+    pub async fn is_cluster_formed(&self) -> bool {
+        self.get_leader_id().await.is_ok()
     }
 
     /// Shutdown all nodes

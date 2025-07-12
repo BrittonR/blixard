@@ -1,12 +1,12 @@
 //! Helper macros and utilities for replacing unwrap() calls with proper error handling
 //!
-//! This module provides standardized patterns for converting unwrap() calls into 
+//! This module provides standardized patterns for converting unwrap() calls into
 //! graceful error handling that integrates with Blixard's error system.
 
 use crate::error::BlixardError;
 
 /// Macro for safely accessing collections with proper error context
-/// 
+///
 /// # Example
 /// ```rust
 /// let item = get_or_not_found!(collection.get(&key), "Resource", format!("{}", key));
@@ -21,7 +21,7 @@ macro_rules! get_or_not_found {
 }
 
 /// Macro for safely accessing mutable collections with proper error context
-/// 
+///
 /// # Example
 /// ```rust
 /// let item = get_mut_or_not_found!(collection.get_mut(&key), "Resource", format!("{}", key));
@@ -36,7 +36,7 @@ macro_rules! get_mut_or_not_found {
 }
 
 /// Macro for parsing strings with configuration error context
-/// 
+///
 /// # Example
 /// ```rust
 /// let addr = parse_or_config_error!("127.0.0.1:8080".parse(), "address", "IP address");
@@ -51,7 +51,7 @@ macro_rules! parse_or_config_error {
 }
 
 /// Macro for byte array conversions with serialization error context
-/// 
+///
 /// # Example
 /// ```rust
 /// let bytes = try_into_bytes!(value.try_into(), "node_id", "8-byte array");
@@ -63,14 +63,14 @@ macro_rules! try_into_bytes {
             operation: format!("convert {} to {}", $context, $expected_format),
             source: Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Invalid byte format for {}", $context)
+                format!("Invalid byte format for {}", $context),
             )),
         })?
     };
 }
 
 /// Macro for serialization operations with proper error context
-/// 
+///
 /// # Example
 /// ```rust
 /// let data = serialize_or_error!(bincode::serialize(&value), "worker capabilities");
@@ -86,7 +86,7 @@ macro_rules! serialize_or_error {
 }
 
 /// Macro for deserialization operations with proper error context
-/// 
+///
 /// # Example
 /// ```rust
 /// let value = deserialize_or_error!(bincode::deserialize(&data), "worker capabilities");
@@ -102,7 +102,7 @@ macro_rules! deserialize_or_error {
 }
 
 /// Macro for acquiring locks with poison handling
-/// 
+///
 /// # Example
 /// ```rust
 /// let guard = acquire_lock!(mutex.lock(), "read cluster state");
@@ -114,14 +114,14 @@ macro_rules! acquire_lock {
             operation: $operation.to_string(),
             source: Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("Lock poisoned: {}", e)
+                format!("Lock poisoned: {}", e),
             )),
         })?
     };
 }
 
 /// Macro for acquiring locks without Result return - panics on poisoned lock
-/// 
+///
 /// # Example
 /// ```rust
 /// let guard = acquire_lock_unwrap!(mutex.lock(), "read cluster state");
@@ -134,7 +134,7 @@ macro_rules! acquire_lock_unwrap {
 }
 
 /// Macro for acquiring read locks with poison handling
-/// 
+///
 /// # Example
 /// ```rust
 /// let guard = acquire_read_lock!(rwlock.read(), "read shared state");
@@ -146,14 +146,14 @@ macro_rules! acquire_read_lock {
             operation: format!("read lock for {}", $operation),
             source: Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("Read lock poisoned: {}", e)
+                format!("Read lock poisoned: {}", e),
             )),
         })?
     };
 }
 
 /// Macro for acquiring write locks with poison handling
-/// 
+///
 /// # Example
 /// ```rust
 /// let guard = acquire_write_lock!(rwlock.write(), "write shared state");
@@ -165,14 +165,14 @@ macro_rules! acquire_write_lock {
             operation: format!("write lock for {}", $operation),
             source: Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("Write lock poisoned: {}", e)
+                format!("Write lock poisoned: {}", e),
             )),
         })?
     };
 }
 
 /// Macro for converting Option to Internal error
-/// 
+///
 /// # Example
 /// ```rust
 /// let value = get_or_internal!(some_option, "critical component", "Component should always be present");
@@ -187,7 +187,7 @@ macro_rules! get_or_internal {
 }
 
 /// Macro for fire-and-forget operations where errors are logged but not propagated
-/// 
+///
 /// # Example
 /// ```rust
 /// try_or_log!(sender.send(msg), "Failed to send notification");
@@ -202,7 +202,7 @@ macro_rules! try_or_log {
 }
 
 /// Macro for critical operations that should log errors but continue execution
-/// 
+///
 /// # Example
 /// ```rust
 /// let value = expect_or_log!(critical_operation(), "default_value", "Critical operation failed");
@@ -221,7 +221,7 @@ macro_rules! expect_or_log {
 }
 
 /// Safe time since UNIX_EPOCH with fallback
-/// 
+///
 /// Returns 0 if the system time is before UNIX_EPOCH (should never happen in practice).
 pub fn time_since_epoch_safe() -> u64 {
     std::time::SystemTime::now()
@@ -231,7 +231,7 @@ pub fn time_since_epoch_safe() -> u64 {
 }
 
 /// Safe random choice from a slice
-/// 
+///
 /// Returns an error if the slice is empty instead of panicking.
 pub fn choose_random<T>(slice: &[T]) -> Result<&T, BlixardError> {
     if slice.is_empty() {
@@ -240,14 +240,14 @@ pub fn choose_random<T>(slice: &[T]) -> Result<&T, BlixardError> {
             reason: "Cannot choose from empty collection".to_string(),
         });
     }
-    
+
     use rand::seq::SliceRandom;
     let mut rng = rand::thread_rng();
     Ok(slice.choose(&mut rng).expect("slice is not empty"))
 }
 
 /// Safe minimum selection with custom comparison
-/// 
+///
 /// Returns an error if the iterator is empty instead of panicking.
 pub fn min_by_safe<I, F, B>(iter: I, f: F) -> Result<I::Item, BlixardError>
 where
@@ -255,14 +255,15 @@ where
     F: FnMut(&I::Item) -> B,
     B: Ord,
 {
-    iter.min_by_key(f).ok_or_else(|| BlixardError::InvalidOperation {
-        operation: "minimum selection".to_string(),
-        reason: "Cannot find minimum in empty collection".to_string(),
-    })
+    iter.min_by_key(f)
+        .ok_or_else(|| BlixardError::InvalidOperation {
+            operation: "minimum selection".to_string(),
+            reason: "Cannot find minimum in empty collection".to_string(),
+        })
 }
 
 /// Safe maximum selection with custom comparison
-/// 
+///
 /// Returns an error if the iterator is empty instead of panicking.
 pub fn max_by_safe<I, F, B>(iter: I, f: F) -> Result<I::Item, BlixardError>
 where
@@ -270,10 +271,11 @@ where
     F: FnMut(&I::Item) -> B,
     B: Ord,
 {
-    iter.max_by_key(f).ok_or_else(|| BlixardError::InvalidOperation {
-        operation: "maximum selection".to_string(),
-        reason: "Cannot find maximum in empty collection".to_string(),
-    })
+    iter.max_by_key(f)
+        .ok_or_else(|| BlixardError::InvalidOperation {
+            operation: "maximum selection".to_string(),
+            reason: "Cannot find maximum in empty collection".to_string(),
+        })
 }
 
 #[cfg(test)]
@@ -285,7 +287,7 @@ mod tests {
     fn test_get_or_not_found_success() {
         let mut map = HashMap::new();
         map.insert("key", "value");
-        
+
         let result = get_or_not_found!(map.get("key"), "Test", "key");
         assert_eq!(*result, "value");
     }
@@ -293,10 +295,9 @@ mod tests {
     #[test]
     fn test_get_or_not_found_failure() {
         let map: HashMap<&str, &str> = HashMap::new();
-        
-        let result = std::panic::catch_unwind(|| {
-            get_or_not_found!(map.get("missing"), "Test", "missing")
-        });
+
+        let result =
+            std::panic::catch_unwind(|| get_or_not_found!(map.get("missing"), "Test", "missing"));
         assert!(result.is_err());
     }
 

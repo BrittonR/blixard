@@ -2,8 +2,8 @@ pub mod placement_strategies;
 pub mod resource_analysis;
 
 use redb::Database;
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::error::BlixardResult;
 use crate::resource_management::{ClusterResourceManager, OvercommitPolicy};
@@ -16,6 +16,7 @@ pub use resource_analysis::*;
 /// VM Scheduler for automatic placement of VMs across cluster nodes
 pub struct VmScheduler {
     database: Arc<Database>,
+    #[allow(dead_code)] // Resource manager for future cluster-wide scheduling decisions
     resource_manager: Arc<tokio::sync::RwLock<ClusterResourceManager>>,
     datacenter_latencies: Arc<tokio::sync::RwLock<DatacenterLatencyMap>>,
 }
@@ -74,20 +75,24 @@ impl VmScheduler {
         );
 
         // Collect cluster state
-        let context = self.collect_cluster_state(
-            requirements, 
-            strategy_name.clone(), 
-            start_time, 
-            vm_config
-        ).await?;
+        let context = self
+            .collect_cluster_state(requirements, strategy_name.clone(), start_time, vm_config)
+            .await?;
 
         // Apply the placement strategy
-        let decision = self.apply_placement_strategy(&context, vm_config, strategy).await?;
+        let decision = self
+            .apply_placement_strategy(&context, vm_config, strategy)
+            .await?;
 
         // Record metrics
         let duration = start_time.elapsed();
         #[cfg(feature = "observability")]
-        crate::metrics_otel::record_vm_scheduling_decision(&vm_config.name, &strategy_name, &decision, duration);
+        crate::metrics_otel::record_vm_scheduling_decision(
+            &vm_config.name,
+            &strategy_name,
+            &decision,
+            duration,
+        );
 
         tracing::info!(
             "VM '{}' scheduled to node {} using strategy {} (took {}ms)",
@@ -103,7 +108,7 @@ impl VmScheduler {
     /// Get cluster-wide resource summary
     pub async fn get_cluster_resource_summary(&self) -> BlixardResult<ClusterResourceSummary> {
         let node_usage = self.get_cluster_resource_usage().await?;
-        
+
         if node_usage.is_empty() {
             return Ok(ClusterResourceSummary {
                 total_nodes: 0,
@@ -122,27 +127,33 @@ impl VmScheduler {
 
         let total_nodes = node_usage.len() as u32;
         let healthy_nodes = node_usage.iter().filter(|n| n.is_healthy).count() as u32;
-        
+
         let total_vcpus = node_usage.iter().map(|n| n.capabilities.cpu_cores).sum();
         let used_vcpus = node_usage.iter().map(|n| n.used_vcpus).sum();
-        
+
         let total_memory_mb = node_usage.iter().map(|n| n.capabilities.memory_mb).sum();
         let used_memory_mb = node_usage.iter().map(|n| n.used_memory_mb).sum();
-        
+
         let total_disk_gb = node_usage.iter().map(|n| n.capabilities.disk_gb).sum();
         let used_disk_gb = node_usage.iter().map(|n| n.used_disk_gb).sum();
 
         let avg_cpu_util = if total_vcpus > 0 {
             (used_vcpus as f64 / total_vcpus as f64) * 100.0
-        } else { 0.0 };
-        
+        } else {
+            0.0
+        };
+
         let avg_mem_util = if total_memory_mb > 0 {
             (used_memory_mb as f64 / total_memory_mb as f64) * 100.0
-        } else { 0.0 };
-        
+        } else {
+            0.0
+        };
+
         let avg_disk_util = if total_disk_gb > 0 {
             (used_disk_gb as f64 / total_disk_gb as f64) * 100.0
-        } else { 0.0 };
+        } else {
+            0.0
+        };
 
         Ok(ClusterResourceSummary {
             total_nodes,

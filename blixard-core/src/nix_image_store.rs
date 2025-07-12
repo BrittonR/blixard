@@ -465,7 +465,7 @@ impl NixImageStore {
                 Ok(_) => {
                     #[cfg(feature = "observability")]
                     record_p2p_verification(true, "nar_hash");
-                },
+                }
                 Err(e) => {
                     #[cfg(feature = "observability")]
                     record_p2p_verification(false, "nar_hash");
@@ -862,11 +862,16 @@ impl NixImageStore {
         }
 
         // Run nix path-info to get NAR hash and size
-        let options = CommandOptions::new()
-            .with_env_var("NIX_CONFIG", "experimental-features = nix-command");
-        
-        let output = self.command_executor
-            .execute("nix", &["path-info", "--json", &path.to_string_lossy()], options)
+        let options =
+            CommandOptions::new().with_env_var("NIX_CONFIG", "experimental-features = nix-command");
+
+        let output = self
+            .command_executor
+            .execute(
+                "nix",
+                &["path-info", "--json", &path.to_string_lossy()],
+                options,
+            )
             .await
             .map_err(|e| BlixardError::Internal {
                 message: format!("Failed to run nix path-info: {}", e),
@@ -880,9 +885,14 @@ impl NixImageStore {
 
                 let add_options = CommandOptions::new()
                     .with_env_var("NIX_CONFIG", "experimental-features = nix-command");
-                    
-                let add_output = self.command_executor
-                    .execute("nix", &["store", "add-path", &path.to_string_lossy()], add_options)
+
+                let add_output = self
+                    .command_executor
+                    .execute(
+                        "nix",
+                        &["store", "add-path", &path.to_string_lossy()],
+                        add_options,
+                    )
                     .await
                     .map_err(|e| BlixardError::Internal {
                         message: format!("Failed to run nix store add-path: {}", e),
@@ -899,9 +909,14 @@ impl NixImageStore {
                 // Try path-info again
                 let retry_options = CommandOptions::new()
                     .with_env_var("NIX_CONFIG", "experimental-features = nix-command");
-                    
-                let retry_output = self.command_executor
-                    .execute("nix", &["path-info", "--json", &path.to_string_lossy()], retry_options)
+
+                let retry_output = self
+                    .command_executor
+                    .execute(
+                        "nix",
+                        &["path-info", "--json", &path.to_string_lossy()],
+                        retry_options,
+                    )
                     .await?;
 
                 if retry_output.status != 0 {
@@ -989,9 +1004,14 @@ impl NixImageStore {
         if path.starts_with(&self.nix_store_dir) {
             let options = CommandOptions::new()
                 .with_env_var("NIX_CONFIG", "experimental-features = nix-command");
-                
-            let output = self.command_executor
-                .execute("nix", &["path-info", "--json", &path.to_string_lossy()], options)
+
+            let output = self
+                .command_executor
+                .execute(
+                    "nix",
+                    &["path-info", "--json", &path.to_string_lossy()],
+                    options,
+                )
                 .await?;
 
             if output.success {
@@ -1017,8 +1037,13 @@ impl NixImageStore {
         // Otherwise, compute the NAR hash directly
         // First, dump the NAR
         let dump_options = CommandOptions::new();
-        let dump_output = self.command_executor
-            .execute("nix-store", &["--dump", &path.to_string_lossy()], dump_options)
+        let dump_output = self
+            .command_executor
+            .execute(
+                "nix-store",
+                &["--dump", &path.to_string_lossy()],
+                dump_options,
+            )
             .await
             .map_err(|e| BlixardError::Internal {
                 message: format!("Failed to run nix-store --dump: {}", e),
@@ -1035,11 +1060,15 @@ impl NixImageStore {
         }
 
         // Hash the NAR output
-        let hash_options = CommandOptions::new()
-            .with_stdin(dump_output.stdout);
-            
-        let hash_result = self.command_executor
-            .execute("nix-hash", &["--type", "sha256", "--base32", "--flat"], hash_options)
+        let hash_options = CommandOptions::new().with_stdin(dump_output.stdout);
+
+        let hash_result = self
+            .command_executor
+            .execute(
+                "nix-hash",
+                &["--type", "sha256", "--base32", "--flat"],
+                hash_options,
+            )
             .await
             .map_err(|e| BlixardError::Internal {
                 message: format!("Failed to run nix-hash: {}", e),

@@ -341,8 +341,14 @@ impl VmRepository for MockVmRepository {
 #[async_trait]
 impl TaskRepository for MockVmRepository {
     async fn create(&self, task_id: &str, task: &TaskSpec) -> BlixardResult<()> {
-        self.tasks.write().await.insert(task_id.to_string(), task.clone());
-        self.task_statuses.write().await.insert(task_id.to_string(), "pending".to_string());
+        self.tasks
+            .write()
+            .await
+            .insert(task_id.to_string(), task.clone());
+        self.task_statuses
+            .write()
+            .await
+            .insert(task_id.to_string(), "pending".to_string());
         Ok(())
     }
 
@@ -351,14 +357,17 @@ impl TaskRepository for MockVmRepository {
     }
 
     async fn update_status(&self, task_id: &str, status: &str) -> BlixardResult<()> {
-        self.task_statuses.write().await.insert(task_id.to_string(), status.to_string());
+        self.task_statuses
+            .write()
+            .await
+            .insert(task_id.to_string(), status.to_string());
         Ok(())
     }
 
     async fn list_by_status(&self, status: &str) -> BlixardResult<Vec<(String, TaskSpec)>> {
         let tasks = self.tasks.read().await;
         let statuses = self.task_statuses.read().await;
-        
+
         let mut result = Vec::new();
         for (id, task) in tasks.iter() {
             if let Some(task_status) = statuses.get(id) {
@@ -367,7 +376,7 @@ impl TaskRepository for MockVmRepository {
                 }
             }
         }
-        
+
         Ok(result)
     }
 
@@ -381,7 +390,10 @@ impl TaskRepository for MockVmRepository {
 #[async_trait]
 impl NodeRepository for MockVmRepository {
     async fn store_node_info(&self, node_id: u64, bind_address: &str) -> BlixardResult<()> {
-        self.nodes.write().await.insert(node_id, bind_address.to_string());
+        self.nodes
+            .write()
+            .await
+            .insert(node_id, bind_address.to_string());
         Ok(())
     }
 

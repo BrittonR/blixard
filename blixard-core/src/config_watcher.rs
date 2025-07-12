@@ -15,7 +15,7 @@ use tokio::task::JoinHandle;
 /// Configuration watcher that monitors file changes
 pub struct ConfigWatcher {
     /// Path to the configuration file
-    config_path: PathBuf,
+    _config_path: PathBuf,
 
     /// File system watcher
     _watcher: RecommendedWatcher,
@@ -101,7 +101,7 @@ impl ConfigWatcher {
         });
 
         Ok(Self {
-            config_path,
+            _config_path: config_path,
             _watcher: watcher,
             shutdown_tx,
             task_handle: Some(task_handle),

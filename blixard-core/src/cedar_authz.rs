@@ -4,8 +4,7 @@
 //! the simple RBAC implementation with a more powerful policy language.
 
 use cedar_policy::{
-    Authorizer, Context, Decision, Entities, EntityUid,
-    PolicySet, Request, Schema,
+    Authorizer, Context, Decision, Entities, EntityUid, PolicySet, Request, Schema,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -15,8 +14,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
+use crate::common::file_io::{read_files_with_extension, read_text_file_with_context};
 use crate::error::{BlixardError, BlixardResult};
-use crate::common::file_io::{read_text_file_with_context, read_files_with_extension};
 
 /// Cedar authorization engine
 #[derive(Debug)]
@@ -63,15 +62,13 @@ impl CedarAuthz {
         let mut policy_set = PolicySet::new();
 
         // Read all .cedar files in the directory
-        let cedar_files = read_files_with_extension(policies_dir, "cedar", "Cedar policies").await?;
-        
+        let cedar_files =
+            read_files_with_extension(policies_dir, "cedar", "Cedar policies").await?;
+
         for (path, policy_text) in cedar_files {
             // Parse policies from text
             let parsed_policies = PolicySet::from_str(&policy_text).map_err(|e| {
-                BlixardError::ConfigError(format!(
-                    "Failed to parse policy file {:?}: {}",
-                    path, e
-                ))
+                BlixardError::ConfigError(format!("Failed to parse policy file {:?}: {}", path, e))
             })?;
 
             // Add policies to set

@@ -4,14 +4,14 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
+#[cfg(feature = "observability")]
+use crate::metrics_otel::{attributes, metrics};
 use crate::{
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
     types::VmConfig,
     vm_scheduler::{PlacementStrategy, VmScheduler},
 };
-#[cfg(feature = "observability")]
-use crate::metrics_otel::{attributes, metrics};
 
 /// Recovery policy for a failed VM
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -252,7 +252,11 @@ impl VmAutoRecovery {
         );
 
         // Create migration task
-        match self.node_state.migrate_vm(vm_name, placement.target_node_id).await {
+        match self
+            .node_state
+            .migrate_vm(vm_name, placement.target_node_id)
+            .await
+        {
             Ok(()) => {
                 info!("Successfully initiated migration for VM '{}'", vm_name);
                 #[cfg(feature = "observability")]

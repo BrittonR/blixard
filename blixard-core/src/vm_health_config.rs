@@ -3,9 +3,9 @@
 //! This module provides centralized configuration management for the VM health monitoring
 //! system, supporting the LifecycleManager pattern and dependency injection.
 
-use std::time::Duration;
-use serde::{Deserialize, Serialize};
 use crate::vm_auto_recovery::RecoveryPolicy;
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// Comprehensive configuration for VM health monitoring system
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,7 +75,7 @@ impl Default for HealthStateManagerConfig {
     fn default() -> Self {
         Self {
             max_state_age: Duration::from_secs(24 * 60 * 60), // 24 hours
-            cleanup_interval: Duration::from_secs(60 * 60), // 1 hour
+            cleanup_interval: Duration::from_secs(60 * 60),   // 1 hour
             max_results_per_vm: 50,
             enable_persistence: false,
         }
@@ -166,7 +166,7 @@ impl VmHealthMonitorDependencies {
             clock: std::sync::Arc::new(crate::abstractions::time::SystemClock::new()),
         }
     }
-    
+
     /// Create dependencies with custom clock (useful for testing)
     pub fn with_clock(
         node_state: std::sync::Arc<crate::node_shared::SharedNodeState>,

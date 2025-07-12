@@ -9,7 +9,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use crate::vopr::operation_generator::{Operation, OperationGenerator};
-use crate::{acquire_lock, error::{BlixardError, BlixardResult}};
+use crate::{
+    acquire_lock,
+    error::{BlixardError, BlixardResult},
+};
 
 /// Fuzzing mode - safety vs liveness
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,7 +193,9 @@ impl FuzzerEngine {
 
     /// Generate a random test case
     pub fn generate_test_case(&mut self, config: &FuzzConfig) -> BlixardResult<Vec<Operation>> {
-        if self.coverage_guided && !acquire_lock!(self.corpus.lock(), "check corpus empty").is_empty() {
+        if self.coverage_guided
+            && !acquire_lock!(self.corpus.lock(), "check corpus empty").is_empty()
+        {
             // Sometimes mutate an existing test case from the corpus
             if self.rng.gen_bool(0.5) {
                 return Ok(self.mutate_test_case(config));
@@ -236,9 +241,9 @@ impl FuzzerEngine {
                     // Generate random index before accessing self again
                     let len = guard.len();
                     drop(guard); // Release the lock
-                    
+
                     let idx = self.rng.gen_range(0..len);
-                    
+
                     // Re-acquire lock to get the test case
                     match self.corpus.lock() {
                         Ok(guard) => {
@@ -253,11 +258,13 @@ impl FuzzerEngine {
                 }
             }
             Err(_) => {
-                eprintln!("Failed to acquire corpus lock for mutation, generating random operations");
+                eprintln!(
+                    "Failed to acquire corpus lock for mutation, generating random operations"
+                );
                 None
             }
         };
-        
+
         // If we couldn't get a test case, generate random operations
         let mut operations = match test_case_ops {
             None => return self.generate_random_operations(config),
@@ -326,7 +333,9 @@ impl FuzzerEngine {
         found_bug: bool,
         execution_time: std::time::Duration,
     ) {
-        let mut global_cov = self.global_coverage.lock()
+        let mut global_cov = self
+            .global_coverage
+            .lock()
             .expect("Lock poisoned during: record execution coverage");
 
         // Check if this execution found new coverage
@@ -346,7 +355,8 @@ impl FuzzerEngine {
                 execution_time,
             };
 
-            self.corpus.lock()
+            self.corpus
+                .lock()
                 .expect("Lock poisoned during: add interesting test case to corpus")
                 .push(test_case);
         }
@@ -408,7 +418,9 @@ mod tests {
             max_message_delay_ms: 1000,
         };
 
-        let operations = engine.generate_test_case(&config).expect("Failed to generate test case");
+        let operations = engine
+            .generate_test_case(&config)
+            .expect("Failed to generate test case");
 
         // Should start with node starts
         let start_ops: Vec<_> = operations

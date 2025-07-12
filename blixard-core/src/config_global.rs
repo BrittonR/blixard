@@ -28,9 +28,11 @@ pub fn init(config: Config) -> BlixardResult<()> {
 pub fn get() -> BlixardResult<Arc<Config>> {
     CONFIG
         .get()
-        .ok_or_else(|| BlixardError::ConfigError(
-            "Configuration not initialized. Call config_global::init() first".to_string()
-        ))
+        .ok_or_else(|| {
+            BlixardError::ConfigError(
+                "Configuration not initialized. Call config_global::init() first".to_string(),
+            )
+        })
         .map(|config| config.clone())
 }
 

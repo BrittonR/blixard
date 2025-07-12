@@ -16,19 +16,25 @@ pub struct OtelP2pMonitor {
     // Additional P2P-specific metrics not in core Metrics struct
     connection_state_transitions: Counter<u64>,
     connection_attempts: Counter<u64>,
+    #[allow(dead_code)] // P2P metrics for future observability implementation
     connection_duration: Histogram<f64>,
     connections_active: UpDownCounter<i64>,
     connection_errors: Counter<u64>,
     p2p_rtt: Histogram<f64>,
     p2p_message_latency: Histogram<f64>,
     p2p_messages_sent: Counter<u64>,
+    #[allow(dead_code)] // P2P metrics for future observability implementation
     p2p_messages_received: Counter<u64>,
     p2p_bandwidth: Histogram<f64>,
+    #[allow(dead_code)] // P2P metrics for future observability implementation
     discovered_peers: Counter<u64>,
+    #[allow(dead_code)] // P2P metrics for future observability implementation
     discovery_duration: Histogram<f64>,
+    #[allow(dead_code)] // P2P metrics for future observability implementation
     discovery_failures: Counter<u64>,
     buffered_messages: UpDownCounter<i64>,
     buffered_messages_bytes: UpDownCounter<i64>,
+    #[allow(dead_code)] // P2P metrics for future observability implementation
     message_buffer_overflows: Counter<u64>,
 }
 

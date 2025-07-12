@@ -260,6 +260,241 @@ impl Default for ResourceManagerConfig {
 }
 
 /// Main ResourceManager trait - unified interface for all resource management
+///
+/// This trait provides a comprehensive framework for managing cluster resources
+/// including CPU, memory, disk, network, and custom resource types. It unifies
+/// quota management, admission control, monitoring, and lifecycle operations
+/// under a single consistent interface.
+///
+/// ## Architecture Overview
+///
+/// ```text
+/// ┌─────────────────────────────────────────────────────────────────┐
+/// │                   ResourceManager Architecture                  │
+/// ├─────────────────────────────────────────────────────────────────┤
+/// │  Resource Operations    │  Lifecycle Mgmt    │  Observability   │
+/// │  ┌─────────────────┐    │  ┌─────────────┐    │  ┌─────────────┐ │
+/// │  │ • allocate()    │    │  │ • start()   │    │  │ • metrics() │ │
+/// │  │ • deallocate()  │    │  │ • stop()    │    │  │ • status()  │ │
+/// │  │ • check_avail() │    │  │ • health()  │    │  │ • telemetry │ │
+/// │  │ • get_usage()   │    │  │ • running() │    │  │ • export()  │ │
+/// │  └─────────────────┘    │  └─────────────┘    │  └─────────────┘ │
+/// ├─────────────────────────────────────────────────────────────────┤
+/// │                     Configuration Management                    │
+/// │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────┐ │
+/// │  │ • update_limits │    │ • validate_cfg  │    │ • hot_reload│ │
+/// │  │ • get_limits    │    │ • update_config │    │ • defaults  │ │
+/// │  └─────────────────┘    └─────────────────┘    └─────────────┘ │
+/// ├─────────────────────────────────────────────────────────────────┤
+/// │               Advanced Operations (Optional)                    │
+/// │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────┐ │
+/// │  │ • reserve()     │    │ • efficiency()  │    │ • custom    │ │
+/// │  │ • activate()    │    │ • optimize()    │    │ • extensions│ │
+/// │  └─────────────────┘    └─────────────────┘    └─────────────┘ │
+/// └─────────────────────────────────────────────────────────────────┘
+/// ```
+///
+/// ## Design Principles
+///
+/// ### 1. Resource Abstraction
+/// The trait abstracts over different resource types while providing type-safe
+/// operations. All resources share common operations but can have specific
+/// implementations for their unique characteristics.
+///
+/// ### 2. Lifecycle Management
+/// Consistent lifecycle across all resource managers with well-defined phases:
+/// - **Initialize**: Set up data structures and validate configuration
+/// - **Start**: Begin monitoring, health checks, and accept requests
+/// - **Running**: Normal operation with full functionality
+/// - **Stop**: Graceful shutdown with cleanup and resource release
+///
+/// ### 3. Multi-Tenant Support
+/// Built-in support for multi-tenant resource isolation through:
+/// - Tenant-scoped allocations with proper isolation
+/// - Quota enforcement per tenant and globally
+/// - Resource accounting and usage tracking
+/// - Fair sharing policies and priority handling
+///
+/// ### 4. Observability-First
+/// Comprehensive monitoring and observability built into the core:
+/// - Real-time metrics collection and export
+/// - Health monitoring with detailed status reporting
+/// - Performance tracking and efficiency analysis
+/// - Telemetry export for external monitoring systems
+///
+/// ## Implementation Example
+///
+/// ```rust,no_run
+/// use blixard_core::{ResourceManager, ResourceType, ResourceAllocationRequest};
+/// use async_trait::async_trait;
+/// use std::sync::Arc;
+/// use tokio::sync::RwLock;
+///
+/// struct MemoryResourceManager {
+///     config: ResourceManagerConfig,
+///     state: Arc<RwLock<MemoryState>>,
+///     metrics: Arc<RwLock<ResourceManagerMetrics>>,
+/// }
+///
+/// #[async_trait]
+/// impl ResourceManager for MemoryResourceManager {
+///     fn resource_type(&self) -> ResourceType {
+///         ResourceType::Memory
+///     }
+///
+///     async fn allocate(&self, request: ResourceAllocationRequest) -> BlixardResult<ResourceAllocation> {
+///         // 1. Validate request
+///         self.validate_request(&request).await?;
+///         
+///         // 2. Check availability
+///         if !self.check_availability(&request).await? {
+///             return Err(BlixardError::ResourceExhausted(
+///                 format!("Insufficient memory: requested {}, available {}", 
+///                         request.amount, self.get_available().await?)
+///             ));
+///         }
+///         
+///         // 3. Create allocation
+///         let allocation = ResourceAllocation {
+///             allocation_id: format!("mem-{}", uuid::Uuid::new_v4()),
+///             request: request.clone(),
+///             allocated_amount: request.amount,
+///             allocated_on: Some(self.node_id()),
+///             allocated_at: SystemTime::now(),
+///             status: AllocationStatus::Active,
+///         };
+///         
+///         // 4. Update state and metrics
+///         {
+///             let mut state = self.state.write().await;
+///             state.allocated_memory += request.amount;
+///             state.allocations.insert(allocation.allocation_id.clone(), allocation.clone());
+///         }
+///         
+///         // 5. Update metrics
+///         {
+///             let mut metrics = self.metrics.write().await;
+///             metrics.total_allocations += 1;
+///         }
+///         
+///         Ok(allocation)
+///     }
+///
+///     async fn deallocate(&self, allocation_id: &ResourceId) -> BlixardResult<()> {
+///         let mut state = self.state.write().await;
+///         
+///         if let Some(allocation) = state.allocations.remove(allocation_id) {
+///             state.allocated_memory -= allocation.allocated_amount;
+///             
+///             // Update metrics
+///             let mut metrics = self.metrics.write().await;
+///             metrics.total_deallocations += 1;
+///             
+///             Ok(())
+///         } else {
+///             Err(BlixardError::ResourceNotFound(
+///                 format!("Allocation {} not found", allocation_id)
+///             ))
+///         }
+///     }
+///
+///     // ... implement other required methods
+/// }
+/// ```
+///
+/// ## Error Handling Strategy
+///
+/// Resource managers should handle various failure modes gracefully:
+///
+/// ```rust,no_run
+/// async fn robust_allocate(&self, request: ResourceAllocationRequest) -> BlixardResult<ResourceAllocation> {
+///     // Retry with exponential backoff for transient failures
+///     let mut retry_count = 0;
+///     let max_retries = 3;
+///     
+///     loop {
+///         match self.try_allocate(&request).await {
+///             Ok(allocation) => return Ok(allocation),
+///             Err(BlixardError::ResourceExhausted(_)) => {
+///                 // No point retrying resource exhaustion
+///                 return Err(BlixardError::ResourceExhausted(
+///                     "No resources available".to_string()
+///                 ));
+///             },
+///             Err(BlixardError::Timeout { .. }) if retry_count < max_retries => {
+///                 retry_count += 1;
+///                 let delay = Duration::from_millis(100 * (1 << retry_count));
+///                 tokio::time::sleep(delay).await;
+///                 continue;
+///             },
+///             Err(e) => return Err(e),
+///         }
+///     }
+/// }
+/// ```
+///
+/// ## Performance Optimization
+///
+/// ### Memory Efficiency
+/// - Use efficient data structures for tracking allocations
+/// - Implement memory pooling for frequently allocated/deallocated resources
+/// - Cache frequently accessed data to reduce lock contention
+///
+/// ### Concurrency
+/// - Design for high concurrency with fine-grained locking
+/// - Use lock-free data structures where possible
+/// - Implement async operations to avoid blocking
+///
+/// ### Monitoring Overhead
+/// - Batch metrics updates to reduce overhead
+/// - Use sampling for high-frequency operations
+/// - Implement configurable monitoring levels
+///
+/// ## Integration Patterns
+///
+/// ### Factory Pattern
+/// ```rust,no_run
+/// pub trait ResourceManagerFactory {
+///     fn create_manager(&self, config: ResourceManagerConfig) -> BlixardResult<Arc<dyn ResourceManager>>;
+///     fn resource_type(&self) -> ResourceType;
+/// }
+/// 
+/// pub struct ResourceManagerRegistry {
+///     factories: HashMap<ResourceType, Arc<dyn ResourceManagerFactory>>,
+/// }
+/// ```
+///
+/// ### Composite Pattern
+/// ```rust,no_run
+/// pub struct CompositeResourceManager {
+///     managers: HashMap<ResourceType, Arc<dyn ResourceManager>>,
+/// }
+/// 
+/// impl CompositeResourceManager {
+///     pub async fn allocate_multiple(&self, requests: Vec<ResourceAllocationRequest>) -> BlixardResult<Vec<ResourceAllocation>> {
+///         let mut allocations = Vec::new();
+///         
+///         for request in requests {
+///             let manager = self.managers.get(&request.resource_type)
+///                 .ok_or_else(|| BlixardError::ResourceNotFound(format!("No manager for {:?}", request.resource_type)))?;
+///             
+///             let allocation = manager.allocate(request).await?;
+///             allocations.push(allocation);
+///         }
+///         
+///         Ok(allocations)
+///     }
+/// }
+/// ```
+///
+/// ## Testing Strategy
+///
+/// Resource managers should be thoroughly tested with:
+/// - Unit tests for individual operations
+/// - Integration tests with real resource constraints
+/// - Load tests for concurrent operations
+/// - Failure injection tests for error handling
+/// - Property-based tests for invariant checking
 #[async_trait]
 pub trait ResourceManager: Send + Sync + Debug {
     /// Get the type of resource this manager handles
@@ -271,7 +506,10 @@ pub trait ResourceManager: Send + Sync + Debug {
     // === Core Resource Operations ===
 
     /// Allocate resources for a request
-    async fn allocate(&self, request: ResourceAllocationRequest) -> BlixardResult<ResourceAllocation>;
+    async fn allocate(
+        &self,
+        request: ResourceAllocationRequest,
+    ) -> BlixardResult<ResourceAllocation>;
 
     /// Deallocate resources by allocation ID
     async fn deallocate(&self, allocation_id: &ResourceId) -> BlixardResult<()>;
@@ -286,7 +524,10 @@ pub trait ResourceManager: Send + Sync + Debug {
     async fn get_allocations(&self) -> BlixardResult<Vec<ResourceAllocation>>;
 
     /// Get allocation by ID
-    async fn get_allocation(&self, allocation_id: &ResourceId) -> BlixardResult<Option<ResourceAllocation>>;
+    async fn get_allocation(
+        &self,
+        allocation_id: &ResourceId,
+    ) -> BlixardResult<Option<ResourceAllocation>>;
 
     // === Lifecycle Management ===
 
@@ -333,7 +574,10 @@ pub trait ResourceManager: Send + Sync + Debug {
     // === Optional Advanced Operations ===
 
     /// Reserve resources without allocating (default implementation)
-    async fn reserve(&self, request: ResourceAllocationRequest) -> BlixardResult<ResourceAllocation> {
+    async fn reserve(
+        &self,
+        request: ResourceAllocationRequest,
+    ) -> BlixardResult<ResourceAllocation> {
         // Default implementation: create allocation with Reserved status
         let mut allocation = self.allocate(request).await?;
         allocation.status = AllocationStatus::Reserved;
@@ -343,7 +587,10 @@ pub trait ResourceManager: Send + Sync + Debug {
     /// Activate a reserved allocation (default implementation)
     async fn activate_reservation(&self, allocation_id: &ResourceId) -> BlixardResult<()> {
         // Default implementation: no-op (override for specific behavior)
-        debug!("Activating reservation {} (default implementation)", allocation_id);
+        debug!(
+            "Activating reservation {} (default implementation)",
+            allocation_id
+        );
         Ok(())
     }
 
@@ -512,8 +759,10 @@ impl CompositeResourceManager {
     pub fn new() -> Self {
         Self {
             managers: Arc::new(RwLock::new(HashMap::new())),
-            config: ResourceManagerConfigBuilder::new(ResourceType::Custom("composite".to_string()))
-                .build(),
+            config: ResourceManagerConfigBuilder::new(ResourceType::Custom(
+                "composite".to_string(),
+            ))
+            .build(),
         }
     }
 
@@ -561,7 +810,10 @@ impl ResourceManager for CompositeResourceManager {
         &self.config
     }
 
-    async fn allocate(&self, request: ResourceAllocationRequest) -> BlixardResult<ResourceAllocation> {
+    async fn allocate(
+        &self,
+        request: ResourceAllocationRequest,
+    ) -> BlixardResult<ResourceAllocation> {
         let managers = self.managers.read().await;
         if let Some(manager) = managers.get(&request.resource_type) {
             manager.allocate(request).await
@@ -637,7 +889,10 @@ impl ResourceManager for CompositeResourceManager {
         Ok(all_allocations)
     }
 
-    async fn get_allocation(&self, allocation_id: &ResourceId) -> BlixardResult<Option<ResourceAllocation>> {
+    async fn get_allocation(
+        &self,
+        allocation_id: &ResourceId,
+    ) -> BlixardResult<Option<ResourceAllocation>> {
         let managers = self.managers.read().await;
         for manager in managers.values() {
             if let Ok(Some(allocation)) = manager.get_allocation(allocation_id).await {
@@ -687,7 +942,9 @@ impl ResourceManager for CompositeResourceManager {
             match manager.health_check().await {
                 Ok(ResourceManagerHealth::Healthy) => {}
                 Ok(ResourceManagerHealth::Degraded(_)) => degraded_count += 1,
-                Ok(ResourceManagerHealth::Unhealthy(_)) | Ok(ResourceManagerHealth::Stopped) => unhealthy_count += 1,
+                Ok(ResourceManagerHealth::Unhealthy(_)) | Ok(ResourceManagerHealth::Stopped) => {
+                    unhealthy_count += 1
+                }
                 Err(_) => unhealthy_count += 1,
             }
         }
@@ -749,7 +1006,12 @@ impl ResourceManager for CompositeResourceManager {
             total_deallocations,
             failed_allocations: total_failed,
             avg_allocation_time_ms,
-            health: self.health_check().await.unwrap_or(ResourceManagerHealth::Unhealthy("Health check failed".to_string())),
+            health: self
+                .health_check()
+                .await
+                .unwrap_or(ResourceManagerHealth::Unhealthy(
+                    "Health check failed".to_string(),
+                )),
             last_health_check: SystemTime::now(),
             custom_metrics: HashMap::new(),
         })
@@ -773,14 +1035,20 @@ impl ResourceManager for CompositeResourceManager {
 
         for (resource_type, manager) in managers.iter() {
             if let Ok(manager_telemetry) = manager.export_telemetry().await {
-                telemetry.insert(resource_type.to_string(), serde_json::json!(manager_telemetry));
+                telemetry.insert(
+                    resource_type.to_string(),
+                    serde_json::json!(manager_telemetry),
+                );
             }
         }
 
-        telemetry.insert("composite_manager".to_string(), serde_json::json!({
-            "manager_count": managers.len(),
-            "resource_types": managers.keys().collect::<Vec<_>>(),
-        }));
+        telemetry.insert(
+            "composite_manager".to_string(),
+            serde_json::json!({
+                "manager_count": managers.len(),
+                "resource_types": managers.keys().collect::<Vec<_>>(),
+            }),
+        );
 
         Ok(telemetry)
     }
@@ -844,7 +1112,10 @@ mod tests {
         assert_eq!(config.limits.system_reserve, 512);
         assert_eq!(config.monitoring_interval, Duration::from_secs(30));
         assert!(config.enable_telemetry);
-        assert_eq!(config.custom_config.get("test_key"), Some(&"test_value".to_string()));
+        assert_eq!(
+            config.custom_config.get("test_key"),
+            Some(&"test_value".to_string())
+        );
     }
 
     #[tokio::test]
@@ -873,7 +1144,10 @@ mod tests {
     #[tokio::test]
     async fn test_composite_resource_manager_creation() {
         let composite = CompositeResourceManager::new();
-        assert_eq!(composite.resource_type(), ResourceType::Custom("composite".to_string()));
+        assert_eq!(
+            composite.resource_type(),
+            ResourceType::Custom("composite".to_string())
+        );
         assert_eq!(composite.get_resource_types().await.len(), 0);
     }
 
@@ -888,7 +1162,7 @@ mod tests {
     fn test_allocation_status() {
         assert_eq!(AllocationStatus::Active, AllocationStatus::Active);
         assert_ne!(AllocationStatus::Active, AllocationStatus::Reserved);
-        
+
         match AllocationStatus::Failed("test error".to_string()) {
             AllocationStatus::Failed(msg) => assert_eq!(msg, "test error"),
             _ => panic!("Expected Failed status"),

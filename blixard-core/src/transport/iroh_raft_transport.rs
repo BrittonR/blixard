@@ -21,8 +21,7 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::metrics_otel::{attributes, metrics, Timer};
 use crate::node_shared::SharedNodeState;
 use crate::transport::iroh_protocol::{
-    generate_request_id, read_message, write_message,
-    MessageType as ProtocolMessageType,
+    generate_request_id, read_message, write_message, MessageType as ProtocolMessageType,
 };
 
 #[cfg(feature = "observability")]
@@ -589,9 +588,7 @@ async fn handle_incoming_connection(
     let peers = node.get_peers();
     let peer_id = peers
         .iter()
-        .find(|p| {
-            p.node_id == remote_node_id.to_string()
-        })
+        .find(|p| p.node_id == remote_node_id.to_string())
         .map(|p| p.node_id.parse::<u64>().unwrap_or(0))
         .ok_or_else(|| {
             BlixardError::ClusterError(format!("Unknown Iroh node: {}", remote_node_id))
@@ -857,7 +854,6 @@ async fn check_connection_health(connections: &Arc<RwLock<HashMap<u64, PeerConne
         }
     }
 }
-
 
 /// Extension trait to integrate with existing PeerConnector
 impl IrohRaftTransport {

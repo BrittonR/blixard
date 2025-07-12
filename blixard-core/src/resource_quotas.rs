@@ -14,61 +14,61 @@ use std::time::SystemTime;
 mod constants {
     /// Default maximum VMs per tenant
     pub const DEFAULT_MAX_VMS: u32 = 50;
-    
+
     /// Default maximum VCPUs per tenant
     pub const DEFAULT_MAX_VCPUS: u32 = 200;
-    
+
     /// Default maximum memory per tenant (200GB in MB)
     pub const DEFAULT_MAX_MEMORY_MB: u64 = 204800;
-    
+
     /// Default maximum disk space per tenant (2TB in GB)
     pub const DEFAULT_MAX_DISK_GB: u64 = 2048;
-    
+
     /// Default maximum VMs per node
     pub const DEFAULT_MAX_VMS_PER_NODE: u32 = 25;
-    
+
     /// Default overcommit ratio
     pub const DEFAULT_OVERCOMMIT_RATIO: f32 = 1.2;
-    
+
     /// Default priority level
     pub const DEFAULT_PRIORITY: u8 = 100;
-    
+
     /// Default API requests per second
     pub const DEFAULT_REQUESTS_PER_SECOND: u32 = 100;
-    
+
     /// Default burst capacity
     pub const DEFAULT_BURST_CAPACITY: u32 = 200;
-    
+
     /// Default maximum concurrent requests
     pub const DEFAULT_MAX_CONCURRENT_REQUESTS: u32 = 50;
-    
+
     /// Default VM creation requests per minute
     pub const DEFAULT_VM_CREATE_PER_MINUTE: u32 = 10;
-    
+
     /// Default VM deletion requests per minute
     pub const DEFAULT_VM_DELETE_PER_MINUTE: u32 = 20;
-    
+
     /// Default cluster join requests per hour
     pub const DEFAULT_CLUSTER_JOIN_PER_HOUR: u32 = 5;
-    
+
     /// Default status query requests per second
     pub const DEFAULT_STATUS_QUERY_PER_SECOND: u32 = 50;
-    
+
     /// Default config change requests per hour
     pub const DEFAULT_CONFIG_CHANGE_PER_HOUR: u32 = 10;
-    
+
     /// Default maximum storage per tenant (1TB in GB)
     pub const DEFAULT_MAX_STORAGE_GB: u64 = 1024;
-    
+
     /// Default maximum disk images per tenant
     pub const DEFAULT_MAX_DISK_IMAGES: u32 = 100;
-    
+
     /// Default maximum image size per tenant (100GB)
     pub const DEFAULT_MAX_IMAGE_SIZE_GB: u64 = 100;
-    
+
     /// Default maximum backup storage per tenant (512GB)
     pub const DEFAULT_MAX_BACKUP_STORAGE_GB: u64 = 512;
-    
+
     /// Default maximum IOPS per tenant
     pub const DEFAULT_MAX_IOPS: u32 = 10000;
 }

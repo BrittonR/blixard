@@ -11,16 +11,14 @@ use std::time::{Duration, Instant};
 use tokio::sync::{watch, Mutex, RwLock};
 use tokio::task::JoinHandle;
 
+#[cfg(feature = "observability")]
+use crate::metrics_otel::{attributes, metrics, Timer};
 use crate::{
     config_global,
     error::{BlixardError, BlixardResult},
     node_shared::{PeerInfo, SharedNodeState},
-    p2p_monitor::{
-        ConnectionQuality, ConnectionState, Direction, P2pErrorType, P2pMonitor,
-    },
+    p2p_monitor::{ConnectionQuality, ConnectionState, Direction, P2pErrorType, P2pMonitor},
 };
-#[cfg(feature = "observability")]
-use crate::metrics_otel::{attributes, metrics, Timer};
 use iroh::{Endpoint, NodeAddr, NodeId};
 
 /// Circuit breaker states
@@ -390,7 +388,8 @@ impl IrohPeerConnector {
                 }
 
                 // Update peer status
-                self.node.update_peer_connection(peer_id, "connected".to_string());
+                self.node
+                    .update_peer_connection(peer_id, "connected".to_string());
 
                 // Record successful connection
                 self.p2p_monitor
@@ -412,7 +411,8 @@ impl IrohPeerConnector {
             }
             Err(e) => {
                 // Update peer status
-                self.node.update_peer_connection(peer_id, "disconnected".to_string());
+                self.node
+                    .update_peer_connection(peer_id, "disconnected".to_string());
 
                 // Record failed connection
                 self.p2p_monitor
@@ -480,12 +480,10 @@ impl IrohPeerConnector {
 
         // Check circuit breaker
         let failure_threshold = config_global::get()?.cluster.peer.failure_threshold;
-        let mut breaker = self.circuit_breakers.entry(peer_id).or_insert_with(|| {
-            CircuitBreaker::new(
-                failure_threshold,
-                Duration::from_secs(30),
-            )
-        });
+        let mut breaker = self
+            .circuit_breakers
+            .entry(peer_id)
+            .or_insert_with(|| CircuitBreaker::new(failure_threshold, Duration::from_secs(30)));
 
         if !breaker.should_allow_request() {
             self.p2p_monitor
@@ -533,7 +531,8 @@ impl IrohPeerConnector {
                 }
 
                 // Update peer status
-                self.node.update_peer_connection(peer_id, "connected".to_string());
+                self.node
+                    .update_peer_connection(peer_id, "connected".to_string());
 
                 // Record success
                 breaker.record_success();
@@ -555,7 +554,8 @@ impl IrohPeerConnector {
                 breaker.record_failure();
 
                 // Update peer status
-                self.node.update_peer_connection(peer_id, "disconnected".to_string());
+                self.node
+                    .update_peer_connection(peer_id, "disconnected".to_string());
 
                 // Remove from connecting
                 {
@@ -686,7 +686,8 @@ impl IrohPeerConnector {
             *count = count.saturating_sub(1);
 
             // Update peer status
-            self.node.update_peer_connection(peer_id, "disconnected".to_string());
+            self.node
+                .update_peer_connection(peer_id, "disconnected".to_string());
 
             // Record disconnection
             self.p2p_monitor

@@ -3,11 +3,11 @@
 //! This module provides the RecoveryCoordinator component that manages
 //! VM recovery operations using the LifecycleManager pattern.
 
+use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, Semaphore};
 use tracing::{error, info, warn};
-use async_trait::async_trait;
 
 use crate::{
     error::{BlixardError, BlixardResult},
@@ -71,7 +71,10 @@ impl RecoveryCoordinator {
     /// Trigger recovery for a failed VM
     pub async fn trigger_recovery(&self, vm_name: &str, vm_config: &VmConfig) -> BlixardResult<()> {
         if !self.config.enable_auto_recovery {
-            info!("Auto-recovery is disabled, skipping recovery for VM '{}'", vm_name);
+            info!(
+                "Auto-recovery is disabled, skipping recovery for VM '{}'",
+                vm_name
+            );
             return Ok(());
         }
 
@@ -79,7 +82,10 @@ impl RecoveryCoordinator {
         {
             let active = self.active_recoveries.read().await;
             if let Some(recovery) = active.get(vm_name) {
-                if matches!(recovery.status, RecoveryStatus::InProgress | RecoveryStatus::Pending) {
+                if matches!(
+                    recovery.status,
+                    RecoveryStatus::InProgress | RecoveryStatus::Pending
+                ) {
                     info!("Recovery already in progress for VM '{}'", vm_name);
                     return Ok(());
                 }
@@ -119,22 +125,32 @@ impl RecoveryCoordinator {
         let _permit = match self.recovery_semaphore.try_acquire() {
             Ok(permit) => permit,
             Err(_) => {
-                warn!("Too many concurrent recovery operations, queueing recovery for VM '{}'", vm_name);
-                
+                warn!(
+                    "Too many concurrent recovery operations, queueing recovery for VM '{}'",
+                    vm_name
+                );
+
                 // Wait for permit with timeout
                 match tokio::time::timeout(
                     self.config.recovery_timeout,
-                    self.recovery_semaphore.acquire()
-                ).await {
+                    self.recovery_semaphore.acquire(),
+                )
+                .await
+                {
                     Ok(Ok(permit)) => permit,
                     Ok(Err(_)) => {
                         error!("Recovery semaphore closed for VM '{}'", vm_name);
-                        self.mark_recovery_failed(vm_name, "Recovery semaphore closed").await;
+                        self.mark_recovery_failed(vm_name, "Recovery semaphore closed")
+                            .await;
                         return;
                     }
                     Err(_) => {
-                        error!("Recovery timeout waiting for semaphore for VM '{}'", vm_name);
-                        self.mark_recovery_failed(vm_name, "Timeout waiting for recovery slot").await;
+                        error!(
+                            "Recovery timeout waiting for semaphore for VM '{}'",
+                            vm_name
+                        );
+                        self.mark_recovery_failed(vm_name, "Timeout waiting for recovery slot")
+                            .await;
                         return;
                     }
                 }
@@ -142,15 +158,17 @@ impl RecoveryCoordinator {
         };
 
         // Update status to in progress
-        self.update_recovery_status(vm_name, RecoveryStatus::InProgress).await;
+        self.update_recovery_status(vm_name, RecoveryStatus::InProgress)
+            .await;
 
         info!("Starting recovery for VM '{}'", vm_name);
 
         // Execute recovery with timeout
         let recovery_result = tokio::time::timeout(
             self.config.recovery_timeout,
-            self.auto_recovery.trigger_recovery(vm_name, vm_config)
-        ).await;
+            self.auto_recovery.trigger_recovery(vm_name, vm_config),
+        )
+        .await;
 
         match recovery_result {
             Ok(Ok(())) => {
@@ -163,9 +181,15 @@ impl RecoveryCoordinator {
 
                 // If migration is enabled and recovery failed, attempt migration
                 if self.config.enable_migration {
-                    info!("Attempting VM migration for failed recovery of VM '{}'", vm_name);
+                    info!(
+                        "Attempting VM migration for failed recovery of VM '{}'",
+                        vm_name
+                    );
                     if let Err(migration_error) = self.attempt_migration(vm_name, vm_config).await {
-                        error!("Migration also failed for VM '{}': {}", vm_name, migration_error);
+                        error!(
+                            "Migration also failed for VM '{}': {}",
+                            vm_name, migration_error
+                        );
                     }
                 }
             }
@@ -183,7 +207,7 @@ impl RecoveryCoordinator {
         // 2. Schedule the VM on the new node
         // 3. Update the VM's node assignment in Raft
         // 4. Clean up the old VM instance
-        
+
         info!("Migration not yet implemented for VM '{}'", vm_name);
         Err(BlixardError::NotImplemented {
             feature: "VM migration".to_string(),
@@ -232,14 +256,22 @@ impl RecoveryCoordinator {
 
     /// List all active recovery operations
     pub async fn list_active_recoveries(&self) -> Vec<RecoveryOperation> {
-        self.active_recoveries.read().await.values().cloned().collect()
+        self.active_recoveries
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect()
     }
 
     /// Clean up completed recovery operations
     pub async fn cleanup_completed_recoveries(&self) {
         let mut active = self.active_recoveries.write().await;
         active.retain(|_, recovery| {
-            !matches!(recovery.status, RecoveryStatus::Completed | RecoveryStatus::Failed | RecoveryStatus::TimedOut)
+            !matches!(
+                recovery.status,
+                RecoveryStatus::Completed | RecoveryStatus::Failed | RecoveryStatus::TimedOut
+            )
         });
     }
 
@@ -270,7 +302,8 @@ impl LifecycleManager for RecoveryCoordinator {
 
     async fn new(_config: Self::Config) -> Result<Self, Self::Error> {
         Err(BlixardError::NotImplemented {
-            feature: "RecoveryCoordinator::new requires dependencies - use new_with_deps instead".to_string(),
+            feature: "RecoveryCoordinator::new requires dependencies - use new_with_deps instead"
+                .to_string(),
         })
     }
 
@@ -312,8 +345,11 @@ impl LifecycleManager for RecoveryCoordinator {
         // Wait for active recoveries to complete or timeout
         let active_count = self.active_recoveries.read().await.len();
         if active_count > 0 {
-            info!("Waiting for {} active recovery operations to complete", active_count);
-            
+            info!(
+                "Waiting for {} active recovery operations to complete",
+                active_count
+            );
+
             // Give active recoveries some time to complete
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
@@ -331,15 +367,14 @@ impl LifecycleManager for RecoveryCoordinator {
     fn is_running(&self) -> bool {
         self.is_running
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::abstractions::time::MockClock;
-    use crate::vm_auto_recovery::RecoveryPolicy;
     use crate::types::Hypervisor;
+    use crate::vm_auto_recovery::RecoveryPolicy;
     use std::time::{Duration, SystemTime};
     use tempfile::TempDir;
 
@@ -370,14 +405,13 @@ mod tests {
 
         let clock = Arc::new(MockClock::new());
 
-        let deps = VmHealthMonitorDependencies::with_clock(
-            node_state,
-            vm_manager,
-            clock,
-        );
+        let deps = VmHealthMonitorDependencies::with_clock(node_state, vm_manager, clock);
 
         let recovery_policy = RecoveryPolicy::default();
-        let auto_recovery = Arc::new(VmAutoRecovery::new(deps.node_state.clone(), recovery_policy));
+        let auto_recovery = Arc::new(VmAutoRecovery::new(
+            deps.node_state.clone(),
+            recovery_policy,
+        ));
 
         let recovery_config = RecoveryCoordinatorConfig {
             recovery_policy: RecoveryPolicy::default(),
@@ -415,7 +449,10 @@ mod tests {
             tenant_id: None,
         };
 
-        coordinator.trigger_recovery("test-vm", &vm_config).await.unwrap();
+        coordinator
+            .trigger_recovery("test-vm", &vm_config)
+            .await
+            .unwrap();
 
         // Give recovery some time to start
         tokio::time::sleep(Duration::from_millis(50)).await;

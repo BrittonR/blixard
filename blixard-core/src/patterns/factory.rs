@@ -13,19 +13,19 @@ use std::sync::Arc;
 pub trait Factory<T>: Send + Sync {
     type Config: Send + Sync;
     type Error: std::error::Error + Send + Sync + 'static;
-    
+
     /// Create an object with the given configuration
     fn create(&self, config: Self::Config) -> Result<T, Self::Error>;
-    
+
     /// Check if this factory can create an object with the given configuration
     fn can_create(&self, config: &Self::Config) -> bool;
-    
+
     /// Get the factory type identifier
     fn factory_type(&self) -> &'static str;
-    
+
     /// Get a human-readable description of what this factory creates
     fn description(&self) -> &'static str;
-    
+
     /// Get the priority of this factory (higher = more preferred)
     fn priority(&self) -> u32 {
         100 // Default priority
@@ -37,19 +37,19 @@ pub trait Factory<T>: Send + Sync {
 pub trait AsyncFactory<T>: Send + Sync {
     type Config: Send + Sync;
     type Error: std::error::Error + Send + Sync + 'static;
-    
+
     /// Create an object with the given configuration asynchronously
     async fn create(&self, config: Self::Config) -> Result<T, Self::Error>;
-    
+
     /// Check if this factory can create an object with the given configuration
     async fn can_create(&self, config: &Self::Config) -> bool;
-    
+
     /// Get the factory type identifier
     fn factory_type(&self) -> &'static str;
-    
+
     /// Get a human-readable description of what this factory creates
     fn description(&self) -> &'static str;
-    
+
     /// Get the priority of this factory (higher = more preferred)
     fn priority(&self) -> u32 {
         100 // Default priority
@@ -58,7 +58,10 @@ pub trait AsyncFactory<T>: Send + Sync {
 
 /// Registry for managing multiple factories of the same type
 pub struct Registry<T> {
-    factories: HashMap<String, Arc<dyn Factory<T, Config = Box<dyn std::any::Any + Send + Sync>, Error = BlixardError>>>,
+    factories: HashMap<
+        String,
+        Arc<dyn Factory<T, Config = Box<dyn std::any::Any + Send + Sync>, Error = BlixardError>>,
+    >,
     default_factory: Option<String>,
 }
 
@@ -74,10 +77,11 @@ impl<T> Registry<T> {
     /// Register a factory with the registry
     pub fn register<F>(&mut self, factory: F) -> BlixardResult<()>
     where
-        F: Factory<T, Config = Box<dyn std::any::Any + Send + Sync>, Error = BlixardError> + 'static,
+        F: Factory<T, Config = Box<dyn std::any::Any + Send + Sync>, Error = BlixardError>
+            + 'static,
     {
         let factory_type = factory.factory_type().to_string();
-        
+
         if self.factories.contains_key(&factory_type) {
             return Err(BlixardError::Internal {
                 message: format!("Factory type '{}' is already registered", factory_type),
@@ -95,18 +99,23 @@ impl<T> Registry<T> {
                 message: format!("Factory type '{}' is not registered", factory_type),
             });
         }
-        
+
         self.default_factory = Some(factory_type.to_string());
         Ok(())
     }
 
     /// Create an object using a specific factory type
-    pub fn create(&self, factory_type: &str, config: Box<dyn std::any::Any + Send + Sync>) -> BlixardResult<T> {
-        let factory = self.factories.get(factory_type).ok_or_else(|| {
-            BlixardError::Internal {
+    pub fn create(
+        &self,
+        factory_type: &str,
+        config: Box<dyn std::any::Any + Send + Sync>,
+    ) -> BlixardResult<T> {
+        let factory = self
+            .factories
+            .get(factory_type)
+            .ok_or_else(|| BlixardError::Internal {
                 message: format!("Factory type '{}' not found", factory_type),
-            }
-        })?;
+            })?;
 
         factory.create(config).map_err(|e| BlixardError::Internal {
             message: format!("Factory creation failed: {}", e),
@@ -115,11 +124,12 @@ impl<T> Registry<T> {
 
     /// Create an object using the default factory
     pub fn create_default(&self, config: Box<dyn std::any::Any + Send + Sync>) -> BlixardResult<T> {
-        let default_type = self.default_factory.as_ref().ok_or_else(|| {
-            BlixardError::Internal {
+        let default_type = self
+            .default_factory
+            .as_ref()
+            .ok_or_else(|| BlixardError::Internal {
                 message: "No default factory type set".to_string(),
-            }
-        })?;
+            })?;
 
         self.create(default_type, config)
     }
@@ -128,7 +138,7 @@ impl<T> Registry<T> {
     pub fn create_best(&self, config: Box<dyn std::any::Any + Send + Sync>) -> BlixardResult<T> {
         // Find all factories that can create with this config
         let mut candidates = Vec::new();
-        
+
         for (factory_type, factory) in &self.factories {
             if factory.can_create(&config) {
                 candidates.push((factory_type.clone(), factory.clone(), factory.priority()));
@@ -185,7 +195,16 @@ pub struct FactoryInfo {
 
 /// Async registry for managing async factories
 pub struct AsyncRegistry<T> {
-    factories: HashMap<String, Arc<dyn AsyncFactory<T, Config = Box<dyn std::any::Any + Send + Sync>, Error = BlixardError>>>,
+    factories: HashMap<
+        String,
+        Arc<
+            dyn AsyncFactory<
+                T,
+                Config = Box<dyn std::any::Any + Send + Sync>,
+                Error = BlixardError,
+            >,
+        >,
+    >,
     default_factory: Option<String>,
 }
 
@@ -201,13 +220,17 @@ impl<T> AsyncRegistry<T> {
     /// Register an async factory with the registry
     pub fn register<F>(&mut self, factory: F) -> BlixardResult<()>
     where
-        F: AsyncFactory<T, Config = Box<dyn std::any::Any + Send + Sync>, Error = BlixardError> + 'static,
+        F: AsyncFactory<T, Config = Box<dyn std::any::Any + Send + Sync>, Error = BlixardError>
+            + 'static,
     {
         let factory_type = factory.factory_type().to_string();
-        
+
         if self.factories.contains_key(&factory_type) {
             return Err(BlixardError::Internal {
-                message: format!("Async factory type '{}' is already registered", factory_type),
+                message: format!(
+                    "Async factory type '{}' is already registered",
+                    factory_type
+                ),
             });
         }
 
@@ -216,16 +239,24 @@ impl<T> AsyncRegistry<T> {
     }
 
     /// Create an object using a specific async factory type
-    pub async fn create(&self, factory_type: &str, config: Box<dyn std::any::Any + Send + Sync>) -> BlixardResult<T> {
-        let factory = self.factories.get(factory_type).ok_or_else(|| {
-            BlixardError::Internal {
+    pub async fn create(
+        &self,
+        factory_type: &str,
+        config: Box<dyn std::any::Any + Send + Sync>,
+    ) -> BlixardResult<T> {
+        let factory = self
+            .factories
+            .get(factory_type)
+            .ok_or_else(|| BlixardError::Internal {
                 message: format!("Async factory type '{}' not found", factory_type),
-            }
-        })?;
+            })?;
 
-        factory.create(config).await.map_err(|e| BlixardError::Internal {
-            message: format!("Async factory creation failed: {}", e),
-        })
+        factory
+            .create(config)
+            .await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Async factory creation failed: {}", e),
+            })
     }
 }
 
@@ -238,7 +269,7 @@ impl<T> Default for AsyncRegistry<T> {
 /// Trait for objects that can be created by a factory
 pub trait Creatable<C>: Sized {
     type Factory: Factory<Self, Config = C>;
-    
+
     /// Get the factory for creating this type
     fn factory() -> Self::Factory;
 }
@@ -246,7 +277,7 @@ pub trait Creatable<C>: Sized {
 /// Trait for objects that can be created by an async factory
 pub trait AsyncCreatable<C>: Sized {
     type AsyncFactory: AsyncFactory<Self, Config = C>;
-    
+
     /// Get the async factory for creating this type
     fn async_factory() -> Self::AsyncFactory;
 }
@@ -265,11 +296,7 @@ where
     F: Fn(C) -> BlixardResult<T> + Send + Sync,
     C: Send + Sync,
 {
-    pub fn new(
-        factory_type: &'static str,
-        description: &'static str,
-        create_fn: F,
-    ) -> Self {
+    pub fn new(factory_type: &'static str, description: &'static str, create_fn: F) -> Self {
         Self {
             factory_type,
             description,
@@ -410,7 +437,7 @@ mod tests {
 
         let result = factory.create(42).unwrap();
         assert_eq!(result, "Number: 42");
-        
+
         assert_eq!(factory.factory_type(), "string_factory");
         assert_eq!(factory.description(), "Creates strings from numbers");
         assert!(factory.can_create(&123));
@@ -418,11 +445,9 @@ mod tests {
 
     #[test]
     fn test_function_factory_with_priority() {
-        let factory = FunctionFactory::new(
-            "high_priority",
-            "High priority factory",
-            |x: i32| Ok(x * 2),
-        ).with_priority(200);
+        let factory =
+            FunctionFactory::new("high_priority", "High priority factory", |x: i32| Ok(x * 2))
+                .with_priority(200);
 
         assert_eq!(factory.priority(), 200);
     }

@@ -23,12 +23,11 @@ async fn test_single_node_with_iroh_default() -> BlixardResult<()> {
     assert!(config.transport_config.is_some());
 
     match &config.transport_config {
-        Some(TransportConfig::Iroh(_)) => {
-            // Expected - Iroh is the default
+        Some(_transport_config) => {
+            // Expected - Iroh is the default transport
         }
-        _ => panic!(
-            "Expected Iroh transport but got {:?}",
-            config.transport_config
+        None => panic!(
+            "Expected transport config but got None"
         ),
     }
 
@@ -47,7 +46,7 @@ async fn test_single_node_with_iroh_default() -> BlixardResult<()> {
 #[tokio::test]
 async fn test_three_node_cluster_with_iroh() -> BlixardResult<()> {
     // Create a 3-node cluster - all should use Iroh by default
-    let mut cluster = TestCluster::new(3).await?;
+    let mut cluster = TestCluster::with_size(3).await?;
 
     // Verify all nodes use Iroh transport
     for i in 1..=3 {
@@ -55,12 +54,12 @@ async fn test_three_node_cluster_with_iroh() -> BlixardResult<()> {
         let config = &node.node().shared().config;
 
         match &config.transport_config {
-            Some(TransportConfig::Iroh(_)) => {
-                // Expected
+            Some(_transport_config) => {
+                // Expected - Iroh transport
             }
-            _ => panic!(
-                "Node {} expected Iroh transport but got {:?}",
-                i, config.transport_config
+            None => panic!(
+                "Node {} expected transport config but got None",
+                i
             ),
         }
     }
@@ -103,7 +102,7 @@ async fn test_three_node_cluster_with_iroh() -> BlixardResult<()> {
 #[tokio::test]
 async fn test_node_join_with_iroh() -> BlixardResult<()> {
     // Start with a 2-node cluster
-    let mut cluster = TestCluster::new(2).await?;
+    let mut cluster = TestCluster::with_size(2).await?;
 
     // Wait for initial cluster to form
     timeout(Duration::from_secs(10), async {
@@ -122,12 +121,11 @@ async fn test_node_join_with_iroh() -> BlixardResult<()> {
     let config = &new_node.node().shared().config;
 
     match &config.transport_config {
-        Some(TransportConfig::Iroh(_)) => {
-            // Expected
+        Some(_transport_config) => {
+            // Expected - Iroh transport
         }
-        _ => panic!(
-            "New node expected Iroh transport but got {:?}",
-            config.transport_config
+        None => panic!(
+            "New node expected transport config but got None"
         ),
     }
 
@@ -172,16 +170,16 @@ async fn test_explicit_iroh_config() -> BlixardResult<()> {
 
     let mut test_node = TestNode::new(1).await?;
     test_node.node_mut().shared().config.transport_config =
-        Some(TransportConfig::Iroh(iroh_config.clone()));
+        Some(iroh_config.clone());
 
     // Verify config is preserved
     match &test_node.node().shared().config.transport_config {
-        Some(TransportConfig::Iroh(config)) => {
+        Some(config) => {
             assert_eq!(config.home_relay, "https://custom.relay.example");
             assert_eq!(config.discovery_port, 12345);
             assert_eq!(config.alpn_protocols, vec!["custom/1".to_string()]);
         }
-        _ => panic!("Expected custom Iroh config"),
+        None => panic!("Expected custom Iroh config"),
     }
 
     Ok(())
@@ -190,7 +188,7 @@ async fn test_explicit_iroh_config() -> BlixardResult<()> {
 #[tokio::test]
 async fn test_raft_messages_over_iroh() -> BlixardResult<()> {
     // Create a cluster and verify Raft messages flow
-    let mut cluster = TestCluster::new(3).await?;
+    let mut cluster = TestCluster::with_size(3).await?;
 
     // Wait for cluster formation
     timeout(Duration::from_secs(10), async {

@@ -12,8 +12,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use blixard_core::{
+    iroh_types::CreateVmRequest,
     test_helpers::{TestCluster, TestNode},
-    types::{CreateVmRequest, VmConfig as BlixardVmConfig},
+    types::VmConfig as BlixardVmConfig,
 };
 use tokio::sync::Mutex;
 
@@ -31,7 +32,7 @@ use blixard_core::linearizability::{
 #[tokio::test]
 async fn test_vm_operations_linearizable() {
     // Initialize test cluster
-    let cluster = TestCluster::new(3).await;
+    let cluster = TestCluster::with_size(3).await;
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await
@@ -219,7 +220,7 @@ async fn test_vm_operations_linearizable() {
 /// Test VM operations under network partition
 #[tokio::test]
 async fn test_vm_operations_with_partition() {
-    let cluster = TestCluster::new(5).await;
+    let cluster = TestCluster::with_size(5).await;
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await
@@ -335,7 +336,7 @@ async fn test_vm_operations_with_partition() {
 /// Test with Byzantine failures
 #[tokio::test]
 async fn test_byzantine_vm_operations() {
-    let cluster = TestCluster::new(5).await;
+    let cluster = TestCluster::with_size(5).await;
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await

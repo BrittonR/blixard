@@ -87,7 +87,7 @@ pub struct PlacementResponse {
 /// Create VM service using ServiceBuilder - eliminates ~600 lines of duplication
 pub fn create_vm_service(node: Arc<SharedNodeState>) -> ServiceProtocolHandler {
     let node_clone = node.clone();
-    
+
     ServiceBuilder::new("vm", node)
         // VM lifecycle operations
         .simple_method("create", {
@@ -182,7 +182,10 @@ async fn handle_create_vm(
         details: Some(format!("VM {} created successfully", request.name)),
     };
 
-    Ok(ServiceResponse::success(response, "VM created successfully"))
+    Ok(ServiceResponse::success(
+        response,
+        "VM created successfully",
+    ))
 }
 
 async fn handle_start_vm(
@@ -197,7 +200,10 @@ async fn handle_start_vm(
         details: Some(format!("VM {} started successfully", request.name)),
     };
 
-    Ok(ServiceResponse::success(response, "VM started successfully"))
+    Ok(ServiceResponse::success(
+        response,
+        "VM started successfully",
+    ))
 }
 
 async fn handle_stop_vm(
@@ -212,7 +218,10 @@ async fn handle_stop_vm(
         details: Some(format!("VM {} stopped successfully", request.name)),
     };
 
-    Ok(ServiceResponse::success(response, "VM stopped successfully"))
+    Ok(ServiceResponse::success(
+        response,
+        "VM stopped successfully",
+    ))
 }
 
 async fn handle_delete_vm(
@@ -227,7 +236,10 @@ async fn handle_delete_vm(
         details: Some(format!("VM {} deleted successfully", request.name)),
     };
 
-    Ok(ServiceResponse::success(response, "VM deleted successfully"))
+    Ok(ServiceResponse::success(
+        response,
+        "VM deleted successfully",
+    ))
 }
 
 async fn handle_list_vms(
@@ -235,20 +247,24 @@ async fn handle_list_vms(
     request: VmListRequest,
 ) -> BlixardResult<ServiceResponse<VmListResponse>> {
     let vms = node.list_vms().await?;
-    
+
     // Convert VmState to VmInfo
-    let vm_infos: Vec<VmInfo> = vms.into_iter().map(|vm| VmInfo {
-        name: vm.name,
-        state: vm.status as i32,
-        node_id: vm.node_id,
-        vcpus: vm.config.vcpus,
-        memory_mb: vm.config.memory,
-        ip_address: vm.config.ip_address.unwrap_or_default(),
-    }).collect();
-    
+    let vm_infos: Vec<VmInfo> = vms
+        .into_iter()
+        .map(|vm| VmInfo {
+            name: vm.name,
+            state: vm.status as i32,
+            node_id: vm.node_id,
+            vcpus: vm.config.vcpus,
+            memory_mb: vm.config.memory,
+            ip_address: vm.config.ip_address.unwrap_or_default(),
+        })
+        .collect();
+
     // Apply filtering if requested
     let filtered_vms = if let Some(filter) = request.filter {
-        vm_infos.into_iter()
+        vm_infos
+            .into_iter()
             .filter(|vm| vm.name.contains(&filter))
             .collect()
     } else {
@@ -261,7 +277,10 @@ async fn handle_list_vms(
         total_count,
     };
 
-    Ok(ServiceResponse::success(response, "VMs listed successfully"))
+    Ok(ServiceResponse::success(
+        response,
+        "VMs listed successfully",
+    ))
 }
 
 async fn handle_get_vm_status(
@@ -269,7 +288,7 @@ async fn handle_get_vm_status(
     request: VmOperationRequest,
 ) -> BlixardResult<ServiceResponse<VmStatusResponse>> {
     let vm_state = node.get_vm_info(&request.name).await?;
-    
+
     // Convert VmState to VmInfo
     let vm_info = Some(VmInfo {
         name: vm_state.name,
@@ -279,7 +298,7 @@ async fn handle_get_vm_status(
         memory_mb: vm_state.config.memory,
         ip_address: vm_state.config.ip_address.unwrap_or_default(),
     });
-    
+
     let response = VmStatusResponse {
         found: true,
         vm_info,
@@ -294,11 +313,12 @@ async fn handle_migrate_vm(
 ) -> BlixardResult<ServiceResponse<VmOperationResponse>> {
     // Implement VM migration logic
     // Parse target_node from string to u64
-    let target_node_id = request.target_node.parse::<u64>()
-        .map_err(|_| crate::error::BlixardError::InvalidInput { 
-            field: "target_node".to_string(), 
-            message: "Must be a valid node ID".to_string() 
-        })?;
+    let target_node_id = request.target_node.parse::<u64>().map_err(|_| {
+        crate::error::BlixardError::InvalidInput {
+            field: "target_node".to_string(),
+            message: "Must be a valid node ID".to_string(),
+        }
+    })?;
     node.migrate_vm(&request.vm_name, target_node_id).await?;
 
     let response = VmOperationResponse {
@@ -310,7 +330,10 @@ async fn handle_migrate_vm(
         )),
     };
 
-    Ok(ServiceResponse::success(response, "VM migrated successfully"))
+    Ok(ServiceResponse::success(
+        response,
+        "VM migrated successfully",
+    ))
 }
 
 async fn handle_create_vm_with_scheduling(
@@ -323,10 +346,16 @@ async fn handle_create_vm_with_scheduling(
     let response = VmOperationResponse {
         vm_name: request.name.clone(),
         operation: "create_with_scheduling".to_string(),
-        details: Some(format!("VM {} created with optimal scheduling", request.name)),
+        details: Some(format!(
+            "VM {} created with optimal scheduling",
+            request.name
+        )),
     };
 
-    Ok(ServiceResponse::success(response, "VM created with scheduling"))
+    Ok(ServiceResponse::success(
+        response,
+        "VM created with scheduling",
+    ))
 }
 
 async fn handle_schedule_placement(
@@ -353,10 +382,10 @@ mod tests {
     async fn test_vm_service_creation() {
         let node = Arc::new(SharedNodeState::new());
         let handler = create_vm_service(node);
-        
+
         assert_eq!(handler.service_name(), "vm");
         let methods = handler.available_methods();
-        
+
         // Verify all methods are registered
         assert!(methods.contains(&"create"));
         assert!(methods.contains(&"start"));
@@ -383,7 +412,7 @@ mod tests {
 
         let result = handle_create_vm(node, request).await;
         assert!(result.is_ok());
-        
+
         let response = result.unwrap();
         assert!(response.success);
         assert_eq!(response.data.as_ref().unwrap().vm_name, "test-vm");
@@ -400,7 +429,7 @@ mod tests {
 
         let result = handle_list_vms(node, request).await;
         assert!(result.is_ok());
-        
+
         let response = result.unwrap();
         assert!(response.success);
         assert!(response.data.is_some());

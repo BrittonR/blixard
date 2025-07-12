@@ -22,7 +22,7 @@ mod common;
 #[tokio::test]
 async fn test_iroh_single_node_startup() -> BlixardResult<()> {
     let mut config = common::test_node_config(1, 0);
-    config.transport_config = Some(TransportConfig::Iroh(IrohConfig::default()));
+    config.transport_config = Some(IrohConfig::default());
 
     let node = Arc::new(SharedNodeState::new(config));
 
@@ -72,7 +72,7 @@ async fn test_iroh_transport_mode_switching() -> BlixardResult<()> {
     // Verify we can create nodes with different transport modes
     let configs = vec![
         ("grpc", TransportConfig::Grpc(Default::default())),
-        ("iroh", TransportConfig::Iroh(Default::default())),
+        ("iroh", Default::default()),
         ("dual", dual_config),
     ];
 

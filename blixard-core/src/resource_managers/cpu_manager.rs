@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::sync::{RwLock, Mutex};
+use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 use tracing::{debug, info};
@@ -93,6 +93,7 @@ struct ManagerState {
     last_health_check: SystemTime,
     total_allocations: u64,
     total_deallocations: u64,
+    #[allow(dead_code)] // Tracked for future allocation failure analysis
     failed_allocations: u64,
     allocation_times: Vec<Duration>,
 }
@@ -162,13 +163,16 @@ impl CpuResourceManager {
         // Initialize core usage tracking
         let mut core_usage = HashMap::new();
         for core_id in 0..total_cores {
-            core_usage.insert(core_id, CoreUsage {
+            core_usage.insert(
                 core_id,
-                allocated_vcpus: 0,
-                utilization_percent: 0.0,
-                exclusive: false,
-                exclusive_tenant: None,
-            });
+                CoreUsage {
+                    core_id,
+                    allocated_vcpus: 0,
+                    utilization_percent: 0.0,
+                    exclusive: false,
+                    exclusive_tenant: None,
+                },
+            );
         }
 
         Self {
@@ -191,7 +195,11 @@ impl CpuResourceManager {
     }
 
     /// Find available cores for allocation using the configured scheduling policy
-    async fn find_available_cores(&self, vcpus_needed: u32, exclusive: bool) -> BlixardResult<Vec<u32>> {
+    async fn find_available_cores(
+        &self,
+        vcpus_needed: u32,
+        exclusive: bool,
+    ) -> BlixardResult<Vec<u32>> {
         let core_usage = self.core_usage.read().await;
         let mut available_cores = Vec::new();
 
@@ -215,10 +223,11 @@ impl CpuResourceManager {
                         }
                     }
                 }
-            },
+            }
             CpuSchedulingPolicy::BestFit => {
                 // Find cores with least fragmentation
-                let mut cores_with_usage: Vec<_> = core_usage.iter()
+                let mut cores_with_usage: Vec<_> = core_usage
+                    .iter()
                     .filter(|(_, core)| {
                         if exclusive {
                             core.allocated_vcpus == 0
@@ -230,17 +239,16 @@ impl CpuResourceManager {
                     .collect();
 
                 cores_with_usage.sort_by_key(|(_, usage)| *usage);
-                
+
                 for (core_id, _) in cores_with_usage.iter().take(vcpus_needed as usize) {
                     available_cores.push(*core_id);
                 }
-            },
+            }
             CpuSchedulingPolicy::RoundRobin => {
                 // Distribute across cores evenly
                 let mut core_ids: Vec<_> = (0..self.total_cores).collect();
-                core_ids.sort_by_key(|id| {
-                    core_usage.get(id).map(|c| c.allocated_vcpus).unwrap_or(0)
-                });
+                core_ids
+                    .sort_by_key(|id| core_usage.get(id).map(|c| c.allocated_vcpus).unwrap_or(0));
 
                 for core_id in core_ids.iter().take(vcpus_needed as usize) {
                     if let Some(core) = core_usage.get(core_id) {
@@ -251,7 +259,7 @@ impl CpuResourceManager {
                         }
                     }
                 }
-            },
+            }
             CpuSchedulingPolicy::AffinityAware => {
                 // Try to keep allocations together for better cache locality
                 let mut consecutive_cores = Vec::new();
@@ -278,12 +286,17 @@ impl CpuResourceManager {
                 }
 
                 if consecutive_cores.len() >= vcpus_needed as usize {
-                    available_cores = consecutive_cores.into_iter().take(vcpus_needed as usize).collect();
+                    available_cores = consecutive_cores
+                        .into_iter()
+                        .take(vcpus_needed as usize)
+                        .collect();
                 } else {
                     // Fallback to first-fit
-                    return self.find_available_cores_first_fit(vcpus_needed, exclusive).await;
+                    return self
+                        .find_available_cores_first_fit(vcpus_needed, exclusive)
+                        .await;
                 }
-            },
+            }
         }
 
         if available_cores.len() < vcpus_needed as usize {
@@ -297,7 +310,11 @@ impl CpuResourceManager {
     }
 
     /// First-fit allocation fallback
-    async fn find_available_cores_first_fit(&self, vcpus_needed: u32, exclusive: bool) -> BlixardResult<Vec<u32>> {
+    async fn find_available_cores_first_fit(
+        &self,
+        vcpus_needed: u32,
+        exclusive: bool,
+    ) -> BlixardResult<Vec<u32>> {
         let core_usage = self.core_usage.read().await;
         let mut available_cores = Vec::new();
 
@@ -329,7 +346,13 @@ impl CpuResourceManager {
     }
 
     /// Allocate CPU cores to an allocation
-    async fn allocate_cores(&self, allocation_id: &ResourceId, cores: Vec<u32>, exclusive: bool, tenant_id: &TenantId) -> BlixardResult<()> {
+    async fn allocate_cores(
+        &self,
+        allocation_id: &ResourceId,
+        cores: Vec<u32>,
+        exclusive: bool,
+        tenant_id: &TenantId,
+    ) -> BlixardResult<()> {
         let mut core_usage = self.core_usage.write().await;
 
         for &core_id in &cores {
@@ -344,7 +367,12 @@ impl CpuResourceManager {
             }
         }
 
-        debug!("Allocated {} cores to {}: {:?}", cores.len(), allocation_id, cores);
+        debug!(
+            "Allocated {} cores to {}: {:?}",
+            cores.len(),
+            allocation_id,
+            cores
+        );
         Ok(())
     }
 
@@ -379,7 +407,9 @@ impl CpuResourceManager {
         let mut active_count = 0;
 
         for allocation in allocations.values() {
-            if allocation.base.status == AllocationStatus::Active || allocation.base.status == AllocationStatus::Reserved {
+            if allocation.base.status == AllocationStatus::Active
+                || allocation.base.status == AllocationStatus::Reserved
+            {
                 total_allocated += allocation.assigned_cores.len() as u64;
                 active_count += 1;
             }
@@ -410,15 +440,15 @@ impl CpuResourceManager {
 
         let handle = tokio::spawn(async move {
             let mut timer = interval(interval_duration);
-            
+
             loop {
                 timer.tick().await;
-                
+
                 // Simulate CPU utilization monitoring
                 let mut total_utilization = 0.0;
                 let mut exclusive_cores = 0;
                 let mut allocated_cores = 0;
-                
+
                 {
                     let mut core_usage_guard = core_usage.write().await;
                     for core in core_usage_guard.values_mut() {
@@ -428,7 +458,7 @@ impl CpuResourceManager {
                             total_utilization += core.utilization_percent;
                             allocated_cores += 1;
                         }
-                        
+
                         if core.exclusive {
                             exclusive_cores += 1;
                         }
@@ -446,7 +476,7 @@ impl CpuResourceManager {
                     let mut metrics_guard = metrics.write().await;
                     metrics_guard.avg_cpu_utilization = avg_utilization;
                     metrics_guard.exclusive_cores = exclusive_cores;
-                    
+
                     // Calculate scheduling efficiency (simplified)
                     metrics_guard.scheduling_efficiency = if allocated_cores > 0 {
                         (avg_utilization / 100.0).min(1.0)
@@ -455,12 +485,18 @@ impl CpuResourceManager {
                     };
                 }
 
-                debug!("CPU monitoring: avg utilization {:.1}%, {} cores allocated", avg_utilization, allocated_cores);
+                debug!(
+                    "CPU monitoring: avg utilization {:.1}%, {} cores allocated",
+                    avg_utilization, allocated_cores
+                );
             }
         });
 
         *self.monitoring_handle.lock().await = Some(handle);
-        info!("CPU monitoring started with interval: {:?}", interval_duration);
+        info!(
+            "CPU monitoring started with interval: {:?}",
+            interval_duration
+        );
         Ok(())
     }
 
@@ -476,18 +512,23 @@ impl CpuResourceManager {
 
         let handle = tokio::spawn(async move {
             let mut timer = interval(interval_duration);
-            
+
             loop {
                 timer.tick().await;
-                
+
                 let health_status = {
                     let metrics_guard = metrics.read().await;
                     let avg_util = metrics_guard.avg_cpu_utilization;
-                    
+
                     if avg_util > 95.0 {
-                        ResourceManagerHealth::Unhealthy("CPU utilization critically high".to_string())
+                        ResourceManagerHealth::Unhealthy(
+                            "CPU utilization critically high".to_string(),
+                        )
                     } else if avg_util > 85.0 {
-                        ResourceManagerHealth::Degraded(format!("CPU utilization at {:.1}%", avg_util))
+                        ResourceManagerHealth::Degraded(format!(
+                            "CPU utilization at {:.1}%",
+                            avg_util
+                        ))
                     } else {
                         ResourceManagerHealth::Healthy
                     }
@@ -504,7 +545,10 @@ impl CpuResourceManager {
         });
 
         *self.health_check_handle.lock().await = Some(handle);
-        info!("CPU health checks started with interval: {:?}", interval_duration);
+        info!(
+            "CPU health checks started with interval: {:?}",
+            interval_duration
+        );
         Ok(())
     }
 
@@ -532,9 +576,12 @@ impl ResourceManager for CpuResourceManager {
         &self.config
     }
 
-    async fn allocate(&self, request: ResourceAllocationRequest) -> BlixardResult<ResourceAllocation> {
+    async fn allocate(
+        &self,
+        request: ResourceAllocationRequest,
+    ) -> BlixardResult<ResourceAllocation> {
         let start_time = SystemTime::now();
-        
+
         // Validate the request
         if request.resource_type != ResourceType::Cpu {
             return Err(BlixardError::InvalidInput {
@@ -544,14 +591,24 @@ impl ResourceManager for CpuResourceManager {
         }
 
         // Determine if exclusive allocation is requested
-        let exclusive = request.metadata.get("exclusive").map(|v| v == "true").unwrap_or(false);
-        
+        let exclusive = request
+            .metadata
+            .get("exclusive")
+            .map(|v| v == "true")
+            .unwrap_or(false);
+
         // Find available cores
-        let cores = self.find_available_cores(request.amount as u32, exclusive).await?;
-        
+        let cores = self
+            .find_available_cores(request.amount as u32, exclusive)
+            .await?;
+
         // Create base allocation
         let base_allocation = ResourceAllocation {
-            allocation_id: format!("cpu-{}-{}", request.tenant_id, chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)),
+            allocation_id: format!(
+                "cpu-{}-{}",
+                request.tenant_id,
+                chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+            ),
             request: request.clone(),
             allocated_amount: cores.len() as u64,
             allocated_on: Some("cpu".to_string()),
@@ -569,7 +626,13 @@ impl ResourceManager for CpuResourceManager {
         };
 
         // Allocate the cores
-        self.allocate_cores(&base_allocation.allocation_id, cores, exclusive, &request.tenant_id).await?;
+        self.allocate_cores(
+            &base_allocation.allocation_id,
+            cores,
+            exclusive,
+            &request.tenant_id,
+        )
+        .await?;
 
         // Store allocation
         {
@@ -579,11 +642,11 @@ impl ResourceManager for CpuResourceManager {
 
         // Update usage and state
         self.update_usage_stats().await;
-        
+
         {
             let mut state = self.state.write().await;
             state.total_allocations += 1;
-            
+
             if let Ok(duration) = start_time.elapsed() {
                 state.allocation_times.push(duration);
                 if state.allocation_times.len() > 100 {
@@ -608,11 +671,12 @@ impl ResourceManager for CpuResourceManager {
 
         if let Some(cpu_allocation) = allocation {
             // Deallocate the cores
-            self.deallocate_cores(&cpu_allocation.assigned_cores, cpu_allocation.exclusive).await?;
-            
+            self.deallocate_cores(&cpu_allocation.assigned_cores, cpu_allocation.exclusive)
+                .await?;
+
             // Update usage statistics
             self.update_usage_stats().await;
-            
+
             // Update state
             {
                 let mut state = self.state.write().await;
@@ -621,8 +685,8 @@ impl ResourceManager for CpuResourceManager {
 
             info!(
                 "CPU deallocated: {} vCPUs for tenant {} (allocation_id: {})",
-                cpu_allocation.assigned_cores.len(), 
-                cpu_allocation.base.request.tenant_id, 
+                cpu_allocation.assigned_cores.len(),
+                cpu_allocation.base.request.tenant_id,
                 allocation_id
             );
 
@@ -640,9 +704,16 @@ impl ResourceManager for CpuResourceManager {
             return Ok(false);
         }
 
-        let exclusive = request.metadata.get("exclusive").map(|v| v == "true").unwrap_or(false);
-        
-        match self.find_available_cores(request.amount as u32, exclusive).await {
+        let exclusive = request
+            .metadata
+            .get("exclusive")
+            .map(|v| v == "true")
+            .unwrap_or(false);
+
+        match self
+            .find_available_cores(request.amount as u32, exclusive)
+            .await
+        {
             Ok(_) => Ok(true),
             Err(BlixardError::InsufficientResources { .. }) => Ok(false),
             Err(e) => Err(e),
@@ -655,17 +726,28 @@ impl ResourceManager for CpuResourceManager {
 
     async fn get_allocations(&self) -> BlixardResult<Vec<ResourceAllocation>> {
         let allocations = self.allocations.read().await;
-        Ok(allocations.values().map(|cpu_alloc| cpu_alloc.base.clone()).collect())
+        Ok(allocations
+            .values()
+            .map(|cpu_alloc| cpu_alloc.base.clone())
+            .collect())
     }
 
-    async fn get_allocation(&self, allocation_id: &ResourceId) -> BlixardResult<Option<ResourceAllocation>> {
+    async fn get_allocation(
+        &self,
+        allocation_id: &ResourceId,
+    ) -> BlixardResult<Option<ResourceAllocation>> {
         let allocations = self.allocations.read().await;
-        Ok(allocations.get(allocation_id).map(|cpu_alloc| cpu_alloc.base.clone()))
+        Ok(allocations
+            .get(allocation_id)
+            .map(|cpu_alloc| cpu_alloc.base.clone()))
     }
 
     async fn initialize(&self) -> BlixardResult<()> {
-        info!("Initializing CPU resource manager with {} cores", self.total_cores);
-        
+        info!(
+            "Initializing CPU resource manager with {} cores",
+            self.total_cores
+        );
+
         // Initialize usage tracking
         let mut usage = self.usage.write().await;
         usage.total_capacity = self.total_cores as u64;
@@ -678,17 +760,20 @@ impl ResourceManager for CpuResourceManager {
         state.last_health_check = SystemTime::now();
         drop(state);
 
-        info!("CPU resource manager initialized with {} cores", self.total_cores);
+        info!(
+            "CPU resource manager initialized with {} cores",
+            self.total_cores
+        );
         Ok(())
     }
 
     async fn start(&self) -> BlixardResult<()> {
         info!("Starting CPU resource manager");
-        
+
         // Start background tasks
         self.start_monitoring().await?;
         self.start_health_checks().await?;
-        
+
         // Update state
         {
             let mut state = self.state.write().await;
@@ -702,10 +787,10 @@ impl ResourceManager for CpuResourceManager {
 
     async fn stop(&self) -> BlixardResult<()> {
         info!("Stopping CPU resource manager");
-        
+
         // Stop background tasks
         self.stop_background_tasks().await;
-        
+
         // Update state
         {
             let mut state = self.state.write().await;
@@ -746,29 +831,53 @@ impl ResourceManager for CpuResourceManager {
 
     async fn export_telemetry(&self) -> BlixardResult<HashMap<String, serde_json::Value>> {
         let mut telemetry = HashMap::new();
-        
+
         let usage = self.get_usage().await?;
         let metrics = self.metrics.read().await;
         let core_usage = self.core_usage.read().await;
 
         telemetry.insert("resource_type".to_string(), serde_json::json!("cpu"));
-        telemetry.insert("total_cores".to_string(), serde_json::json!(self.total_cores));
-        telemetry.insert("allocated_vcpus".to_string(), serde_json::json!(usage.allocated_amount));
-        telemetry.insert("utilization_percent".to_string(), serde_json::json!(usage.utilization_percent()));
-        telemetry.insert("allocation_count".to_string(), serde_json::json!(usage.allocation_count));
-        telemetry.insert("avg_cpu_utilization".to_string(), serde_json::json!(metrics.avg_cpu_utilization));
-        telemetry.insert("exclusive_cores".to_string(), serde_json::json!(metrics.exclusive_cores));
-        telemetry.insert("scheduling_policy".to_string(), serde_json::json!(format!("{:?}", self.scheduling_policy)));
-        
+        telemetry.insert(
+            "total_cores".to_string(),
+            serde_json::json!(self.total_cores),
+        );
+        telemetry.insert(
+            "allocated_vcpus".to_string(),
+            serde_json::json!(usage.allocated_amount),
+        );
+        telemetry.insert(
+            "utilization_percent".to_string(),
+            serde_json::json!(usage.utilization_percent()),
+        );
+        telemetry.insert(
+            "allocation_count".to_string(),
+            serde_json::json!(usage.allocation_count),
+        );
+        telemetry.insert(
+            "avg_cpu_utilization".to_string(),
+            serde_json::json!(metrics.avg_cpu_utilization),
+        );
+        telemetry.insert(
+            "exclusive_cores".to_string(),
+            serde_json::json!(metrics.exclusive_cores),
+        );
+        telemetry.insert(
+            "scheduling_policy".to_string(),
+            serde_json::json!(format!("{:?}", self.scheduling_policy)),
+        );
+
         // Core-specific metrics
-        let core_metrics: Vec<serde_json::Value> = core_usage.values()
-            .map(|core| serde_json::json!({
-                "core_id": core.core_id,
-                "allocated_vcpus": core.allocated_vcpus,
-                "utilization_percent": core.utilization_percent,
-                "exclusive": core.exclusive,
-                "exclusive_tenant": core.exclusive_tenant
-            }))
+        let core_metrics: Vec<serde_json::Value> = core_usage
+            .values()
+            .map(|core| {
+                serde_json::json!({
+                    "core_id": core.core_id,
+                    "allocated_vcpus": core.allocated_vcpus,
+                    "utilization_percent": core.utilization_percent,
+                    "exclusive": core.exclusive,
+                    "exclusive_tenant": core.exclusive_tenant
+                })
+            })
             .collect();
         telemetry.insert("core_usage".to_string(), serde_json::json!(core_metrics));
 
@@ -783,9 +892,11 @@ impl ResourceManager for CpuResourceManager {
             });
         }
 
-        info!("CPU limits update requested: hard={}, soft={}, overcommit={}",
-            limits.hard_limit, limits.soft_limit, limits.overcommit_ratio);
-        
+        info!(
+            "CPU limits update requested: hard={}, soft={}, overcommit={}",
+            limits.hard_limit, limits.soft_limit, limits.overcommit_ratio
+        );
+
         // Update usage capacity
         {
             let mut usage = self.usage.write().await;
@@ -820,7 +931,7 @@ impl ResourceManager for CpuResourceManager {
 
     async fn update_config(&self, config: ResourceManagerConfig) -> BlixardResult<()> {
         self.validate_config(&config).await?;
-        
+
         info!("CPU manager configuration update validated");
         Ok(())
     }
@@ -910,7 +1021,7 @@ mod tests {
 
         // Test deallocation
         manager.deallocate(&allocation.allocation_id).await.unwrap();
-        
+
         let usage_after = manager.get_usage().await.unwrap();
         assert_eq!(usage_after.allocated_amount, 0);
         assert_eq!(usage_after.allocation_count, 0);
@@ -962,6 +1073,9 @@ mod tests {
 
         let result = manager.allocate(large_request).await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), BlixardError::InsufficientResources { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            BlixardError::InsufficientResources { .. }
+        ));
     }
 }

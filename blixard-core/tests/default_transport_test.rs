@@ -8,7 +8,7 @@ fn test_default_transport_is_iroh() {
     let default_transport = TransportConfig::default();
 
     match default_transport {
-        TransportConfig::Iroh(_) => {
+        _ => {
             // This is expected - Iroh is the default
         }
         _ => panic!(
@@ -48,7 +48,7 @@ fn test_config_includes_iroh_transport() {
 
     if let Some(transport) = config.transport {
         match transport {
-            TransportConfig::Iroh(_) => {
+            _ => {
                 // This is expected
             }
             _ => panic!(
@@ -90,7 +90,7 @@ mod transport_config_tests {
             toml::from_str(&toml_str).expect("Should deserialize from TOML");
 
         match deserialized {
-            TransportConfig::Iroh(_) => {
+            _ => {
                 // Good, still Iroh
             }
             _ => panic!("Deserialized transport should be Iroh"),

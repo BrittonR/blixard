@@ -270,8 +270,11 @@ impl TransactionLogReader {
             let reader = BufReader::new(file);
             let mut lines = reader.lines();
 
-            while let Some(line) = lines.next_line().await
-                .storage_context("read transaction log line")? {
+            while let Some(line) = lines
+                .next_line()
+                .await
+                .storage_context("read transaction log line")?
+            {
                 if line.trim().is_empty() {
                     continue;
                 }
@@ -312,8 +315,11 @@ impl TransactionLogReader {
             let reader = BufReader::new(file);
             let mut lines = reader.lines();
 
-            while let Some(line) = lines.next_line().await
-                .storage_context("read transaction log line")? {
+            while let Some(line) = lines
+                .next_line()
+                .await
+                .storage_context("read transaction log line")?
+            {
                 if line.trim().is_empty() {
                     continue;
                 }
@@ -338,10 +344,9 @@ impl TransactionLogReader {
     async fn list_log_files(&self) -> BlixardResult<Vec<PathBuf>> {
         let mut log_files = Vec::new();
 
-        let mut entries =
-            tokio::fs::read_dir(&self.log_dir)
-                .await
-                .file_context("read transaction log directory", &self.log_dir)?;
+        let mut entries = tokio::fs::read_dir(&self.log_dir)
+            .await
+            .file_context("read transaction log directory", &self.log_dir)?;
 
         while let Some(entry) = entries
             .next_entry()

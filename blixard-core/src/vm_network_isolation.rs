@@ -4,9 +4,9 @@
 //! to ensure VMs cannot access cluster internal networks and are properly isolated
 //! from each other based on tenant boundaries.
 
+use crate::abstractions::command::{CommandExecutor, CommandOptions, TokioCommandExecutor};
 use crate::error::{BlixardError, BlixardResult};
 use crate::types::VmConfig;
-use crate::abstractions::command::{CommandExecutor, CommandOptions, TokioCommandExecutor};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -624,15 +624,22 @@ table inet blixard {{
     async fn run_iptables(&self, args: &[&str], ignore_errors: bool) -> BlixardResult<()> {
         debug!("Running iptables command: iptables {}", args.join(" "));
 
-        let output = self.command_executor
-            .execute("iptables", args, CommandOptions::new().with_output_capture())
+        let output = self
+            .command_executor
+            .execute(
+                "iptables",
+                args,
+                CommandOptions::new().with_output_capture(),
+            )
             .await
             .map_err(|e| BlixardError::Internal {
                 message: format!("Failed to run iptables: {}", e),
             })?;
 
         if !output.success && !ignore_errors {
-            let stderr = output.stderr_string().unwrap_or_else(|_| "Unknown error".to_string());
+            let stderr = output
+                .stderr_string()
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(BlixardError::Internal {
                 message: format!("iptables command failed: {}", stderr),
             });
@@ -645,7 +652,8 @@ table inet blixard {{
     async fn run_nft(&self, args: &[&str], ignore_errors: bool) -> BlixardResult<()> {
         debug!("Running nft command: nft {}", args.join(" "));
 
-        let output = self.command_executor
+        let output = self
+            .command_executor
             .execute("nft", args, CommandOptions::new().with_output_capture())
             .await
             .map_err(|e| BlixardError::Internal {
@@ -653,7 +661,9 @@ table inet blixard {{
             })?;
 
         if !output.success && !ignore_errors {
-            let stderr = output.stderr_string().unwrap_or_else(|_| "Unknown error".to_string());
+            let stderr = output
+                .stderr_string()
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(BlixardError::Internal {
                 message: format!("nft command failed: {}", stderr),
             });
@@ -666,7 +676,8 @@ table inet blixard {{
     async fn run_nft_rules(&self, rules: &str) -> BlixardResult<()> {
         debug!("Applying nft rules:\n{}", rules);
 
-        let output = self.command_executor
+        let output = self
+            .command_executor
             .execute(
                 "nft",
                 &["-f", "-"],
@@ -680,7 +691,9 @@ table inet blixard {{
             })?;
 
         if !output.success {
-            let stderr = output.stderr_string().unwrap_or_else(|_| "Unknown error".to_string());
+            let stderr = output
+                .stderr_string()
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(BlixardError::Internal {
                 message: format!("nft rules failed: {}", stderr),
             });
@@ -693,7 +706,8 @@ table inet blixard {{
     pub async fn get_rules(&self) -> BlixardResult<String> {
         match self.config.backend {
             FirewallBackend::Iptables => {
-                let output = self.command_executor
+                let output = self
+                    .command_executor
                     .execute(
                         "iptables",
                         &["-t", "filter", "-L", "-n", "-v"],
@@ -707,7 +721,8 @@ table inet blixard {{
                 output.stdout_string()
             }
             FirewallBackend::Nftables => {
-                let output = self.command_executor
+                let output = self
+                    .command_executor
                     .execute(
                         "nft",
                         &["list", "table", "inet", "blixard"],
@@ -725,7 +740,9 @@ table inet blixard {{
 }
 
 /// Check if running with sufficient privileges for firewall management
-pub async fn check_firewall_privileges(command_executor: &dyn CommandExecutor) -> BlixardResult<()> {
+pub async fn check_firewall_privileges(
+    command_executor: &dyn CommandExecutor,
+) -> BlixardResult<()> {
     // Check if we can run iptables/nft commands
     let output = command_executor
         .execute("id", &["-u"], CommandOptions::new().with_output_capture())
@@ -734,14 +751,16 @@ pub async fn check_firewall_privileges(command_executor: &dyn CommandExecutor) -
             message: format!("Failed to check user ID: {}", e),
         })?;
 
-    let uid = output.stdout_string()?
-        .trim()
-        .to_string();
+    let uid = output.stdout_string()?.trim().to_string();
 
     if uid != "0" {
         // Check if we have CAP_NET_ADMIN capability
         let cap_result = command_executor
-            .execute("capsh", &["--print"], CommandOptions::new().with_output_capture())
+            .execute(
+                "capsh",
+                &["--print"],
+                CommandOptions::new().with_output_capture(),
+            )
             .await;
 
         if let Ok(cap_output) = cap_result {
@@ -766,7 +785,7 @@ pub async fn check_firewall_privileges(command_executor: &dyn CommandExecutor) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::abstractions::command::{MockCommandExecutor, CommandOutput};
+    use crate::abstractions::command::{CommandOutput, MockCommandExecutor};
     use std::time::Duration;
 
     #[test]
@@ -789,10 +808,10 @@ mod tests {
     async fn test_run_iptables_success() {
         let config = NetworkIsolationConfig::default();
         let mock_executor = Arc::new(MockCommandExecutor::new());
-        
+
         // Set up expectation for successful iptables command
         mock_executor.expect(
-            "iptables", 
+            "iptables",
             &["-t", "filter", "-N", "TEST_CHAIN"],
             Ok(CommandOutput {
                 status: 0,
@@ -800,12 +819,14 @@ mod tests {
                 stderr: vec![],
                 success: true,
                 duration: Duration::from_millis(10),
-            })
+            }),
         );
 
         let manager = NetworkIsolationManager::with_executor(config, mock_executor.clone());
-        let result = manager.run_iptables(&["-t", "filter", "-N", "TEST_CHAIN"], false).await;
-        
+        let result = manager
+            .run_iptables(&["-t", "filter", "-N", "TEST_CHAIN"], false)
+            .await;
+
         assert!(result.is_ok());
         mock_executor.verify().unwrap();
     }
@@ -814,10 +835,10 @@ mod tests {
     async fn test_run_iptables_failure() {
         let config = NetworkIsolationConfig::default();
         let mock_executor = Arc::new(MockCommandExecutor::new());
-        
+
         // Set up expectation for failed iptables command
         mock_executor.expect(
-            "iptables", 
+            "iptables",
             &["-t", "filter", "-N", "INVALID_CHAIN"],
             Ok(CommandOutput {
                 status: 1,
@@ -825,12 +846,14 @@ mod tests {
                 stderr: b"Chain already exists".to_vec(),
                 success: false,
                 duration: Duration::from_millis(10),
-            })
+            }),
         );
 
         let manager = NetworkIsolationManager::with_executor(config, mock_executor.clone());
-        let result = manager.run_iptables(&["-t", "filter", "-N", "INVALID_CHAIN"], false).await;
-        
+        let result = manager
+            .run_iptables(&["-t", "filter", "-N", "INVALID_CHAIN"], false)
+            .await;
+
         assert!(result.is_err());
         mock_executor.verify().unwrap();
     }
@@ -839,10 +862,10 @@ mod tests {
     async fn test_run_nft_success() {
         let config = NetworkIsolationConfig::default();
         let mock_executor = Arc::new(MockCommandExecutor::new());
-        
+
         // Set up expectation for successful nft command
         mock_executor.expect(
-            "nft", 
+            "nft",
             &["add", "table", "inet", "test"],
             Ok(CommandOutput {
                 status: 0,
@@ -850,12 +873,14 @@ mod tests {
                 stderr: vec![],
                 success: true,
                 duration: Duration::from_millis(10),
-            })
+            }),
         );
 
         let manager = NetworkIsolationManager::with_executor(config, mock_executor.clone());
-        let result = manager.run_nft(&["add", "table", "inet", "test"], false).await;
-        
+        let result = manager
+            .run_nft(&["add", "table", "inet", "test"], false)
+            .await;
+
         assert!(result.is_ok());
         mock_executor.verify().unwrap();
     }
@@ -864,10 +889,10 @@ mod tests {
     async fn test_run_nft_rules_with_stdin() {
         let config = NetworkIsolationConfig::default();
         let mock_executor = Arc::new(MockCommandExecutor::new());
-        
+
         // Set up expectation for nft command with stdin
         mock_executor.expect(
-            "nft", 
+            "nft",
             &["-f", "-"],
             Ok(CommandOutput {
                 status: 0,
@@ -875,13 +900,13 @@ mod tests {
                 stderr: vec![],
                 success: true,
                 duration: Duration::from_millis(20),
-            })
+            }),
         );
 
         let manager = NetworkIsolationManager::with_executor(config, mock_executor.clone());
         let rules = "table inet test { chain input { type filter hook input priority 0; } }";
         let result = manager.run_nft_rules(rules).await;
-        
+
         assert!(result.is_ok());
         mock_executor.verify().unwrap();
     }
@@ -891,7 +916,7 @@ mod tests {
         let mut config = NetworkIsolationConfig::default();
         config.backend = FirewallBackend::Iptables;
         let mock_executor = Arc::new(MockCommandExecutor::new());
-        
+
         // Set up expectation for iptables list command
         mock_executor.expect(
             "iptables", 
@@ -907,7 +932,7 @@ mod tests {
 
         let manager = NetworkIsolationManager::with_executor(config, mock_executor.clone());
         let result = manager.get_rules().await;
-        
+
         assert!(result.is_ok());
         let rules_output = result.unwrap();
         assert!(rules_output.contains("Chain INPUT"));
@@ -918,7 +943,7 @@ mod tests {
     async fn test_get_rules_nftables() {
         let config = NetworkIsolationConfig::default(); // defaults to nftables
         let mock_executor = Arc::new(MockCommandExecutor::new());
-        
+
         // Set up expectation for nft list command
         mock_executor.expect(
             "nft", 
@@ -934,7 +959,7 @@ mod tests {
 
         let manager = NetworkIsolationManager::with_executor(config, mock_executor.clone());
         let result = manager.get_rules().await;
-        
+
         assert!(result.is_ok());
         let rules_output = result.unwrap();
         assert!(rules_output.contains("table inet blixard"));
@@ -944,10 +969,10 @@ mod tests {
     #[tokio::test]
     async fn test_check_firewall_privileges_root() {
         let mock_executor = MockCommandExecutor::new();
-        
+
         // Set up expectation for id command returning root (uid 0)
         mock_executor.expect(
-            "id", 
+            "id",
             &["-u"],
             Ok(CommandOutput {
                 status: 0,
@@ -955,11 +980,11 @@ mod tests {
                 stderr: vec![],
                 success: true,
                 duration: Duration::from_millis(5),
-            })
+            }),
         );
 
         let result = check_firewall_privileges(&mock_executor).await;
-        
+
         assert!(result.is_ok());
         mock_executor.verify().unwrap();
     }
@@ -967,10 +992,10 @@ mod tests {
     #[tokio::test]
     async fn test_check_firewall_privileges_non_root_with_caps() {
         let mock_executor = MockCommandExecutor::new();
-        
+
         // Set up expectations for non-root user with capabilities
         mock_executor.expect(
-            "id", 
+            "id",
             &["-u"],
             Ok(CommandOutput {
                 status: 0,
@@ -978,11 +1003,11 @@ mod tests {
                 stderr: vec![],
                 success: true,
                 duration: Duration::from_millis(5),
-            })
+            }),
         );
-        
+
         mock_executor.expect(
-            "capsh", 
+            "capsh",
             &["--print"],
             Ok(CommandOutput {
                 status: 0,
@@ -990,11 +1015,11 @@ mod tests {
                 stderr: vec![],
                 success: true,
                 duration: Duration::from_millis(8),
-            })
+            }),
         );
 
         let result = check_firewall_privileges(&mock_executor).await;
-        
+
         assert!(result.is_ok());
         mock_executor.verify().unwrap();
     }
@@ -1002,10 +1027,10 @@ mod tests {
     #[tokio::test]
     async fn test_check_firewall_privileges_insufficient() {
         let mock_executor = MockCommandExecutor::new();
-        
+
         // Set up expectations for non-root user without capabilities
         mock_executor.expect(
-            "id", 
+            "id",
             &["-u"],
             Ok(CommandOutput {
                 status: 0,
@@ -1013,11 +1038,11 @@ mod tests {
                 stderr: vec![],
                 success: true,
                 duration: Duration::from_millis(5),
-            })
+            }),
         );
-        
+
         mock_executor.expect(
-            "capsh", 
+            "capsh",
             &["--print"],
             Ok(CommandOutput {
                 status: 0,
@@ -1025,11 +1050,11 @@ mod tests {
                 stderr: vec![],
                 success: true,
                 duration: Duration::from_millis(8),
-            })
+            }),
         );
 
         let result = check_firewall_privileges(&mock_executor).await;
-        
+
         assert!(result.is_err());
         if let Err(BlixardError::Security { message }) = result {
             assert!(message.contains("CAP_NET_ADMIN"));

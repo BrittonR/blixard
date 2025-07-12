@@ -7,8 +7,8 @@
 //! - Manages per-tenant and per-node limits
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::resource_quotas::*;
 use crate::raft_storage::Storage;
+use crate::resource_quotas::*;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::{Duration, SystemTime};
@@ -36,6 +36,7 @@ pub struct QuotaManager {
     storage: Arc<dyn Storage>,
 
     /// Cleanup timer for expired rate limit entries
+    #[allow(dead_code)] // Timer stored for future cleanup task implementation
     cleanup_interval: Option<Interval>,
 }
 
@@ -66,9 +67,11 @@ struct TenantRequestTracking {
 #[derive(Debug)]
 struct GlobalRequestTracking {
     /// Total requests per second globally
+    #[allow(dead_code)] // Reserved for future global rate limiting implementation
     global_rps: u32,
 
     /// Last reset timestamp
+    #[allow(dead_code)] // Reserved for future global rate limiting implementation
     last_reset: SystemTime,
 }
 

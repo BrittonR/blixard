@@ -19,7 +19,11 @@ pub enum BackoffStrategy {
     /// Linear increase in delay (base * attempt)
     Linear { base: Duration, max: Duration },
     /// Exponential increase in delay (base * 2^attempt)
-    Exponential { base: Duration, max: Duration, multiplier: f64 },
+    Exponential {
+        base: Duration,
+        max: Duration,
+        multiplier: f64,
+    },
     /// Fibonacci sequence delays
     Fibonacci { base: Duration, max: Duration },
     /// Custom backoff function
@@ -31,25 +35,29 @@ impl BackoffStrategy {
     pub fn delay(&self, attempt: u32) -> Duration {
         match self {
             BackoffStrategy::Fixed(duration) => *duration,
-            
+
             BackoffStrategy::Linear { base, max } => {
                 let delay = base.saturating_mul(attempt);
                 std::cmp::min(delay, *max)
             }
-            
-            BackoffStrategy::Exponential { base, max, multiplier } => {
+
+            BackoffStrategy::Exponential {
+                base,
+                max,
+                multiplier,
+            } => {
                 let factor = multiplier.powf(attempt.saturating_sub(1) as f64);
                 let delay_ms = (base.as_millis() as f64 * factor) as u64;
                 let delay = Duration::from_millis(delay_ms);
                 std::cmp::min(delay, *max)
             }
-            
+
             BackoffStrategy::Fibonacci { base, max } => {
                 let fib = fibonacci(attempt);
                 let delay = base.saturating_mul(fib);
                 std::cmp::min(delay, *max)
             }
-            
+
             BackoffStrategy::Custom(f) => f(attempt),
         }
     }
@@ -101,7 +109,7 @@ impl RetryConfig {
             ..Default::default()
         }
     }
-    
+
     /// Create an exponential backoff retry config
     pub fn exponential(attempts: u32) -> Self {
         Self {
@@ -120,10 +128,10 @@ impl RetryConfig {
 fn default_is_retryable(error: &BlixardError) -> bool {
     matches!(
         error,
-        BlixardError::NetworkError(_) |
-        BlixardError::Timeout { .. } |
-        BlixardError::ConnectionError { .. } |
-        BlixardError::TemporaryFailure { .. }
+        BlixardError::NetworkError(_)
+            | BlixardError::Timeout { .. }
+            | BlixardError::ConnectionError { .. }
+            | BlixardError::TemporaryFailure { .. }
     )
 }
 
@@ -132,10 +140,10 @@ fn default_is_retryable(error: &BlixardError) -> bool {
 pub trait Retryable {
     /// The output type of the operation
     type Output;
-    
+
     /// Execute the operation
     async fn execute(&mut self) -> BlixardResult<Self::Output>;
-    
+
     /// Optional callback when retry occurs
     fn on_retry(&mut self, attempt: u32, error: &BlixardError, delay: Duration) {
         warn!(
@@ -153,10 +161,10 @@ where
     let mut attempt = 0;
     let mut total_delay = Duration::ZERO;
     let _start_time = tokio::time::Instant::now();
-    
+
     loop {
         attempt += 1;
-        
+
         match operation().await {
             Ok(result) => {
                 if attempt > 1 {
@@ -170,22 +178,23 @@ where
                     warn!("Max retry attempts ({}) reached", config.max_attempts);
                     return Err(error);
                 }
-                
+
                 if !(config.is_retryable)(&error) {
                     debug!("Error is not retryable: {}", error);
                     return Err(error);
                 }
-                
+
                 // Calculate delay
                 let mut delay = config.backoff.delay(attempt);
-                
+
                 // Add jitter if configured
                 if config.jitter {
                     use rand::Rng;
                     let jitter_factor = rand::thread_rng().gen_range(0.5..1.5);
-                    delay = Duration::from_millis((delay.as_millis() as f64 * jitter_factor) as u64);
+                    delay =
+                        Duration::from_millis((delay.as_millis() as f64 * jitter_factor) as u64);
                 }
-                
+
                 // Check total delay limit
                 total_delay = total_delay.saturating_add(delay);
                 if let Some(max_total) = config.max_total_delay {
@@ -194,12 +203,12 @@ where
                         return Err(error);
                     }
                 }
-                
+
                 warn!(
                     "Retry attempt {}/{} after error: {} (waiting {:?})",
                     attempt, config.max_attempts, error, delay
                 );
-                
+
                 sleep(delay).await;
             }
         }
@@ -209,7 +218,8 @@ where
 /// Retry builder for more complex retry scenarios
 pub struct RetryBuilder<T> {
     config: RetryConfig,
-    operation: Option<Box<dyn FnMut() -> Pin<Box<dyn Future<Output = BlixardResult<T>> + Send>> + Send>>,
+    operation:
+        Option<Box<dyn FnMut() -> Pin<Box<dyn Future<Output = BlixardResult<T>> + Send>> + Send>>,
 }
 
 impl<T> RetryBuilder<T> {
@@ -220,37 +230,37 @@ impl<T> RetryBuilder<T> {
             operation: None,
         }
     }
-    
+
     /// Set the maximum number of attempts
     pub fn max_attempts(mut self, attempts: u32) -> Self {
         self.config.max_attempts = attempts;
         self
     }
-    
+
     /// Set the backoff strategy
     pub fn backoff(mut self, strategy: BackoffStrategy) -> Self {
         self.config.backoff = strategy;
         self
     }
-    
+
     /// Enable or disable jitter
     pub fn jitter(mut self, enabled: bool) -> Self {
         self.config.jitter = enabled;
         self
     }
-    
+
     /// Set the maximum total delay
     pub fn max_total_delay(mut self, duration: Duration) -> Self {
         self.config.max_total_delay = Some(duration);
         self
     }
-    
+
     /// Set the retryable error checker
     pub fn is_retryable(mut self, f: fn(&BlixardError) -> bool) -> Self {
         self.config.is_retryable = f;
         self
     }
-    
+
     /// Set the operation to retry
     pub fn operation<F>(mut self, f: F) -> Self
     where
@@ -259,14 +269,16 @@ impl<T> RetryBuilder<T> {
         self.operation = Some(Box::new(f));
         self
     }
-    
+
     /// Execute the retry operation
     pub async fn execute(mut self) -> BlixardResult<T> {
-        let operation = self.operation.take()
+        let operation = self
+            .operation
+            .take()
             .ok_or_else(|| BlixardError::Internal {
                 message: "No operation provided to retry".to_string(),
             })?;
-            
+
         retry(self.config, operation).await
     }
 }
@@ -292,7 +304,7 @@ fn fibonacci(n: u32) -> u32 {
 /// Convenience functions for common retry patterns
 pub mod presets {
     use super::*;
-    
+
     /// Quick retry for network operations
     pub async fn retry_network<F, T>(operation: F) -> BlixardResult<T>
     where
@@ -307,17 +319,19 @@ pub mod presets {
             },
             jitter: true,
             max_total_delay: Some(Duration::from_secs(30)),
-            is_retryable: |e| matches!(
-                e,
-                BlixardError::NetworkError(_) |
-                BlixardError::ConnectionError { .. } |
-                BlixardError::Timeout { .. }
-            ),
+            is_retryable: |e| {
+                matches!(
+                    e,
+                    BlixardError::NetworkError(_)
+                        | BlixardError::ConnectionError { .. }
+                        | BlixardError::Timeout { .. }
+                )
+            },
         };
-        
+
         retry(config, operation).await
     }
-    
+
     /// Quick retry for database operations
     pub async fn retry_database<F, T>(operation: F) -> BlixardResult<T>
     where
@@ -328,16 +342,17 @@ pub mod presets {
             backoff: BackoffStrategy::Fixed(Duration::from_millis(100)),
             jitter: false,
             max_total_delay: Some(Duration::from_secs(5)),
-            is_retryable: |e| matches!(
-                e,
-                BlixardError::DatabaseError { .. } |
-                BlixardError::TemporaryFailure { .. }
-            ),
+            is_retryable: |e| {
+                matches!(
+                    e,
+                    BlixardError::DatabaseError { .. } | BlixardError::TemporaryFailure { .. }
+                )
+            },
         };
-        
+
         retry(config, operation).await
     }
-    
+
     /// Aggressive retry for critical operations
     pub async fn retry_critical<F, T>(operation: F) -> BlixardResult<T>
     where
@@ -351,14 +366,16 @@ pub mod presets {
             },
             jitter: true,
             max_total_delay: Some(Duration::from_secs(300)), // 5 minutes
-            is_retryable: |e| !matches!(
-                e,
-                BlixardError::InvalidInput { .. } |
-                BlixardError::NotImplemented { .. } |
-                BlixardError::ConfigError(_)
-            ),
+            is_retryable: |e| {
+                !matches!(
+                    e,
+                    BlixardError::InvalidInput { .. }
+                        | BlixardError::NotImplemented { .. }
+                        | BlixardError::ConfigError(_)
+                )
+            },
         };
-        
+
         retry(config, operation).await
     }
 }
@@ -368,30 +385,30 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
-    
+
     #[tokio::test]
     async fn test_successful_on_first_attempt() {
         let config = RetryConfig::fixed(3, Duration::from_millis(10));
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = counter.clone();
-        
+
         let result = retry(config, move || {
             let count = counter_clone.fetch_add(1, Ordering::SeqCst);
-            Box::pin(async move {
-                Ok(count)
-            })
-        }).await.unwrap();
-        
+            Box::pin(async move { Ok(count) })
+        })
+        .await
+        .unwrap();
+
         assert_eq!(result, 0);
         assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
-    
+
     #[tokio::test]
     async fn test_retry_on_failure() {
         let config = RetryConfig::fixed(3, Duration::from_millis(10));
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = counter.clone();
-        
+
         let result = retry(config, move || {
             let count = counter_clone.fetch_add(1, Ordering::SeqCst);
             Box::pin(async move {
@@ -401,31 +418,34 @@ mod tests {
                     Ok(count)
                 }
             })
-        }).await.unwrap();
-        
+        })
+        .await
+        .unwrap();
+
         assert_eq!(result, 2);
         assert_eq!(counter.load(Ordering::SeqCst), 3);
     }
-    
+
     #[tokio::test]
     async fn test_max_attempts_exceeded() {
         let config = RetryConfig::fixed(2, Duration::from_millis(10));
-        
+
         let result = retry(config, move || {
-            Box::pin(async move {
-                Err::<(), _>(BlixardError::NetworkError("Always fails".to_string()))
-            })
-        }).await;
-        
+            Box::pin(
+                async move { Err::<(), _>(BlixardError::NetworkError("Always fails".to_string())) },
+            )
+        })
+        .await;
+
         assert!(result.is_err());
     }
-    
+
     #[tokio::test]
     async fn test_non_retryable_error() {
         let config = RetryConfig::fixed(3, Duration::from_millis(10));
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = counter.clone();
-        
+
         let result = retry(config, move || {
             counter_clone.fetch_add(1, Ordering::SeqCst);
             Box::pin(async move {
@@ -435,12 +455,13 @@ mod tests {
                     reason: "Not retryable".to_string(),
                 })
             })
-        }).await;
-        
+        })
+        .await;
+
         assert!(result.is_err());
         assert_eq!(counter.load(Ordering::SeqCst), 1); // Only one attempt
     }
-    
+
     #[tokio::test]
     async fn test_exponential_backoff() {
         let start = tokio::time::Instant::now();
@@ -454,24 +475,25 @@ mod tests {
             jitter: false,
             ..Default::default()
         };
-        
+
         let _ = retry(config, move || {
-            Box::pin(async move {
-                Err::<(), _>(BlixardError::NetworkError("Always fails".to_string()))
-            })
-        }).await;
-        
+            Box::pin(
+                async move { Err::<(), _>(BlixardError::NetworkError("Always fails".to_string())) },
+            )
+        })
+        .await;
+
         let elapsed = start.elapsed();
         // Should have delays of 10ms and 20ms = 30ms total (plus some overhead)
         assert!(elapsed >= Duration::from_millis(30));
         assert!(elapsed < Duration::from_millis(100));
     }
-    
+
     #[tokio::test]
     async fn test_retry_builder() {
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = counter.clone();
-        
+
         let result = RetryBuilder::new()
             .max_attempts(5)
             .backoff(BackoffStrategy::Fixed(Duration::from_millis(5)))
@@ -491,7 +513,7 @@ mod tests {
             .execute()
             .await
             .unwrap();
-        
+
         assert_eq!(result, "Success");
         assert_eq!(counter.load(Ordering::SeqCst), 4);
     }

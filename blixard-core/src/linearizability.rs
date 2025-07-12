@@ -177,7 +177,10 @@ impl RecordingClient {
     }
 
     /// Start a VM with history recording
-    pub async fn start_vm(&self, name: impl Into<String>) -> BlixardResult<Response<StartVmResponse>> {
+    pub async fn start_vm(
+        &self,
+        name: impl Into<String>,
+    ) -> BlixardResult<Response<StartVmResponse>> {
         let name = name.into();
         let op_id = self
             .history
@@ -209,7 +212,10 @@ impl RecordingClient {
     }
 
     /// Stop a VM with history recording
-    pub async fn stop_vm(&self, name: impl Into<String>) -> BlixardResult<Response<StopVmResponse>> {
+    pub async fn stop_vm(
+        &self,
+        name: impl Into<String>,
+    ) -> BlixardResult<Response<StopVmResponse>> {
         let name = name.into();
         let op_id = self
             .history

@@ -6,8 +6,8 @@
 
 use crate::{
     error::BlixardResult,
+    raft_manager::{TaskResult, WorkerStatus},
     types::VmStatus,
-    raft_manager::{WorkerStatus, TaskResult},
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -23,14 +23,14 @@ pub enum NodeEvent {
         commit_index: u64,
         applied_index: u64,
     },
-    
+
     /// Peer connection status has changed
     PeerConnectionChange {
         peer_id: u64,
         address: String,
         connected: bool,
     },
-    
+
     /// VM status has changed
     VmStatusChange {
         vm_name: String,
@@ -38,21 +38,21 @@ pub enum NodeEvent {
         new_status: VmStatus,
         node_id: u64,
     },
-    
+
     /// Worker status has changed
     WorkerStatusChange {
         worker_id: u64,
         old_status: WorkerStatus,
         new_status: WorkerStatus,
     },
-    
+
     /// Task has completed
     TaskCompleted {
         task_id: String,
         worker_id: u64,
         result: TaskResult,
     },
-    
+
     /// Cluster membership has changed
     ClusterMembershipChange {
         added_nodes: Vec<u64>,
@@ -65,10 +65,10 @@ pub enum NodeEvent {
 pub trait NodeEventHandler: Send + Sync {
     /// Handle a node event
     async fn handle_event(&self, event: NodeEvent) -> BlixardResult<()>;
-    
+
     /// Get the name/identifier for this handler (for debugging)
     fn handler_name(&self) -> &'static str;
-    
+
     /// Check if this handler is interested in a specific event type
     fn handles_event_type(&self, event: &NodeEvent) -> bool {
         // By default, handle all events
@@ -81,14 +81,26 @@ pub trait NodeEventHandler: Send + Sync {
             NodeEvent::ClusterMembershipChange { .. } => self.handles_cluster_membership_changes(),
         }
     }
-    
+
     // Override these methods to specify which events this handler cares about
-    fn handles_raft_status_updates(&self) -> bool { true }
-    fn handles_peer_connection_changes(&self) -> bool { true }
-    fn handles_vm_status_changes(&self) -> bool { true }
-    fn handles_worker_status_changes(&self) -> bool { true }
-    fn handles_task_completion(&self) -> bool { true }
-    fn handles_cluster_membership_changes(&self) -> bool { true }
+    fn handles_raft_status_updates(&self) -> bool {
+        true
+    }
+    fn handles_peer_connection_changes(&self) -> bool {
+        true
+    }
+    fn handles_vm_status_changes(&self) -> bool {
+        true
+    }
+    fn handles_worker_status_changes(&self) -> bool {
+        true
+    }
+    fn handles_task_completion(&self) -> bool {
+        true
+    }
+    fn handles_cluster_membership_changes(&self) -> bool {
+        true
+    }
 }
 
 /// Event bus for distributing events to handlers
@@ -96,13 +108,13 @@ pub trait NodeEventHandler: Send + Sync {
 pub trait EventBus: Send + Sync {
     /// Register a new event handler
     async fn register_handler(&self, handler: Box<dyn NodeEventHandler>) -> BlixardResult<()>;
-    
+
     /// Unregister an event handler by name
     async fn unregister_handler(&self, handler_name: &str) -> BlixardResult<()>;
-    
+
     /// Emit an event to all registered handlers
     async fn emit_event(&self, event: NodeEvent) -> BlixardResult<()>;
-    
+
     /// Get the number of registered handlers
     async fn handler_count(&self) -> usize;
 }
@@ -119,7 +131,7 @@ pub trait RaftEventHandler: Send + Sync {
         commit_index: u64,
         applied_index: u64,
     ) -> BlixardResult<()>;
-    
+
     async fn on_cluster_membership_change(
         &self,
         added_nodes: Vec<u64>,
@@ -163,24 +175,49 @@ impl<T: RaftEventHandler> RaftEventAdapter<T> {
 impl<T: RaftEventHandler> NodeEventHandler for RaftEventAdapter<T> {
     async fn handle_event(&self, event: NodeEvent) -> BlixardResult<()> {
         match event {
-            NodeEvent::RaftStatusUpdate { term, is_leader, leader_id, commit_index, applied_index } => {
-                self.handler.on_raft_status_update(term, is_leader, leader_id, commit_index, applied_index).await
+            NodeEvent::RaftStatusUpdate {
+                term,
+                is_leader,
+                leader_id,
+                commit_index,
+                applied_index,
+            } => {
+                self.handler
+                    .on_raft_status_update(term, is_leader, leader_id, commit_index, applied_index)
+                    .await
             }
-            NodeEvent::ClusterMembershipChange { added_nodes, removed_nodes } => {
-                self.handler.on_cluster_membership_change(added_nodes, removed_nodes).await
+            NodeEvent::ClusterMembershipChange {
+                added_nodes,
+                removed_nodes,
+            } => {
+                self.handler
+                    .on_cluster_membership_change(added_nodes, removed_nodes)
+                    .await
             }
             _ => Ok(()), // Ignore non-Raft events
         }
     }
-    
+
     fn handler_name(&self) -> &'static str {
         "RaftEventAdapter"
     }
-    
-    fn handles_raft_status_updates(&self) -> bool { true }
-    fn handles_cluster_membership_changes(&self) -> bool { true }
-    fn handles_peer_connection_changes(&self) -> bool { false }
-    fn handles_vm_status_changes(&self) -> bool { false }
-    fn handles_worker_status_changes(&self) -> bool { false }
-    fn handles_task_completion(&self) -> bool { false }
+
+    fn handles_raft_status_updates(&self) -> bool {
+        true
+    }
+    fn handles_cluster_membership_changes(&self) -> bool {
+        true
+    }
+    fn handles_peer_connection_changes(&self) -> bool {
+        false
+    }
+    fn handles_vm_status_changes(&self) -> bool {
+        false
+    }
+    fn handles_worker_status_changes(&self) -> bool {
+        false
+    }
+    fn handles_task_completion(&self) -> bool {
+        false
+    }
 }

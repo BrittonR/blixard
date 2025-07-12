@@ -18,7 +18,7 @@ use redb::ReadableTable;
 /// Test basic log compaction after threshold
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_log_compaction_basic() {
-    let cluster = TestCluster::new(1).await.expect("Failed to create cluster");
+    let cluster = TestCluster::with_size(1).await.expect("Failed to create cluster");
 
     // Wait for node to be ready
     timing::wait_for_condition_with_backoff(
@@ -83,7 +83,7 @@ async fn test_log_compaction_basic() {
 /// Test recovery after log compaction
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_recovery_after_compaction() {
-    let cluster = TestCluster::new(1).await.expect("Failed to create cluster");
+    let cluster = TestCluster::with_size(1).await.expect("Failed to create cluster");
 
     timing::wait_for_condition_with_backoff(
         || async { cluster.get_node(1).unwrap().shared_state.is_leader().await },
@@ -139,7 +139,7 @@ async fn test_recovery_after_compaction() {
     timing::robust_sleep(Duration::from_secs(1)).await;
 
     // Create new cluster with same data directory
-    let new_cluster = TestCluster::new(1).await.expect("Failed to create cluster");
+    let new_cluster = TestCluster::with_size(1).await.expect("Failed to create cluster");
 
     // Wait for node to recover
     timing::wait_for_condition_with_backoff(
@@ -212,7 +212,7 @@ async fn test_recovery_after_compaction() {
 /// Test compaction in multi-node cluster  
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_compaction_multi_node() {
-    let cluster = TestCluster::new(3).await.expect("Failed to create cluster");
+    let cluster = TestCluster::with_size(3).await.expect("Failed to create cluster");
 
     // Wait for leader election
     let mut leader_id = 0;

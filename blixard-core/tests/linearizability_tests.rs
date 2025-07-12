@@ -25,7 +25,7 @@ use linearizability_framework::*;
 #[tokio::test]
 async fn test_concurrent_vm_creation_linearizability() {
     let recorder = HistoryRecorder::new();
-    let cluster = TestCluster::new(3).await.unwrap();
+    let cluster = TestCluster::with_size(3).await.unwrap();
     cluster
         .wait_for_convergence(Duration::from_secs(10))
         .await
@@ -111,7 +111,7 @@ async fn test_concurrent_vm_creation_linearizability() {
 #[ignore = "KV operations not implemented yet"]
 async fn test_kv_linearizability() {
     let recorder = HistoryRecorder::new();
-    let cluster = TestCluster::new(3).await.unwrap();
+    let cluster = TestCluster::with_size(3).await.unwrap();
     cluster
         .wait_for_convergence(Duration::from_secs(10))
         .await
@@ -196,7 +196,7 @@ async fn test_kv_linearizability() {
 #[tokio::test]
 async fn test_cluster_membership_linearizability() {
     let recorder = HistoryRecorder::new();
-    let cluster = Arc::new(Mutex::new(TestCluster::new(3).await.unwrap()));
+    let cluster = Arc::new(Mutex::new(TestCluster::with_size(3).await.unwrap()));
     {
         let cluster_lock = cluster.lock().await;
         cluster_lock
@@ -327,7 +327,7 @@ async fn test_cluster_membership_linearizability() {
 #[ignore = "Network partition methods not implemented yet"]
 async fn test_split_brain_detection() {
     let recorder = HistoryRecorder::new();
-    let cluster = TestCluster::new(5).await.unwrap();
+    let cluster = TestCluster::with_size(5).await.unwrap();
     cluster
         .wait_for_convergence(Duration::from_secs(10))
         .await

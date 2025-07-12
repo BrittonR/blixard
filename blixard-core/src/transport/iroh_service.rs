@@ -4,8 +4,8 @@
 //! RPC calls over Iroh transport.
 
 use crate::{
-    error::{BlixardError, BlixardResult},
     common::error_context::NetworkContext,
+    error::{BlixardError, BlixardResult},
     transport::iroh_protocol::{
         deserialize_payload, generate_request_id, read_message, serialize_payload, write_message,
         MessageType, RpcRequest, RpcResponse,
@@ -208,8 +208,7 @@ async fn handle_stream(
     .await?;
 
     // Close stream
-    send.finish()
-        .iroh_context("finish response stream")?;
+    send.finish().iroh_context("finish response stream")?;
 
     Ok(())
 }
@@ -245,7 +244,9 @@ impl IrohRpcClient {
         let connection = self.get_or_create_connection(node_addr).await?;
 
         // Open bidirectional stream
-        let (mut send, mut recv) = connection.open_bi().await
+        let (mut send, mut recv) = connection
+            .open_bi()
+            .await
             .iroh_context("open bidirectional stream")?;
 
         // Prepare request
@@ -262,8 +263,7 @@ impl IrohRpcClient {
         write_message(&mut send, MessageType::Request, request_id, &rpc_bytes).await?;
 
         // Finish sending
-        send.finish()
-            .iroh_context("finish send stream")?;
+        send.finish().iroh_context("finish send stream")?;
 
         // Read response
         let (header, payload) = read_message(&mut recv).await?;
@@ -312,7 +312,8 @@ impl IrohRpcClient {
 
         // Create new connection
         info!("Connecting to {}", node_id);
-        let connection = self.endpoint
+        let connection = self
+            .endpoint
             .connect(node_addr, b"blixard/rpc/1")
             .await
             .iroh_context("connect to peer")?;

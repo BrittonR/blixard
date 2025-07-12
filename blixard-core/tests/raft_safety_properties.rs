@@ -30,8 +30,7 @@ use tempfile::TempDir;
 use blixard_core::{
     error::{BlixardError, BlixardResult},
     raft_manager::{
-        ProposalData, ResourceRequirements, TaskResult, TaskSpec, WorkerCapabilities,
-        WorkerStatus,
+        ProposalData, ResourceRequirements, TaskResult, TaskSpec, WorkerCapabilities, WorkerStatus,
     },
     storage::{RAFT_LOG_TABLE, RAFT_SNAPSHOT_TABLE},
     test_helpers::{timing, TestCluster, TestNode},

@@ -7,8 +7,7 @@ use std::net::{IpAddr, Ipv4Addr};
 
 // Strategy for generating valid IPv4 addresses
 fn ipv4_addr_strategy() -> impl Strategy<Value = Ipv4Addr> {
-    (0u8..=255, 0u8..=255, 0u8..=255, 0u8..=255)
-        .prop_map(|(a, b, c, d)| Ipv4Addr::new(a, b, c, d))
+    (0u8..=255, 0u8..=255, 0u8..=255, 0u8..=255).prop_map(|(a, b, c, d)| Ipv4Addr::new(a, b, c, d))
 }
 
 // Strategy for generating valid IP addresses (v4 only for simplicity)
@@ -39,49 +38,51 @@ fn ip_pool_config_strategy() -> impl Strategy<Value = IpPoolConfig> {
         prop::option::of("[a-z]{3,10}"),
         prop::bool::ANY,
     )
-        .prop_flat_map(|(id, name, subnet, vlan_id, dns_servers, topology_hint, enabled)| {
-            // Generate gateway within the subnet
-            let subnet_clone = subnet.clone();
-            let gateway_strategy = Just(match subnet {
-                ipnet::IpNet::V4(net) => {
-                    let network = net.network();
-                    let gateway_u32 = u32::from(network) + 1;
-                    IpAddr::V4(Ipv4Addr::from(gateway_u32))
-                }
-                ipnet::IpNet::V6(_) => panic!("IPv6 not supported in this test"),
-            });
-            
-            // Generate allocation range within the subnet
-            let (start_strategy, end_strategy) = match subnet_clone {
-                ipnet::IpNet::V4(net) => {
-                    let network_u32 = u32::from(net.network());
-                    let broadcast_u32 = u32::from(net.broadcast());
-                    let start = network_u32 + 10;
-                    let end = broadcast_u32.saturating_sub(10).max(start + 1);
-                    
-                    (
-                        Just(IpAddr::V4(Ipv4Addr::from(start))),
-                        Just(IpAddr::V4(Ipv4Addr::from(end))),
-                    )
-                }
-                ipnet::IpNet::V6(_) => panic!("IPv6 not supported in this test"),
-            };
-            
-            (
-                Just(id),
-                Just(name),
-                Just(subnet_clone),
-                Just(vlan_id),
-                gateway_strategy,
-                Just(dns_servers),
-                start_strategy,
-                end_strategy,
-                Just(topology_hint),
-                Just(BTreeSet::new()),
-                Just(enabled),
-                Just(HashMap::new()),
-            )
-        })
+        .prop_flat_map(
+            |(id, name, subnet, vlan_id, dns_servers, topology_hint, enabled)| {
+                // Generate gateway within the subnet
+                let subnet_clone = subnet.clone();
+                let gateway_strategy = Just(match subnet {
+                    ipnet::IpNet::V4(net) => {
+                        let network = net.network();
+                        let gateway_u32 = u32::from(network) + 1;
+                        IpAddr::V4(Ipv4Addr::from(gateway_u32))
+                    }
+                    ipnet::IpNet::V6(_) => panic!("IPv6 not supported in this test"),
+                });
+
+                // Generate allocation range within the subnet
+                let (start_strategy, end_strategy) = match subnet_clone {
+                    ipnet::IpNet::V4(net) => {
+                        let network_u32 = u32::from(net.network());
+                        let broadcast_u32 = u32::from(net.broadcast());
+                        let start = network_u32 + 10;
+                        let end = broadcast_u32.saturating_sub(10).max(start + 1);
+
+                        (
+                            Just(IpAddr::V4(Ipv4Addr::from(start))),
+                            Just(IpAddr::V4(Ipv4Addr::from(end))),
+                        )
+                    }
+                    ipnet::IpNet::V6(_) => panic!("IPv6 not supported in this test"),
+                };
+
+                (
+                    Just(id),
+                    Just(name),
+                    Just(subnet_clone),
+                    Just(vlan_id),
+                    gateway_strategy,
+                    Just(dns_servers),
+                    start_strategy,
+                    end_strategy,
+                    Just(topology_hint),
+                    Just(BTreeSet::new()),
+                    Just(enabled),
+                    Just(HashMap::new()),
+                )
+            },
+        )
         .prop_map(
             |(
                 id,
@@ -121,14 +122,14 @@ proptest! {
         // The generated config should always be valid
         prop_assert!(config.validate().is_ok());
     }
-    
+
     #[test]
     fn test_ip_pool_capacity_calculation(config in ip_pool_config_strategy()) {
         let capacity = config.total_capacity();
-        
+
         // Capacity should be positive
         prop_assert!(capacity > 0);
-        
+
         // Capacity should not exceed the theoretical maximum for the subnet
         match config.subnet {
             ipnet::IpNet::V4(net) => {
@@ -138,53 +139,53 @@ proptest! {
             _ => {}
         }
     }
-    
+
     #[test]
     fn test_ip_pool_state_allocation(config in ip_pool_config_strategy()) {
         let mut state = IpPoolState::new(config.clone());
-        
+
         // Initial state should have no allocations
         prop_assert_eq!(state.allocated_ips.len(), 0);
         prop_assert_eq!(state.utilization_percent(), 0.0);
         prop_assert!(state.has_capacity());
-        
+
         // Allocate IPs until pool is full
         let mut allocated_count = 0;
         while let Some(ip) = state.next_available_ip() {
             prop_assert!(state.is_available(&ip));
             state.allocated_ips.insert(ip);
             allocated_count += 1;
-            
+
             // Prevent infinite loop in case of bug
             if allocated_count > 1000 {
                 break;
             }
         }
-        
+
         // After full allocation, pool should report no capacity
         if allocated_count == config.total_capacity() {
             prop_assert!(!state.has_capacity());
             prop_assert_eq!(state.utilization_percent(), 100.0);
         }
     }
-    
+
     #[test]
     fn test_ip_allocation_never_duplicates(config in ip_pool_config_strategy()) {
         let mut state = IpPoolState::new(config.clone());
         let mut allocated_ips = BTreeSet::new();
-        
+
         // Allocate multiple IPs and ensure no duplicates
         for _ in 0..20.min(config.total_capacity()) {
             if let Some(ip) = state.next_available_ip() {
                 // Should not have been allocated before
                 prop_assert!(!allocated_ips.contains(&ip));
-                
+
                 allocated_ips.insert(ip);
                 state.allocated_ips.insert(ip);
             }
         }
     }
-    
+
     #[test]
     fn test_reserved_ips_not_allocated(mut config in ip_pool_config_strategy()) {
         // Reserve some IPs
@@ -194,7 +195,7 @@ proptest! {
                 IpAddr::V4(addr) => u32::from(addr),
                 _ => panic!("Expected IPv4"),
             };
-            
+
             // Reserve a few IPs in the allocation range
             for i in 0..3 {
                 let ip = IpAddr::V4(Ipv4Addr::from(start_u32 + i));
@@ -203,10 +204,10 @@ proptest! {
                 }
             }
         }
-        
+
         config.reserved_ips = reserved.clone();
         let mut state = IpPoolState::new(config);
-        
+
         // Allocate IPs and ensure reserved ones are never allocated
         let mut allocated = BTreeSet::new();
         for _ in 0..50 {
@@ -217,11 +218,11 @@ proptest! {
             }
         }
     }
-    
+
     #[test]
     fn test_gateway_never_allocated(config in ip_pool_config_strategy()) {
         let mut state = IpPoolState::new(config.clone());
-        
+
         // Allocate many IPs and ensure gateway is never allocated
         for _ in 0..config.total_capacity() {
             if let Some(ip) = state.next_available_ip() {
@@ -249,12 +250,12 @@ fn test_specific_edge_cases() {
         enabled: true,
         tags: HashMap::new(),
     };
-    
+
     assert!(config.validate().is_ok());
     let state = IpPoolState::new(config);
     // Gateway takes the only IP, so no allocation possible
     assert_eq!(state.next_available_ip(), None);
-    
+
     // Test /31 subnet (point-to-point link)
     let config = IpPoolConfig {
         id: IpPoolId(2),
@@ -270,7 +271,7 @@ fn test_specific_edge_cases() {
         enabled: true,
         tags: HashMap::new(),
     };
-    
+
     assert!(config.validate().is_ok());
     let mut state = IpPoolState::new(config);
     // Should be able to allocate the non-gateway IP

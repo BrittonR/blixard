@@ -12,14 +12,12 @@ pub mod metrics;
 
 #[cfg(test)]
 // mod example_usage;
-
 pub use error_context::{ErrorContext, ResultContext};
 pub use file_io::{
-    read_text_file_with_context, read_binary_file_with_context,
-    read_config_file, write_text_file_with_context, write_binary_file_with_context,
-    write_config_file, file_exists, ensure_directory, read_directory_with_context,
-    read_files_with_extension,
+    ensure_directory, file_exists, read_binary_file_with_context, read_config_file,
+    read_directory_with_context, read_files_with_extension, read_text_file_with_context,
+    write_binary_file_with_context, write_config_file, write_text_file_with_context,
 };
 // pub use conversions::{ToProto, FromProto};
-pub use metrics::{MetricsRecorder, MetricTimer};
+pub use metrics::{MetricTimer, MetricsRecorder};
 // pub use rate_limiting::RateLimiter;

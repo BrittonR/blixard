@@ -10,6 +10,7 @@ use tracing::info;
 /// Unified observability manager
 pub struct ObservabilityManager {
     /// Configuration
+    #[allow(dead_code)] // Config kept for future observability feature extension
     config: ObservabilityConfig,
 
     /// Whether metrics are enabled

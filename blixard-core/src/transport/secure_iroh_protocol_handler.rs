@@ -8,8 +8,8 @@ use crate::{
     transport::{
         iroh_middleware::IrohMiddleware,
         iroh_protocol::{
-            deserialize_payload, read_message, serialize_payload,
-            write_message, MessageType, RpcRequest, RpcResponse,
+            deserialize_payload, read_message, serialize_payload, write_message, MessageType,
+            RpcRequest, RpcResponse,
         },
         iroh_secure_vm_service::{SecureIrohService, SecureIrohVmService},
     },

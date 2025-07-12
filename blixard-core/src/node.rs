@@ -8,8 +8,8 @@ use tokio::task::JoinHandle;
 use crate::error::{BlixardError, BlixardResult};
 use crate::node_shared::SharedNodeState;
 use crate::p2p_manager::{ConnectionQuality, PeerInfo};
-use crate::raft_manager::{ProposalData, RaftConfChange, RaftManager};
 use crate::raft::messages::RaftProposal;
+use crate::raft_manager::{ProposalData, RaftConfChange, RaftManager};
 use crate::types::{NodeConfig, VmCommand};
 use crate::vm_backend::{VmBackendRegistry, VmManager};
 use crate::vm_health_monitor::VmHealthMonitor;
@@ -75,17 +75,18 @@ impl Node {
         self.setup_p2p_infrastructure().await?;
 
         // Phase 6: Raft initialization
-        let (raft_manager, _message_rx, _, proposal_tx, conf_change_tx) = 
+        let (raft_manager, _message_rx, _, proposal_tx, conf_change_tx) =
             self.initialize_raft(db.clone()).await?;
 
         // Phase 7: Transport setup
         let (message_tx, _unused_rx) = mpsc::unbounded_channel();
-        
+
         // Set the message tx in shared state
         self.shared.set_raft_message_tx(message_tx.clone());
-        
-        let (raft_transport, outgoing_rx) = 
-            self.setup_transport(message_tx.clone(), conf_change_tx, proposal_tx).await?;
+
+        let (raft_transport, outgoing_rx) = self
+            .setup_transport(message_tx.clone(), conf_change_tx, proposal_tx)
+            .await?;
 
         // Phase 8: Spawn Raft message handler
         self.spawn_raft_message_handler(raft_transport, outgoing_rx);
@@ -132,14 +133,14 @@ impl Node {
                 })?
             }
         };
-        
+
         let db_arc = Arc::new(database);
 
         // Initialize all database tables
         crate::raft_storage::init_database_tables(&db_arc)?;
 
         self.shared.set_database(Some(db_arc.clone())).await;
-        
+
         Ok(db_arc)
     }
 
@@ -151,16 +152,12 @@ impl Node {
     ) -> BlixardResult<()> {
         // Create VM backend
         let vm_backend = self.create_vm_backend(&registry, db.clone())?;
-        
+
         // Store VM backend in shared state
         self.shared.set_vm_manager(vm_backend.clone());
-        
+
         // Initialize VM manager
-        let vm_manager = Arc::new(VmManager::new(
-            db.clone(),
-            vm_backend,
-            self.shared.clone(),
-        ));
+        let vm_manager = Arc::new(VmManager::new(db.clone(), vm_backend, self.shared.clone()));
 
         // Recover persisted VMs
         if let Err(e) = vm_manager.recover_persisted_vms().await {
@@ -197,7 +194,7 @@ impl Node {
                 operation: "begin read transaction".to_string(),
                 source: Box::new(e),
             })?;
-            
+
             let mut pools = Vec::new();
             if let Ok(table) = read_txn.open_table(crate::raft_storage::IP_POOL_TABLE) {
                 for entry in table.iter().map_err(|e| BlixardError::Storage {
@@ -208,7 +205,7 @@ impl Node {
                         operation: "read IP pool entry".to_string(),
                         source: Box::new(e),
                     })?;
-                    
+
                     let pool: crate::ip_pool::IpPoolConfig = bincode::deserialize(value.value())
                         .map_err(|e| BlixardError::Serialization {
                             operation: "deserialize IP pool".to_string(),
@@ -219,13 +216,13 @@ impl Node {
             }
             pools
         };
-        
+
         let allocations = {
             let read_txn = db.begin_read().map_err(|e| BlixardError::Storage {
                 operation: "begin read transaction".to_string(),
                 source: Box::new(e),
             })?;
-            
+
             let mut allocations = Vec::new();
             if let Ok(table) = read_txn.open_table(crate::raft_storage::IP_ALLOCATION_TABLE) {
                 for entry in table.iter().map_err(|e| BlixardError::Storage {
@@ -236,21 +233,25 @@ impl Node {
                         operation: "read IP allocation entry".to_string(),
                         source: Box::new(e),
                     })?;
-                    
-                    let allocation: crate::ip_pool::IpAllocation = bincode::deserialize(value.value())
-                        .map_err(|e| BlixardError::Serialization {
-                            operation: "deserialize IP allocation".to_string(),
-                            source: Box::new(e),
+
+                    let allocation: crate::ip_pool::IpAllocation =
+                        bincode::deserialize(value.value()).map_err(|e| {
+                            BlixardError::Serialization {
+                                operation: "deserialize IP allocation".to_string(),
+                                source: Box::new(e),
+                            }
                         })?;
                     allocations.push(allocation);
                 }
             }
             allocations
         };
-        
-        ip_pool_manager.load_from_storage(pools, allocations).await?;
+
+        ip_pool_manager
+            .load_from_storage(pools, allocations)
+            .await?;
         self.shared.set_ip_pool_manager(ip_pool_manager);
-        
+
         tracing::info!("Initialized IP pool manager");
         Ok(())
     }
@@ -266,7 +267,7 @@ impl Node {
     /// Set up P2P infrastructure if enabled
     async fn setup_p2p_infrastructure(&mut self) -> BlixardResult<()> {
         let _config = crate::config_global::get()?;
-        
+
         // P2P manager initialization - placeholder for future enhancement
         // The Iroh transport handles P2P functionality directly
         tracing::info!("P2P infrastructure initialized via Iroh transport");
@@ -295,10 +296,11 @@ impl Node {
         };
 
         // For bootstrap, we'll store the capabilities directly
-        let worker_data = bincode::serialize(&capabilities).map_err(|e| BlixardError::Serialization {
-            operation: "serialize worker capabilities".to_string(),
-            source: Box::new(e),
-        })?;
+        let worker_data =
+            bincode::serialize(&capabilities).map_err(|e| BlixardError::Serialization {
+                operation: "serialize worker capabilities".to_string(),
+                source: Box::new(e),
+            })?;
 
         {
             let mut worker_table = txn.open_table(crate::raft_storage::WORKER_TABLE)?;
@@ -326,7 +328,13 @@ impl Node {
     async fn initialize_raft(
         &mut self,
         db: Arc<Database>,
-    ) -> BlixardResult<(RaftManager, mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>, mpsc::UnboundedReceiver<RaftConfChange>, mpsc::UnboundedSender<RaftProposal>, mpsc::UnboundedSender<RaftConfChange>)> {
+    ) -> BlixardResult<(
+        RaftManager,
+        mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>,
+        mpsc::UnboundedReceiver<RaftConfChange>,
+        mpsc::UnboundedSender<RaftProposal>,
+        mpsc::UnboundedSender<RaftConfChange>,
+    )> {
         let joining_cluster = self.shared.config.join_addr.is_some();
         let storage = crate::raft_storage::RedbRaftStorage {
             database: db.clone(),
@@ -335,9 +343,12 @@ impl Node {
         // Initialize based on whether we're joining or bootstrapping
         if !joining_cluster {
             // Bootstrap mode - initialize storage with this node
-            tracing::info!("Bootstrapping new cluster with node {}", self.shared.config.id);
+            tracing::info!(
+                "Bootstrapping new cluster with node {}",
+                self.shared.config.id
+            );
             storage.initialize_single_node(self.shared.config.id)?;
-            
+
             // Register as worker in bootstrap mode
             self.register_bootstrap_worker(db.clone()).await?;
         } else {
@@ -346,23 +357,30 @@ impl Node {
         }
 
         // Create Raft manager
-        let (raft_manager, proposal_tx, _message_tx, conf_change_tx, message_rx) = RaftManager::new(
-            self.shared.config.id,
-            db.clone(),
-            vec![], // No initial peers for bootstrap/join
-            Arc::downgrade(&self.shared),
-        )?;
-        
-        // Set up batch processing if enabled  
+        let (raft_manager, proposal_tx, _message_tx, conf_change_tx, message_rx) =
+            RaftManager::new(
+                self.shared.config.id,
+                db.clone(),
+                vec![], // No initial peers for bootstrap/join
+                Arc::downgrade(&self.shared),
+            )?;
+
+        // Set up batch processing if enabled
         let final_proposal_tx = self.setup_batch_processing(proposal_tx.clone())?;
-        
+
         // Store the proposal tx in shared state
         self.shared.set_raft_proposal_tx(final_proposal_tx.clone());
 
         // Create a conf_change_rx for the return value (not used in this refactored version)
         let (_, conf_change_rx) = mpsc::unbounded_channel();
 
-        Ok((raft_manager, message_rx, conf_change_rx, final_proposal_tx, conf_change_tx))
+        Ok((
+            raft_manager,
+            message_rx,
+            conf_change_rx,
+            final_proposal_tx,
+            conf_change_tx,
+        ))
     }
 
     /// Set up batch processing for Raft proposals if enabled
@@ -379,9 +397,12 @@ impl Node {
         };
 
         if batch_config.enabled {
-            let (batch_tx, batch_processor) =
-                crate::raft_batch_processor::create_batch_processor(batch_config, proposal_tx, self.shared.get_id());
-            
+            let (batch_tx, batch_processor) = crate::raft_batch_processor::create_batch_processor(
+                batch_config,
+                proposal_tx,
+                self.shared.get_id(),
+            );
+
             tokio::spawn(async move {
                 batch_processor.run().await;
                 tracing::debug!("Batch processor completed");
@@ -415,7 +436,16 @@ impl Node {
                 // We'll use the discovery mechanism if available, or create a temporary client
 
                 // Try discovery-based join first
-                if let Ok(result) = self.attempt_discovery_based_join(join_addr, leader_node_id, &p2p_node_id, &p2p_addresses, &p2p_relay_url).await {
+                if let Ok(result) = self
+                    .attempt_discovery_based_join(
+                        join_addr,
+                        leader_node_id,
+                        &p2p_node_id,
+                        &p2p_addresses,
+                        &p2p_relay_url,
+                    )
+                    .await
+                {
                     return Ok(result);
                 }
 
@@ -449,7 +479,14 @@ impl Node {
                     .add_peer_with_p2p(bootstrap_info.node_id, peer_info);
 
                 // Execute HTTP bootstrap join
-                self.execute_http_bootstrap_join(&bootstrap_info, &node_addr, &p2p_node_id, &p2p_addresses, &p2p_relay_url).await?;
+                self.execute_http_bootstrap_join(
+                    &bootstrap_info,
+                    &node_addr,
+                    &p2p_node_id,
+                    &p2p_addresses,
+                    &p2p_relay_url,
+                )
+                .await?;
             }
 
             /* Original commented code for reference
@@ -537,9 +574,10 @@ impl Node {
     /// Build bootstrap URL from join address
     async fn build_bootstrap_url(&self, join_addr: &str) -> BlixardResult<String> {
         tracing::info!("Attempting HTTP bootstrap from {}", join_addr);
-        
+
         // Determine if join_addr is already an HTTP URL or a socket address
-        let bootstrap_url = if join_addr.starts_with("http://") || join_addr.starts_with("https://") {
+        let bootstrap_url = if join_addr.starts_with("http://") || join_addr.starts_with("https://")
+        {
             // Already an HTTP URL, append /bootstrap if not present
             if join_addr.ends_with("/bootstrap") {
                 join_addr.to_string()
@@ -549,10 +587,7 @@ impl Node {
         } else {
             // Parse as socket address and construct HTTP URL
             let addr: SocketAddr = join_addr.parse().map_err(|e| {
-                BlixardError::ConfigError(format!(
-                    "Invalid join address '{}': {}",
-                    join_addr, e
-                ))
+                BlixardError::ConfigError(format!("Invalid join address '{}': {}", join_addr, e))
             })?;
 
             // Get metrics port offset from config
@@ -560,12 +595,15 @@ impl Node {
             let bootstrap_port = addr.port() + config.network.metrics.port_offset;
             format!("http://{}:{}/bootstrap", addr.ip(), bootstrap_port)
         };
-        
+
         Ok(bootstrap_url)
     }
 
     /// Fetch bootstrap info from HTTP endpoint
-    async fn fetch_bootstrap_info(&self, bootstrap_url: &str) -> BlixardResult<crate::iroh_types::BootstrapInfo> {
+    async fn fetch_bootstrap_info(
+        &self,
+        bootstrap_url: &str,
+    ) -> BlixardResult<crate::iroh_types::BootstrapInfo> {
         tracing::debug!("Fetching bootstrap info from {}", bootstrap_url);
         let client = reqwest::Client::new();
         let response = match client
@@ -604,19 +642,20 @@ impl Node {
             bootstrap_info.p2p_node_id,
             bootstrap_info.p2p_addresses
         );
-        
+
         Ok(bootstrap_info)
     }
 
     /// Create P2P NodeAddr from bootstrap info
-    async fn create_p2p_node_addr(&self, bootstrap_info: &crate::iroh_types::BootstrapInfo) -> BlixardResult<iroh::NodeAddr> {
+    async fn create_p2p_node_addr(
+        &self,
+        bootstrap_info: &crate::iroh_types::BootstrapInfo,
+    ) -> BlixardResult<iroh::NodeAddr> {
         // Parse the P2P node ID
         let p2p_node_id = bootstrap_info
             .p2p_node_id
             .parse::<iroh::NodeId>()
-            .map_err(|e| {
-                BlixardError::ConfigError(format!("Invalid P2P node ID: {}", e))
-            })?;
+            .map_err(|e| BlixardError::ConfigError(format!("Invalid P2P node ID: {}", e)))?;
 
         // Create NodeAddr with the bootstrap info
         let mut node_addr = iroh::NodeAddr::new(p2p_node_id);
@@ -636,7 +675,7 @@ impl Node {
                 node_addr = node_addr.with_relay_url(url);
             }
         }
-        
+
         Ok(node_addr)
     }
 
@@ -649,10 +688,7 @@ impl Node {
         p2p_addresses: &[String],
         p2p_relay_url: &Option<String>,
     ) -> BlixardResult<()> {
-        if let Some(discovery_manager) = self
-            .shared
-            .get_discovery_manager()
-        {
+        if let Some(discovery_manager) = self.shared.get_discovery_manager() {
             // Try to find the leader's info via discovery
             let discovered_nodes = discovery_manager.get_nodes().await;
 
@@ -682,41 +718,36 @@ impl Node {
                         capabilities: vec![],
                         shared_resources: HashMap::new(),
                         connection_quality: ConnectionQuality {
-                        latency_ms: 0,
-                        bandwidth_mbps: 100.0,
-                        packet_loss: 0.0,
-                        reliability_score: 1.0,
-                    },
+                            latency_ms: 0,
+                            bandwidth_mbps: 100.0,
+                            packet_loss: 0.0,
+                            reliability_score: 1.0,
+                        },
                         p2p_node_id: Some(node_info.node_id.to_string()),
                         p2p_addresses: node_info.addresses.iter().map(|a| a.to_string()).collect(),
                         p2p_relay_url: None,
                     };
-                    self.shared
-                        .add_peer_with_p2p(leader_node_id, peer_info);
+                    self.shared.add_peer_with_p2p(leader_node_id, peer_info);
 
                     // Now we can make the P2P connection
                     if let Some(p2p_manager) = self.shared.get_p2p_manager() {
-                        tracing::info!(
-                            "Connecting to leader via P2P at {}",
-                            node_info.node_id
-                        );
+                        tracing::info!("Connecting to leader via P2P at {}", node_info.node_id);
                         p2p_manager
                             .connect_p2p_peer(leader_node_id, &node_addr)
                             .await?;
 
                         // Execute the P2P join request
-                        let (success, message, peers, voters) = self.execute_p2p_join_request(
-                            &node_addr,
-                            p2p_node_id,
-                            p2p_addresses,
-                            p2p_relay_url,
-                        ).await?;
+                        let (success, message, peers, voters) = self
+                            .execute_p2p_join_request(
+                                &node_addr,
+                                p2p_node_id,
+                                p2p_addresses,
+                                p2p_relay_url,
+                            )
+                            .await?;
 
                         if success {
-                            tracing::info!(
-                                "Successfully joined cluster via P2P: {}",
-                                message
-                            );
+                            tracing::info!("Successfully joined cluster via P2P: {}", message);
 
                             // Update cluster configuration
                             self.update_cluster_configuration(&voters).await?;
@@ -732,7 +763,7 @@ impl Node {
                 }
             }
         }
-        
+
         Err(BlixardError::ClusterJoin {
             reason: "Discovery-based join failed".to_string(),
         })
@@ -747,12 +778,13 @@ impl Node {
         _p2p_relay_url: &Option<String>,
     ) -> BlixardResult<(bool, String, Vec<crate::iroh_types::NodeInfo>, Vec<u64>)> {
         // TODO: Fix to handle proper endpoint retrieval
-        Err(BlixardError::NotImplemented { 
-            feature: "P2P cluster join".to_string() 
+        Err(BlixardError::NotImplemented {
+            feature: "P2P cluster join".to_string(),
         })
     }
 
     /// Update shared state after joining cluster
+    #[allow(dead_code)] // Reserved for future cluster join state synchronization
     async fn update_shared_state_after_join(
         &self,
         _peers: &[crate::iroh_types::NodeInfo],
@@ -767,7 +799,10 @@ impl Node {
     }
 
     /// Store peer information from join response
-    async fn store_peer_information(&self, peers: &[crate::iroh_types::NodeInfo]) -> BlixardResult<()> {
+    async fn store_peer_information(
+        &self,
+        peers: &[crate::iroh_types::NodeInfo],
+    ) -> BlixardResult<()> {
         // Store all peer P2P info from the response and establish connections
         for peer_info in peers {
             if peer_info.id != self.shared.get_id() && !peer_info.p2p_node_id.is_empty() {
@@ -788,8 +823,7 @@ impl Node {
                     p2p_addresses: vec![],
                     p2p_relay_url: None,
                 };
-                self.shared
-                    .add_peer_with_p2p(peer_info.id, p2p_peer_info);
+                self.shared.add_peer_with_p2p(peer_info.id, p2p_peer_info);
 
                 // Establish P2P connection to this peer
                 if let Ok(node_id_parsed) = peer_info.p2p_node_id.parse::<iroh::NodeId>() {
@@ -813,14 +847,24 @@ impl Node {
                     }
 
                     // Try to connect
-                    tracing::info!("Establishing P2P connection to peer {} after joining cluster", peer_info.id);
+                    tracing::info!(
+                        "Establishing P2P connection to peer {} after joining cluster",
+                        peer_info.id
+                    );
                     if let Some(p2p_manager) = self.shared.get_p2p_manager() {
                         match p2p_manager.connect_p2p_peer(peer_info.id, &node_addr).await {
                             Ok(_) => {
-                                tracing::info!("✅ Successfully connected to P2P peer {}", peer_info.id);
+                                tracing::info!(
+                                    "✅ Successfully connected to P2P peer {}",
+                                    peer_info.id
+                                );
                             }
                             Err(e) => {
-                                tracing::warn!("⚠️ Failed to establish P2P connection to peer {}: {}", peer_info.id, e);
+                                tracing::warn!(
+                                    "⚠️ Failed to establish P2P connection to peer {}: {}",
+                                    peer_info.id,
+                                    e
+                                );
                             }
                         }
                     } else {
@@ -850,11 +894,10 @@ impl Node {
 
             // Create P2P client and send join request
             let (endpoint, _our_node_id) = p2p_manager.get_endpoint();
-            let transport_client =
-                crate::transport::iroh_client::IrohClusterServiceClient::new(
-                    Arc::new(endpoint),
-                    node_addr.clone(),
-                );
+            let transport_client = crate::transport::iroh_client::IrohClusterServiceClient::new(
+                Arc::new(endpoint),
+                node_addr.clone(),
+            );
 
             // Now proceed with the join request via P2P
             let our_node_id = self.shared.get_id();
@@ -921,12 +964,12 @@ impl Node {
                 let mut conf_state = raft::prelude::ConfState::default();
                 conf_state.voters = voters.to_vec();
                 if let Err(e) = storage.save_conf_state(&conf_state) {
-                    tracing::warn!(
-                        "Failed to save initial configuration state: {}",
-                        e
-                    );
+                    tracing::warn!("Failed to save initial configuration state: {}", e);
                 } else {
-                    tracing::info!("Successfully saved initial configuration state with voters: {:?}", voters);
+                    tracing::info!(
+                        "Successfully saved initial configuration state with voters: {:?}",
+                        voters
+                    );
                 }
             } else {
                 tracing::warn!("No database available to save configuration state");
@@ -943,11 +986,14 @@ impl Node {
         message_tx: mpsc::UnboundedSender<(u64, raft::prelude::Message)>,
         _conf_change_tx: mpsc::UnboundedSender<RaftConfChange>,
         proposal_tx: mpsc::UnboundedSender<RaftProposal>,
-    ) -> BlixardResult<(Arc<crate::transport::raft_transport_adapter::RaftTransport>, mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>)> {
+    ) -> BlixardResult<(
+        Arc<crate::transport::raft_transport_adapter::RaftTransport>,
+        mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>,
+    )> {
         // Get transport configuration - using default TransportConfig (Iroh-only now)
         let transport_config = crate::transport::config::TransportConfig::default();
 
-        // Create transport  
+        // Create transport
         let raft_transport = Arc::new(
             crate::transport::raft_transport_adapter::RaftTransport::new(
                 self.shared.clone(),
@@ -963,12 +1009,14 @@ impl Node {
         // Get the endpoint from the transport and create peer connector
         let endpoint = raft_transport.endpoint().as_ref().clone();
         let p2p_monitor = Arc::new(crate::p2p_monitor::NoOpMonitor);
-        
-        let peer_connector = Arc::new(crate::transport::iroh_peer_connector::IrohPeerConnector::new(
-            endpoint,
-            self.shared.clone(),
-            p2p_monitor,
-        ));
+
+        let peer_connector = Arc::new(
+            crate::transport::iroh_peer_connector::IrohPeerConnector::new(
+                endpoint,
+                self.shared.clone(),
+                p2p_monitor,
+            ),
+        );
 
         let connector_clone = peer_connector.clone();
         tokio::spawn(async move {
@@ -1005,17 +1053,21 @@ impl Node {
         mut outgoing_rx: mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>,
     ) {
         let shared_weak = Arc::downgrade(&self.shared);
-        
+
         tokio::spawn(async move {
             while let Some((target, msg)) = outgoing_rx.recv().await {
                 if let Some(_shared) = shared_weak.upgrade() {
                     let result = transport.send_message(target, msg).await;
-                    
+
                     if let Err(e) = result {
                         match &e {
                             BlixardError::NodeNotFound { .. } => {
                                 // Node removed from cluster, this is expected
-                                tracing::debug!("Cannot send message to removed node {}: {}", target, e);
+                                tracing::debug!(
+                                    "Cannot send message to removed node {}: {}",
+                                    target,
+                                    e
+                                );
                             }
                             _ => {
                                 tracing::warn!("Failed to send Raft message to {}: {}", target, e);
@@ -1040,7 +1092,7 @@ impl Node {
         let shared_weak = Arc::downgrade(&self.shared);
         let node_id = self.shared.get_id();
         let shared_for_db = self.shared.clone();
-        
+
         tokio::spawn(async move {
             let config = match crate::config_global::get() {
                 Ok(cfg) => cfg,
@@ -1076,7 +1128,9 @@ impl Node {
                     let delay = restart_delay_ms * (1 << (restart_count - 1).min(5));
                     tracing::warn!(
                         "Restarting Raft manager (attempt {}/{}) after {} ms",
-                        restart_count, max_restarts, delay
+                        restart_count,
+                        max_restarts,
+                        delay
                     );
                     tokio::time::sleep(Duration::from_millis(delay)).await;
 
@@ -1108,7 +1162,10 @@ impl Node {
             }
 
             let error = BlixardError::Internal {
-                message: format!("Raft manager failed after {} restart attempts", max_restarts),
+                message: format!(
+                    "Raft manager failed after {} restart attempts",
+                    max_restarts
+                ),
             };
             tracing::error!("{}", error);
             Err(error)
@@ -1128,8 +1185,14 @@ impl Node {
         // Create new channels
         let (proposal_tx, _proposal_rx) = mpsc::unbounded_channel();
         let (message_tx, _message_rx) = mpsc::unbounded_channel();
-        let (_conf_change_tx, _conf_change_rx): (mpsc::UnboundedSender<RaftConfChange>, mpsc::UnboundedReceiver<RaftConfChange>) = mpsc::unbounded_channel();
-        let (_outgoing_tx, _outgoing_rx): (mpsc::UnboundedSender<(u64, raft::prelude::Message)>, mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>) = mpsc::unbounded_channel();
+        let (_conf_change_tx, _conf_change_rx): (
+            mpsc::UnboundedSender<RaftConfChange>,
+            mpsc::UnboundedReceiver<RaftConfChange>,
+        ) = mpsc::unbounded_channel();
+        let (_outgoing_tx, _outgoing_rx): (
+            mpsc::UnboundedSender<(u64, raft::prelude::Message)>,
+            mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>,
+        ) = mpsc::unbounded_channel();
 
         // Update shared state with new channels
         // Set individual Raft channels
@@ -1138,18 +1201,17 @@ impl Node {
 
         // Create new Raft manager with correct signature
         let peers = shared.get_peers();
-        let peer_list: Vec<(u64, String)> = peers.into_iter().map(|p| {
-            // Parse node_id string to u64 - use 0 as fallback
-            let id = p.node_id.parse::<u64>().unwrap_or(0);
-            (id, p.address)
-        }).collect();
+        let peer_list: Vec<(u64, String)> = peers
+            .into_iter()
+            .map(|p| {
+                // Parse node_id string to u64 - use 0 as fallback
+                let id = p.node_id.parse::<u64>().unwrap_or(0);
+                (id, p.address)
+            })
+            .collect();
         let shared_weak = Arc::downgrade(&shared);
-        let (raft_manager, _proposal_tx, _message_tx, _conf_change_tx, _outgoing_tx) = RaftManager::new(
-            node_id,
-            db,
-            peer_list,
-            shared_weak,
-        )?;
+        let (raft_manager, _proposal_tx, _message_tx, _conf_change_tx, _outgoing_tx) =
+            RaftManager::new(node_id, db, peer_list, shared_weak)?;
 
         // Message handling is managed internally by RaftManager
 
@@ -1184,12 +1246,14 @@ impl Node {
                 },
             };
             let topology = self.shared.config.topology.clone();
-            self.shared.register_worker_through_raft(
-                self.shared.get_id(),
-                self.shared.get_bind_addr().to_string(),
-                capabilities,
-                topology,
-            ).await?;
+            self.shared
+                .register_worker_through_raft(
+                    self.shared.get_id(),
+                    self.shared.get_bind_addr().to_string(),
+                    capabilities,
+                    topology,
+                )
+                .await?;
         } else {
             // Bootstrap mode - already registered as worker directly
             tracing::info!("Node {} bootstrapped successfully", self.shared.get_id());
@@ -1219,7 +1283,7 @@ impl Node {
     /// Pre-connect to the leader node
     async fn pre_connect_to_leader(&self, join_addr: &str) -> BlixardResult<()> {
         tracing::info!("Pre-connecting to leader at {}", join_addr);
-        
+
         if let Some(_peer_connector) = self.shared.get_peer_connector() {
             let parts: Vec<&str> = join_addr.split(':').collect();
             if parts.len() == 2 {
@@ -1239,7 +1303,7 @@ impl Node {
         let timeout = Duration::from_secs(30);
 
         tracing::info!("Waiting for leader identification...");
-        
+
         while start.elapsed() < timeout {
             let raft_status = self.shared.get_raft_status();
             if let Some(leader_id) = raft_status.leader_id {
@@ -1265,7 +1329,10 @@ impl Node {
             VmCommand::Migrate { task } => &task.vm_name,
         };
         let command_str = format!("{:?}", command);
-        self.shared.send_vm_command(vm_name, command_str).await.map(|_| ())
+        self.shared
+            .send_vm_command(vm_name, command_str)
+            .await
+            .map(|_| ())
     }
 
     /// Get the node ID
@@ -1283,7 +1350,10 @@ impl Node {
         &self,
     ) -> BlixardResult<Vec<(crate::types::VmConfig, crate::types::VmStatus)>> {
         let vm_states = self.shared.list_vms().await?;
-        Ok(vm_states.into_iter().map(|state| (state.config, state.status)).collect())
+        Ok(vm_states
+            .into_iter()
+            .map(|state| (state.config, state.status))
+            .collect())
     }
 
     /// Get status of a specific VM
@@ -1623,6 +1693,7 @@ impl Node {
     }
 
     /// Create discovery configuration from node config
+    #[allow(dead_code)] // Reserved for future dynamic discovery configuration
     fn create_discovery_config(
         config: &NodeConfig,
     ) -> BlixardResult<crate::discovery::DiscoveryConfig> {

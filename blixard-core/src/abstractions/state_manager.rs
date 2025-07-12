@@ -3,11 +3,7 @@
 //! These traits provide interfaces for accessing shared state without
 //! requiring tight coupling between components.
 
-use crate::{
-    error::BlixardResult,
-    node_shared::PeerInfo,
-    types::NodeConfig,
-};
+use crate::{error::BlixardResult, node_shared::PeerInfo, types::NodeConfig};
 use async_trait::async_trait;
 use redb::Database;
 use std::{collections::HashMap, sync::Arc};
@@ -18,17 +14,17 @@ use tokio::sync::mpsc;
 pub trait ConfigManager: Send + Sync {
     /// Get the current node configuration
     async fn get_config(&self) -> NodeConfig;
-    
+
     /// Get the node ID
     async fn get_node_id(&self) -> u64 {
         self.get_config().await.id
     }
-    
+
     /// Get the data directory path
     async fn get_data_dir(&self) -> String {
         self.get_config().await.data_dir
     }
-    
+
     /// Check if the node is configured for development mode
     async fn is_dev_mode(&self) -> bool {
         // Could be extended to check for dev-specific configuration
@@ -41,7 +37,7 @@ pub trait ConfigManager: Send + Sync {
 pub trait DatabaseManager: Send + Sync {
     /// Get the shared database instance
     async fn get_database(&self) -> Option<Arc<Database>>;
-    
+
     /// Check if the database is available and initialized
     async fn is_database_available(&self) -> bool {
         self.get_database().await.is_some()
@@ -53,22 +49,26 @@ pub trait DatabaseManager: Send + Sync {
 pub trait PeerManager: Send + Sync {
     /// Add a new peer to the known peers list
     async fn add_peer(&self, peer_id: u64, peer_info: PeerInfo) -> BlixardResult<()>;
-    
+
     /// Remove a peer from the known peers list
     async fn remove_peer(&self, peer_id: u64) -> BlixardResult<()>;
-    
+
     /// Get information about a specific peer
     async fn get_peer(&self, peer_id: u64) -> Option<PeerInfo>;
-    
+
     /// Get all known peers
     async fn get_all_peers(&self) -> HashMap<u64, PeerInfo>;
-    
+
     /// Update the connection status of a peer
-    async fn update_peer_connection_status(&self, peer_id: u64, connected: bool) -> BlixardResult<()>;
-    
+    async fn update_peer_connection_status(
+        &self,
+        peer_id: u64,
+        connected: bool,
+    ) -> BlixardResult<()>;
+
     /// Get the list of connected peers
     async fn get_connected_peers(&self) -> Vec<u64>;
-    
+
     /// Get the total number of known peers
     async fn peer_count(&self) -> usize {
         self.get_all_peers().await.len()
@@ -80,15 +80,23 @@ pub trait PeerManager: Send + Sync {
 pub trait ChannelManager: Send + Sync {
     /// Get the channel for sending Raft proposals
     async fn get_raft_proposal_tx(&self) -> Option<mpsc::UnboundedSender<RaftProposal>>;
-    
+
     /// Get the channel for sending Raft messages
-    async fn get_raft_message_tx(&self) -> Option<mpsc::UnboundedSender<(u64, raft::prelude::Message)>>;
-    
+    async fn get_raft_message_tx(
+        &self,
+    ) -> Option<mpsc::UnboundedSender<(u64, raft::prelude::Message)>>;
+
     /// Set the Raft proposal channel (called during initialization)
-    async fn set_raft_proposal_tx(&self, tx: mpsc::UnboundedSender<RaftProposal>) -> BlixardResult<()>;
-    
+    async fn set_raft_proposal_tx(
+        &self,
+        tx: mpsc::UnboundedSender<RaftProposal>,
+    ) -> BlixardResult<()>;
+
     /// Set the Raft message channel (called during initialization)
-    async fn set_raft_message_tx(&self, tx: mpsc::UnboundedSender<(u64, raft::prelude::Message)>) -> BlixardResult<()>;
+    async fn set_raft_message_tx(
+        &self,
+        tx: mpsc::UnboundedSender<(u64, raft::prelude::Message)>,
+    ) -> BlixardResult<()>;
 }
 
 /// Trait for managing node lifecycle state
@@ -96,19 +104,19 @@ pub trait ChannelManager: Send + Sync {
 pub trait LifecycleManager: Send + Sync {
     /// Check if the node is currently running
     async fn is_running(&self) -> bool;
-    
+
     /// Check if the node has been initialized
     async fn is_initialized(&self) -> bool;
-    
+
     /// Mark the node as initialized
     async fn set_initialized(&self, initialized: bool) -> BlixardResult<()>;
-    
+
     /// Mark the node as running
     async fn set_running(&self, running: bool) -> BlixardResult<()>;
-    
+
     /// Get the node startup time
     async fn get_startup_time(&self) -> Option<std::time::SystemTime>;
-    
+
     /// Get the node uptime
     async fn get_uptime(&self) -> Option<std::time::Duration> {
         if let Some(startup_time) = self.get_startup_time().await {
@@ -131,14 +139,8 @@ pub struct RaftProposal {
 /// Combined trait for comprehensive state management
 /// This trait combines all the individual management traits for convenience
 #[async_trait]
-pub trait StateManager: 
-    ConfigManager + 
-    DatabaseManager + 
-    PeerManager + 
-    ChannelManager + 
-    LifecycleManager + 
-    Send + 
-    Sync 
+pub trait StateManager:
+    ConfigManager + DatabaseManager + PeerManager + ChannelManager + LifecycleManager + Send + Sync
 {
     /// Get a comprehensive snapshot of the current node state
     async fn get_state_snapshot(&self) -> NodeStateSnapshot {
@@ -176,7 +178,8 @@ pub struct MockStateManager {
     is_initialized: tokio::sync::RwLock<bool>,
     startup_time: Option<std::time::SystemTime>,
     raft_proposal_tx: tokio::sync::RwLock<Option<mpsc::UnboundedSender<RaftProposal>>>,
-    raft_message_tx: tokio::sync::RwLock<Option<mpsc::UnboundedSender<(u64, raft::prelude::Message)>>>,
+    raft_message_tx:
+        tokio::sync::RwLock<Option<mpsc::UnboundedSender<(u64, raft::prelude::Message)>>>,
 }
 
 #[cfg(test)]
@@ -193,7 +196,7 @@ impl MockStateManager {
             raft_message_tx: tokio::sync::RwLock::new(None),
         }
     }
-    
+
     pub fn with_database(mut self, database: Arc<Database>) -> Self {
         self.database = Some(database);
         self
@@ -223,27 +226,31 @@ impl PeerManager for MockStateManager {
         self.peers.write().await.insert(peer_id, peer_info);
         Ok(())
     }
-    
+
     async fn remove_peer(&self, peer_id: u64) -> BlixardResult<()> {
         self.peers.write().await.remove(&peer_id);
         Ok(())
     }
-    
+
     async fn get_peer(&self, peer_id: u64) -> Option<PeerInfo> {
         self.peers.read().await.get(&peer_id).cloned()
     }
-    
+
     async fn get_all_peers(&self) -> HashMap<u64, PeerInfo> {
         self.peers.read().await.clone()
     }
-    
-    async fn update_peer_connection_status(&self, peer_id: u64, connected: bool) -> BlixardResult<()> {
+
+    async fn update_peer_connection_status(
+        &self,
+        peer_id: u64,
+        connected: bool,
+    ) -> BlixardResult<()> {
         if let Some(peer_info) = self.peers.write().await.get_mut(&peer_id) {
             peer_info.is_connected = connected;
         }
         Ok(())
     }
-    
+
     async fn get_connected_peers(&self) -> Vec<u64> {
         self.peers
             .read()
@@ -261,17 +268,25 @@ impl ChannelManager for MockStateManager {
     async fn get_raft_proposal_tx(&self) -> Option<mpsc::UnboundedSender<RaftProposal>> {
         self.raft_proposal_tx.read().await.clone()
     }
-    
-    async fn get_raft_message_tx(&self) -> Option<mpsc::UnboundedSender<(u64, raft::prelude::Message)>> {
+
+    async fn get_raft_message_tx(
+        &self,
+    ) -> Option<mpsc::UnboundedSender<(u64, raft::prelude::Message)>> {
         self.raft_message_tx.read().await.clone()
     }
-    
-    async fn set_raft_proposal_tx(&self, tx: mpsc::UnboundedSender<RaftProposal>) -> BlixardResult<()> {
+
+    async fn set_raft_proposal_tx(
+        &self,
+        tx: mpsc::UnboundedSender<RaftProposal>,
+    ) -> BlixardResult<()> {
         *self.raft_proposal_tx.write().await = Some(tx);
         Ok(())
     }
-    
-    async fn set_raft_message_tx(&self, tx: mpsc::UnboundedSender<(u64, raft::prelude::Message)>) -> BlixardResult<()> {
+
+    async fn set_raft_message_tx(
+        &self,
+        tx: mpsc::UnboundedSender<(u64, raft::prelude::Message)>,
+    ) -> BlixardResult<()> {
         *self.raft_message_tx.write().await = Some(tx);
         Ok(())
     }
@@ -283,21 +298,21 @@ impl LifecycleManager for MockStateManager {
     async fn is_running(&self) -> bool {
         *self.is_running.read().await
     }
-    
+
     async fn is_initialized(&self) -> bool {
         *self.is_initialized.read().await
     }
-    
+
     async fn set_initialized(&self, initialized: bool) -> BlixardResult<()> {
         *self.is_initialized.write().await = initialized;
         Ok(())
     }
-    
+
     async fn set_running(&self, running: bool) -> BlixardResult<()> {
         *self.is_running.write().await = running;
         Ok(())
     }
-    
+
     async fn get_startup_time(&self) -> Option<std::time::SystemTime> {
         self.startup_time
     }
@@ -311,7 +326,7 @@ impl StateManager for MockStateManager {}
 mod tests {
     use super::*;
     use crate::types::NodeConfig;
-    
+
     #[tokio::test]
     async fn test_mock_state_manager() {
         let config = NodeConfig {
@@ -319,20 +334,20 @@ mod tests {
             address: "127.0.0.1:7001".to_string(),
             data_dir: "/tmp/test".to_string(),
         };
-        
+
         let state_manager = MockStateManager::new(config.clone());
-        
+
         // Test config management
         assert_eq!(state_manager.get_node_id().await, 1);
         assert_eq!(state_manager.get_config().await.address, "127.0.0.1:7001");
-        
+
         // Test lifecycle management
         assert!(!state_manager.is_running().await);
         assert!(!state_manager.is_initialized().await);
-        
+
         state_manager.set_initialized(true).await.unwrap();
         assert!(state_manager.is_initialized().await);
-        
+
         // Test peer management
         let peer_info = PeerInfo {
             id: 2,
@@ -341,11 +356,11 @@ mod tests {
             p2p_node_id: None,
             p2p_addresses: vec![],
         };
-        
+
         state_manager.add_peer(2, peer_info.clone()).await.unwrap();
         assert_eq!(state_manager.peer_count().await, 1);
         assert_eq!(state_manager.get_connected_peers().await, vec![2]);
-        
+
         // Test state snapshot
         let snapshot = state_manager.get_state_snapshot().await;
         assert_eq!(snapshot.config.id, 1);

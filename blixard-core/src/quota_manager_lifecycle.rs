@@ -81,9 +81,11 @@ struct TenantRequestTracking {
 #[derive(Debug)]
 struct GlobalRequestTracking {
     /// Total requests per second globally
+    #[allow(dead_code)] // Reserved for future global rate limiting implementation
     global_rps: u32,
 
     /// Last reset timestamp
+    #[allow(dead_code)] // Reserved for future global rate limiting implementation
     last_reset: SystemTime,
 }
 

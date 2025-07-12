@@ -21,7 +21,7 @@ use blixard_core::{
 async fn test_leader_election_with_network_failures() {
     failpoints::init();
 
-    let cluster = TestCluster::new(5).await;
+    let cluster = TestCluster::with_size(5).await;
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await
@@ -70,7 +70,7 @@ async fn test_leader_election_with_network_failures() {
 async fn test_storage_failures_during_replication() {
     failpoints::init();
 
-    let cluster = TestCluster::new(3).await;
+    let cluster = TestCluster::with_size(3).await;
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await
@@ -150,7 +150,7 @@ async fn test_storage_failures_during_replication() {
 async fn test_state_machine_apply_failures() {
     failpoints::init();
 
-    let cluster = TestCluster::new(3).await;
+    let cluster = TestCluster::with_size(3).await;
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await
@@ -198,7 +198,7 @@ async fn test_state_machine_apply_failures() {
 async fn test_leader_step_down_failpoints() {
     failpoints::init();
 
-    let cluster = TestCluster::new(5).await;
+    let cluster = TestCluster::with_size(5).await;
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await
@@ -250,7 +250,7 @@ async fn test_leader_step_down_failpoints() {
 async fn test_snapshot_failures() {
     failpoints::init();
 
-    let cluster = TestCluster::new(3).await;
+    let cluster = TestCluster::with_size(3).await;
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await
@@ -314,7 +314,7 @@ async fn test_snapshot_failures() {
 async fn test_chaos_engineering_scenario() {
     failpoints::init();
 
-    let cluster = TestCluster::new(5).await;
+    let cluster = TestCluster::with_size(5).await;
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await
@@ -412,7 +412,7 @@ async fn test_chaos_engineering_scenario() {
 async fn test_cascading_failure_recovery() {
     failpoints::init();
 
-    let cluster = TestCluster::new(5).await;
+    let cluster = TestCluster::with_size(5).await;
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await

@@ -8,9 +8,9 @@
 //! Note: Transport security is handled by Iroh's built-in QUIC/TLS 1.3
 
 use crate::cedar_authz::CedarAuthz;
+use crate::common::file_io::{file_exists, read_config_file};
 use crate::config_v2::{AuthConfig, SecurityConfig, TlsConfig};
 use crate::error::{BlixardError, BlixardResult};
-use crate::common::file_io::{read_config_file, file_exists};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -23,6 +23,7 @@ use tracing::{info, warn};
 #[derive(Debug)]
 pub struct SecurityManager {
     /// Configuration
+    #[allow(dead_code)] // Config kept for future security feature configuration
     config: SecurityConfig,
 
     /// Authentication manager
@@ -306,14 +307,14 @@ impl AuthManager {
             return Ok(());
         }
 
-        let tokens: HashMap<String, TokenInfo> = 
-            read_config_file(token_file, "tokens").await
-                .map_err(|e| match e {
-                    BlixardError::ConfigError(msg) => BlixardError::Security {
-                        message: format!("Failed to load token file: {}", msg),
-                    },
-                    other => other,
-                })?;
+        let tokens: HashMap<String, TokenInfo> = read_config_file(token_file, "tokens")
+            .await
+            .map_err(|e| match e {
+                BlixardError::ConfigError(msg) => BlixardError::Security {
+                    message: format!("Failed to load token file: {}", msg),
+                },
+                other => other,
+            })?;
 
         let mut valid_tokens = self.valid_tokens.write().await;
         *valid_tokens = tokens;
@@ -447,13 +448,13 @@ impl SecretsManager {
         // Generate secure master key from environment or derive from password
         let master_key = match std::env::var("BLIXARD_MASTER_KEY") {
             Ok(key_hex) => {
-                let bytes = hex::decode(key_hex)
-                    .map_err(|_| BlixardError::Security { 
-                        message: "Invalid master key format - must be 64 hex characters".to_string() 
-                    })?;
+                let bytes = hex::decode(key_hex).map_err(|_| BlixardError::Security {
+                    message: "Invalid master key format - must be 64 hex characters".to_string(),
+                })?;
                 if bytes.len() != 32 {
-                    return Err(BlixardError::Security { 
-                        message: "Master key must be exactly 32 bytes (64 hex characters)".to_string() 
+                    return Err(BlixardError::Security {
+                        message: "Master key must be exactly 32 bytes (64 hex characters)"
+                            .to_string(),
                     });
                 }
                 let mut key = [0u8; 32];
@@ -592,7 +593,8 @@ mod tests {
     #[tokio::test]
     async fn test_security_manager_creation() {
         let config = default_dev_security_config();
-        let security_manager = SecurityManager::new(config).await
+        let security_manager = SecurityManager::new(config)
+            .await
             .expect("Failed to create security manager with dev config");
 
         // Iroh handles transport security via QUIC/TLS - no separate TLS config needed
@@ -604,7 +606,7 @@ mod tests {
         assert!(auth_result.authenticated);
         assert_eq!(auth_result.user, Some("anonymous".to_string()));
         assert_eq!(auth_result.auth_method, "disabled");
-        
+
         // Test that various token formats are accepted when auth is disabled
         let test_tokens = vec![
             "simple-token",
@@ -612,11 +614,17 @@ mod tests {
             "",
             "very-long-token-with-special-characters-!@#$%",
         ];
-        
+
         for token in test_tokens {
-            let result = security_manager.authenticate_token(token).await
+            let result = security_manager
+                .authenticate_token(token)
+                .await
                 .expect("Authentication should not fail when disabled");
-            assert!(result.authenticated, "Token '{}' should be accepted when auth is disabled", token);
+            assert!(
+                result.authenticated,
+                "Token '{}' should be accepted when auth is disabled",
+                token
+            );
         }
     }
 
@@ -637,7 +645,8 @@ mod tests {
             },
         };
 
-        let mut security_manager = SecurityManager::new(config).await
+        let mut security_manager = SecurityManager::new(config)
+            .await
             .expect("Failed to create security manager with auth enabled");
 
         // Generate a token
@@ -647,10 +656,17 @@ mod tests {
             .expect("Failed to generate token for test user");
 
         // Authenticate with the token
-        let auth_result = security_manager.authenticate_token(&token).await
+        let auth_result = security_manager
+            .authenticate_token(&token)
+            .await
             .expect("Failed to authenticate valid token");
         assert!(auth_result.authenticated);
-        assert_eq!(auth_result.user.expect("Authenticated user should have a name"), "test-user");
+        assert_eq!(
+            auth_result
+                .user
+                .expect("Authenticated user should have a name"),
+            "test-user"
+        );
 
         // Test invalid token
         let invalid_result = security_manager
@@ -663,7 +679,8 @@ mod tests {
     #[tokio::test]
     async fn test_secrets_management() {
         let config = default_dev_security_config();
-        let mut security_manager = SecurityManager::new(config).await
+        let mut security_manager = SecurityManager::new(config)
+            .await
             .expect("Failed to create security manager for secrets test");
 
         // Store a secret
@@ -673,12 +690,19 @@ mod tests {
             .expect("Failed to store secret");
 
         // Retrieve the secret
-        let retrieved = security_manager.get_secret("test-key").await
+        let retrieved = security_manager
+            .get_secret("test-key")
+            .await
             .expect("Failed to retrieve stored secret");
-        assert_eq!(retrieved.expect("Retrieved secret should not be None"), "secret-value");
+        assert_eq!(
+            retrieved.expect("Retrieved secret should not be None"),
+            "secret-value"
+        );
 
         // Non-existent secret
-        let missing = security_manager.get_secret("missing-key").await
+        let missing = security_manager
+            .get_secret("missing-key")
+            .await
             .expect("Getting missing secret should not fail");
         assert!(missing.is_none());
     }

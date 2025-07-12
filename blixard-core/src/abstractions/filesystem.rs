@@ -153,17 +153,17 @@ impl FileSystem for TokioFileSystem {
     async fn read_dir(&self, path: &Path) -> BlixardResult<Vec<PathBuf>> {
         let mut entries = tokio::fs::read_dir(path).await?;
         let mut paths = Vec::new();
-        
+
         while let Some(entry) = entries.next_entry().await? {
             paths.push(entry.path());
         }
-        
+
         Ok(paths)
     }
 
     async fn metadata(&self, path: &Path) -> BlixardResult<FileMetadata> {
         let metadata = tokio::fs::metadata(path).await?;
-        
+
         Ok(FileMetadata {
             size: metadata.len(),
             is_dir: metadata.is_dir(),
@@ -320,7 +320,7 @@ impl FileSystem for MockFileSystem {
 
     async fn read_dir(&self, path: &Path) -> BlixardResult<Vec<PathBuf>> {
         let files = self.files.read().await;
-        
+
         // Find all files that have this path as a parent
         let mut entries = Vec::new();
         for file_path in files.keys() {
@@ -330,13 +330,13 @@ impl FileSystem for MockFileSystem {
                 }
             }
         }
-        
+
         Ok(entries)
     }
 
     async fn metadata(&self, path: &Path) -> BlixardResult<FileMetadata> {
         let files = self.files.read().await;
-        
+
         if let Some(content) = files.get(path) {
             Ok(FileMetadata {
                 size: content.len() as u64,

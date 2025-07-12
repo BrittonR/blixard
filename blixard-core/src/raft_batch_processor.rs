@@ -12,8 +12,8 @@ use tracing::{info, warn};
 use crate::error::{BlixardError, BlixardResult};
 #[cfg(feature = "observability")]
 use crate::metrics_otel::{attributes, metrics};
-use crate::raft_manager::ProposalData;
 use crate::raft::messages::RaftProposal;
+use crate::raft_manager::ProposalData;
 
 /// Configuration for batch processing
 #[derive(Debug, Clone)]
@@ -55,7 +55,7 @@ impl ProposalBatch {
             created_at: Instant::now(),
         }
     }
-    
+
     fn with_capacity(capacity: usize) -> Self {
         Self {
             proposals: Vec::with_capacity(capacity),
@@ -107,7 +107,9 @@ impl RaftBatchProcessor {
             config: config.clone(),
             proposal_rx,
             raft_tx,
-            current_batch: Arc::new(RwLock::new(ProposalBatch::with_capacity(config.max_batch_size))),
+            current_batch: Arc::new(RwLock::new(ProposalBatch::with_capacity(
+                config.max_batch_size,
+            ))),
             node_id,
         }
     }

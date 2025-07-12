@@ -1,12 +1,12 @@
-pub mod timing_helpers;
 pub mod cluster_helpers;
+pub mod timing_helpers;
 pub mod vm_helpers;
 
 use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 
 // Re-export key components
-pub use timing_helpers::*;
 pub use cluster_helpers::*;
+pub use timing_helpers::*;
 pub use vm_helpers::*;
 
 /// Global port allocator for tests
@@ -24,9 +24,9 @@ impl PortAllocator {
     /// Get the next available port for testing
     pub fn next_port() -> u16 {
         PORT_ALLOCATION_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
-        
+
         let port = PORT_ALLOCATOR.fetch_add(1, Ordering::Relaxed);
-        
+
         // Check if port is actually available (simple validation)
         if port > 65000 {
             // Reset to avoid port exhaustion in long-running test suites
@@ -59,19 +59,19 @@ impl PortAllocator {
 
 /// Database utilities for tests
 pub mod database {
-    use std::sync::Arc;
     use crate::error::{BlixardError, BlixardResult};
     use crate::raft_storage::init_database_tables;
+    use std::sync::Arc;
 
     /// Create a temporary database for testing
     pub fn create() -> BlixardResult<(Arc<redb::Database>, tempfile::TempDir)> {
         let temp_dir = tempfile::tempdir()?;
         let db_path = temp_dir.path().join("test.db");
         let database = Arc::new(redb::Database::create(&db_path)?);
-        
+
         // Initialize all required tables
         init_database_tables(&database)?;
-        
+
         Ok((database, temp_dir))
     }
 
@@ -80,10 +80,10 @@ pub mod database {
         let temp_dir = tempfile::tempdir()?;
         let db_path = temp_dir.path().join(format!("{}.db", name));
         let database = Arc::new(redb::Database::create(&db_path)?);
-        
+
         // Initialize all required tables
         init_database_tables(&database)?;
-        
+
         Ok((database, temp_dir))
     }
 
@@ -92,32 +92,34 @@ pub mod database {
         let temp_dir = tempfile::tempdir()?;
         let db_path = temp_dir.path().join("test.db");
         let database = redb::Database::create(&db_path)?;
-        
+
         // Initialize all required tables
         let database_arc = Arc::new(database);
         init_database_tables(&database_arc)?;
-        
+
         // Extract the raw database from Arc
         let database = Arc::try_unwrap(database_arc).map_err(|_| BlixardError::Internal {
             message: "Failed to unwrap Arc<Database>".to_string(),
         })?;
-        
+
         Ok((database, temp_dir))
     }
 
     /// Create database with only specific tables initialized
-    pub fn create_with_tables(tables: &[&'static str]) -> BlixardResult<(Arc<redb::Database>, tempfile::TempDir)> {
+    pub fn create_with_tables(
+        tables: &[&'static str],
+    ) -> BlixardResult<(Arc<redb::Database>, tempfile::TempDir)> {
         let temp_dir = tempfile::tempdir()?;
         let db_path = temp_dir.path().join("test.db");
         let database = redb::Database::create(&db_path)?;
-        
+
         // Initialize only requested tables
         let write_txn = database.begin_write()?;
         for table_name in tables {
             let _ = write_txn.open_table(redb::TableDefinition::<&str, &[u8]>::new(table_name))?;
         }
         write_txn.commit()?;
-        
+
         Ok((Arc::new(database), temp_dir))
     }
 }

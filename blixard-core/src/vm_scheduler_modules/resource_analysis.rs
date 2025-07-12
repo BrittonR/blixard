@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::anti_affinity::AntiAffinityChecker;
 use crate::error::{BlixardError, BlixardResult};
 use crate::raft_manager::{WorkerCapabilities, WorkerStatus};
 use crate::raft_storage::{VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE};
-use crate::types::{VmConfig, NodeTopology};
-use crate::anti_affinity::AntiAffinityChecker;
+use crate::types::{NodeTopology, VmConfig};
 
 /// Resource requirements for VM placement
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,7 +87,9 @@ impl NodeResourceUsage {
 
     /// Get available memory in MB
     pub fn available_memory_mb(&self) -> u64 {
-        self.capabilities.memory_mb.saturating_sub(self.used_memory_mb)
+        self.capabilities
+            .memory_mb
+            .saturating_sub(self.used_memory_mb)
     }
 
     /// Get available disk space in GB
@@ -108,7 +110,10 @@ impl NodeResourceUsage {
         }
 
         // Check memory
-        let available_memory = self.capabilities.memory_mb.saturating_sub(self.used_memory_mb);
+        let available_memory = self
+            .capabilities
+            .memory_mb
+            .saturating_sub(self.used_memory_mb);
         if available_memory < requirements.memory_mb {
             return false;
         }
@@ -137,19 +142,22 @@ impl NodeResourceUsage {
 
         // Calculate available resources as percentages
         let cpu_available = if self.capabilities.cpu_cores > 0 {
-            (self.capabilities.cpu_cores - self.used_vcpus) as f64 / self.capabilities.cpu_cores as f64
+            (self.capabilities.cpu_cores - self.used_vcpus) as f64
+                / self.capabilities.cpu_cores as f64
         } else {
             0.0
         };
 
         let memory_available = if self.capabilities.memory_mb > 0 {
-            (self.capabilities.memory_mb - self.used_memory_mb) as f64 / self.capabilities.memory_mb as f64
+            (self.capabilities.memory_mb - self.used_memory_mb) as f64
+                / self.capabilities.memory_mb as f64
         } else {
             0.0
         };
 
         let disk_available = if self.capabilities.disk_gb > 0 {
-            (self.capabilities.disk_gb - self.used_disk_gb) as f64 / self.capabilities.disk_gb as f64
+            (self.capabilities.disk_gb - self.used_disk_gb) as f64
+                / self.capabilities.disk_gb as f64
         } else {
             0.0
         };
@@ -182,7 +190,7 @@ impl NodeResourceUsage {
     /// Calculate placement score based on strategy
     pub fn placement_score(&self, strategy: &crate::vm_scheduler::PlacementStrategy) -> f64 {
         use crate::vm_scheduler::PlacementStrategy;
-        
+
         if !self.is_healthy {
             return 0.0;
         }
@@ -218,7 +226,11 @@ impl NodeResourceUsage {
             }
             PlacementStrategy::Manual { node_id } => {
                 // Return 1.0 if this is the target node, 0.0 otherwise
-                if self.node_id == *node_id { 1.0 } else { 0.0 }
+                if self.node_id == *node_id {
+                    1.0
+                } else {
+                    0.0
+                }
             }
             PlacementStrategy::PriorityBased { .. } => {
                 // TODO: Implement priority-based scoring
@@ -281,73 +293,79 @@ impl super::VmScheduler {
 
     /// Get current resource usage for all nodes in the cluster
     pub async fn get_cluster_resource_usage(&self) -> BlixardResult<Vec<NodeResourceUsage>> {
-        let read_txn = self.database.begin_read().map_err(|e| BlixardError::Storage {
-            operation: "begin read transaction".to_string(),
-            source: Box::new(e),
-        })?;
+        let read_txn = self
+            .database
+            .begin_read()
+            .map_err(|e| BlixardError::Storage {
+                operation: "begin read transaction".to_string(),
+                source: Box::new(e),
+            })?;
 
         // Get all workers and their capabilities
-        let worker_table = read_txn.open_table(WORKER_TABLE).map_err(|e| BlixardError::Storage {
-            operation: "open worker table".to_string(),
-            source: Box::new(e),
-        })?;
+        let worker_table =
+            read_txn
+                .open_table(WORKER_TABLE)
+                .map_err(|e| BlixardError::Storage {
+                    operation: "open worker table".to_string(),
+                    source: Box::new(e),
+                })?;
 
         // Get worker status
-        let status_table = read_txn.open_table(WORKER_STATUS_TABLE).map_err(|e| BlixardError::Storage {
-            operation: "open worker status table".to_string(),
-            source: Box::new(e),
-        })?;
+        let status_table =
+            read_txn
+                .open_table(WORKER_STATUS_TABLE)
+                .map_err(|e| BlixardError::Storage {
+                    operation: "open worker status table".to_string(),
+                    source: Box::new(e),
+                })?;
 
         // Get VM assignments to calculate resource usage
-        let vm_table = read_txn.open_table(VM_STATE_TABLE).map_err(|e| BlixardError::Storage {
-            operation: "open VM state table".to_string(),
-            source: Box::new(e),
-        })?;
+        let vm_table = read_txn
+            .open_table(VM_STATE_TABLE)
+            .map_err(|e| BlixardError::Storage {
+                operation: "open VM state table".to_string(),
+                source: Box::new(e),
+            })?;
 
         let mut node_usage = Vec::new();
 
-        for entry in worker_table.range::<&[u8]>(..).map_err(|e| BlixardError::Storage {
-            operation: "iterate workers".to_string(),
-            source: Box::new(e),
-        })? {
+        for entry in worker_table
+            .range::<&[u8]>(..)
+            .map_err(|e| BlixardError::Storage {
+                operation: "iterate workers".to_string(),
+                source: Box::new(e),
+            })?
+        {
             let (node_id_bytes, worker_data) = entry.map_err(|e| BlixardError::Storage {
                 operation: "read worker entry".to_string(),
                 source: Box::new(e),
             })?;
 
-            let node_id = u64::from_be_bytes(
-                node_id_bytes.value().try_into().map_err(|_| {
-                    BlixardError::Serialization {
-                        operation: "parse node ID".to_string(),
-                        source: Box::new(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            "Invalid node ID format",
-                        )),
-                    }
-                })?,
-            );
+            let node_id = u64::from_be_bytes(node_id_bytes.value().try_into().map_err(|_| {
+                BlixardError::Serialization {
+                    operation: "parse node ID".to_string(),
+                    source: Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "Invalid node ID format",
+                    )),
+                }
+            })?);
 
             let capabilities: WorkerCapabilities = bincode::deserialize(worker_data.value())
-                .map_err(|e| BlixardError::serialization(
-                    "deserialize worker capabilities",
-                    e
-                ))?;
+                .map_err(|e| BlixardError::serialization("deserialize worker capabilities", e))?;
 
             // Get worker status
             let node_id_bytes = node_id.to_be_bytes();
             let is_healthy = if let Ok(Some(status_data)) = status_table.get(&node_id_bytes[..]) {
                 let status: WorkerStatus = bincode::deserialize(status_data.value())
-                    .map_err(|e| BlixardError::serialization(
-                        "deserialize worker status",
-                        e
-                    ))?;
+                    .map_err(|e| BlixardError::serialization("deserialize worker status", e))?;
                 matches!(status, crate::raft::proposals::WorkerStatus::Online)
             } else {
                 false // No status means not healthy
             };
 
             // Calculate current resource usage from VMs
-            let (used_vcpus, used_memory_mb, used_disk_gb, running_vms) = 
+            let (used_vcpus, used_memory_mb, used_disk_gb, running_vms) =
                 self.calculate_node_resource_usage(node_id, &vm_table)?;
 
             let mut usage = NodeResourceUsage {
@@ -358,7 +376,7 @@ impl super::VmScheduler {
                 used_memory_mb,
                 used_disk_gb,
                 running_vms,
-                topology: None, // TODO: Load from NODE_TOPOLOGY_TABLE if needed
+                topology: None,      // TODO: Load from NODE_TOPOLOGY_TABLE if needed
                 cost_per_hour: None, // TODO: Load from configuration
                 current_utilization: NodeUtilization {
                     cpu_percent: 0.0,
@@ -379,24 +397,26 @@ impl super::VmScheduler {
         &self,
         _node_id: u64,
         vm_table: &redb::ReadOnlyTable<&str, &[u8]>,
-    ) -> BlixardResult<(u32, u64, u64, u32)> 
-    {
+    ) -> BlixardResult<(u32, u64, u64, u32)> {
         let mut used_vcpus = 0;
         let mut used_memory_mb = 0;
         let mut used_disk_gb = 0;
         let mut running_vms = 0;
 
-        for entry in vm_table.range::<&str>(..).map_err(|e| BlixardError::Storage {
-            operation: "iterate VMs".to_string(),
-            source: Box::new(e),
-        })? {
+        for entry in vm_table
+            .range::<&str>(..)
+            .map_err(|e| BlixardError::Storage {
+                operation: "iterate VMs".to_string(),
+                source: Box::new(e),
+            })?
+        {
             let (_, vm_data) = entry.map_err(|e| BlixardError::Storage {
                 operation: "read VM entry".to_string(),
                 source: Box::new(e),
             })?;
 
-            let vm_config: VmConfig = bincode::deserialize(vm_data.value())
-                .map_err(|e| BlixardError::Serialization {
+            let vm_config: VmConfig =
+                bincode::deserialize(vm_data.value()).map_err(|e| BlixardError::Serialization {
                     operation: "deserialize VM config".to_string(),
                     source: Box::new(e),
                 })?;
@@ -415,42 +435,54 @@ impl super::VmScheduler {
 
     /// Build anti-affinity checker for constraint validation
     pub(super) async fn build_anti_affinity_checker(&self) -> BlixardResult<AntiAffinityChecker> {
-        let read_txn = self.database.begin_read().map_err(|e| BlixardError::Storage {
-            operation: "begin read transaction".to_string(),
-            source: Box::new(e),
-        })?;
+        let read_txn = self
+            .database
+            .begin_read()
+            .map_err(|e| BlixardError::Storage {
+                operation: "begin read transaction".to_string(),
+                source: Box::new(e),
+            })?;
 
-        let vm_table = read_txn.open_table(VM_STATE_TABLE).map_err(|e| BlixardError::Storage {
-            operation: "open VM state table".to_string(),
-            source: Box::new(e),
-        })?;
+        let vm_table = read_txn
+            .open_table(VM_STATE_TABLE)
+            .map_err(|e| BlixardError::Storage {
+                operation: "open VM state table".to_string(),
+                source: Box::new(e),
+            })?;
 
         let mut existing_placements = Vec::new();
 
-        for entry in vm_table.range::<&str>(..).map_err(|e| BlixardError::Storage {
-            operation: "iterate VMs".to_string(),
-            source: Box::new(e),
-        })? {
+        for entry in vm_table
+            .range::<&str>(..)
+            .map_err(|e| BlixardError::Storage {
+                operation: "iterate VMs".to_string(),
+                source: Box::new(e),
+            })?
+        {
             let (vm_name, vm_data) = entry.map_err(|e| BlixardError::Storage {
                 operation: "read VM entry".to_string(),
                 source: Box::new(e),
             })?;
 
-            let vm_config: VmConfig = bincode::deserialize(vm_data.value())
-                .map_err(|e| BlixardError::Serialization {
+            let vm_config: VmConfig =
+                bincode::deserialize(vm_data.value()).map_err(|e| BlixardError::Serialization {
                     operation: "deserialize VM config".to_string(),
                     source: Box::new(e),
                 })?;
 
             // For now, create empty groups and use a default node (0) for VMs without placement info
             // TODO: VM placement tracking - need to track which node VMs are actually placed on
-            let vm_name_str = std::str::from_utf8(vm_name.value().as_ref()).unwrap_or("unknown").to_string();
-            let groups = vm_config.metadata.as_ref()
+            let vm_name_str = std::str::from_utf8(vm_name.value().as_ref())
+                .unwrap_or("unknown")
+                .to_string();
+            let groups = vm_config
+                .metadata
+                .as_ref()
                 .and_then(|metadata| metadata.get("affinity-group"))
                 .map(|group| vec![group.clone()])
                 .unwrap_or_default();
             let node_id = 0u64; // Default node until proper placement tracking is implemented
-            
+
             if !groups.is_empty() {
                 existing_placements.push((vm_name_str, groups, node_id));
             }

@@ -3,13 +3,15 @@
 //! This module provides the HealthCheckScheduler component that manages
 //! periodic health checks for VMs using the LifecycleManager pattern.
 
+use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 use tracing::{error, info, warn};
-use async_trait::async_trait;
 
+#[cfg(feature = "observability")]
+use crate::metrics_otel::{attributes, metrics};
 use crate::{
     error::{BlixardError, BlixardResult},
     patterns::LifecycleManager,
@@ -18,8 +20,6 @@ use crate::{
     vm_health_config::{HealthCheckSchedulerConfig, VmHealthMonitorDependencies},
     vm_health_types::{HealthState, VmHealthStatus},
 };
-#[cfg(feature = "observability")]
-use crate::metrics_otel::{attributes, metrics};
 
 /// Component responsible for scheduling and executing health checks
 pub struct HealthCheckScheduler {
@@ -110,7 +110,9 @@ impl HealthCheckScheduler {
                     info!("VM '{}' process is no longer running", vm_config.name);
 
                     // Update status through Raft
-                    if let Err(e) = self.deps.node_state
+                    if let Err(e) = self
+                        .deps
+                        .node_state
                         .update_vm_status_through_raft(
                             &vm_config.name,
                             format!("{:?}", process_status),
@@ -121,7 +123,8 @@ impl HealthCheckScheduler {
                     }
 
                     // Trigger auto-recovery
-                    if let Err(e) = self.auto_recovery
+                    if let Err(e) = self
+                        .auto_recovery
                         .trigger_recovery(&vm_config.name, &vm_config)
                         .await
                     {
@@ -133,19 +136,26 @@ impl HealthCheckScheduler {
 
             // Perform detailed health checks (if enabled and VM is running)
             if self.config.enable_detailed_checks && process_status == VmStatus::Running {
-                match self.perform_vm_health_checks(&vm_config.name, &vm_config).await {
+                match self
+                    .perform_vm_health_checks(&vm_config.name, &vm_config)
+                    .await
+                {
                     Ok(health_status) => {
                         // Record metrics based on health state
                         self.record_health_metrics(&vm_config.name, &health_status);
 
                         // Handle unhealthy VMs
-                        if matches!(health_status.state, HealthState::Unhealthy | HealthState::Unresponsive) {
+                        if matches!(
+                            health_status.state,
+                            HealthState::Unhealthy | HealthState::Unresponsive
+                        ) {
                             unhealthy_count += 1;
 
                             // Trigger auto-recovery for unhealthy VMs
                             if health_status.consecutive_failures >= 3 {
                                 info!("VM '{}' is unhealthy, triggering recovery", vm_config.name);
-                                if let Err(e) = self.auto_recovery
+                                if let Err(e) = self
+                                    .auto_recovery
                                     .trigger_recovery(&vm_config.name, &vm_config)
                                     .await
                                 {
@@ -158,7 +168,9 @@ impl HealthCheckScheduler {
                         }
 
                         // Store health status in backend
-                        if let Err(e) = self.deps.vm_manager
+                        if let Err(e) = self
+                            .deps
+                            .vm_manager
                             .backend()
                             .update_vm_health_status(&vm_config.name, health_status)
                             .await
@@ -205,12 +217,14 @@ impl HealthCheckScheduler {
 
     /// Get the node ID that owns a specific VM
     async fn get_vm_node_id(&self, vm_name: &str) -> BlixardResult<Option<u64>> {
-        let database = self.deps.node_state
-            .get_database()
-            .await
-            .ok_or_else(|| BlixardError::Internal {
-                message: "Database not initialized".to_string(),
-            })?;
+        let database =
+            self.deps
+                .node_state
+                .get_database()
+                .await
+                .ok_or_else(|| BlixardError::Internal {
+                    message: "Database not initialized".to_string(),
+                })?;
 
         let read_txn = database.begin_read()?;
         let table = read_txn.open_table(crate::raft_storage::VM_STATE_TABLE)?;
@@ -246,10 +260,13 @@ impl HealthCheckScheduler {
 
             let result = tokio::time::timeout(
                 self.config.health_check_timeout,
-                self.deps.vm_manager
-                    .backend()
-                    .perform_health_check(vm_name, &check.name, &check.check_type)
-            ).await;
+                self.deps.vm_manager.backend().perform_health_check(
+                    vm_name,
+                    &check.name,
+                    &check.check_type,
+                ),
+            )
+            .await;
 
             let check_result = match result {
                 Ok(Ok(result)) => result,
@@ -259,7 +276,8 @@ impl HealthCheckScheduler {
                         check_name: check.name.clone(),
                         success: false,
                         message: format!("Health check failed: {}", e),
-                        duration_ms: self.deps.clock.now().duration_since(start_time).as_millis() as u64,
+                        duration_ms: self.deps.clock.now().duration_since(start_time).as_millis()
+                            as u64,
                         timestamp_secs: std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or(Duration::from_secs(0))
@@ -272,7 +290,10 @@ impl HealthCheckScheduler {
                     crate::vm_health_types::HealthCheckResult {
                         check_name: check.name.clone(),
                         success: false,
-                        message: format!("Health check timed out after {:?}", self.config.health_check_timeout),
+                        message: format!(
+                            "Health check timed out after {:?}",
+                            self.config.health_check_timeout
+                        ),
                         duration_ms: self.config.health_check_timeout.as_millis() as u64,
                         timestamp_secs: std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
@@ -300,37 +321,37 @@ impl HealthCheckScheduler {
             let metrics = metrics();
 
             match health_status.state {
-            HealthState::Healthy => {
-                metrics.vm_health_state.add(
-                    1,
-                    &[
-                        attributes::vm_name(vm_name),
-                        attributes::health_state("healthy"),
-                    ],
-                );
+                HealthState::Healthy => {
+                    metrics.vm_health_state.add(
+                        1,
+                        &[
+                            attributes::vm_name(vm_name),
+                            attributes::health_state("healthy"),
+                        ],
+                    );
+                }
+                HealthState::Degraded => {
+                    metrics.vm_health_state.add(
+                        1,
+                        &[
+                            attributes::vm_name(vm_name),
+                            attributes::health_state("degraded"),
+                        ],
+                    );
+                }
+                HealthState::Unhealthy | HealthState::Unresponsive => {
+                    metrics.vm_health_state.add(
+                        1,
+                        &[
+                            attributes::vm_name(vm_name),
+                            attributes::health_state("unhealthy"),
+                        ],
+                    );
+                }
+                HealthState::Unknown => {
+                    // No metrics for unknown state
+                }
             }
-            HealthState::Degraded => {
-                metrics.vm_health_state.add(
-                    1,
-                    &[
-                        attributes::vm_name(vm_name),
-                        attributes::health_state("degraded"),
-                    ],
-                );
-            }
-            HealthState::Unhealthy | HealthState::Unresponsive => {
-                metrics.vm_health_state.add(
-                    1,
-                    &[
-                        attributes::vm_name(vm_name),
-                        attributes::health_state("unhealthy"),
-                    ],
-                );
-            }
-            HealthState::Unknown => {
-                // No metrics for unknown state
-            }
-        }
         }
     }
 }
@@ -343,7 +364,8 @@ impl LifecycleManager for HealthCheckScheduler {
 
     async fn new(_config: Self::Config) -> Result<Self, Self::Error> {
         Err(BlixardError::NotImplemented {
-            feature: "HealthCheckScheduler::new requires dependencies - use new_with_deps instead".to_string(),
+            feature: "HealthCheckScheduler::new requires dependencies - use new_with_deps instead"
+                .to_string(),
         })
     }
 
@@ -418,7 +440,6 @@ impl LifecycleManager for HealthCheckScheduler {
     fn is_running(&self) -> bool {
         self.is_running
     }
-
 }
 
 impl Drop for HealthCheckScheduler {
@@ -464,14 +485,13 @@ mod tests {
 
         let clock = Arc::new(MockClock::new());
 
-        let deps = VmHealthMonitorDependencies::with_clock(
-            node_state,
-            vm_manager,
-            clock,
-        );
+        let deps = VmHealthMonitorDependencies::with_clock(node_state, vm_manager, clock);
 
         let recovery_policy = RecoveryPolicy::default();
-        let auto_recovery = Arc::new(VmAutoRecovery::new(deps.node_state.clone(), recovery_policy));
+        let auto_recovery = Arc::new(VmAutoRecovery::new(
+            deps.node_state.clone(),
+            recovery_policy,
+        ));
 
         let scheduler_config = HealthCheckSchedulerConfig {
             check_interval: Duration::from_millis(100),

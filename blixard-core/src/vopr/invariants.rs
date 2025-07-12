@@ -154,10 +154,7 @@ impl Invariant for SingleLeaderInvariant {
         for (node_id, node_state) in &state.nodes {
             if node_state.role == crate::vopr::state_tracker::NodeRole::Leader {
                 if let Some(term) = state.views.get(node_id) {
-                    leaders_by_term
-                        .entry(*term)
-                        .or_default()
-                        .push(*node_id);
+                    leaders_by_term.entry(*term).or_default().push(*node_id);
                 }
             }
         }

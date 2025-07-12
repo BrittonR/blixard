@@ -9,16 +9,16 @@ use async_trait::async_trait;
 /// Unified builder trait for configuration objects
 pub trait Builder<T> {
     type Error: std::error::Error + Send + Sync + 'static;
-    
+
     /// Create a new builder with default values
     fn new() -> Self;
-    
+
     /// Build the final object
     fn build(self) -> Result<T, Self::Error>;
-    
+
     /// Validate the current builder state
     fn validate(&self) -> Result<(), Self::Error>;
-    
+
     /// Reset builder to initial state
     fn reset(&mut self);
 }
@@ -27,16 +27,16 @@ pub trait Builder<T> {
 #[async_trait]
 pub trait AsyncBuilder<T>: Send {
     type Error: std::error::Error + Send + Sync + 'static;
-    
+
     /// Create a new async builder with default values
     fn new() -> Self;
-    
+
     /// Build the final object asynchronously
     async fn build(self) -> Result<T, Self::Error>;
-    
+
     /// Validate the current builder state
     async fn validate(&self) -> Result<(), Self::Error>;
-    
+
     /// Reset builder to initial state
     fn reset(&mut self);
 }
@@ -44,7 +44,7 @@ pub trait AsyncBuilder<T>: Send {
 /// Trait for objects that have a corresponding builder
 pub trait HasBuilder: Sized {
     type Builder: Builder<Self> + Default + Sized;
-    
+
     /// Get a builder for this type
     fn builder() -> Self::Builder {
         Self::Builder::default()
@@ -54,7 +54,7 @@ pub trait HasBuilder: Sized {
 /// Trait for objects that have a corresponding async builder
 pub trait HasAsyncBuilder: Sized {
     type AsyncBuilder: AsyncBuilder<Self> + Default + Sized;
-    
+
     /// Get an async builder for this type
     fn async_builder() -> Self::AsyncBuilder {
         Self::AsyncBuilder::default()
@@ -72,7 +72,7 @@ macro_rules! config_builder {
                 $field:ident: $field_type:ty = $default:expr,
             )*
         }
-        
+
         $(
             validate {
                 $($validation:expr;)*
@@ -140,7 +140,7 @@ macro_rules! config_builder {
 
             fn build(self) -> Result<$target, Self::Error> {
                 self.validate()?;
-                
+
                 Ok($target {
                     $(
                         $field: self.$field.unwrap_or_else(|| $default),
@@ -179,7 +179,7 @@ macro_rules! async_config_builder {
                 $field:ident: $field_type:ty = $default:expr,
             )*
         }
-        
+
         $(
             async_validate {
                 $($validation:expr;)*
@@ -229,7 +229,7 @@ macro_rules! async_config_builder {
 
             async fn build(self) -> Result<$target, Self::Error> {
                 self.validate().await?;
-                
+
                 Ok($target {
                     $(
                         $field: self.$field.unwrap_or_else(|| $default),
@@ -359,14 +359,14 @@ mod tests {
         pub struct TestConfigBuilder for TestConfig {
             /// The name of the service
             name: String = "default".to_string(),
-            /// The port to listen on  
+            /// The port to listen on
             port: u16 = 8080,
             /// Whether the service is enabled
             enabled: bool = true,
             /// Request timeout duration
             timeout: std::time::Duration = std::time::Duration::from_secs(30),
         }
-        
+
         validate {
             if self.port.unwrap_or(8080) == 0 {
                 return Err(BlixardError::Validation {
@@ -402,12 +402,10 @@ mod tests {
 
     #[test]
     fn test_builder_reset() {
-        let mut builder = TestConfig::builder()
-            .name("test".to_string())
-            .port(3000);
+        let mut builder = TestConfig::builder().name("test".to_string()).port(3000);
 
         builder.reset();
-        
+
         let config = builder.build().unwrap();
         assert_eq!(config.name, "default"); // Should use default after reset
         assert_eq!(config.port, 8080); // Should use default after reset
@@ -417,9 +415,12 @@ mod tests {
     fn test_collection_builder() {
         let numbers = CollectionBuilder::new()
             .with_capacity_limit(3)
-            .add(1).unwrap()
-            .add(2).unwrap()
-            .add(3).unwrap()
+            .add(1)
+            .unwrap()
+            .add(2)
+            .unwrap()
+            .add(3)
+            .unwrap()
             .build()
             .unwrap();
 
@@ -428,8 +429,10 @@ mod tests {
         // Test capacity limit
         let result = CollectionBuilder::new()
             .with_capacity_limit(2)
-            .add(1).unwrap()
-            .add(2).unwrap()
+            .add(1)
+            .unwrap()
+            .add(2)
+            .unwrap()
             .add(3); // Should fail
 
         assert!(result.is_err());
@@ -450,7 +453,8 @@ mod tests {
 
         let result = CollectionBuilder::new()
             .with_validator(validator)
-            .add(1).unwrap()
+            .add(1)
+            .unwrap()
             .add(-1); // Should fail validation
 
         assert!(result.is_err());

@@ -16,7 +16,7 @@ use redb::ReadableTable;
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "Integration test needs full Raft consensus for VM creation"]
 async fn test_vm_scheduling_multi_node_placement() {
-    let cluster = TestCluster::new(3).await.expect("Failed to create cluster");
+    let cluster = TestCluster::with_size(3).await.expect("Failed to create cluster");
 
     // Wait for leader election
     timing::wait_for_condition_with_backoff(
@@ -256,7 +256,7 @@ async fn test_vm_scheduling_multi_node_placement() {
 /// Test VM scheduling with node failures and recovery
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_vm_scheduling_with_node_failures() {
-    let cluster = TestCluster::new(3).await.expect("Failed to create cluster");
+    let cluster = TestCluster::with_size(3).await.expect("Failed to create cluster");
 
     // Wait for leader election
     timing::wait_for_condition_with_backoff(
@@ -401,7 +401,7 @@ async fn test_vm_scheduling_with_node_failures() {
 /// Test cluster resource summary accuracy
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_cluster_resource_summary_accuracy() {
-    let cluster = TestCluster::new(2).await.expect("Failed to create cluster");
+    let cluster = TestCluster::with_size(2).await.expect("Failed to create cluster");
 
     // Wait for leader election
     timing::wait_for_condition_with_backoff(
@@ -541,7 +541,7 @@ async fn test_cluster_resource_summary_accuracy() {
 /// Test VM migration between nodes
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_vm_migration_scheduling() {
-    let cluster = TestCluster::new(3).await.expect("Failed to create cluster");
+    let cluster = TestCluster::with_size(3).await.expect("Failed to create cluster");
 
     // Wait for leader election
     timing::wait_for_condition_with_backoff(
@@ -671,7 +671,7 @@ async fn test_vm_migration_scheduling() {
 /// Test concurrent VM scheduling requests
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_concurrent_vm_scheduling() {
-    let cluster = TestCluster::new(3).await.expect("Failed to create cluster");
+    let cluster = TestCluster::with_size(3).await.expect("Failed to create cluster");
 
     // Wait for leader election
     timing::wait_for_condition_with_backoff(

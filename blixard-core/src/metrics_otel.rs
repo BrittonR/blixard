@@ -18,6 +18,7 @@ static METRICS: OnceLock<Metrics> = OnceLock::new();
 /// Container for all application metrics
 #[cfg(feature = "observability")]
 pub struct Metrics {
+    #[allow(dead_code)] // Meter kept for future metrics creation and debugging
     meter: Meter,
 
     // Raft metrics
@@ -114,7 +115,7 @@ impl Metrics {
     /// Create new metrics instance with the given meter
     fn new(meter: Meter) -> Self {
         let mut metrics = Metrics::with_meter(meter.clone());
-        
+
         // Initialize all metric groups
         metrics.init_raft_metrics(&meter);
         metrics.init_network_metrics(&meter);
@@ -123,7 +124,7 @@ impl Metrics {
         metrics.init_storage_metrics(&meter);
         metrics.init_p2p_metrics(&meter);
         metrics.init_connection_pool_metrics(&meter);
-        
+
         metrics
     }
 
@@ -645,8 +646,7 @@ pub fn update_cluster_resource_metrics(summary: &crate::vm_scheduler::ClusterRes
 
 /// No-op version when observability is disabled
 #[cfg(not(feature = "observability"))]
-pub fn update_cluster_resource_metrics(_summary: &crate::vm_scheduler::ClusterResourceSummary) {
-}
+pub fn update_cluster_resource_metrics(_summary: &crate::vm_scheduler::ClusterResourceSummary) {}
 
 /// Update node-specific resource metrics
 #[cfg(feature = "observability")]
@@ -674,14 +674,10 @@ pub fn record_vm_placement_attempt(strategy: &str, success: bool, duration_secs:
     let metrics = metrics();
     let strategy_attr = KeyValue::new("strategy", strategy.to_string());
 
-    metrics
-        .vm_placement_attempts
-        .add(1, &[strategy_attr]);
+    metrics.vm_placement_attempts.add(1, &[strategy_attr]);
     if !success {
         let failure_attr = KeyValue::new("strategy", strategy.to_string());
-        metrics
-            .vm_placement_failures
-            .add(1, &[failure_attr]);
+        metrics.vm_placement_failures.add(1, &[failure_attr]);
     }
     let duration_attr = KeyValue::new("strategy", strategy.to_string());
     metrics
@@ -698,26 +694,26 @@ pub fn record_vm_placement_attempt(_strategy: &str, _success: bool, _duration_se
 /// Record VM scheduling decision with details
 #[cfg(feature = "observability")]
 pub fn record_vm_scheduling_decision(
-    _vm_name: &str, 
-    strategy: &str, 
+    _vm_name: &str,
+    strategy: &str,
     decision: &crate::vm_scheduler_modules::placement_strategies::PlacementDecision,
-    duration: std::time::Duration
+    duration: std::time::Duration,
 ) {
     let metrics = metrics();
     let strategy_attr = KeyValue::new("strategy", strategy.to_string());
     let node_attr = KeyValue::new("target_node", decision.target_node_id.to_string());
-    
+
     // Record the scheduling decision
     metrics
         .vm_placement_attempts
         .add(1, &[strategy_attr, node_attr]);
-    
+
     // Record timing
     let timing_attr = KeyValue::new("strategy", strategy.to_string());
     metrics
         .vm_placement_duration
         .record(duration.as_secs_f64(), &[timing_attr]);
-    
+
     // If there were preemptions, record them
     if !decision.preempted_vms.is_empty() {
         let preemption_attr = KeyValue::new("target_node", decision.target_node_id.to_string());
@@ -732,10 +728,10 @@ pub fn record_vm_scheduling_decision(
 /// Record VM scheduling decision with details (no-op version)
 #[cfg(not(feature = "observability"))]
 pub fn record_vm_scheduling_decision(
-    _vm_name: &str, 
-    _strategy: &str, 
+    _vm_name: &str,
+    _strategy: &str,
     _decision: &crate::vm_scheduler_modules::placement_strategies::PlacementDecision,
-    _duration: std::time::Duration
+    _duration: std::time::Duration,
 ) {
     // No-op when observability is disabled
 }
@@ -744,7 +740,7 @@ pub fn record_vm_scheduling_decision(
 #[cfg(feature = "observability")]
 pub fn record_vm_operation(operation: &str, success: bool) {
     let metrics = metrics();
-    
+
     // Create attributes for each case to avoid cloning
     match operation {
         "create" => {
@@ -1167,17 +1163,27 @@ pub fn record_resource_utilization(
 ) {
     let metrics = metrics();
     let attrs = &[KeyValue::new("node_id", node_id.to_string())];
-    
+
     // Record actual resource usage as histograms for better analysis
     metrics.vm_create_duration.record(actual_cpu_percent, attrs);
-    metrics.vm_create_duration.record(actual_memory_mb as f64, attrs);
-    metrics.vm_create_duration.record(actual_disk_gb as f64, attrs);
-    
+    metrics
+        .vm_create_duration
+        .record(actual_memory_mb as f64, attrs);
+    metrics
+        .vm_create_duration
+        .record(actual_disk_gb as f64, attrs);
+
     // Record overcommit ratios
-    metrics.vm_create_duration.record(overcommit_ratio_cpu, attrs);
-    metrics.vm_create_duration.record(overcommit_ratio_memory, attrs);
-    metrics.vm_create_duration.record(overcommit_ratio_disk, attrs);
-    
+    metrics
+        .vm_create_duration
+        .record(overcommit_ratio_cpu, attrs);
+    metrics
+        .vm_create_duration
+        .record(overcommit_ratio_memory, attrs);
+    metrics
+        .vm_create_duration
+        .record(overcommit_ratio_disk, attrs);
+
     // Note: In production, we'd add specific metrics for resource utilization
     // This is a simplified implementation reusing existing metrics
 }

@@ -127,13 +127,17 @@ pub async fn with_failpoint<F, R>(name: &str, config: &str, f: F) -> R
 where
     F: std::future::Future<Output = R>,
 {
-    fail::cfg(name, config).map_err(|e| {
-        tracing::error!("Failed to configure failpoint '{}': {}", name, e);
-    }).ok();
+    fail::cfg(name, config)
+        .map_err(|e| {
+            tracing::error!("Failed to configure failpoint '{}': {}", name, e);
+        })
+        .ok();
     let result = f.await;
-    fail::cfg(name, "off").map_err(|e| {
-        tracing::error!("Failed to disable failpoint '{}': {}", name, e);
-    }).ok();
+    fail::cfg(name, "off")
+        .map_err(|e| {
+            tracing::error!("Failed to disable failpoint '{}': {}", name, e);
+        })
+        .ok();
     result
 }
 
@@ -145,18 +149,22 @@ where
 {
     // Enable all failpoints
     for (name, config) in failpoints {
-        fail::cfg(*name, *config).map_err(|e| {
-            tracing::error!("Failed to configure failpoint '{}': {}", name, e);
-        }).ok();
+        fail::cfg(*name, *config)
+            .map_err(|e| {
+                tracing::error!("Failed to configure failpoint '{}': {}", name, e);
+            })
+            .ok();
     }
 
     let result = f.await;
 
     // Disable all failpoints
     for (name, _) in failpoints {
-        fail::cfg(*name, "off").map_err(|e| {
-            tracing::error!("Failed to disable failpoint '{}': {}", name, e);
-        }).ok();
+        fail::cfg(*name, "off")
+            .map_err(|e| {
+                tracing::error!("Failed to disable failpoint '{}': {}", name, e);
+            })
+            .ok();
     }
 
     result

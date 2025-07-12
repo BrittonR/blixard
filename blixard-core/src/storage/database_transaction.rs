@@ -11,12 +11,14 @@
 //! - Transaction lifecycle management with proper cleanup
 
 use crate::{
-    common::error_context::{SerializationContext as SerializationContextTrait, StorageContext as StorageContextTrait},
+    common::error_context::{
+        SerializationContext as SerializationContextTrait, StorageContext as StorageContextTrait,
+    },
     error::{BlixardError, BlixardResult},
 };
 use redb::{
-    Database, ReadTransaction, WriteTransaction, Table, TableDefinition,
-    ReadOnlyTable, ReadableTable,
+    Database, ReadOnlyTable, ReadTransaction, ReadableTable, Table, TableDefinition,
+    WriteTransaction,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -42,10 +44,7 @@ enum TransactionInner {
 
 impl DatabaseTransaction {
     /// Begin a read transaction with context
-    pub fn begin_read(
-        database: &Database,
-        operation: impl Into<String>,
-    ) -> BlixardResult<Self> {
+    pub fn begin_read(database: &Database, operation: impl Into<String>) -> BlixardResult<Self> {
         let operation = operation.into();
         let txn = database
             .begin_read()
@@ -60,10 +59,7 @@ impl DatabaseTransaction {
     }
 
     /// Begin a write transaction with context
-    pub fn begin_write(
-        database: &Database,
-        operation: impl Into<String>,
-    ) -> BlixardResult<Self> {
+    pub fn begin_write(database: &Database, operation: impl Into<String>) -> BlixardResult<Self> {
         let operation = operation.into();
         let txn = database
             .begin_write()
@@ -83,17 +79,19 @@ impl DatabaseTransaction {
         table_def: TableDefinition<K, V>,
     ) -> BlixardResult<Table<K, V>> {
         match &self.txn {
-            TransactionInner::Read(_) => {
-                Err(BlixardError::Storage {
-                    operation: format!("Cannot open mutable table in read transaction: {}", self.operation),
-                    source: Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Read-only transaction")),
-                })
-            }
-            TransactionInner::Write(write_txn) => {
-                write_txn
-                    .open_table(table_def)
-                    .storage_context(&format!("open table for {}", self.operation))
-            }
+            TransactionInner::Read(_) => Err(BlixardError::Storage {
+                operation: format!(
+                    "Cannot open mutable table in read transaction: {}",
+                    self.operation
+                ),
+                source: Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Read-only transaction",
+                )),
+            }),
+            TransactionInner::Write(write_txn) => write_txn
+                .open_table(table_def)
+                .storage_context(&format!("open table for {}", self.operation)),
         }
     }
 
@@ -104,17 +102,16 @@ impl DatabaseTransaction {
         table_def: TableDefinition<K, V>,
     ) -> BlixardResult<ReadOnlyTable<K, V>> {
         match &self.txn {
-            TransactionInner::Read(read_txn) => {
-                read_txn
-                    .open_table(table_def)
-                    .storage_context(&format!("open read table for {}", self.operation))
-            }
-            TransactionInner::Write(_) => {
-                Err(BlixardError::Storage {
-                    operation: self.operation.clone(),
-                    source: Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Cannot get ReadOnlyTable from WriteTransaction. Use open_table() instead.")),
-                })
-            }
+            TransactionInner::Read(read_txn) => read_txn
+                .open_table(table_def)
+                .storage_context(&format!("open read table for {}", self.operation)),
+            TransactionInner::Write(_) => Err(BlixardError::Storage {
+                operation: self.operation.clone(),
+                source: Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Cannot get ReadOnlyTable from WriteTransaction. Use open_table() instead.",
+                )),
+            }),
         }
     }
 
@@ -128,7 +125,11 @@ impl DatabaseTransaction {
     where
         T: Serialize,
     {
-        let data = bincode::serialize(value).bincode_context(&format!("serialize {} for {}", std::any::type_name::<T>(), self.operation))?;
+        let data = bincode::serialize(value).bincode_context(&format!(
+            "serialize {} for {}",
+            std::any::type_name::<T>(),
+            self.operation
+        ))?;
 
         table
             .insert(key, data.as_slice())
@@ -148,9 +149,14 @@ impl DatabaseTransaction {
     {
         match table
             .get(key)
-            .storage_context(&format!("get data for {}", self.operation))? {
+            .storage_context(&format!("get data for {}", self.operation))?
+        {
             Some(data) => {
-                let value = bincode::deserialize(data.value()).bincode_context(&format!("deserialize {} for {}", std::any::type_name::<T>(), self.operation))?;
+                let value = bincode::deserialize(data.value()).bincode_context(&format!(
+                    "deserialize {} for {}",
+                    std::any::type_name::<T>(),
+                    self.operation
+                ))?;
                 Ok(Some(value))
             }
             None => Ok(None),
@@ -158,10 +164,7 @@ impl DatabaseTransaction {
     }
 
     /// Clear all entries from a table
-    pub fn clear_table<V>(
-        &self,
-        table: &mut Table<&str, V>,
-    ) -> BlixardResult<()>
+    pub fn clear_table<V>(&self, table: &mut Table<&str, V>) -> BlixardResult<()>
     where
         V: redb::Value + 'static,
     {
@@ -175,7 +178,11 @@ impl DatabaseTransaction {
             .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
             .collect();
 
-        debug!("Clearing {} entries from table during {}", keys.len(), self.operation);
+        debug!(
+            "Clearing {} entries from table during {}",
+            keys.len(),
+            self.operation
+        );
 
         for key in keys {
             table
@@ -214,16 +221,20 @@ impl DatabaseTransaction {
         T: for<'de> Deserialize<'de>,
     {
         let mut results = Vec::new();
-        
+
         let iter = table
             .iter()
             .storage_context(&format!("iterate table for {}", self.operation))?;
 
         for entry in iter {
-            let (key, value) = entry.storage_context(&format!("read entry during iteration for {}", self.operation))?;
+            let (key, value) = entry.storage_context(&format!(
+                "read entry during iteration for {}",
+                self.operation
+            ))?;
 
-            let deserialized_value = bincode::deserialize(value.value())
-                .bincode_context(&format!("deserialize entry during iteration for {}", self.operation))?;
+            let deserialized_value = bincode::deserialize(value.value()).bincode_context(
+                &format!("deserialize entry during iteration for {}", self.operation),
+            )?;
 
             results.push((key.value().to_string(), deserialized_value));
         }
@@ -337,7 +348,7 @@ impl TransactionExecutor {
         F: Fn(&DatabaseTransaction) -> BlixardResult<R>,
     {
         let mut last_error = None;
-        
+
         for attempt in 0..=max_retries {
             match self.write(operation, &f).await {
                 Ok(result) => return Ok(result),
@@ -345,9 +356,14 @@ impl TransactionExecutor {
                     if attempt < max_retries {
                         warn!(
                             "Transaction {} failed on attempt {}, retrying: {}",
-                            operation, attempt + 1, e
+                            operation,
+                            attempt + 1,
+                            e
                         );
-                        tokio::time::sleep(std::time::Duration::from_millis(10 * (attempt + 1) as u64)).await;
+                        tokio::time::sleep(std::time::Duration::from_millis(
+                            10 * (attempt + 1) as u64,
+                        ))
+                        .await;
                     }
                     last_error = Some(e);
                 }
@@ -356,7 +372,10 @@ impl TransactionExecutor {
 
         Err(last_error.unwrap_or_else(|| BlixardError::Storage {
             operation: format!("retry transaction {}", operation),
-            source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, "All retry attempts failed")),
+            source: Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "All retry attempts failed",
+            )),
         }))
     }
 }
@@ -385,11 +404,11 @@ mod tests {
     async fn test_write_transaction_basic() {
         let db = create_test_database();
         let txn = DatabaseTransaction::begin_write(&db, "test operation").unwrap();
-        
+
         assert!(txn.is_write());
         assert!(!txn.is_read());
         assert_eq!(txn.operation(), "test operation");
-        
+
         txn.commit().unwrap();
     }
 
@@ -397,7 +416,7 @@ mod tests {
     async fn test_read_transaction_basic() {
         let db = create_test_database();
         let txn = DatabaseTransaction::begin_read(&db, "test read").unwrap();
-        
+
         assert!(txn.is_read());
         assert!(!txn.is_write());
         assert_eq!(txn.operation(), "test read");
@@ -415,7 +434,8 @@ mod tests {
         {
             let txn = DatabaseTransaction::begin_write(&db, "insert test").unwrap();
             let mut table = txn.open_table(TEST_TABLE).unwrap();
-            txn.insert_serialized(&mut table, "key1", &test_data).unwrap();
+            txn.insert_serialized(&mut table, "key1", &test_data)
+                .unwrap();
             txn.commit().unwrap();
         }
 
@@ -424,7 +444,7 @@ mod tests {
             let txn = DatabaseTransaction::begin_read(&db, "read test").unwrap();
             let table = txn.open_table_read(TEST_TABLE).unwrap();
             let result: Option<TestData> = txn.get_deserialized(&table, "key1").unwrap();
-            
+
             assert_eq!(result, Some(test_data));
         }
     }
@@ -432,13 +452,29 @@ mod tests {
     #[tokio::test]
     async fn test_clear_and_restore() {
         let db = create_test_database();
-        
+
         // Insert initial data
         {
             let txn = DatabaseTransaction::begin_write(&db, "initial data").unwrap();
             let mut table = txn.open_table(TEST_TABLE).unwrap();
-            txn.insert_serialized(&mut table, "key1", &TestData { id: 1, name: "one".to_string() }).unwrap();
-            txn.insert_serialized(&mut table, "key2", &TestData { id: 2, name: "two".to_string() }).unwrap();
+            txn.insert_serialized(
+                &mut table,
+                "key1",
+                &TestData {
+                    id: 1,
+                    name: "one".to_string(),
+                },
+            )
+            .unwrap();
+            txn.insert_serialized(
+                &mut table,
+                "key2",
+                &TestData {
+                    id: 2,
+                    name: "two".to_string(),
+                },
+            )
+            .unwrap();
             txn.commit().unwrap();
         }
 
@@ -446,13 +482,26 @@ mod tests {
         {
             let txn = DatabaseTransaction::begin_write(&db, "clear and restore").unwrap();
             let mut table = txn.open_table(TEST_TABLE).unwrap();
-            
+
             let new_data = vec![
-                ("key3", TestData { id: 3, name: "three".to_string() }),
-                ("key4", TestData { id: 4, name: "four".to_string() }),
+                (
+                    "key3",
+                    TestData {
+                        id: 3,
+                        name: "three".to_string(),
+                    },
+                ),
+                (
+                    "key4",
+                    TestData {
+                        id: 4,
+                        name: "four".to_string(),
+                    },
+                ),
             ];
-            
-            txn.clear_and_restore_serialized(&mut table, new_data).unwrap();
+
+            txn.clear_and_restore_serialized(&mut table, new_data)
+                .unwrap();
             txn.commit().unwrap();
         }
 
@@ -461,7 +510,7 @@ mod tests {
             let txn = DatabaseTransaction::begin_read(&db, "verify").unwrap();
             let table = txn.open_table_read(TEST_TABLE).unwrap();
             let all_data: Vec<(String, TestData)> = txn.iter_deserialized(&table).unwrap();
-            
+
             assert_eq!(all_data.len(), 2);
             assert!(all_data.iter().any(|(k, _)| k == "key3"));
             assert!(all_data.iter().any(|(k, _)| k == "key4"));
@@ -480,16 +529,22 @@ mod tests {
         };
 
         // Write using executor
-        executor.write("executor write", |txn| {
-            let mut table = txn.open_table(TEST_TABLE)?;
-            txn.insert_serialized(&mut table, "executor_key", &test_data)
-        }).await.unwrap();
+        executor
+            .write("executor write", |txn| {
+                let mut table = txn.open_table(TEST_TABLE)?;
+                txn.insert_serialized(&mut table, "executor_key", &test_data)
+            })
+            .await
+            .unwrap();
 
         // Read using executor
-        let result: Option<TestData> = executor.read("executor read", |txn| {
-            let table = txn.open_table_read(TEST_TABLE)?;
-            txn.get_deserialized(&table, "executor_key")
-        }).await.unwrap();
+        let result: Option<TestData> = executor
+            .read("executor read", |txn| {
+                let table = txn.open_table_read(TEST_TABLE)?;
+                txn.get_deserialized(&table, "executor_key")
+            })
+            .await
+            .unwrap();
 
         assert_eq!(result, Some(test_data));
     }

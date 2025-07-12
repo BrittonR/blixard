@@ -397,7 +397,7 @@ async fn generate_workload(
 #[tokio::test]
 async fn test_vm_linearizability() {
     // Setup cluster
-    let cluster = TestCluster::new(3).await;
+    let cluster = TestCluster::with_size(3).await;
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await
@@ -438,7 +438,7 @@ async fn test_vm_linearizability() {
 /// Test under network partition
 #[tokio::test]
 async fn test_partition_linearizability() {
-    let cluster = TestCluster::new(5).await;
+    let cluster = TestCluster::with_size(5).await;
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await
@@ -500,7 +500,7 @@ async fn test_partition_linearizability() {
 /// Test clock skew scenarios
 #[tokio::test]
 async fn test_clock_skew_linearizability() {
-    let cluster = TestCluster::new(3).await;
+    let cluster = TestCluster::with_size(3).await;
     cluster
         .wait_for_leader(Duration::from_secs(10))
         .await

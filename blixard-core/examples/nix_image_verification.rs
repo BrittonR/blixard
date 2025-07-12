@@ -31,8 +31,14 @@ async fn main() -> BlixardResult<()> {
     let p2p_manager = Arc::new(P2pManager::new(1, temp_dir.path(), P2pConfig::default()).await?);
     let command_executor = Arc::new(TokioCommandExecutor::new());
 
-    let store =
-        NixImageStore::new(1, p2p_manager, temp_dir.path(), Some(nix_store_dir.clone()), command_executor).await?;
+    let store = NixImageStore::new(
+        1,
+        p2p_manager,
+        temp_dir.path(),
+        Some(nix_store_dir.clone()),
+        command_executor,
+    )
+    .await?;
 
     // Demo 1: Import with NAR hash verification
     info!("\n--- Demo 1: Import with NAR Hash ---");

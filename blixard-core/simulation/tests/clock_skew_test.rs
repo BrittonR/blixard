@@ -17,7 +17,7 @@ use blixard_core::test_helpers::TestCluster;
 #[madsim::test]
 async fn test_clock_skew_future_nodes() {
     let handle = Handle::current();
-    let mut cluster = TestCluster::new(3).await;
+    let mut cluster = TestCluster::with_size(3).await;
     
     // Start node 1 normally
     cluster.start_node(1).await;
@@ -57,7 +57,7 @@ async fn test_clock_skew_future_nodes() {
 #[madsim::test]
 async fn test_clock_skew_past_nodes() {
     let handle = Handle::current();
-    let mut cluster = TestCluster::new(3).await;
+    let mut cluster = TestCluster::with_size(3).await;
     
     // Start all nodes
     cluster.start_all_nodes().await;
@@ -91,7 +91,7 @@ async fn test_clock_skew_past_nodes() {
 #[madsim::test]
 async fn test_gradual_clock_drift() {
     let handle = Handle::current();
-    let mut cluster = TestCluster::new(3).await;
+    let mut cluster = TestCluster::with_size(3).await;
     cluster.start_all_nodes().await;
     
     // Wait for stable cluster
@@ -132,7 +132,7 @@ async fn test_gradual_clock_drift() {
 #[madsim::test]
 async fn test_sudden_clock_jumps() {
     let handle = Handle::current();
-    let mut cluster = TestCluster::new(5).await;
+    let mut cluster = TestCluster::with_size(5).await;
     cluster.start_all_nodes().await;
     
     sleep(Duration::from_secs(2)).await;
@@ -174,7 +174,7 @@ async fn test_sudden_clock_jumps() {
 #[madsim::test]
 async fn test_election_timeout_with_skew() {
     let handle = Handle::current();
-    let mut cluster = TestCluster::new(3).await;
+    let mut cluster = TestCluster::with_size(3).await;
     
     // Start nodes with different clock offsets
     cluster.start_node(1).await;
@@ -235,7 +235,7 @@ async fn test_election_timeout_with_skew() {
 #[madsim::test]
 async fn test_heartbeat_with_clock_drift() {
     let handle = Handle::current();
-    let mut cluster = TestCluster::new(3).await;
+    let mut cluster = TestCluster::with_size(3).await;
     cluster.start_all_nodes().await;
     
     sleep(Duration::from_secs(2)).await;

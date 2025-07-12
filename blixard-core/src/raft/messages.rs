@@ -69,7 +69,7 @@ impl RaftProposal {
             response_tx: None,
         }
     }
-    
+
     /// Create a proposal with a response channel
     pub fn with_response(data: ProposalData) -> (Self, oneshot::Receiver<BlixardResult<()>>) {
         let (tx, rx) = oneshot::channel();

@@ -101,34 +101,64 @@ impl super::VmScheduler {
         context: &'a SchedulingContext,
         vm_config: &'a VmConfig,
         strategy: PlacementStrategy,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<PlacementDecision>> + Send + 'a>> {
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = BlixardResult<PlacementDecision>> + Send + 'a>,
+    > {
         Box::pin(async move {
-        match strategy {
-            PlacementStrategy::MostAvailable => {
-                self.apply_most_available_strategy(context, vm_config).await
+            match strategy {
+                PlacementStrategy::MostAvailable => {
+                    self.apply_most_available_strategy(context, vm_config).await
+                }
+                PlacementStrategy::LeastAvailable => {
+                    self.apply_least_available_strategy(context, vm_config)
+                        .await
+                }
+                PlacementStrategy::RoundRobin => {
+                    self.apply_round_robin_strategy(context, vm_config).await
+                }
+                PlacementStrategy::Manual { node_id } => {
+                    self.apply_manual_strategy(context, vm_config, node_id)
+                        .await
+                }
+                PlacementStrategy::PriorityBased {
+                    base_strategy,
+                    enable_preemption,
+                } => {
+                    self.apply_priority_based_strategy(
+                        context,
+                        vm_config,
+                        *base_strategy,
+                        enable_preemption,
+                    )
+                    .await
+                }
+                PlacementStrategy::LocalityAware {
+                    base_strategy,
+                    strict,
+                } => {
+                    self.apply_locality_aware_strategy(context, vm_config, *base_strategy, strict)
+                        .await
+                }
+                PlacementStrategy::SpreadAcrossFailureDomains {
+                    min_domains,
+                    spread_level,
+                } => {
+                    self.apply_spread_strategy(context, vm_config, min_domains, &spread_level)
+                        .await
+                }
+                PlacementStrategy::CostOptimized {
+                    max_cost_increase,
+                    include_network_costs,
+                } => {
+                    self.apply_cost_optimized_strategy(
+                        context,
+                        vm_config,
+                        max_cost_increase,
+                        include_network_costs,
+                    )
+                    .await
+                }
             }
-            PlacementStrategy::LeastAvailable => {
-                self.apply_least_available_strategy(context, vm_config).await
-            }
-            PlacementStrategy::RoundRobin => {
-                self.apply_round_robin_strategy(context, vm_config).await
-            }
-            PlacementStrategy::Manual { node_id } => {
-                self.apply_manual_strategy(context, vm_config, node_id).await
-            }
-            PlacementStrategy::PriorityBased { base_strategy, enable_preemption } => {
-                self.apply_priority_based_strategy(context, vm_config, *base_strategy, enable_preemption).await
-            }
-            PlacementStrategy::LocalityAware { base_strategy, strict } => {
-                self.apply_locality_aware_strategy(context, vm_config, *base_strategy, strict).await
-            }
-            PlacementStrategy::SpreadAcrossFailureDomains { min_domains, spread_level } => {
-                self.apply_spread_strategy(context, vm_config, min_domains, &spread_level).await
-            }
-            PlacementStrategy::CostOptimized { max_cost_increase, include_network_costs } => {
-                self.apply_cost_optimized_strategy(context, vm_config, max_cost_increase, include_network_costs).await
-            }
-        }
         })
     }
 
@@ -141,7 +171,7 @@ impl super::VmScheduler {
         // Pre-allocate with estimated capacity to avoid reallocations
         let estimated_capacity = (context.node_usage.len() * 3) / 4; // Estimate 75% pass filter
         let mut candidate_nodes = Vec::with_capacity(estimated_capacity);
-        
+
         // Filter nodes that can accommodate the VM (avoid collect() allocation)
         for node in &context.node_usage {
             if node.can_accommodate(&context.requirements) {
@@ -150,9 +180,13 @@ impl super::VmScheduler {
         }
 
         // Apply anti-affinity constraints if present
-        if let (Some(checker), Some(rules)) = (&context.anti_affinity_checker, &vm_config.anti_affinity) {
+        if let (Some(checker), Some(rules)) =
+            (&context.anti_affinity_checker, &vm_config.anti_affinity)
+        {
             candidate_nodes.retain(|node| {
-                checker.check_placement(&vm_config.name, node.node_id, rules).is_ok()
+                checker
+                    .check_placement(&vm_config.name, node.node_id, rules)
+                    .is_ok()
             });
         }
 
@@ -184,11 +218,13 @@ impl super::VmScheduler {
             .unwrap();
 
         let confidence_score = best_node.calculate_availability_score();
-        let resource_fit_score = self.calculate_resource_fit_score(best_node, &context.requirements);
+        let resource_fit_score =
+            self.calculate_resource_fit_score(best_node, &context.requirements);
 
         // Pre-allocate alternative nodes vector for better performance
         let mut alternative_nodes = Vec::with_capacity(3);
-        for node in candidate_nodes.iter().take(4) { // Take 4 to account for best_node exclusion
+        for node in candidate_nodes.iter().take(4) {
+            // Take 4 to account for best_node exclusion
             if node.node_id != best_node.node_id && alternative_nodes.len() < 3 {
                 alternative_nodes.push(node.node_id);
             }
@@ -201,7 +237,10 @@ impl super::VmScheduler {
             preempted_vms: Vec::new(),
             resource_fit_score,
             alternative_nodes,
-            reason: format!("Selected node {} with highest resource availability (score: {:.2})", best_node.node_id, resource_fit_score),
+            reason: format!(
+                "Selected node {} with highest resource availability (score: {:.2})",
+                best_node.node_id, resource_fit_score
+            ),
         })
     }
 
@@ -230,7 +269,8 @@ impl super::VmScheduler {
             .unwrap();
 
         let confidence_score = 100.0 - best_node.calculate_availability_score(); // Invert for bin packing
-        let resource_fit_score = self.calculate_resource_fit_score(best_node, &context.requirements);
+        let resource_fit_score =
+            self.calculate_resource_fit_score(best_node, &context.requirements);
 
         let alternative_nodes: Vec<u64> = candidate_nodes
             .iter()
@@ -246,7 +286,10 @@ impl super::VmScheduler {
             preempted_vms: Vec::new(),
             resource_fit_score,
             alternative_nodes,
-            reason: format!("Selected node {} for bin packing strategy (score: {:.2})", best_node.node_id, resource_fit_score),
+            reason: format!(
+                "Selected node {} for bin packing strategy (score: {:.2})",
+                best_node.node_id, resource_fit_score
+            ),
         })
     }
 
@@ -270,7 +313,8 @@ impl super::VmScheduler {
         let best_node = candidate_nodes[selected_index];
 
         let confidence_score = 75.0; // Medium confidence for round-robin
-        let resource_fit_score = self.calculate_resource_fit_score(best_node, &context.requirements);
+        let resource_fit_score =
+            self.calculate_resource_fit_score(best_node, &context.requirements);
 
         let alternative_nodes: Vec<u64> = candidate_nodes
             .iter()
@@ -286,7 +330,10 @@ impl super::VmScheduler {
             preempted_vms: Vec::new(),
             resource_fit_score,
             alternative_nodes,
-            reason: format!("Selected node {} using round-robin distribution", best_node.node_id),
+            reason: format!(
+                "Selected node {} using round-robin distribution",
+                best_node.node_id
+            ),
         })
     }
 
@@ -317,15 +364,19 @@ impl super::VmScheduler {
         }
 
         // Check anti-affinity constraints
-        if let (Some(checker), Some(rules)) = (&context.anti_affinity_checker, &vm_config.anti_affinity) {
-            checker.check_placement(&vm_config.name, target_node_id, rules)
+        if let (Some(checker), Some(rules)) =
+            (&context.anti_affinity_checker, &vm_config.anti_affinity)
+        {
+            checker
+                .check_placement(&vm_config.name, target_node_id, rules)
                 .map_err(|e| BlixardError::SchedulingError {
                     message: format!("Anti-affinity violation: {}", e),
                 })?;
         }
 
         let confidence_score = 100.0; // High confidence for manual placement
-        let resource_fit_score = self.calculate_resource_fit_score(target_node, &context.requirements);
+        let resource_fit_score =
+            self.calculate_resource_fit_score(target_node, &context.requirements);
 
         Ok(PlacementDecision {
             target_node_id,
@@ -347,11 +398,15 @@ impl super::VmScheduler {
         enable_preemption: bool,
     ) -> BlixardResult<PlacementDecision> {
         // First try the base strategy
-        match self.apply_placement_strategy(context, vm_config, base_strategy.clone()).await {
+        match self
+            .apply_placement_strategy(context, vm_config, base_strategy.clone())
+            .await
+        {
             Ok(decision) => Ok(decision),
             Err(_) if enable_preemption => {
                 // Base strategy failed, try preemption
-                self.apply_preemption_strategy(context, vm_config, base_strategy).await
+                self.apply_preemption_strategy(context, vm_config, base_strategy)
+                    .await
             }
             Err(e) => Err(e),
         }
@@ -367,9 +422,10 @@ impl super::VmScheduler {
     ) -> BlixardResult<PlacementDecision> {
         // Filter nodes based on locality preferences
         let locality_filtered_context = self.filter_by_locality(context, vm_config, strict)?;
-        
+
         // Apply base strategy on filtered nodes
-        self.apply_placement_strategy(&locality_filtered_context, vm_config, base_strategy).await
+        self.apply_placement_strategy(&locality_filtered_context, vm_config, base_strategy)
+            .await
     }
 
     /// Apply spread strategy across failure domains
@@ -382,22 +438,26 @@ impl super::VmScheduler {
     ) -> BlixardResult<PlacementDecision> {
         // Group nodes by failure domain
         let domain_groups = self.group_nodes_by_domain(context, spread_level);
-        
+
         if domain_groups.len() < min_domains as usize {
             return Err(BlixardError::SchedulingError {
                 message: format!(
                     "Not enough failure domains available: {} required, {} found",
-                    min_domains, domain_groups.len()
+                    min_domains,
+                    domain_groups.len()
                 ),
             });
         }
 
         // Find the domain with least VMs for this application
-        let best_domain = self.find_best_spread_domain(&domain_groups, vm_config).await?;
-        
+        let best_domain = self
+            .find_best_spread_domain(&domain_groups, vm_config)
+            .await?;
+
         // Apply most available strategy within the chosen domain
         let filtered_context = self.filter_context_by_domain(context, &best_domain, spread_level);
-        self.apply_most_available_strategy(&filtered_context, vm_config).await
+        self.apply_most_available_strategy(&filtered_context, vm_config)
+            .await
     }
 
     /// Apply cost-optimized placement strategy
@@ -419,7 +479,9 @@ impl super::VmScheduler {
         // Calculate costs for each candidate
         let mut node_costs: Vec<(u64, f64)> = Vec::new();
         for node in &candidate_nodes {
-            let cost = self.calculate_placement_cost(node, vm_config, include_network_costs).await;
+            let cost = self
+                .calculate_placement_cost(node, vm_config, include_network_costs)
+                .await;
             node_costs.push((node.node_id, cost));
         }
 
@@ -442,7 +504,8 @@ impl super::VmScheduler {
             .unwrap();
 
         let confidence_score = 100.0 - ((best_cost - cheapest_cost) / cheapest_cost * 100.0);
-        let resource_fit_score = self.calculate_resource_fit_score(best_node, &context.requirements);
+        let resource_fit_score =
+            self.calculate_resource_fit_score(best_node, &context.requirements);
 
         let alternative_nodes: Vec<u64> = node_costs
             .iter()
@@ -458,12 +521,19 @@ impl super::VmScheduler {
             preempted_vms: Vec::new(),
             resource_fit_score,
             alternative_nodes,
-            reason: format!("Selected node {} for optimal cost efficiency (cost: {:.2})", best_node_id, best_cost),
+            reason: format!(
+                "Selected node {} for optimal cost efficiency (cost: {:.2})",
+                best_node_id, best_cost
+            ),
         })
     }
 
     /// Calculate how well the VM's resource requirements fit on the node
-    fn calculate_resource_fit_score(&self, node: &NodeResourceUsage, requirements: &VmResourceRequirements) -> f64 {
+    fn calculate_resource_fit_score(
+        &self,
+        node: &NodeResourceUsage,
+        requirements: &VmResourceRequirements,
+    ) -> f64 {
         let cpu_fit = requirements.vcpus as f64 / node.capabilities.cpu_cores as f64;
         let memory_fit = requirements.memory_mb as f64 / node.capabilities.memory_mb as f64;
         let disk_fit = requirements.disk_gb as f64 / node.capabilities.disk_gb as f64;
@@ -557,17 +627,45 @@ impl std::fmt::Display for PlacementStrategy {
             PlacementStrategy::LeastAvailable => write!(f, "LeastAvailable"),
             PlacementStrategy::RoundRobin => write!(f, "RoundRobin"),
             PlacementStrategy::Manual { node_id } => write!(f, "Manual(node_id={})", node_id),
-            PlacementStrategy::PriorityBased { base_strategy, enable_preemption } => {
-                write!(f, "PriorityBased(base={}, preemption={})", base_strategy, enable_preemption)
+            PlacementStrategy::PriorityBased {
+                base_strategy,
+                enable_preemption,
+            } => {
+                write!(
+                    f,
+                    "PriorityBased(base={}, preemption={})",
+                    base_strategy, enable_preemption
+                )
             }
-            PlacementStrategy::LocalityAware { base_strategy, strict } => {
-                write!(f, "LocalityAware(base={}, strict={})", base_strategy, strict)
+            PlacementStrategy::LocalityAware {
+                base_strategy,
+                strict,
+            } => {
+                write!(
+                    f,
+                    "LocalityAware(base={}, strict={})",
+                    base_strategy, strict
+                )
             }
-            PlacementStrategy::SpreadAcrossFailureDomains { min_domains, spread_level } => {
-                write!(f, "SpreadAcrossFailureDomains(min_domains={}, level={})", min_domains, spread_level)
+            PlacementStrategy::SpreadAcrossFailureDomains {
+                min_domains,
+                spread_level,
+            } => {
+                write!(
+                    f,
+                    "SpreadAcrossFailureDomains(min_domains={}, level={})",
+                    min_domains, spread_level
+                )
             }
-            PlacementStrategy::CostOptimized { max_cost_increase, include_network_costs } => {
-                write!(f, "CostOptimized(max_increase={:.1}%, network={})", max_cost_increase, include_network_costs)
+            PlacementStrategy::CostOptimized {
+                max_cost_increase,
+                include_network_costs,
+            } => {
+                write!(
+                    f,
+                    "CostOptimized(max_increase={:.1}%, network={})",
+                    max_cost_increase, include_network_costs
+                )
             }
         }
     }

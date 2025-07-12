@@ -4,8 +4,8 @@ use std::time::Duration;
 
 #[cfg(feature = "observability")]
 use prometheus::{
-    register_histogram_vec, register_int_counter_vec, register_int_gauge_vec,
-    HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGaugeVec,
+    register_histogram_vec, register_int_counter_vec, register_int_gauge_vec, HistogramOpts,
+    HistogramVec, IntCounter, IntCounterVec, IntGaugeVec,
 };
 
 /// Transport metrics collector
@@ -179,7 +179,8 @@ impl TransportMetrics {
         Ok(Self)
     }
 
-    pub fn record_rpc(&self, _transport: &str, _service: &str, _method: &str, _duration: Duration) {}
+    pub fn record_rpc(&self, _transport: &str, _service: &str, _method: &str, _duration: Duration) {
+    }
     pub fn record_connection_attempt(&self, _transport: &str, _peer_id: &str) {}
     pub fn record_connection_error(&self, _transport: &str, _error_type: &str) {}
     pub fn set_active_connections(&self, _transport: &str, _peer_id: &str, _count: i64) {}

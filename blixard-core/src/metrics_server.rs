@@ -26,7 +26,7 @@ async fn handle_request(
             let metrics = prometheus_metrics();
             #[cfg(not(feature = "observability"))]
             let metrics = "# Observability features disabled\n";
-            
+
             Response::builder()
                 .status(StatusCode::OK)
                 .header("Content-Type", "text/plain; version=0.0.4")
@@ -117,7 +117,7 @@ async fn get_bootstrap_info(shared_state: &SharedNodeState) -> BlixardResult<Boo
     // Get the Iroh endpoint information (stub implementation for now)
     let endpoint_info = shared_state.get_iroh_endpoint().ok_or_else(|| {
         crate::error::BlixardError::NotInitialized {
-            component: "Iroh endpoint".to_string()
+            component: "Iroh endpoint".to_string(),
         }
     })?;
 

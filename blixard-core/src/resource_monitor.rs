@@ -11,7 +11,6 @@ use tokio::task::JoinHandle;
 use tokio::time::interval;
 use tracing::{debug, error, info};
 
-
 use crate::{
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
@@ -19,7 +18,6 @@ use crate::{
     types::VmStatus,
     vm_backend::VmManager,
 };
-
 
 /// Real-time resource utilization data for a VM
 #[derive(Debug, Clone)]
@@ -99,23 +97,28 @@ impl ResourceMonitor {
 
         let handle = tokio::spawn(async move {
             let mut interval = interval(monitoring_interval);
-            
+
             loop {
                 interval.tick().await;
-                
+
                 if let Err(e) = Self::collect_resource_metrics(
                     &node_state,
                     &vm_manager,
                     &vm_usage,
                     &node_utilization,
-                ).await {
+                )
+                .await
+                {
                     error!("Failed to collect resource metrics: {}", e);
                 }
             }
         });
 
         self.handle = Some(handle);
-        info!("Resource monitor started with interval: {:?}", monitoring_interval);
+        info!(
+            "Resource monitor started with interval: {:?}",
+            monitoring_interval
+        );
         Ok(())
     }
 
@@ -153,7 +156,7 @@ impl ResourceMonitor {
         // TODO: Implement resource pressure calculation
         ResourcePressure::default()
     }
-    
+
     /// Register a callback for resource pressure events
     pub async fn on_pressure_change<F>(&self, _callback: F)
     where
@@ -161,7 +164,7 @@ impl ResourceMonitor {
     {
         // TODO: Implement pressure callback registration
     }
-    
+
     /// Get resource efficiency metrics (actual vs allocated)
     pub async fn get_resource_efficiency(&self) -> ResourceEfficiency {
         let vm_usage = self.vm_usage.read().await;
@@ -195,7 +198,7 @@ impl ResourceMonitor {
     /// Check if node is approaching resource limits
     pub async fn check_resource_pressure(&self) -> ResourcePressure {
         let utilization = self.node_utilization.read().await;
-        
+
         if let Some(util) = utilization.as_ref() {
             let cpu_pressure = util.actual_cpu_percent / 100.0;
             let memory_pressure = util.actual_memory_mb as f64 / util.physical_memory_mb as f64;
@@ -208,7 +211,9 @@ impl ResourceMonitor {
                 overcommit_cpu: util.overcommit_ratio_cpu,
                 overcommit_memory: util.overcommit_ratio_memory,
                 overcommit_disk: util.overcommit_ratio_disk,
-                is_high_pressure: cpu_pressure > 0.8 || memory_pressure > 0.8 || disk_pressure > 0.8,
+                is_high_pressure: cpu_pressure > 0.8
+                    || memory_pressure > 0.8
+                    || disk_pressure > 0.8,
             }
         } else {
             ResourcePressure::default()
@@ -223,7 +228,7 @@ impl ResourceMonitor {
         node_utilization: &Arc<RwLock<Option<NodeResourceUtilization>>>,
     ) -> BlixardResult<()> {
         let node_id = node_state.get_id();
-        
+
         // Get all VMs on this node
         let vms = vm_manager.list_vms().await?;
         let mut new_vm_usage = HashMap::new();
@@ -237,7 +242,7 @@ impl ResourceMonitor {
 
         for (vm_config, vm_status) in vms {
             if vm_status == VmStatus::Running {
-                // Get actual resource usage (simplified - in production this would 
+                // Get actual resource usage (simplified - in production this would
                 // query system metrics, container runtime, or hypervisor APIs)
                 let actual_cpu_percent = Self::get_vm_cpu_usage(&vm_config.name).await?;
                 let actual_memory_mb = Self::get_vm_memory_usage(&vm_config.name).await?;
@@ -271,20 +276,20 @@ impl ResourceMonitor {
 
         // Get node physical capabilities
         let worker_capabilities = node_state.get_worker_capabilities().await?;
-        
+
         // Calculate overcommit ratios
         let overcommit_ratio_cpu = if worker_capabilities.cpu_cores > 0 {
             total_allocated_vcpus as f64 / worker_capabilities.cpu_cores as f64
         } else {
             0.0
         };
-        
+
         let overcommit_ratio_memory = if worker_capabilities.memory_mb > 0 {
             total_allocated_memory_mb as f64 / worker_capabilities.memory_mb as f64
         } else {
             0.0
         };
-        
+
         let overcommit_ratio_disk = if worker_capabilities.disk_gb > 0 {
             total_allocated_disk_gb as f64 / worker_capabilities.disk_gb as f64
         } else {
@@ -313,12 +318,13 @@ impl ResourceMonitor {
         *node_utilization.write().await = Some(node_util.clone());
 
         // Calculate resource pressure
-        let cpu_pressure = total_actual_cpu_percent / (worker_capabilities.cpu_cores as f64 * 100.0);
+        let cpu_pressure =
+            total_actual_cpu_percent / (worker_capabilities.cpu_cores as f64 * 100.0);
         let memory_pressure = total_actual_memory_mb as f64 / worker_capabilities.memory_mb as f64;
         let disk_pressure = total_actual_disk_gb as f64 / worker_capabilities.disk_gb as f64;
-        
+
         let is_high_pressure = cpu_pressure > 0.8 || memory_pressure > 0.8 || disk_pressure > 0.8;
-        
+
         let new_pressure = ResourcePressure {
             cpu_pressure,
             memory_pressure,
@@ -328,15 +334,15 @@ impl ResourceMonitor {
             overcommit_disk: overcommit_ratio_disk,
             is_high_pressure,
         };
-        
+
         // TODO: Implement pressure tracking when struct fields are added
         if new_pressure.is_high_pressure {
             tracing::warn!(
-                    "High resource pressure detected - CPU: {:.1}%, Memory: {:.1}%, Disk: {:.1}%",
-                    cpu_pressure * 100.0,
-                    memory_pressure * 100.0,
-                    disk_pressure * 100.0
-                );
+                "High resource pressure detected - CPU: {:.1}%, Memory: {:.1}%, Disk: {:.1}%",
+                cpu_pressure * 100.0,
+                memory_pressure * 100.0,
+                disk_pressure * 100.0
+            );
         } else {
             tracing::info!("Resource pressure returned to normal levels");
         }
@@ -362,7 +368,10 @@ impl ResourceMonitor {
         match SystemResourceCollector::get_systemd_vm_resources(vm_name) {
             Ok(metrics) => Ok(metrics.cpu_percent),
             Err(e) => {
-                debug!("Failed to get real CPU metrics for {}: {}, using estimate", vm_name, e);
+                debug!(
+                    "Failed to get real CPU metrics for {}: {}, using estimate",
+                    vm_name, e
+                );
                 // Fallback to estimate based on allocated resources
                 Ok(rand::random::<f64>() * 60.0 + 10.0)
             }
@@ -375,7 +384,10 @@ impl ResourceMonitor {
         match SystemResourceCollector::get_systemd_vm_resources(vm_name) {
             Ok(metrics) => Ok(metrics.memory_mb),
             Err(e) => {
-                debug!("Failed to get real memory metrics for {}: {}, using estimate", vm_name, e);
+                debug!(
+                    "Failed to get real memory metrics for {}: {}, using estimate",
+                    vm_name, e
+                );
                 // Fallback to estimate
                 Ok((rand::random::<u64>() % 1024) + 512)
             }
@@ -389,7 +401,10 @@ impl ResourceMonitor {
         match SystemResourceCollector::get_disk_usage(&vm_data_path) {
             Ok(disk_gb) => Ok(disk_gb),
             Err(e) => {
-                debug!("Failed to get real disk metrics for {}: {}, using estimate", vm_name, e);
+                debug!(
+                    "Failed to get real disk metrics for {}: {}, using estimate",
+                    vm_name, e
+                );
                 // Fallback to estimate
                 Ok((rand::random::<u64>() % 3) + 1)
             }
@@ -442,39 +457,45 @@ mod tests {
         use crate::types::NodeConfig;
         use crate::vm_backend::MockVmBackend;
         use tempfile::TempDir;
-        
+
         let vm_usage = Arc::new(RwLock::new(HashMap::new()));
-        
+
         // Add some test VM usage data
         let mut usage_map = HashMap::new();
-        usage_map.insert("vm1".to_string(), VmResourceUsage {
-            vm_name: "vm1".to_string(),
-            allocated_vcpus: 4,
-            allocated_memory_mb: 8192,
-            allocated_disk_gb: 20,
-            actual_cpu_percent: 50.0,
-            actual_memory_mb: 4096,
-            actual_disk_gb: 10,
-            last_updated: chrono::Utc::now(),
-        });
-        usage_map.insert("vm2".to_string(), VmResourceUsage {
-            vm_name: "vm2".to_string(),
-            allocated_vcpus: 2,
-            allocated_memory_mb: 4096,
-            allocated_disk_gb: 10,
-            actual_cpu_percent: 30.0,
-            actual_memory_mb: 2048,
-            actual_disk_gb: 5,
-            last_updated: chrono::Utc::now(),
-        });
-        
+        usage_map.insert(
+            "vm1".to_string(),
+            VmResourceUsage {
+                vm_name: "vm1".to_string(),
+                allocated_vcpus: 4,
+                allocated_memory_mb: 8192,
+                allocated_disk_gb: 20,
+                actual_cpu_percent: 50.0,
+                actual_memory_mb: 4096,
+                actual_disk_gb: 10,
+                last_updated: chrono::Utc::now(),
+            },
+        );
+        usage_map.insert(
+            "vm2".to_string(),
+            VmResourceUsage {
+                vm_name: "vm2".to_string(),
+                allocated_vcpus: 2,
+                allocated_memory_mb: 4096,
+                allocated_disk_gb: 10,
+                actual_cpu_percent: 30.0,
+                actual_memory_mb: 2048,
+                actual_disk_gb: 5,
+                last_updated: chrono::Utc::now(),
+            },
+        );
+
         *vm_usage.write().await = usage_map;
 
         // Create test database and SharedNodeState
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
         let database = Arc::new(redb::Database::create(db_path).unwrap());
-        
+
         let config = NodeConfig {
             id: 1,
             bind_addr: "127.0.0.1:9001".parse().unwrap(),
@@ -485,13 +506,13 @@ mod tests {
             transport_config: None,
             topology: Default::default(),
         };
-        
+
         let node_state = Arc::new(crate::node_shared::SharedNodeState::new(config));
-        
+
         // Note: get_worker_capabilities() returns hardcoded values:
         // cpu_cores: 8, memory_mb: 16384, disk_gb: 100
         // These match what we need for the test
-        
+
         // Create VM backend and manager
         let vm_backend = Arc::new(MockVmBackend::new(database.clone()));
         let vm_manager = Arc::new(crate::vm_backend::VmManager::new(
@@ -511,13 +532,13 @@ mod tests {
         };
 
         let efficiency = monitor.get_resource_efficiency().await;
-        
+
         // CPU efficiency: (50% + 30%) / (4 + 2) VCPUs = 80% / 6 VCPUs = 13.33%
         assert!((efficiency.cpu_efficiency - 0.1333).abs() < 0.01);
-        
+
         // Memory efficiency: (4096 + 2048) / (8192 + 4096) = 6144 / 12288 = 50%
         assert!((efficiency.memory_efficiency - 0.5).abs() < 0.01);
-        
+
         assert_eq!(efficiency.vm_count, 2);
     }
 }

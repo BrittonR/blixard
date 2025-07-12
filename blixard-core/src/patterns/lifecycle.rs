@@ -78,8 +78,7 @@ impl LifecycleStats {
     }
 
     pub fn current_uptime(&self) -> Option<std::time::Duration> {
-        self.start_time
-            .and_then(|start| start.elapsed().ok())
+        self.start_time.and_then(|start| start.elapsed().ok())
     }
 }
 
@@ -94,15 +93,15 @@ impl Default for LifecycleStats {
 pub trait LifecycleManager: Send + Sync + Debug {
     /// Associated configuration type
     type Config: Clone + Debug + Send + Sync;
-    
+
     /// Associated state type for manager-specific state
     type State: Send + Sync;
-    
+
     /// Associated error type (typically BlixardError)
     type Error: std::error::Error + Send + Sync + 'static + From<BlixardError>;
 
     /// Create a new manager instance with the given configuration
-    /// 
+    ///
     /// This is a factory method that creates but does not start the manager.
     /// The manager will be in Created state after this call.
     async fn new(config: Self::Config) -> Result<Self, Self::Error>
@@ -110,7 +109,7 @@ pub trait LifecycleManager: Send + Sync + Debug {
         Self: Sized;
 
     /// Initialize the manager with any required resources
-    /// 
+    ///
     /// This method should:
     /// - Validate configuration
     /// - Initialize internal state
@@ -122,7 +121,7 @@ pub trait LifecycleManager: Send + Sync + Debug {
     }
 
     /// Start the manager and begin normal operations
-    /// 
+    ///
     /// This method should:
     /// - Start background tasks
     /// - Establish connections
@@ -131,7 +130,7 @@ pub trait LifecycleManager: Send + Sync + Debug {
     async fn start(&mut self) -> Result<(), Self::Error>;
 
     /// Stop the manager gracefully
-    /// 
+    ///
     /// This method should:
     /// - Signal background tasks to stop
     /// - Close connections gracefully
@@ -171,7 +170,7 @@ pub trait LifecycleManager: Send + Sync + Debug {
     fn config(&self) -> &Self::Config;
 
     /// Update configuration (if supported)
-    /// 
+    ///
     /// Default implementation returns error - managers that support
     /// dynamic reconfiguration should override this.
     async fn update_config(&mut self, _config: Self::Config) -> Result<(), Self::Error> {
@@ -181,16 +180,20 @@ pub trait LifecycleManager: Send + Sync + Debug {
     }
 
     /// Wait for manager to reach a specific state
-    async fn wait_for_state(&self, target_state: LifecycleState, timeout: std::time::Duration) -> Result<(), Self::Error> {
+    async fn wait_for_state(
+        &self,
+        target_state: LifecycleState,
+        timeout: std::time::Duration,
+    ) -> Result<(), Self::Error> {
         let start = std::time::Instant::now();
-        
+
         while start.elapsed() < timeout {
             if self.state() == target_state {
                 return Ok(());
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
-        
+
         Err(Self::Error::from(BlixardError::Timeout {
             operation: format!("wait_for_state({:?})", target_state),
             duration: timeout,
@@ -213,13 +216,13 @@ pub trait LifecycleManager: Send + Sync + Debug {
 pub trait BackgroundTaskManager: LifecycleManager {
     /// Get names of background tasks
     fn task_names(&self) -> Vec<String>;
-    
+
     /// Check if a specific task is running
     fn is_task_running(&self, task_name: &str) -> bool;
-    
+
     /// Restart a specific background task
     async fn restart_task(&mut self, task_name: &str) -> Result<(), Self::Error>;
-    
+
     /// Get status of all background tasks
     fn task_status(&self) -> std::collections::HashMap<String, bool> {
         self.task_names()
@@ -266,7 +269,7 @@ impl<C: Clone + Debug> LifecycleBase<C> {
             }
             _ => {}
         }
-        
+
         self.state = new_state;
     }
 
@@ -311,7 +314,7 @@ macro_rules! impl_lifecycle_manager {
 
             async fn new(config: Self::Config) -> Result<Self, Self::Error>
             where
-                Self: Sized
+                Self: Sized,
             {
                 <$manager>::new(config).await
             }
@@ -495,7 +498,7 @@ mod tests {
     #[tokio::test]
     async fn test_health_status() {
         let mut manager = MockManager::new_success();
-        
+
         // Initially not healthy (not running)
         let health = manager.health().await;
         assert!(matches!(health, HealthStatus::Degraded(_)));
@@ -510,13 +513,13 @@ mod tests {
     #[tokio::test]
     async fn test_restart() {
         let mut manager = MockManager::new_success();
-        
+
         manager.start().await.unwrap();
         assert_eq!(manager.state(), LifecycleState::Running);
-        
+
         manager.restart().await.unwrap();
         assert_eq!(manager.state(), LifecycleState::Running);
-        
+
         // Should have recorded a restart
         let stats = manager.stats();
         assert_eq!(stats.restart_count, 1);
@@ -525,13 +528,13 @@ mod tests {
     #[tokio::test]
     async fn test_error_handling() {
         let mut manager = MockManager::new_failing();
-        
+
         let result = manager.start().await;
         assert!(result.is_err());
-        
+
         // Should be in failed state
         assert!(matches!(manager.state(), LifecycleState::Failed(_)));
-        
+
         // Health should be unhealthy
         let health = manager.health().await;
         assert!(matches!(health, HealthStatus::Unhealthy(_)));
@@ -540,33 +543,31 @@ mod tests {
     #[tokio::test]
     async fn test_wait_for_state() {
         let mut manager = MockManager::new_success();
-        
+
         // Start manager in background
         let manager_ref = &mut manager;
         tokio::spawn(async move {
             sleep(Duration::from_millis(50)).await;
             manager_ref.start().await.unwrap();
         });
-        
+
         // Wait for running state
-        let result = manager.wait_for_state(
-            LifecycleState::Running,
-            Duration::from_millis(100)
-        ).await;
-        
+        let result = manager
+            .wait_for_state(LifecycleState::Running, Duration::from_millis(100))
+            .await;
+
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_wait_for_state_timeout() {
         let manager = MockManager::new_success();
-        
+
         // Wait for a state that will never be reached
-        let result = manager.wait_for_state(
-            LifecycleState::Running,
-            Duration::from_millis(50)
-        ).await;
-        
+        let result = manager
+            .wait_for_state(LifecycleState::Running, Duration::from_millis(50))
+            .await;
+
         assert!(result.is_err());
     }
 
@@ -574,14 +575,14 @@ mod tests {
     async fn test_lifecycle_stats() {
         let mut manager = MockManager::new_success();
         let mut stats = manager.stats();
-        
+
         // Initially no start time
         assert!(stats.start_time.is_none());
         assert_eq!(stats.restart_count, 0);
-        
+
         manager.start().await.unwrap();
         stats = manager.stats();
-        
+
         // Should have start time after starting
         assert!(stats.start_time.is_some());
         assert!(stats.current_uptime().is_some());

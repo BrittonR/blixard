@@ -185,9 +185,8 @@ impl TimeAccelerator {
     /// Advance time based on real time elapsed (with acceleration)
     pub fn advance_by_real_time(&self) {
         let real_elapsed = self.start_real_time.elapsed();
-        let sim_elapsed = Duration::from_nanos(
-            (real_elapsed.as_nanos() * self.acceleration as u128) as u64,
-        );
+        let sim_elapsed =
+            Duration::from_nanos((real_elapsed.as_nanos() * self.acceleration as u128) as u64);
 
         let mut global = self.global_time.lock().unwrap();
         *global = self.start_sim_time.add(sim_elapsed);

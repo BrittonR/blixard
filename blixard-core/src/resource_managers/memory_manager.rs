@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::sync::{RwLock, Mutex};
+use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 use tracing::{debug, info, warn};
@@ -115,11 +115,16 @@ impl MemoryResourceManager {
     fn available_capacity(&self, current_allocated: u64) -> u64 {
         let effective = self.effective_capacity();
         let reserve = self.config.limits.system_reserve;
-        effective.saturating_sub(current_allocated).saturating_sub(reserve)
+        effective
+            .saturating_sub(current_allocated)
+            .saturating_sub(reserve)
     }
 
     /// Check if allocation request would violate limits
-    async fn validate_allocation_request(&self, request: &ResourceAllocationRequest) -> BlixardResult<()> {
+    async fn validate_allocation_request(
+        &self,
+        request: &ResourceAllocationRequest,
+    ) -> BlixardResult<()> {
         // Check resource type
         if request.resource_type != ResourceType::Memory {
             return Err(BlixardError::InvalidInput {
@@ -159,7 +164,9 @@ impl MemoryResourceManager {
         let mut active_count = 0;
 
         for allocation in allocations.values() {
-            if allocation.status == AllocationStatus::Active || allocation.status == AllocationStatus::Reserved {
+            if allocation.status == AllocationStatus::Active
+                || allocation.status == AllocationStatus::Reserved
+            {
                 total_allocated += allocation.allocated_amount;
                 active_count += 1;
             }
@@ -195,15 +202,19 @@ impl MemoryResourceManager {
 
         let handle = tokio::spawn(async move {
             let mut timer = interval(interval_duration);
-            
+
             loop {
                 timer.tick().await;
-                
+
                 // Update usage statistics
                 let allocated = {
                     let allocations_guard = allocations.read().await;
-                    allocations_guard.values()
-                        .filter(|a| a.status == AllocationStatus::Active || a.status == AllocationStatus::Reserved)
+                    allocations_guard
+                        .values()
+                        .filter(|a| {
+                            a.status == AllocationStatus::Active
+                                || a.status == AllocationStatus::Reserved
+                        })
                         .map(|a| a.allocated_amount)
                         .sum::<u64>()
                 };
@@ -213,7 +224,7 @@ impl MemoryResourceManager {
                     usage_guard.allocated_amount = allocated;
                     usage_guard.allocation_count = allocations.read().await.len();
                     usage_guard.updated_at = SystemTime::now();
-                    
+
                     // Simulate real usage monitoring
                     usage_guard.used_amount = (allocated as f64 * 0.8) as u64;
                 }
@@ -225,19 +236,27 @@ impl MemoryResourceManager {
                     metrics.total_allocations = state.total_allocations;
                     metrics.total_deallocations = state.total_deallocations;
                     metrics.failed_allocations = state.failed_allocations;
-                    
+
                     if !state.allocation_times.is_empty() {
                         let total_time: Duration = state.allocation_times.iter().sum();
-                        metrics.avg_allocation_time_ms = total_time.as_millis() as f64 / state.allocation_times.len() as f64;
+                        metrics.avg_allocation_time_ms =
+                            total_time.as_millis() as f64 / state.allocation_times.len() as f64;
                     }
                 }
 
-                debug!("Memory usage updated: {}MB allocated, {}MB used", allocated, allocated * 8 / 10);
+                debug!(
+                    "Memory usage updated: {}MB allocated, {}MB used",
+                    allocated,
+                    allocated * 8 / 10
+                );
             }
         });
 
         *self.monitoring_handle.lock().await = Some(handle);
-        info!("Memory monitoring started with interval: {:?}", interval_duration);
+        info!(
+            "Memory monitoring started with interval: {:?}",
+            interval_duration
+        );
         Ok(())
     }
 
@@ -253,18 +272,23 @@ impl MemoryResourceManager {
 
         let handle = tokio::spawn(async move {
             let mut timer = interval(interval_duration);
-            
+
             loop {
                 timer.tick().await;
-                
+
                 let health_status = {
                     let usage_guard = usage.read().await;
                     let utilization = usage_guard.utilization_percent();
-                    
+
                     if utilization > 95.0 {
-                        ResourceManagerHealth::Unhealthy("Memory utilization critically high".to_string())
+                        ResourceManagerHealth::Unhealthy(
+                            "Memory utilization critically high".to_string(),
+                        )
                     } else if utilization > 85.0 || usage_guard.is_overallocated() {
-                        ResourceManagerHealth::Degraded(format!("Memory utilization at {:.1}%", utilization))
+                        ResourceManagerHealth::Degraded(format!(
+                            "Memory utilization at {:.1}%",
+                            utilization
+                        ))
                     } else {
                         ResourceManagerHealth::Healthy
                     }
@@ -281,7 +305,10 @@ impl MemoryResourceManager {
         });
 
         *self.health_check_handle.lock().await = Some(handle);
-        info!("Memory health checks started with interval: {:?}", interval_duration);
+        info!(
+            "Memory health checks started with interval: {:?}",
+            interval_duration
+        );
         Ok(())
     }
 
@@ -309,15 +336,22 @@ impl ResourceManager for MemoryResourceManager {
         &self.config
     }
 
-    async fn allocate(&self, request: ResourceAllocationRequest) -> BlixardResult<ResourceAllocation> {
+    async fn allocate(
+        &self,
+        request: ResourceAllocationRequest,
+    ) -> BlixardResult<ResourceAllocation> {
         let start_time = SystemTime::now();
-        
+
         // Validate the request
         self.validate_allocation_request(&request).await?;
 
         // Create allocation
         let allocation = ResourceAllocation {
-            allocation_id: format!("mem-{}-{}", request.tenant_id, chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)),
+            allocation_id: format!(
+                "mem-{}-{}",
+                request.tenant_id,
+                chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+            ),
             request: request.clone(),
             allocated_amount: request.amount,
             allocated_on: Some("memory".to_string()),
@@ -333,11 +367,11 @@ impl ResourceManager for MemoryResourceManager {
 
         // Update usage and state
         self.update_usage_stats().await;
-        
+
         {
             let mut state = self.state.write().await;
             state.total_allocations += 1;
-            
+
             if let Ok(duration) = start_time.elapsed() {
                 state.allocation_times.push(duration);
                 // Keep only last 100 allocation times for rolling average
@@ -363,10 +397,10 @@ impl ResourceManager for MemoryResourceManager {
 
         if let Some(mut allocation) = allocation {
             allocation.status = AllocationStatus::Released;
-            
+
             // Update usage statistics
             self.update_usage_stats().await;
-            
+
             // Update state
             {
                 let mut state = self.state.write().await;
@@ -404,14 +438,17 @@ impl ResourceManager for MemoryResourceManager {
         Ok(allocations.values().cloned().collect())
     }
 
-    async fn get_allocation(&self, allocation_id: &ResourceId) -> BlixardResult<Option<ResourceAllocation>> {
+    async fn get_allocation(
+        &self,
+        allocation_id: &ResourceId,
+    ) -> BlixardResult<Option<ResourceAllocation>> {
         let allocations = self.allocations.read().await;
         Ok(allocations.get(allocation_id).cloned())
     }
 
     async fn initialize(&self) -> BlixardResult<()> {
         info!("Initializing memory resource manager");
-        
+
         // Initialize usage tracking
         let mut usage = self.usage.write().await;
         usage.total_capacity = self.config.limits.hard_limit;
@@ -424,17 +461,20 @@ impl ResourceManager for MemoryResourceManager {
         state.last_health_check = SystemTime::now();
         drop(state);
 
-        info!("Memory resource manager initialized with capacity: {}MB", self.config.limits.hard_limit);
+        info!(
+            "Memory resource manager initialized with capacity: {}MB",
+            self.config.limits.hard_limit
+        );
         Ok(())
     }
 
     async fn start(&self) -> BlixardResult<()> {
         info!("Starting memory resource manager");
-        
+
         // Start background tasks
         self.start_monitoring().await?;
         self.start_health_checks().await?;
-        
+
         // Update state
         {
             let mut state = self.state.write().await;
@@ -448,10 +488,10 @@ impl ResourceManager for MemoryResourceManager {
 
     async fn stop(&self) -> BlixardResult<()> {
         info!("Stopping memory resource manager");
-        
+
         // Stop background tasks
         self.stop_background_tasks().await;
-        
+
         // Update state
         {
             let mut state = self.state.write().await;
@@ -492,23 +532,53 @@ impl ResourceManager for MemoryResourceManager {
 
     async fn export_telemetry(&self) -> BlixardResult<HashMap<String, serde_json::Value>> {
         let mut telemetry = HashMap::new();
-        
+
         let usage = self.get_usage().await?;
         let metrics = self.get_metrics().await?;
         let state = self.state.read().await;
 
         telemetry.insert("resource_type".to_string(), serde_json::json!("memory"));
-        telemetry.insert("total_capacity_mb".to_string(), serde_json::json!(usage.total_capacity));
-        telemetry.insert("allocated_mb".to_string(), serde_json::json!(usage.allocated_amount));
+        telemetry.insert(
+            "total_capacity_mb".to_string(),
+            serde_json::json!(usage.total_capacity),
+        );
+        telemetry.insert(
+            "allocated_mb".to_string(),
+            serde_json::json!(usage.allocated_amount),
+        );
         telemetry.insert("used_mb".to_string(), serde_json::json!(usage.used_amount));
-        telemetry.insert("utilization_percent".to_string(), serde_json::json!(usage.utilization_percent()));
-        telemetry.insert("allocation_count".to_string(), serde_json::json!(usage.allocation_count));
-        telemetry.insert("total_allocations".to_string(), serde_json::json!(metrics.total_allocations));
-        telemetry.insert("total_deallocations".to_string(), serde_json::json!(metrics.total_deallocations));
-        telemetry.insert("failed_allocations".to_string(), serde_json::json!(metrics.failed_allocations));
-        telemetry.insert("avg_allocation_time_ms".to_string(), serde_json::json!(metrics.avg_allocation_time_ms));
-        telemetry.insert("health_status".to_string(), serde_json::json!(format!("{:?}", state.health)));
-        telemetry.insert("is_running".to_string(), serde_json::json!(state.is_running));
+        telemetry.insert(
+            "utilization_percent".to_string(),
+            serde_json::json!(usage.utilization_percent()),
+        );
+        telemetry.insert(
+            "allocation_count".to_string(),
+            serde_json::json!(usage.allocation_count),
+        );
+        telemetry.insert(
+            "total_allocations".to_string(),
+            serde_json::json!(metrics.total_allocations),
+        );
+        telemetry.insert(
+            "total_deallocations".to_string(),
+            serde_json::json!(metrics.total_deallocations),
+        );
+        telemetry.insert(
+            "failed_allocations".to_string(),
+            serde_json::json!(metrics.failed_allocations),
+        );
+        telemetry.insert(
+            "avg_allocation_time_ms".to_string(),
+            serde_json::json!(metrics.avg_allocation_time_ms),
+        );
+        telemetry.insert(
+            "health_status".to_string(),
+            serde_json::json!(format!("{:?}", state.health)),
+        );
+        telemetry.insert(
+            "is_running".to_string(),
+            serde_json::json!(state.is_running),
+        );
 
         Ok(telemetry)
     }
@@ -522,9 +592,11 @@ impl ResourceManager for MemoryResourceManager {
         }
 
         // Note: In a real implementation, we'd need to handle config mutability differently
-        info!("Memory limits update requested: hard={}, soft={}, overcommit={}",
-            limits.hard_limit, limits.soft_limit, limits.overcommit_ratio);
-        
+        info!(
+            "Memory limits update requested: hard={}, soft={}, overcommit={}",
+            limits.hard_limit, limits.soft_limit, limits.overcommit_ratio
+        );
+
         // Update usage capacity
         {
             let mut usage = self.usage.write().await;
@@ -573,7 +645,7 @@ impl ResourceManager for MemoryResourceManager {
 
     async fn update_config(&self, config: ResourceManagerConfig) -> BlixardResult<()> {
         self.validate_config(&config).await?;
-        
+
         // Note: In a real implementation, this would properly update the config
         info!("Memory manager configuration update validated");
         Ok(())
@@ -639,9 +711,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_memory_allocation_and_deallocation() {
-        let manager = MemoryResourceManager::builder()
-            .with_capacity(1024)
-            .build();
+        let manager = MemoryResourceManager::builder().with_capacity(1024).build();
 
         manager.initialize().await.unwrap();
 
@@ -668,7 +738,7 @@ mod tests {
 
         // Test deallocation
         manager.deallocate(&allocation.allocation_id).await.unwrap();
-        
+
         let usage_after = manager.get_usage().await.unwrap();
         assert_eq!(usage_after.allocated_amount, 0);
         assert_eq!(usage_after.allocation_count, 0);
@@ -676,9 +746,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_memory_overallocation_rejection() {
-        let manager = MemoryResourceManager::builder()
-            .with_capacity(1024)
-            .build();
+        let manager = MemoryResourceManager::builder().with_capacity(1024).build();
 
         manager.initialize().await.unwrap();
 
@@ -695,7 +763,10 @@ mod tests {
 
         let result = manager.allocate(large_request).await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), BlixardError::InsufficientResources { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            BlixardError::InsufficientResources { .. }
+        ));
     }
 
     #[tokio::test]
@@ -707,7 +778,7 @@ mod tests {
 
         // Test initialization
         manager.initialize().await.unwrap();
-        
+
         // Test starting
         manager.start().await.unwrap();
         assert!(manager.is_running().await);
@@ -723,9 +794,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_memory_usage_calculations() {
-        let manager = MemoryResourceManager::builder()
-            .with_capacity(1000)
-            .build();
+        let manager = MemoryResourceManager::builder().with_capacity(1000).build();
 
         manager.initialize().await.unwrap();
 
@@ -737,9 +806,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_memory_manager_metrics() {
-        let manager = MemoryResourceManager::builder()
-            .with_capacity(1024)
-            .build();
+        let manager = MemoryResourceManager::builder().with_capacity(1024).build();
 
         manager.initialize().await.unwrap();
 

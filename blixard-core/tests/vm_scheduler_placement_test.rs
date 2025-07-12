@@ -15,7 +15,7 @@ use blixard_core::vm_scheduler::PlacementStrategy;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_scheduler_placement_decisions() {
-    let cluster = TestCluster::new(3).await.expect("Failed to create cluster");
+    let cluster = TestCluster::with_size(3).await.expect("Failed to create cluster");
 
     // Wait for leader election
     timing::wait_for_condition_with_backoff(

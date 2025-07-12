@@ -3,6 +3,7 @@
 //! This module provides the HealthStateManager component that manages
 //! VM health state persistence and cleanup using the LifecycleManager pattern.
 
+use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,7 +11,6 @@ use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
-use async_trait::async_trait;
 
 use crate::{
     error::{BlixardError, BlixardResult},
@@ -41,7 +41,10 @@ impl std::fmt::Debug for HealthStateManager {
             .field("health_configs", &self.health_configs)
             .field("health_statuses", &self.health_statuses)
             .field("monitoring_enabled", &self.monitoring_enabled)
-            .field("cleanup_handle", &self.cleanup_handle.as_ref().map(|_| "<JoinHandle>"))
+            .field(
+                "cleanup_handle",
+                &self.cleanup_handle.as_ref().map(|_| "<JoinHandle>"),
+            )
             .field("is_running", &self.is_running)
             .finish()
     }
@@ -49,10 +52,7 @@ impl std::fmt::Debug for HealthStateManager {
 
 impl HealthStateManager {
     /// Create new health state manager
-    pub fn new(
-        config: HealthStateManagerConfig,
-        deps: VmHealthMonitorDependencies,
-    ) -> Self {
+    pub fn new(config: HealthStateManagerConfig, deps: VmHealthMonitorDependencies) -> Self {
         Self {
             config,
             deps,
@@ -70,9 +70,13 @@ impl HealthStateManager {
     }
 
     /// Update health status for a VM
-    pub async fn update_health_status(&self, vm_name: &str, status: VmHealthStatus) -> BlixardResult<()> {
+    pub async fn update_health_status(
+        &self,
+        vm_name: &str,
+        status: VmHealthStatus,
+    ) -> BlixardResult<()> {
         let mut statuses = self.health_statuses.write().await;
-        
+
         // Check if we should store the status based on configuration
         if let Some(_existing) = statuses.get(vm_name) {
             // Limit the number of stored statuses per VM
@@ -83,11 +87,17 @@ impl HealthStateManager {
         }
 
         statuses.insert(vm_name.to_string(), status);
-        
+
         // If persistence is enabled, store to backend
         if self.config.enable_persistence {
-            if let Err(e) = self.persist_health_status(vm_name, &statuses[vm_name]).await {
-                error!("Failed to persist health status for VM '{}': {}", vm_name, e);
+            if let Err(e) = self
+                .persist_health_status(vm_name, &statuses[vm_name])
+                .await
+            {
+                error!(
+                    "Failed to persist health status for VM '{}': {}",
+                    vm_name, e
+                );
             }
         }
 
@@ -185,9 +195,12 @@ impl HealthStateManager {
 
         for (vm_name, status) in statuses.iter() {
             let status_age = if let Some(last_healthy_at) = status.last_healthy_at_secs {
-                current_time.duration_since(
-                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(last_healthy_at as u64)
-                ).unwrap_or(Duration::from_secs(0))
+                current_time
+                    .duration_since(
+                        std::time::UNIX_EPOCH
+                            + std::time::Duration::from_secs(last_healthy_at as u64),
+                    )
+                    .unwrap_or(Duration::from_secs(0))
             } else {
                 // If no last healthy time, consider it very old
                 Duration::from_secs(u64::MAX / 2)
@@ -207,9 +220,14 @@ impl HealthStateManager {
     }
 
     /// Persist health status to backend storage
-    async fn persist_health_status(&self, vm_name: &str, status: &VmHealthStatus) -> BlixardResult<()> {
+    async fn persist_health_status(
+        &self,
+        vm_name: &str,
+        status: &VmHealthStatus,
+    ) -> BlixardResult<()> {
         // Store to VM backend if it supports health status persistence
-        self.deps.vm_manager
+        self.deps
+            .vm_manager
             .backend()
             .update_vm_health_status(vm_name, status.clone())
             .await
@@ -247,7 +265,8 @@ impl LifecycleManager for HealthStateManager {
 
     async fn new(_config: Self::Config) -> Result<Self, Self::Error> {
         Err(BlixardError::NotImplemented {
-            feature: "HealthStateManager::new requires dependencies - use new_with_deps instead".to_string(),
+            feature: "HealthStateManager::new requires dependencies - use new_with_deps instead"
+                .to_string(),
         })
     }
 
@@ -304,7 +323,6 @@ impl LifecycleManager for HealthStateManager {
     fn is_running(&self) -> bool {
         self.is_running
     }
-
 }
 
 impl Drop for HealthStateManager {
@@ -350,11 +368,7 @@ mod tests {
 
         let clock = Arc::new(MockClock::new());
 
-        let deps = VmHealthMonitorDependencies::with_clock(
-            node_state,
-            vm_manager,
-            clock,
-        );
+        let deps = VmHealthMonitorDependencies::with_clock(node_state, vm_manager, clock);
 
         let state_config = HealthStateManagerConfig {
             max_state_age: Duration::from_hours(1),
@@ -386,7 +400,10 @@ mod tests {
             retries: 3,
         };
 
-        manager.add_health_check("test-vm", health_check.clone()).await.unwrap();
+        manager
+            .add_health_check("test-vm", health_check.clone())
+            .await
+            .unwrap();
 
         let checks = manager.list_health_checks("test-vm").await.unwrap();
         assert_eq!(checks.len(), 1);
@@ -400,7 +417,10 @@ mod tests {
         // Test health status
         let mut status = VmHealthStatus::default();
         status.state = HealthState::Healthy;
-        manager.update_health_status("test-vm", status).await.unwrap();
+        manager
+            .update_health_status("test-vm", status)
+            .await
+            .unwrap();
 
         let retrieved_status = manager.get_health_status("test-vm").await;
         assert!(retrieved_status.is_some());

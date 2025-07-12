@@ -5,10 +5,10 @@
 //! configurable overcommit policies.
 
 use crate::error::{BlixardError, BlixardResult};
-use crate::resource_management::{ClusterResourceManager, OvercommitPolicy};
 use crate::raft_manager::WorkerCapabilities;
-use crate::types::{VmConfig, VmState, VmStatus};
+use crate::resource_management::{ClusterResourceManager, OvercommitPolicy};
 use crate::try_into_bytes;
+use crate::types::{VmConfig, VmState, VmStatus};
 use redb::{Database, ReadableTable};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -18,13 +18,13 @@ use tracing::{debug, info, warn};
 pub struct AdmissionControlConfig {
     /// Whether to enable strict admission control (no overcommit)
     pub strict_mode: bool,
-    
+
     /// Default overcommit policy if not specified per-node
     pub default_overcommit_policy: OvercommitPolicy,
-    
+
     /// Whether to account for preemptible VMs differently
     pub preemptible_discount: f64, // e.g., 0.5 = count preemptible VMs as 50% resources
-    
+
     /// Whether to reserve resources for system processes
     pub enable_system_reserve: bool,
 }
@@ -65,9 +65,9 @@ impl ResourceAdmissionController {
         let read_txn = self.database.begin_read()?;
         let worker_table = read_txn.open_table(crate::raft_storage::WORKER_TABLE)?;
         let vm_table = read_txn.open_table(crate::raft_storage::VM_STATE_TABLE)?;
-        
+
         let mut resource_manager = self.resource_manager.write().await;
-        
+
         // Update node capabilities
         for entry in worker_table.iter()? {
             let (key, value) = entry?;
@@ -76,13 +76,12 @@ impl ResourceAdmissionController {
                 "node_id key",
                 "8-byte array"
             ));
-            let (_address, capabilities): (String, WorkerCapabilities) = 
-                bincode::deserialize(value.value())
-                    .map_err(|e| BlixardError::Serialization {
-                        operation: "deserialize worker capabilities".to_string(),
-                        source: Box::new(e),
-                    })?;
-            
+            let (_address, capabilities): (String, WorkerCapabilities) =
+                bincode::deserialize(value.value()).map_err(|e| BlixardError::Serialization {
+                    operation: "deserialize worker capabilities".to_string(),
+                    source: Box::new(e),
+                })?;
+
             // Register or update node in resource manager
             resource_manager.register_node(
                 node_id,
@@ -91,13 +90,13 @@ impl ResourceAdmissionController {
                 capabilities.disk_gb,
             );
         }
-        
+
         // Clear all allocations (we'll rebuild from VM state)
         for (_node_id, state) in resource_manager.node_states.iter_mut() {
             state.allocated_resources = Default::default();
             state.reservations.clear();
         }
-        
+
         // Rebuild allocations from VM states
         for entry in vm_table.iter()? {
             let (_, vm_data) = entry?;
@@ -109,22 +108,23 @@ impl ResourceAdmissionController {
                     } else {
                         vm_state.config.vcpus
                     };
-                    
+
                     let memory_usage = if vm_state.config.preemptible {
                         (vm_state.config.memory as f64 * self.config.preemptible_discount) as u64
                     } else {
                         vm_state.config.memory as u64
                     };
-                    
+
                     // Allocate resources on the node
-                    if let Some(node_state) = resource_manager.get_node_state_mut(vm_state.node_id) {
+                    if let Some(node_state) = resource_manager.get_node_state_mut(vm_state.node_id)
+                    {
                         // Best effort allocation - don't fail if overcommitted
                         let _ = node_state.allocate(cpu_usage, memory_usage, 5);
                     }
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -136,14 +136,16 @@ impl ResourceAdmissionController {
     ) -> BlixardResult<()> {
         // Sync current state
         self.sync_resource_state().await?;
-        
+
         let resource_manager = self.resource_manager.read().await;
-        
+
         // Get node state
         let node_state = resource_manager
             .get_node_state(target_node_id)
-            .ok_or_else(|| BlixardError::NodeNotFound { node_id: target_node_id })?;
-        
+            .ok_or_else(|| BlixardError::NodeNotFound {
+                node_id: target_node_id,
+            })?;
+
         // Calculate resource requirements
         let (cpu_required, memory_required, disk_required) = if config.preemptible {
             (
@@ -154,26 +156,30 @@ impl ResourceAdmissionController {
         } else {
             (config.vcpus, config.memory as u64, 5u64)
         };
-        
+
         // Check if node can accommodate the VM
         if self.config.strict_mode {
             // In strict mode, don't allow any overcommit
             let physical = &node_state.physical_resources;
             let allocated = &node_state.allocated_resources;
-            
+
             if allocated.cpu_cores + cpu_required > physical.cpu_cores {
                 return Err(BlixardError::InsufficientResources {
                     requested: format!("{}vCPU", cpu_required),
-                    available: format!("{}vCPU available (strict mode)", 
-                        physical.cpu_cores.saturating_sub(allocated.cpu_cores)),
+                    available: format!(
+                        "{}vCPU available (strict mode)",
+                        physical.cpu_cores.saturating_sub(allocated.cpu_cores)
+                    ),
                 });
             }
-            
+
             if allocated.memory_mb + memory_required > physical.memory_mb {
                 return Err(BlixardError::InsufficientResources {
                     requested: format!("{}MB memory", memory_required),
-                    available: format!("{}MB available (strict mode)", 
-                        physical.memory_mb.saturating_sub(allocated.memory_mb)),
+                    available: format!(
+                        "{}MB available (strict mode)",
+                        physical.memory_mb.saturating_sub(allocated.memory_mb)
+                    ),
                 });
             }
         } else {
@@ -191,7 +197,7 @@ impl ResourceAdmissionController {
                     ),
                 });
             }
-            
+
             // Warn if node is becoming overcommitted
             if node_state.is_overcommitted() {
                 warn!(
@@ -200,7 +206,7 @@ impl ResourceAdmissionController {
                 );
             }
         }
-        
+
         // Check feature requirements
         let worker_capabilities = self.get_worker_capabilities(target_node_id).await?;
         for feature in &["microvm"] {
@@ -213,12 +219,12 @@ impl ResourceAdmissionController {
                 });
             }
         }
-        
+
         info!(
             "VM {} admission approved for node {} (CPU: {}, Memory: {}MB)",
             config.name, target_node_id, cpu_required, memory_required
         );
-        
+
         Ok(())
     }
 
@@ -229,11 +235,11 @@ impl ResourceAdmissionController {
         node_id: u64,
     ) -> BlixardResult<()> {
         let mut resource_manager = self.resource_manager.write().await;
-        
+
         let node_state = resource_manager
             .get_node_state_mut(node_id)
             .ok_or_else(|| BlixardError::NodeNotFound { node_id })?;
-        
+
         // Calculate resource requirements
         let (cpu_required, memory_required, disk_required) = if config.preemptible {
             (
@@ -244,25 +250,21 @@ impl ResourceAdmissionController {
         } else {
             (config.vcpus, config.memory as u64, 5u64)
         };
-        
+
         node_state.allocate(cpu_required, memory_required, disk_required)?;
-        
+
         debug!(
             "Allocated resources for VM {} on node {}: CPU={}, Memory={}MB, Disk={}GB",
             config.name, node_id, cpu_required, memory_required, disk_required
         );
-        
+
         Ok(())
     }
 
     /// Release resources when a VM is stopped or deleted
-    pub async fn release_vm_resources(
-        &self,
-        config: &VmConfig,
-        node_id: u64,
-    ) -> BlixardResult<()> {
+    pub async fn release_vm_resources(&self, config: &VmConfig, node_id: u64) -> BlixardResult<()> {
         let mut resource_manager = self.resource_manager.write().await;
-        
+
         if let Some(node_state) = resource_manager.get_node_state_mut(node_id) {
             // Calculate resource requirements
             let (cpu_required, memory_required, disk_required) = if config.preemptible {
@@ -274,15 +276,15 @@ impl ResourceAdmissionController {
             } else {
                 (config.vcpus, config.memory as u64, 5u64)
             };
-            
+
             node_state.release(cpu_required, memory_required, disk_required);
-            
+
             debug!(
                 "Released resources for VM {} on node {}: CPU={}, Memory={}MB, Disk={}GB",
                 config.name, node_id, cpu_required, memory_required, disk_required
             );
         }
-        
+
         Ok(())
     }
 
@@ -290,14 +292,13 @@ impl ResourceAdmissionController {
     async fn get_worker_capabilities(&self, node_id: u64) -> BlixardResult<WorkerCapabilities> {
         let read_txn = self.database.begin_read()?;
         let worker_table = read_txn.open_table(crate::raft_storage::WORKER_TABLE)?;
-        
+
         if let Some(data) = worker_table.get(node_id.to_le_bytes().as_ref())? {
-            let (_address, capabilities): (String, WorkerCapabilities) = 
-                bincode::deserialize(data.value())
-                    .map_err(|e| BlixardError::Serialization {
-                        operation: "deserialize worker capabilities".to_string(),
-                        source: Box::new(e),
-                    })?;
+            let (_address, capabilities): (String, WorkerCapabilities) =
+                bincode::deserialize(data.value()).map_err(|e| BlixardError::Serialization {
+                    operation: "deserialize worker capabilities".to_string(),
+                    source: Box::new(e),
+                })?;
             Ok(capabilities)
         } else {
             Err(BlixardError::NodeNotFound { node_id })
@@ -307,18 +308,18 @@ impl ResourceAdmissionController {
     /// Get current resource utilization summary
     pub async fn get_resource_summary(&self) -> BlixardResult<ResourceUtilizationSummary> {
         self.sync_resource_state().await?;
-        
+
         let resource_manager = self.resource_manager.read().await;
         let cluster_summary = resource_manager.cluster_summary();
-        
+
         let total_cpu = cluster_summary.total_physical.cpu_cores;
         let total_memory = cluster_summary.total_physical.memory_mb;
         let total_disk = cluster_summary.total_physical.disk_gb;
-        
+
         let allocated_cpu = cluster_summary.total_allocated.cpu_cores;
         let allocated_memory = cluster_summary.total_allocated.memory_mb;
         let allocated_disk = cluster_summary.total_allocated.disk_gb;
-        
+
         Ok(ResourceUtilizationSummary {
             total_cpu,
             total_memory_mb: total_memory,
@@ -371,13 +372,17 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
         let database = Arc::new(Database::create(&db_path).unwrap());
-        
+
         // Initialize tables
         let write_txn = database.begin_write().unwrap();
-        let _ = write_txn.open_table(crate::raft_storage::WORKER_TABLE).unwrap();
-        let _ = write_txn.open_table(crate::raft_storage::VM_STATE_TABLE).unwrap();
+        let _ = write_txn
+            .open_table(crate::raft_storage::WORKER_TABLE)
+            .unwrap();
+        let _ = write_txn
+            .open_table(crate::raft_storage::VM_STATE_TABLE)
+            .unwrap();
         write_txn.commit().unwrap();
-        
+
         // Create admission controller with moderate overcommit
         let config = AdmissionControlConfig {
             strict_mode: false,
@@ -385,20 +390,19 @@ mod tests {
             preemptible_discount: 0.5,
             enable_system_reserve: true,
         };
-        
-        let resource_manager = Arc::new(tokio::sync::RwLock::new(
-            ClusterResourceManager::new(config.default_overcommit_policy.clone())
-        ));
-        
-        let controller = ResourceAdmissionController::new(
-            database.clone(),
-            config,
-            resource_manager,
-        );
-        
+
+        let resource_manager = Arc::new(tokio::sync::RwLock::new(ClusterResourceManager::new(
+            config.default_overcommit_policy.clone(),
+        )));
+
+        let controller =
+            ResourceAdmissionController::new(database.clone(), config, resource_manager);
+
         // Register a node with 10 CPUs, 16GB RAM
         let write_txn = database.begin_write().unwrap();
-        let mut worker_table = write_txn.open_table(crate::raft_storage::WORKER_TABLE).unwrap();
+        let mut worker_table = write_txn
+            .open_table(crate::raft_storage::WORKER_TABLE)
+            .unwrap();
         let capabilities = WorkerCapabilities {
             cpu_cores: 10,
             memory_mb: 16384,
@@ -406,17 +410,19 @@ mod tests {
             features: vec!["microvm".to_string()],
         };
         let node_data = bincode::serialize(&("127.0.0.1:7001", capabilities)).unwrap();
-        worker_table.insert(&1u64.to_le_bytes(), node_data.as_slice()).unwrap();
+        worker_table
+            .insert(&1u64.to_le_bytes(), node_data.as_slice())
+            .unwrap();
         write_txn.commit().unwrap();
-        
+
         // Sync state
         controller.sync_resource_state().await.unwrap();
-        
+
         // Test admission with moderate overcommit (2x CPU, 1.2x memory)
         // With 15% system reserve, effective capacity is:
         // CPU: 10 * 2.0 * 0.85 = 17
         // Memory: 16384 * 1.2 * 0.85 = 16711 MB
-        
+
         // Should admit VMs up to effective capacity
         let vm_config = VmConfig {
             name: "test-vm".to_string(),
@@ -434,10 +440,13 @@ mod tests {
             hypervisor: crate::types::Hypervisor::CloudHypervisor,
             tenant_id: None,
         };
-        
+
         // Should succeed (within overcommit limits)
-        controller.validate_vm_admission(&vm_config, 1).await.unwrap();
-        
+        controller
+            .validate_vm_admission(&vm_config, 1)
+            .await
+            .unwrap();
+
         // Test with preemptible VM (should use discount)
         let preemptible_vm = VmConfig {
             name: "preemptible-vm".to_string(),
@@ -446,9 +455,12 @@ mod tests {
             preemptible: true,
             ..vm_config.clone()
         };
-        
+
         // Should succeed with discounted resources
-        controller.validate_vm_admission(&preemptible_vm, 1).await.unwrap();
+        controller
+            .validate_vm_admission(&preemptible_vm, 1)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -456,13 +468,17 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
         let database = Arc::new(Database::create(&db_path).unwrap());
-        
+
         // Initialize tables
         let write_txn = database.begin_write().unwrap();
-        let _ = write_txn.open_table(crate::raft_storage::WORKER_TABLE).unwrap();
-        let _ = write_txn.open_table(crate::raft_storage::VM_STATE_TABLE).unwrap();
+        let _ = write_txn
+            .open_table(crate::raft_storage::WORKER_TABLE)
+            .unwrap();
+        let _ = write_txn
+            .open_table(crate::raft_storage::VM_STATE_TABLE)
+            .unwrap();
         write_txn.commit().unwrap();
-        
+
         // Create admission controller in strict mode (no overcommit)
         let config = AdmissionControlConfig {
             strict_mode: true,
@@ -470,20 +486,19 @@ mod tests {
             preemptible_discount: 1.0,
             enable_system_reserve: false,
         };
-        
-        let resource_manager = Arc::new(tokio::sync::RwLock::new(
-            ClusterResourceManager::new(config.default_overcommit_policy.clone())
-        ));
-        
-        let controller = ResourceAdmissionController::new(
-            database.clone(),
-            config,
-            resource_manager,
-        );
-        
+
+        let resource_manager = Arc::new(tokio::sync::RwLock::new(ClusterResourceManager::new(
+            config.default_overcommit_policy.clone(),
+        )));
+
+        let controller =
+            ResourceAdmissionController::new(database.clone(), config, resource_manager);
+
         // Register a node with 4 CPUs, 8GB RAM
         let write_txn = database.begin_write().unwrap();
-        let mut worker_table = write_txn.open_table(crate::raft_storage::WORKER_TABLE).unwrap();
+        let mut worker_table = write_txn
+            .open_table(crate::raft_storage::WORKER_TABLE)
+            .unwrap();
         let capabilities = WorkerCapabilities {
             cpu_cores: 4,
             memory_mb: 8192,
@@ -491,12 +506,14 @@ mod tests {
             features: vec!["microvm".to_string()],
         };
         let node_data = bincode::serialize(&("127.0.0.1:7001", capabilities)).unwrap();
-        worker_table.insert(&1u64.to_le_bytes(), node_data.as_slice()).unwrap();
+        worker_table
+            .insert(&1u64.to_le_bytes(), node_data.as_slice())
+            .unwrap();
         write_txn.commit().unwrap();
-        
+
         // Sync state
         controller.sync_resource_state().await.unwrap();
-        
+
         // Test strict admission (no overcommit allowed)
         let vm_config = VmConfig {
             name: "test-vm".to_string(),
@@ -514,10 +531,13 @@ mod tests {
             hypervisor: crate::types::Hypervisor::CloudHypervisor,
             tenant_id: None,
         };
-        
+
         // Should fail (exceeds physical capacity in strict mode)
         let result = controller.validate_vm_admission(&vm_config, 1).await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), BlixardError::InsufficientResources { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            BlixardError::InsufficientResources { .. }
+        ));
     }
 }

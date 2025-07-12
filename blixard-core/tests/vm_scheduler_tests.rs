@@ -3,9 +3,11 @@ mod common;
 use blixard_core::{
     error::BlixardResult,
     raft::proposals::WorkerCapabilities,
-    test_helpers::{TestDatabaseFactory, TestWorkerFactory, TestVmFactory},
+    test_helpers::{TestDatabaseFactory, TestVmFactory, TestWorkerFactory},
     types::{NodeTopology, VmConfig, VmStatus},
-    vm_scheduler::{NodeResourceUsage, NodeUtilization, PlacementStrategy, VmResourceRequirements, VmScheduler},
+    vm_scheduler::{
+        NodeResourceUsage, NodeUtilization, PlacementStrategy, VmResourceRequirements, VmScheduler,
+    },
 };
 
 #[tokio::test]
@@ -441,10 +443,14 @@ async fn test_vm_status_resource_counting() {
     TestWorkerFactory::register_worker(&database, 1, capabilities, true).unwrap();
 
     // Add VMs with different statuses
-    TestVmFactory::add_vm_to_database(&database, "running-vm", 1, 2, 2048, VmStatus::Running).unwrap();
-    TestVmFactory::add_vm_to_database(&database, "starting-vm", 1, 1, 1024, VmStatus::Starting).unwrap();
-    TestVmFactory::add_vm_to_database(&database, "stopped-vm", 1, 4, 4096, VmStatus::Stopped).unwrap();
-    TestVmFactory::add_vm_to_database(&database, "failed-vm", 1, 2, 2048, VmStatus::Failed).unwrap();
+    TestVmFactory::add_vm_to_database(&database, "running-vm", 1, 2, 2048, VmStatus::Running)
+        .unwrap();
+    TestVmFactory::add_vm_to_database(&database, "starting-vm", 1, 1, 1024, VmStatus::Starting)
+        .unwrap();
+    TestVmFactory::add_vm_to_database(&database, "stopped-vm", 1, 4, 4096, VmStatus::Stopped)
+        .unwrap();
+    TestVmFactory::add_vm_to_database(&database, "failed-vm", 1, 2, 2048, VmStatus::Failed)
+        .unwrap();
 
     let summary = scheduler.get_cluster_resource_summary().await.unwrap();
 

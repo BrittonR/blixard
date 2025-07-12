@@ -5,7 +5,7 @@
 //!
 //! ## Migration to FileSystem Abstraction
 //!
-//! This module has been migrated to use the `FileSystem` trait instead of 
+//! This module has been migrated to use the `FileSystem` trait instead of
 //! direct `std::fs` operations. This provides:
 //!
 //! - **Testability**: Use `MockFileSystem` in tests to avoid real file I/O
@@ -79,7 +79,7 @@ pub struct P2pImageStore {
 impl P2pImageStore {
     /// Create a new P2P image store with custom filesystem
     pub async fn new(
-        node_id: u64, 
+        node_id: u64,
         data_dir: &Path,
         filesystem: Arc<dyn FileSystem>,
     ) -> BlixardResult<Self> {
@@ -101,7 +101,7 @@ impl P2pImageStore {
             filesystem,
         })
     }
-    
+
     /// Create a new P2P image store with default filesystem
     pub async fn with_default_filesystem(node_id: u64, data_dir: &Path) -> BlixardResult<Self> {
         use crate::abstractions::filesystem::TokioFileSystem;

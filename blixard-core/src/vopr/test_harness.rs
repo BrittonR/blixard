@@ -211,7 +211,10 @@ impl TestHarness {
                 ClientOp::DeleteVm { vm_id: _ } => {
                     // Similar pattern for Delete command
                 }
-                ClientOp::SubmitTask { task_id: _, command: _ } => {
+                ClientOp::SubmitTask {
+                    task_id: _,
+                    command: _,
+                } => {
                     // Task submission would go here
                 }
                 ClientOp::GetVmStatus { vm_id: _ } => {

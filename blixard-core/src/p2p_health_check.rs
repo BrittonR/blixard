@@ -51,7 +51,7 @@ impl P2pHealthChecker {
             clock,
         }
     }
-    
+
     /// Create a new health checker with default system clock
     pub fn with_default_clock(monitor: Arc<dyn P2pMonitor>) -> Self {
         use crate::abstractions::time::SystemClock;
@@ -69,7 +69,11 @@ impl P2pHealthChecker {
         // Send health check request using Iroh client
         let request = HealthCheckRequest {};
 
-        match self.clock.timeout(self.timeout_duration, _client.health_check(request)).await {
+        match self
+            .clock
+            .timeout(self.timeout_duration, _client.health_check(request))
+            .await
+        {
             Ok(Ok(response)) => {
                 let now = self.clock.now();
                 let rtt_ms = start.elapsed(now).as_secs_f64() * 1000.0;
@@ -200,24 +204,24 @@ mod tests {
         assert_eq!(quality.avg_rtt, 550.0);
         assert!(quality.score() < 0.5); // Should have low score
     }
-    
+
     #[tokio::test]
     async fn test_with_mock_clock() {
         use crate::abstractions::time::MockClock;
-        
+
         let monitor = Arc::new(NoOpMonitor);
         let mock_clock = Arc::new(MockClock::new());
         let checker = P2pHealthChecker::new(monitor, mock_clock.clone());
-        
+
         // Test that we can control time in tests
         let start_time = mock_clock.current_time().await;
         assert_eq!(start_time, 0);
-        
+
         // Advance time and verify it changes
         mock_clock.advance(Duration::from_millis(100)).await;
         let new_time = mock_clock.current_time().await;
         assert_eq!(new_time, 100_000); // 100ms = 100,000 microseconds
-        
+
         // This demonstrates how MockClock enables deterministic testing
         // In real tests, we could simulate timeout scenarios by not advancing time
     }
