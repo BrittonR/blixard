@@ -419,7 +419,7 @@ pub enum BlixardError {
     ServiceManagementError(String),
 
     #[error("Storage error: {0}")]
-    StorageError(#[from] redb::Error),
+    StorageError(#[from] Box<redb::Error>),
 
     #[error("Storage transaction error: {0}")]
     StorageTransactionError(String),
@@ -428,7 +428,7 @@ pub enum BlixardError {
     StorageTableError(String),
 
     #[error("Raft error: {0}")]
-    RaftError(#[from] raft::Error),
+    RaftError(#[from] Box<raft::Error>),
 
     #[error("Cluster error: {0}")]
     ClusterError(String),
@@ -452,10 +452,10 @@ pub enum BlixardError {
     NetworkError(String),
 
     #[error("Serialization error: {0}")]
-    SerializationError(#[from] bincode::Error),
+    SerializationError(#[from] Box<bincode::Error>),
 
     #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
+    IoError(#[from] Box<std::io::Error>),
 
     #[error("System error: {0}")]
     SystemError(String),
@@ -518,7 +518,7 @@ pub enum BlixardError {
     Validation { field: String, message: String },
 
     #[error("JSON error: {0}")]
-    JsonError(#[from] serde_json::Error),
+    JsonError(#[from] Box<serde_json::Error>),
 
     #[error("gRPC error: {0}")]
     GrpcError(String),
@@ -677,18 +677,49 @@ impl From<redb::TableError> for BlixardError {
 
 impl From<redb::StorageError> for BlixardError {
     fn from(err: redb::StorageError) -> Self {
-        BlixardError::StorageError(err.into())
+        BlixardError::StorageError(Box::new(err.into()))
     }
 }
 
 impl From<redb::DatabaseError> for BlixardError {
     fn from(err: redb::DatabaseError) -> Self {
-        BlixardError::StorageError(err.into())
+        BlixardError::StorageError(Box::new(err.into()))
     }
 }
 
 impl From<redb::CommitError> for BlixardError {
     fn from(err: redb::CommitError) -> Self {
-        BlixardError::StorageError(err.into())
+        BlixardError::StorageError(Box::new(err.into()))
+    }
+}
+
+// Additional From implementations for unboxed types
+impl From<redb::Error> for BlixardError {
+    fn from(err: redb::Error) -> Self {
+        BlixardError::StorageError(Box::new(err))
+    }
+}
+
+impl From<raft::Error> for BlixardError {
+    fn from(err: raft::Error) -> Self {
+        BlixardError::RaftError(Box::new(err))
+    }
+}
+
+impl From<bincode::Error> for BlixardError {
+    fn from(err: bincode::Error) -> Self {
+        BlixardError::SerializationError(Box::new(err))
+    }
+}
+
+impl From<std::io::Error> for BlixardError {
+    fn from(err: std::io::Error) -> Self {
+        BlixardError::IoError(Box::new(err))
+    }
+}
+
+impl From<serde_json::Error> for BlixardError {
+    fn from(err: serde_json::Error) -> Self {
+        BlixardError::JsonError(Box::new(err))
     }
 }

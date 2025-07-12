@@ -18,13 +18,13 @@ pub async fn read_text_file_with_context<P: AsRef<Path>>(
 
     tokio::fs::read_to_string(path)
         .await
-        .map_err(|e| BlixardError::IoError(e))
-        .map_err(|e| match e {
+        .map_err(|e| BlixardError::IoError(Box::new(e)))
+        .map_err(|e| match &e {
             BlixardError::IoError(io_err) => BlixardError::ConfigError(format!(
                 "Failed to read {}: {} (path: {:?})",
                 context, io_err, path
             )),
-            other => other,
+            _ => e,
         })
 }
 
@@ -38,13 +38,13 @@ pub async fn read_binary_file_with_context<P: AsRef<Path>>(
 
     tokio::fs::read(path)
         .await
-        .map_err(|e| BlixardError::IoError(e))
-        .map_err(|e| match e {
+        .map_err(|e| BlixardError::IoError(Box::new(e)))
+        .map_err(|e| match &e {
             BlixardError::IoError(io_err) => BlixardError::ConfigError(format!(
                 "Failed to read {}: {} (path: {:?})",
                 context, io_err, path
             )),
-            other => other,
+            _ => e,
         })
 }
 

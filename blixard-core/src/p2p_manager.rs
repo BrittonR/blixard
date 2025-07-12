@@ -140,6 +140,17 @@ pub struct P2pManager {
     config: P2pConfig,
 }
 
+impl std::fmt::Debug for P2pManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("P2pManager")
+            .field("node_id", &self.node_id)
+            .field("transport", &"IrohTransportV2")
+            .field("image_store", &"P2pImageStore")
+            .field("config", &self.config)
+            .finish()
+    }
+}
+
 /// P2P configuration
 #[derive(Debug, Clone)]
 pub struct P2pConfig {
@@ -441,7 +452,7 @@ impl P2pManager {
                 // Read the file content
                 let data = tokio::fs::read(&temp_path)
                     .await
-                    .map_err(|e| BlixardError::IoError(e))?;
+                    .map_err(|e| BlixardError::IoError(Box::new(e)))?;
 
                 // Clean up temp file
                 let _ = tokio::fs::remove_file(&temp_path).await;
@@ -491,7 +502,7 @@ impl P2pManager {
                     // Read the downloaded file
                     let data = tokio::fs::read(&temp_path)
                         .await
-                        .map_err(|e| BlixardError::IoError(e))?;
+                        .map_err(|e| BlixardError::IoError(Box::new(e)))?;
 
                     // Clean up temp file
                     let _ = tokio::fs::remove_file(&temp_path).await;

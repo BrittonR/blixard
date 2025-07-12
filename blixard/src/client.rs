@@ -252,6 +252,7 @@ impl IrohClient {
 pub type UnifiedClient = IrohClient;
 
 /// Helper to create a client (no longer needs transport config)
+#[allow(dead_code)]
 pub fn get_transport_config() -> Option<blixard_core::transport::config::TransportConfig> {
     None
 }

@@ -392,7 +392,7 @@ impl IrohTransportV2 {
         // Read file content
         let content = tokio::fs::read(path)
             .await
-            .map_err(|e| BlixardError::IoError(e))?;
+            .map_err(|e| BlixardError::IoError(Box::new(e)))?;
 
         // Create a hash from the content using blake3
         let hash_bytes = blake3::hash(&content);
@@ -428,7 +428,7 @@ impl IrohTransportV2 {
                 // Write to output file
                 tokio::fs::write(output_path, &data)
                     .await
-                    .map_err(|e| BlixardError::IoError(e))?;
+                    .map_err(|e| BlixardError::IoError(Box::new(e)))?;
 
                 info!("Successfully downloaded file to {:?}", output_path);
                 Ok(())
@@ -529,7 +529,7 @@ impl IrohTransportV2 {
         // Write to output file
         tokio::fs::write(output_path, &blob_data)
             .await
-            .map_err(|e| BlixardError::IoError(e))?;
+            .map_err(|e| BlixardError::IoError(Box::new(e)))?;
 
         // Also store in our blob store for future sharing
         {

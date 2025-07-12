@@ -104,7 +104,7 @@ impl VmImageServiceImpl {
     async fn calculate_file_hash(path: &Path) -> BlixardResult<String> {
         let mut file = fs::File::open(path)
             .await
-            .map_err(|e| BlixardError::IoError(e))?;
+            .map_err(|e| BlixardError::IoError(Box::new(e)))?;
         let mut hasher = Sha256::new();
         let mut buffer = vec![0; 8192];
 
@@ -113,7 +113,7 @@ impl VmImageServiceImpl {
             let bytes_read = file
                 .read(&mut buffer)
                 .await
-                .map_err(|e| BlixardError::IoError(e))?;
+                .map_err(|e| BlixardError::IoError(Box::new(e)))?;
             if bytes_read == 0 {
                 break;
             }
@@ -127,7 +127,7 @@ impl VmImageServiceImpl {
     async fn get_file_size(path: &Path) -> BlixardResult<u64> {
         let metadata = fs::metadata(path)
             .await
-            .map_err(|e| BlixardError::IoError(e))?;
+            .map_err(|e| BlixardError::IoError(Box::new(e)))?;
         Ok(metadata.len())
     }
 }

@@ -226,10 +226,10 @@ impl FileSystem for MockFileSystem {
 
     async fn read(&self, path: &Path) -> BlixardResult<Vec<u8>> {
         self.files.read().await.get(path).cloned().ok_or_else(|| {
-            crate::error::BlixardError::IoError(std::io::Error::new(
+            crate::error::BlixardError::IoError(Box::new(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "File not found",
-            ))
+            )))
         })
     }
 
@@ -311,10 +311,10 @@ impl FileSystem for MockFileSystem {
         if self.exists(path).await? {
             Ok(path.to_path_buf())
         } else {
-            Err(crate::error::BlixardError::IoError(std::io::Error::new(
+            Err(crate::error::BlixardError::IoError(Box::new(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "Path not found",
-            )))
+            ))))
         }
     }
 
@@ -346,10 +346,10 @@ impl FileSystem for MockFileSystem {
                 created: Some(SystemTime::now()),
             })
         } else {
-            Err(crate::error::BlixardError::IoError(std::io::Error::new(
+            Err(crate::error::BlixardError::IoError(Box::new(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "File not found",
-            )))
+            ))))
         }
     }
 }

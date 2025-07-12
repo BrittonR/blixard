@@ -281,7 +281,6 @@ pub fn record_metric<'a>(recorder: &'a dyn MetricsRecorder) -> MetricBuilder<'a>
 }
 
 /// Standard metric recording patterns for common operations
-
 /// Record a gRPC request
 pub fn record_grpc_request(method: &str, node_id: u64, success: bool, duration_secs: f64) {
     let recorder = GlobalMetricsRecorder;

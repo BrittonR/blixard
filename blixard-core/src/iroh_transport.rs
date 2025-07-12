@@ -228,7 +228,7 @@ impl IrohTransport {
         // In a real implementation, this would import into a blob store
         let _content = tokio::fs::read(path)
             .await
-            .map_err(|e| BlixardError::IoError(e))?;
+            .map_err(|e| BlixardError::IoError(Box::new(e)))?;
 
         // TODO: Implement proper hash generation when iroh-blobs API is available
         // For now, return a dummy hash

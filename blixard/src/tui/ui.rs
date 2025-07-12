@@ -1789,12 +1789,6 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
             format!("{} Connected{}", quality_icon, latency_str)
         }
         crate::tui::types::ui::ConnectionStatus::Connecting => "🟡 Connecting...".to_string(),
-        crate::tui::types::ui::ConnectionStatus::Connecting => {
-            format!(
-                "🟠 Reconnecting... (attempt {})",
-                0 + 1
-            )
-        }
         crate::tui::types::ui::ConnectionStatus::Disconnected => {
             if let Some(next_retry) = &None::<std::time::Duration> {
                 format!("🔴 Disconnected (retry in {}s)", next_retry.as_secs())

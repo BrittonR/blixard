@@ -76,6 +76,17 @@ pub struct P2pImageStore {
     filesystem: Arc<dyn FileSystem>,
 }
 
+impl std::fmt::Debug for P2pImageStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("P2pImageStore")
+            .field("cache_dir", &self.cache_dir)
+            .field("node_id", &self.node_id)
+            .field("transport", &"IrohTransportV2")
+            .field("filesystem", &"FileSystem")
+            .finish()
+    }
+}
+
 impl P2pImageStore {
     /// Create a new P2P image store with custom filesystem
     pub async fn new(
@@ -291,7 +302,7 @@ impl P2pImageStore {
         peer_addr: &iroh::NodeAddr,
         metadata: &VmImageMetadata,
     ) -> BlixardResult<()> {
-        let data = serde_json::to_vec(metadata).map_err(|e| BlixardError::JsonError(e))?;
+        let data = serde_json::to_vec(metadata).map_err(|e| BlixardError::JsonError(Box::new(e)))?;
         self.transport
             .send_to_peer(peer_addr, DocumentType::VmImages, &data)
             .await

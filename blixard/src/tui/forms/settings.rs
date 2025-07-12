@@ -38,6 +38,7 @@ impl Default for AppSettings {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SettingsForm {
     pub current_field: usize,
     pub settings: AppSettings,

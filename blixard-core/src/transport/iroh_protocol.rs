@@ -233,12 +233,12 @@ pub fn generate_request_id() -> [u8; 16] {
 pub fn serialize_payload<T: Serialize>(value: &T) -> BlixardResult<Bytes> {
     bincode::serialize(value)
         .map(Bytes::from)
-        .map_err(|e| BlixardError::SerializationError(e))
+        .map_err(|e| BlixardError::SerializationError(Box::new(e)))
 }
 
 /// Helper to deserialize bytes to a value
 pub fn deserialize_payload<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> BlixardResult<T> {
-    bincode::deserialize(bytes).map_err(|e| BlixardError::SerializationError(e))
+    bincode::deserialize(bytes).map_err(|e| BlixardError::SerializationError(Box::new(e)))
 }
 
 #[cfg(test)]

@@ -451,7 +451,7 @@ impl IrohVmService {
         let hash = format!("{:x}", hasher.finalize());
         let size = tokio::fs::metadata(&image_path)
             .await
-            .map_err(|e| BlixardError::IoError(e))?
+            .map_err(|e| BlixardError::IoError(Box::new(e)))?
             .len();
 
         // Store metadata
@@ -514,7 +514,7 @@ impl IrohVmService {
         // Get the size of the downloaded file
         let size = tokio::fs::metadata(&output_path)
             .await
-            .map_err(|e| BlixardError::IoError(e))?
+            .map_err(|e| BlixardError::IoError(Box::new(e)))?
             .len();
 
         info!(

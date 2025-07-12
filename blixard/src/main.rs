@@ -1595,7 +1595,7 @@ async fn handle_ip_pool_command(command: IpPoolCommands) -> BlixardResult<()> {
         std::env::var("BLIXARD_NODE_ADDR").unwrap_or_else(|_| command_addr(&command));
     
     // Connect to the node
-    let mut client = UnifiedClient::new(&node_addr)
+    let _client = UnifiedClient::new(&node_addr)
         .await
         .map_err(|e| BlixardError::Internal {
             message: format!("Failed to connect to node at {}: {}", node_addr, e),
@@ -1657,7 +1657,7 @@ async fn handle_ip_pool_command(command: IpPoolCommands) -> BlixardResult<()> {
             
             // Create the IP pool command
             let command = IpPoolCommand::CreatePool(config.clone());
-            let proposal = ProposalData::IpPoolCommand(command);
+            let _proposal = ProposalData::IpPoolCommand(command);
             
             // Submit the proposal through cluster operations
             // Note: This requires a proper cluster operation method to be added
@@ -1686,7 +1686,7 @@ async fn handle_ip_pool_command(command: IpPoolCommands) -> BlixardResult<()> {
             println!("Deleting IP pool {}...", id);
             
             let command = IpPoolCommand::DeletePool(IpPoolId(id));
-            let proposal = ProposalData::IpPoolCommand(command);
+            let _proposal = ProposalData::IpPoolCommand(command);
             
             // TODO: Submit proposal through cluster operation
             eprintln!("Note: IP pool deletion requires cluster operation support");
@@ -1699,7 +1699,7 @@ async fn handle_ip_pool_command(command: IpPoolCommands) -> BlixardResult<()> {
                 pool_id: IpPoolId(id), 
                 enabled: enable 
             };
-            let proposal = ProposalData::IpPoolCommand(command);
+            let _proposal = ProposalData::IpPoolCommand(command);
             
             // TODO: Submit proposal through cluster operation
             eprintln!("Note: IP pool enable/disable requires cluster operation support");
@@ -1757,13 +1757,13 @@ async fn handle_reset_command(
         print!("❓ Are you sure you want to continue? (y/N): ");
         if let Err(e) = io::stdout().flush() {
             eprintln!("Error flushing stdout: {}", e);
-            return Err(BlixardError::IoError(e));
+            return Err(BlixardError::IoError(Box::new(e)));
         }
 
         let mut input = String::new();
         if let Err(e) = io::stdin().read_line(&mut input) {
             eprintln!("Error reading input: {}", e);
-            return Err(BlixardError::IoError(e));
+            return Err(BlixardError::IoError(Box::new(e)));
         }
         let input = input.trim().to_lowercase();
 
@@ -1887,8 +1887,9 @@ async fn handle_tui_command() -> BlixardResult<()> {
     let mut app = tui::app::App::new();
     let mut event_handler = tui::events::EventHandler::new(250); // 250ms tick rate
 
-    // Note: The new App struct doesn't have set_event_sender or refresh_all_data methods yet
-    // These will need to be implemented as part of the migration
+    // Setup event sender and initial data refresh
+    app.set_event_sender(event_handler.sender());
+    app.refresh_all_data().await?;
 
     // Main loop
     let result = loop {
@@ -1902,14 +1903,16 @@ async fn handle_tui_command() -> BlixardResult<()> {
         // Handle events
         match event_handler.next().await {
             Ok(event) => {
-                // Note: handle_event method needs to be implemented in the new App struct
-                // For now, we'll just check if we should quit
+                // Handle quit event for immediate exit
                 use tui::events::Event;
-                if let Event::Key(key_event) = event {
+                if let Event::Key(key_event) = &event {
                     if key_event.code == crossterm::event::KeyCode::Char('q') {
                         app.ui_state.should_quit = true;
                     }
                 }
+
+                // Let the app handle the event
+                app.handle_event(event).await?;
 
                 if app.ui_state.should_quit {
                     break Ok(());

@@ -13,18 +13,35 @@ use blixard_core::{
 use std::time::Duration;
 use tokio::time::sleep;
 
-/// Retry configuration for network operations
+/// Configuration for network operation retry behavior
+///
+/// Defines parameters for exponential backoff retry logic used
+/// throughout the VM client to handle network failures gracefully.
+/// This helps provide resilient connectivity in distributed environments.
+///
+/// # Fields
+///
+/// * `max_attempts` - Maximum number of retry attempts before giving up
+/// * `initial_delay` - Starting delay between retry attempts
+/// * `max_delay` - Maximum delay between retries (caps exponential backoff)
+/// * `backoff_multiplier` - Factor to multiply delay by each retry
+/// * `request_timeout` - Timeout for individual network requests
 #[derive(Debug, Clone)]
 pub struct RetryConfig {
     /// Maximum number of retry attempts
+    #[allow(dead_code)]
     pub max_attempts: u32,
     /// Initial delay between retries
+    #[allow(dead_code)]
     pub initial_delay: Duration,
     /// Maximum delay between retries
+    #[allow(dead_code)]
     pub max_delay: Duration,
     /// Exponential backoff multiplier
+    #[allow(dead_code)]
     pub backoff_multiplier: f64,
     /// Timeout for individual requests
+    #[allow(dead_code)]
     pub request_timeout: Duration,
 }
 
@@ -40,17 +57,79 @@ impl Default for RetryConfig {
     }
 }
 
-/// VM client for TUI operations with retry support
+/// Client for communicating with Blixard cluster nodes
+///
+/// Provides a high-level interface for VM and cluster operations,
+/// with built-in retry logic, error handling, and type conversions
+/// suitable for TUI applications. Wraps the lower-level UnifiedClient
+/// with TUI-specific conveniences.
+///
+/// # Features
+///
+/// - Automatic retry with exponential backoff
+/// - Type conversion from protocol types to TUI types
+/// - Comprehensive error handling and reporting
+/// - Support for VM lifecycle operations
+/// - Cluster status and resource monitoring
+/// - VM placement and scheduling operations
+///
+/// # Examples
+///
+/// ```rust
+/// # use blixard::tui::vm_client::VmClient;
+/// # async fn example() -> blixard::BlixardResult<()> {
+/// let mut client = VmClient::new("127.0.0.1:7001").await?;
+/// let vms = client.list_vms().await?;
+/// println!("Found {} VMs", vms.len());
+/// # Ok(())
+/// # }
+/// ```
 pub struct VmClient {
     client: UnifiedClient,
-    retry_config: RetryConfig,
 }
 
 impl VmClient {
+    /// Create a new VM client with default retry configuration
+    ///
+    /// Establishes a connection to the Blixard cluster at the specified address
+    /// using default retry settings (3 attempts, exponential backoff).
+    ///
+    /// # Arguments
+    ///
+    /// * `addr` - Network address of a cluster node (e.g., "127.0.0.1:7001")
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(VmClient)` - Successfully connected client
+    /// * `Err(BlixardError)` - Connection failed after all retries
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use blixard::tui::vm_client::VmClient;
+    /// # async fn example() -> blixard::BlixardResult<()> {
+    /// let client = VmClient::new("127.0.0.1:7001").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn new(addr: &str) -> BlixardResult<Self> {
         Self::new_with_config(addr, RetryConfig::default()).await
     }
 
+    /// Create a new VM client with custom retry configuration
+    ///
+    /// Similar to `new()` but allows customization of retry behavior
+    /// for environments with different network characteristics.
+    ///
+    /// # Arguments
+    ///
+    /// * `addr` - Network address of a cluster node
+    /// * `retry_config` - Custom retry configuration
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(VmClient)` - Successfully connected client
+    /// * `Err(BlixardError)` - Connection failed after all retries
     pub async fn new_with_config(addr: &str, retry_config: RetryConfig) -> BlixardResult<Self> {
         // Try to connect with retries
         let client = Self::retry_operation(
@@ -66,10 +145,7 @@ impl VmClient {
         )
         .await?;
 
-        Ok(Self {
-            client,
-            retry_config,
-        })
+        Ok(Self { client })
     }
 
     /// Execute an operation with retry logic
@@ -127,6 +203,29 @@ impl VmClient {
         }
     }
 
+    /// Retrieve a list of all VMs in the cluster
+    ///
+    /// Fetches current VM information from the cluster and converts
+    /// protocol types to TUI-friendly VmInfo structures. This includes
+    /// status, resource allocation, and placement information.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<VmInfo>)` - List of all VMs with current status
+    /// * `Err(BlixardError)` - Failed to retrieve VM list
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use blixard::tui::vm_client::VmClient;
+    /// # async fn example(client: &mut VmClient) -> blixard::BlixardResult<()> {
+    /// let vms = client.list_vms().await?;
+    /// for vm in vms {
+    ///     println!("VM {}: {:?} on node {}", vm.name, vm.status, vm.node_id);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn list_vms(&mut self) -> BlixardResult<Vec<VmInfo>> {
         let request = ListVmsRequest {};
         let resp =
@@ -173,6 +272,33 @@ impl VmClient {
         Ok(vms)
     }
 
+    /// Create a new virtual machine with specified resources
+    ///
+    /// Creates a VM with the given name and resource allocation.
+    /// The cluster scheduler will automatically select an appropriate
+    /// node for placement based on available resources.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Unique name for the new VM
+    /// * `vcpus` - Number of virtual CPU cores to allocate
+    /// * `memory` - Memory allocation in MB
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - VM created successfully
+    /// * `Err(BlixardError)` - Creation failed (duplicate name, insufficient resources, etc.)
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use blixard::tui::vm_client::VmClient;
+    /// # async fn example(client: &mut VmClient) -> blixard::BlixardResult<()> {
+    /// client.create_vm("web-server-01", 2, 2048).await?;
+    /// println!("VM created successfully");
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn create_vm(&mut self, name: &str, vcpus: u32, memory: u32) -> BlixardResult<()> {
         let request = CreateVmRequest {
             name: name.to_string(),
@@ -198,6 +324,19 @@ impl VmClient {
         Ok(())
     }
 
+    /// Start a previously created virtual machine
+    ///
+    /// Initiates the boot process for a VM that is currently in Stopped state.
+    /// The VM will transition through Starting to Running state if successful.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Name of the VM to start
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - VM start initiated successfully
+    /// * `Err(BlixardError)` - Start failed (VM not found, already running, etc.)
     pub async fn start_vm(&mut self, name: &str) -> BlixardResult<()> {
         let request = StartVmRequest {
             name: name.to_string(),
@@ -220,6 +359,19 @@ impl VmClient {
         Ok(())
     }
 
+    /// Stop a running virtual machine
+    ///
+    /// Gracefully shuts down a VM that is currently running.
+    /// The VM will transition through Stopping to Stopped state.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Name of the VM to stop
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - VM stop initiated successfully
+    /// * `Err(BlixardError)` - Stop failed (VM not found, already stopped, etc.)
     pub async fn stop_vm(&mut self, name: &str) -> BlixardResult<()> {
         let request = StopVmRequest {
             name: name.to_string(),
@@ -242,6 +394,23 @@ impl VmClient {
         Ok(())
     }
 
+    /// Permanently delete a virtual machine
+    ///
+    /// Removes a VM and all associated resources from the cluster.
+    /// The VM must be in Stopped state before deletion.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Name of the VM to delete
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - VM deleted successfully
+    /// * `Err(BlixardError)` - Deletion failed (VM not found, still running, etc.)
+    ///
+    /// # Warning
+    ///
+    /// This operation is irreversible. All VM data will be lost.
     pub async fn delete_vm(&mut self, name: &str) -> BlixardResult<()> {
         let request = DeleteVmRequest {
             name: name.to_string(),
@@ -319,6 +488,28 @@ impl VmClient {
         }))
     }
 
+    /// Get comprehensive cluster status and membership information
+    ///
+    /// Retrieves current cluster state including leader information,
+    /// Raft consensus status, and details about all member nodes.
+    /// This is essential for cluster monitoring and health assessment.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(ClusterInfo)` - Current cluster status and node information
+    /// * `Err(BlixardError)` - Failed to retrieve cluster status
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use blixard::tui::vm_client::VmClient;
+    /// # async fn example(client: &mut VmClient) -> blixard::BlixardResult<()> {
+    /// let status = client.get_cluster_status().await?;
+    /// println!("Cluster has {} nodes, leader is node {}", 
+    ///          status.node_count, status.leader_id);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn get_cluster_status(&mut self) -> BlixardResult<ClusterInfo> {
         let request = ClusterStatusRequest {};
 
@@ -507,7 +698,32 @@ impl VmClient {
         ))
     }
 
-    /// Join a node to the cluster
+    /// Add a new node to the cluster
+    ///
+    /// Requests that a node join the existing cluster, expanding cluster
+    /// capacity and providing additional redundancy. The joining node
+    /// must be reachable and compatible with the cluster version.
+    ///
+    /// # Arguments
+    ///
+    /// * `node_id` - Unique identifier for the joining node
+    /// * `bind_address` - Network address where the node can be reached
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(String)` - Success message from the cluster
+    /// * `Err(BlixardError)` - Join operation failed
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use blixard::tui::vm_client::VmClient;
+    /// # async fn example(client: &mut VmClient) -> blixard::BlixardResult<()> {\
+    /// let result = client.join_cluster(2, \"192.168.1.100:7001\").await?;\
+    /// println!(\"Node joined: {}\", result);\
+    /// # Ok(())\
+    /// # }\
+    /// ```
     pub async fn join_cluster(
         &mut self,
         node_id: u64,
@@ -538,7 +754,33 @@ impl VmClient {
         Ok(resp.message)
     }
 
-    /// Migrate a VM to another node
+    /// Migrate a virtual machine to a different cluster node
+    ///
+    /// Moves a VM from its current node to a target node, with optional
+    /// live migration to minimize downtime. This is useful for load balancing,
+    /// maintenance, or resource optimization.
+    ///
+    /// # Arguments
+    ///
+    /// * `vm_name` - Name of the VM to migrate
+    /// * `target_node_id` - ID of the destination node
+    /// * `live_migration` - Whether to perform live migration (minimize downtime)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok((source_node_id, target_node_id, message))` - Migration details
+    /// * `Err(BlixardError)` - Migration failed
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use blixard::tui::vm_client::VmClient;
+    /// # async fn example(client: &mut VmClient) -> blixard::BlixardResult<()> {
+    /// let (source, target, msg) = client.migrate_vm("web-01", 2, true).await?;
+    /// println!("Migrated from node {} to node {}: {}", source, target, msg);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn migrate_vm(
         &mut self,
         vm_name: &str,

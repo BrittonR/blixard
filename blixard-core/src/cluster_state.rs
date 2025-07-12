@@ -165,7 +165,7 @@ impl ClusterStateManager {
 
         // Serialize to JSON
         let json_data =
-            serde_json::to_string_pretty(&state).map_err(|e| BlixardError::JsonError(e))?;
+            serde_json::to_string_pretty(&state).map_err(|e| BlixardError::JsonError(Box::new(e)))?;
 
         if options.compress {
             // Compress with gzip
@@ -176,16 +176,16 @@ impl ClusterStateManager {
             let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
             encoder
                 .write_all(json_data.as_bytes())
-                .map_err(|e| BlixardError::IoError(e))?;
-            let compressed = encoder.finish().map_err(|e| BlixardError::IoError(e))?;
+                .map_err(|e| BlixardError::IoError(Box::new(e)))?;
+            let compressed = encoder.finish().map_err(|e| BlixardError::IoError(Box::new(e)))?;
 
             tokio::fs::write(output_path, compressed)
                 .await
-                .map_err(|e| BlixardError::IoError(e))?;
+                .map_err(|e| BlixardError::IoError(Box::new(e)))?;
         } else {
             tokio::fs::write(output_path, json_data)
                 .await
-                .map_err(|e| BlixardError::IoError(e))?;
+                .map_err(|e| BlixardError::IoError(Box::new(e)))?;
         }
 
         info!("Cluster state exported to: {:?}", output_path);
@@ -225,7 +225,7 @@ impl ClusterStateManager {
     pub async fn import_from_file(&self, input_path: &Path, merge: bool) -> BlixardResult<()> {
         let file_data = tokio::fs::read(input_path)
             .await
-            .map_err(|e| BlixardError::IoError(e))?;
+            .map_err(|e| BlixardError::IoError(Box::new(e)))?;
 
         // Try to decompress if it's gzipped
         let json_data = if file_data.starts_with(&[0x1f, 0x8b]) {
@@ -237,7 +237,7 @@ impl ClusterStateManager {
             let mut decompressed = String::new();
             decoder
                 .read_to_string(&mut decompressed)
-                .map_err(|e| BlixardError::IoError(e))?;
+                .map_err(|e| BlixardError::IoError(Box::new(e)))?;
             decompressed
         } else {
             String::from_utf8(file_data).map_err(|e| BlixardError::Internal {
@@ -246,7 +246,7 @@ impl ClusterStateManager {
         };
 
         let state: ClusterState =
-            serde_json::from_str(&json_data).map_err(|e| BlixardError::JsonError(e))?;
+            serde_json::from_str(&json_data).map_err(|e| BlixardError::JsonError(Box::new(e)))?;
 
         self.import_state(&state, merge).await
     }
@@ -267,7 +267,7 @@ impl ClusterStateManager {
         let state = self.export_state(cluster_name, options).await?;
 
         // Serialize state
-        let json_data = serde_json::to_vec(&state).map_err(|e| BlixardError::JsonError(e))?;
+        let json_data = serde_json::to_vec(&state).map_err(|e| BlixardError::JsonError(Box::new(e)))?;
 
         // Write to cluster config document
         let key = format!("cluster-state-{}", Utc::now().timestamp());
@@ -310,7 +310,7 @@ impl ClusterStateManager {
         }
 
         let state: ClusterState =
-            serde_json::from_slice(&data).map_err(|e| BlixardError::JsonError(e))?;
+            serde_json::from_slice(&data).map_err(|e| BlixardError::JsonError(Box::new(e)))?;
 
         self.import_state(&state, merge).await
     }
