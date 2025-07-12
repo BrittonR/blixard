@@ -214,13 +214,17 @@ mod tests {
 
         let core_config = CoreVmConfig {
             name: "test-vm".to_string(),
-            cpus: 2,
+            config_path: "/test/path".to_string(),
+            vcpus: 2,
             memory: 1024,
-            disk_size: 10240,
-            metadata: None,
+            tenant_id: "test-tenant".to_string(),
             ip_address: Some("10.0.0.20".to_string()),
-            assigned_node: None,
-            placement_strategy: None,
+            metadata: None,
+            anti_affinity: None,
+            priority: 100,
+            preemptible: false,
+            locality_preference: Default::default(),
+            health_check_config: None,
         };
 
         let vm_config = converter.convert_config(&core_config).await.unwrap();
@@ -249,13 +253,17 @@ mod tests {
 
         let core_config = CoreVmConfig {
             name: "nix-vm".to_string(),
-            cpus: 1,
+            config_path: "/test/path".to_string(),
+            vcpus: 1,
             memory: 512,
-            disk_size: 5120,
-            metadata: Some(metadata),
+            tenant_id: "test-tenant".to_string(),
             ip_address: None,
-            assigned_node: None,
-            placement_strategy: None,
+            metadata: Some(metadata),
+            anti_affinity: None,
+            priority: 100,
+            preemptible: false,
+            locality_preference: Default::default(),
+            health_check_config: None,
         };
 
         let vm_config = converter.convert_config(&core_config).await.unwrap();

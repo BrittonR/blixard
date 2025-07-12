@@ -245,6 +245,7 @@ struct RedbTaskRepository {
 }
 
 impl RedbTaskRepository {
+    #[allow(dead_code)]
     fn new(database: Arc<redb::Database>) -> Self {
         Self { database }
     }
@@ -279,6 +280,7 @@ impl TaskRepository for RedbTaskRepository {
 struct MockTaskRepository;
 
 impl MockTaskRepository {
+    #[allow(dead_code)]
     fn new() -> Self {
         Self
     }
@@ -313,6 +315,7 @@ struct RedbNodeRepository {
 }
 
 impl RedbNodeRepository {
+    #[allow(dead_code)]
     fn new(database: Arc<redb::Database>) -> Self {
         Self { database }
     }
@@ -345,6 +348,7 @@ impl NodeRepository for RedbNodeRepository {
 struct MockNodeRepository;
 
 impl MockNodeRepository {
+    #[allow(dead_code)]
     fn new() -> Self {
         Self
     }

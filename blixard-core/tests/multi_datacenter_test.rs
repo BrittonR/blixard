@@ -216,7 +216,7 @@ async fn test_locality_aware_placement() {
         .await
         .unwrap();
     // Should select either node 1 or 3 (both in us-east-1)
-    assert!(decision1.selected_node_id == 1 || decision1.selected_node_id == 3);
+    assert!(decision1.target_node_id == 1 || decision1.target_node_id == 3);
 
     // Test 2: Exclude specific datacenter
     let vm_config2 = VmConfig {
@@ -240,7 +240,7 @@ async fn test_locality_aware_placement() {
         .await
         .unwrap();
     // Should not select node 2 (in us-west-1)
-    assert!(decision2.selected_node_id == 1 || decision2.selected_node_id == 3);
+    assert!(decision2.target_node_id == 1 || decision2.target_node_id == 3);
 
     // Test 3: Prefer specific zone within datacenter
     let vm_config3 = VmConfig {
@@ -264,7 +264,7 @@ async fn test_locality_aware_placement() {
         .await
         .unwrap();
     // Should select node 3 (us-east-1, zone-b)
-    assert_eq!(decision3.selected_node_id, 3);
+    assert_eq!(decision3.target_node_id, 3);
 }
 
 #[tokio::test]

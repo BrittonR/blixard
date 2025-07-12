@@ -18,7 +18,7 @@ pub use crate::tui::types::{
     SystemEvent, EventLevel, HealthAlert, AlertSeverity, HealthStatus, ClusterHealthStatus,
     AppTab, AppMode, InputMode, ConnectionStatus, SearchMode, LogLevel, LogEntry, LogSourceType,
     RaftDebugInfo, DebugMetrics, RaftNodeState, DebugLevel,
-    NetworkQuality,
+    NetworkQuality, P2pPeer, P2pTransfer, P2pImage, ConnectionState,
 };
 
 pub use crate::tui::forms::{

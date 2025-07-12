@@ -1,7 +1,6 @@
 //! Standalone test for Iroh RPC
 
 use blixard_core::transport::iroh_protocol::*;
-use std::io::Cursor;
 
 fn main() {
     println!("Testing Iroh RPC protocol...");

@@ -85,14 +85,14 @@ async fn test_priority_based_placement_without_preemption() {
         .schedule_vm_placement(&high_priority_vm, strategy.clone())
         .await
         .unwrap();
-    assert_eq!(decision1.selected_node_id, 1);
+    assert_eq!(decision1.target_node_id, 1);
     assert!(decision1.preemption_candidates.is_empty());
 
     let decision2 = scheduler
         .schedule_vm_placement(&low_priority_vm, strategy)
         .await
         .unwrap();
-    assert_eq!(decision2.selected_node_id, 1);
+    assert_eq!(decision2.target_node_id, 1);
     assert!(decision2.preemption_candidates.is_empty());
 }
 
@@ -210,7 +210,7 @@ async fn test_priority_based_placement_with_preemption() {
         .unwrap();
 
     // Should select node 1 with preemption candidates
-    assert_eq!(decision.selected_node_id, 1);
+    assert_eq!(decision.target_node_id, 1);
     assert!(!decision.preemption_candidates.is_empty());
 
     // Should suggest preempting the lowest priority VMs first

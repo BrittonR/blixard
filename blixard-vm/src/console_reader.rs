@@ -269,16 +269,23 @@ mod tests {
         
         // Spawn server task
         let server_handle = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.map_err(|e| BlixardError::IoError(e))?;
+            let result: BlixardResult<()> = async {
+                let (mut stream, _) = listener.accept().await.map_err(|e| BlixardError::IoError(e))?;
+                
+                // Write some console output
+                stream.write_all(b"Starting VM...\n").await.map_err(|e| BlixardError::IoError(e))?;
+                stream.write_all(b"Network initialized\n").await.map_err(|e| BlixardError::IoError(e))?;
+                stream.write_all(b"System ready\n").await.map_err(|e| BlixardError::IoError(e))?;
+                stream.flush().await.map_err(|e| BlixardError::IoError(e))?;
+                
+                // Keep connection open briefly
+                tokio::time::sleep(constants::TEST_SERVER_HOLD_TIME).await;
+                Ok(())
+            }.await;
             
-            // Write some console output
-            stream.write_all(b"Starting VM...\n").await.map_err(|e| BlixardError::IoError(e))?;
-            stream.write_all(b"Network initialized\n").await.map_err(|e| BlixardError::IoError(e))?;
-            stream.write_all(b"System ready\n").await.map_err(|e| BlixardError::IoError(e))?;
-            stream.flush().await.map_err(|e| BlixardError::IoError(e))?;
-            
-            // Keep connection open briefly
-            tokio::time::sleep(constants::TEST_SERVER_HOLD_TIME).await;
+            if let Err(e) = result {
+                eprintln!("Test server error: {}", e);
+            }
         });
 
         // Create reader and check patterns
@@ -314,16 +321,23 @@ mod tests {
         
         // Spawn server task
         let server_handle = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.map_err(|e| BlixardError::IoError(e))?;
+            let result: BlixardResult<()> = async {
+                let (mut stream, _) = listener.accept().await.map_err(|e| BlixardError::IoError(e))?;
+                
+                // Write some console output with error
+                stream.write_all(b"Starting VM...\n").await.map_err(|e| BlixardError::IoError(e))?;
+                stream.write_all(b"PANIC: kernel panic\n").await.map_err(|e| BlixardError::IoError(e))?;
+                stream.write_all(b"System halted\n").await.map_err(|e| BlixardError::IoError(e))?;
+                stream.flush().await.map_err(|e| BlixardError::IoError(e))?;
+                
+                // Keep connection open briefly
+                tokio::time::sleep(constants::TEST_SERVER_HOLD_TIME).await;
+                Ok(())
+            }.await;
             
-            // Write some console output with error
-            stream.write_all(b"Starting VM...\n").await.map_err(|e| BlixardError::IoError(e))?;
-            stream.write_all(b"PANIC: kernel panic\n").await.map_err(|e| BlixardError::IoError(e))?;
-            stream.write_all(b"System halted\n").await.map_err(|e| BlixardError::IoError(e))?;
-            stream.flush().await.map_err(|e| BlixardError::IoError(e))?;
-            
-            // Keep connection open briefly
-            tokio::time::sleep(constants::TEST_SERVER_HOLD_TIME).await;
+            if let Err(e) = result {
+                eprintln!("Test server error: {}", e);
+            }
         });
 
         // Create reader and check patterns

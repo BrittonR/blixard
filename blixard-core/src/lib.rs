@@ -89,6 +89,9 @@ pub mod test_helpers_concurrent;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_message_filter;
 
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod test_helpers_modules;
+
 // Native Rust types for Iroh transport
 pub mod iroh_types;
 

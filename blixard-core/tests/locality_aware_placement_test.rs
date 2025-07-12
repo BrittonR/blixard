@@ -95,7 +95,7 @@ async fn test_locality_aware_placement_strategy() {
         .await
         .unwrap();
     // Should select node 1 (us-east-1, zone-a)
-    assert_eq!(decision.selected_node_id, 1);
+    assert_eq!(decision.target_node_id, 1);
 
     // Test 2: LocalityAware non-strict with impossible preference
     let vm_config2 = VmConfig {
@@ -120,7 +120,7 @@ async fn test_locality_aware_placement_strategy() {
         .await
         .unwrap();
     // Should select any available node (non-strict)
-    assert!(decision2.selected_node_id >= 1 && decision2.selected_node_id <= 3);
+    assert!(decision2.target_node_id >= 1 && decision2.target_node_id <= 3);
 
     // Test 3: LocalityAware strict with impossible preference should fail
     let strategy3 = PlacementStrategy::LocalityAware {
@@ -246,7 +246,7 @@ async fn test_spread_across_failure_domains_strategy() {
         .await
         .unwrap();
     // Should select node 4 (zone-c with 0 VMs)
-    assert_eq!(decision.selected_node_id, 4);
+    assert_eq!(decision.target_node_id, 4);
 
     // Test spreading at datacenter level
     let strategy2 = PlacementStrategy::SpreadAcrossFailureDomains {
@@ -259,5 +259,5 @@ async fn test_spread_across_failure_domains_strategy() {
         .await
         .unwrap();
     // Should select any node (all in same datacenter)
-    assert!(decision2.selected_node_id >= 1 && decision2.selected_node_id <= 4);
+    assert!(decision2.target_node_id >= 1 && decision2.target_node_id <= 4);
 }

@@ -56,3 +56,12 @@ pub enum NetworkQuality {
     Poor,
     Unknown,
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConnectionState {
+    Connecting,
+    Connected,
+    Disconnected,
+    Failed,
+    Reconnecting,
+}

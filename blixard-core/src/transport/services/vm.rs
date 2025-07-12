@@ -192,6 +192,7 @@ impl VmServiceImpl {
     }
 
     /// Convert internal VM status to proto
+    #[allow(dead_code)]
     fn vm_status_to_proto(status: &InternalVmStatus) -> VmState {
         match status {
             InternalVmStatus::Creating => VmState::VmStateCreated,

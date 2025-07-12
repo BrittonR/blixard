@@ -139,10 +139,10 @@ async fn test_distributed_vm_scheduling() {
 
         println!(
             "VM {} scheduled on node {}: {}",
-            i, placement.selected_node_id, placement.reason
+            i, placement.target_node_id, placement.reason
         );
 
-        placement_decisions.push(placement.selected_node_id);
+        placement_decisions.push(placement.target_node_id);
     }
 
     // Verify VMs are distributed across nodes

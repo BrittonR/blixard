@@ -1042,7 +1042,6 @@ impl Node {
         let shared_for_db = self.shared.clone();
         
         tokio::spawn(async move {
-            let mut restart_count = 0;
             let config = match crate::config_global::get() {
                 Ok(cfg) => cfg,
                 Err(e) => {
@@ -1054,16 +1053,16 @@ impl Node {
             let restart_delay_ms = config.cluster.raft.restart_delay.as_millis() as u64;
 
             // Run the initial Raft manager
-            match raft_manager.run().await {
+            let mut restart_count = match raft_manager.run().await {
                 Ok(_) => {
                     tracing::info!("Raft manager exited normally");
                     return Ok(());
                 }
                 Err(e) => {
                     tracing::error!("Raft manager crashed: {}", e);
-                    restart_count = 1;
+                    1
                 }
-            }
+            };
 
             // Recovery loop
             while restart_count <= max_restarts {

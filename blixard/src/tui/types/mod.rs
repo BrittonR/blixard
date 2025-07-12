@@ -18,4 +18,4 @@ pub use cluster::{ClusterInfo, ClusterNodeInfo, ClusterMetrics, ClusterHealth, C
 pub use monitoring::{SystemEvent, EventLevel, NodeHealthSnapshot, HealthAlert, AlertSeverity, ClusterResourceInfo, HealthStatus, ClusterHealthStatus};
 pub use debug::{RaftDebugInfo, RaftNodeState, SnapshotMetadata, PeerDebugInfo, PeerState, DebugMetrics, DebugLogEntry, DebugLevel};
 pub use ui::{AppTab, AppMode, InputMode, Theme, LogLevel, PerformanceMode, SearchMode, ConnectionStatus, LogSourceType, LogEntry, LogStreamConfig};
-pub use p2p::{P2pPeer, P2pImage, P2pTransfer, NetworkQuality};
+pub use p2p::{P2pPeer, P2pImage, P2pTransfer, NetworkQuality, ConnectionState};

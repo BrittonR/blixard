@@ -21,6 +21,11 @@ use tempfile::TempDir;
 // Re-export concurrent test utilities
 pub use crate::test_helpers_concurrent::*;
 
+// Re-export timing utilities
+pub mod timing {
+    pub use crate::test_helpers_modules::timing_helpers::*;
+}
+
 /// Test-specific node wrapper
 pub struct TestNode {
     pub id: u64,

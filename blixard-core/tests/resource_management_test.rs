@@ -100,7 +100,7 @@ async fn test_conservative_overcommit_policy() {
         .schedule_vm_placement(&vm1, PlacementStrategy::MostAvailable)
         .await
         .unwrap();
-    assert_eq!(decision.selected_node_id, 1);
+    assert_eq!(decision.target_node_id, 1);
 
     // Actually allocate the resources (simulating VM creation)
     {
@@ -111,7 +111,7 @@ async fn test_conservative_overcommit_policy() {
                 .unwrap();
             let vm_state = blixard_core::types::VmState {
                 name: vm1.name.clone(),
-                node_id: decision.selected_node_id,
+                node_id: decision.target_node_id,
                 status: blixard_core::types::VmStatus::Running,
                 config: vm1.clone(),
                 created_at: chrono::Utc::now(),
@@ -171,7 +171,7 @@ async fn test_moderate_overcommit_policy() {
         .schedule_vm_placement(&vm1, PlacementStrategy::MostAvailable)
         .await
         .unwrap();
-    assert_eq!(decision1.selected_node_id, 1);
+    assert_eq!(decision1.target_node_id, 1);
 
     // Note: In a real scenario, we'd need to actually allocate resources
     // For this test, we're just verifying the policy allows it
@@ -208,7 +208,7 @@ async fn test_resource_reservations() {
         .schedule_vm_placement(&vm, PlacementStrategy::MostAvailable)
         .await
         .unwrap();
-    assert_eq!(decision.selected_node_id, 1);
+    assert_eq!(decision.target_node_id, 1);
 }
 
 #[tokio::test]
@@ -236,7 +236,7 @@ async fn test_vm_placement_with_reservation() {
         .unwrap();
 
     // Should have placed and reserved resources
-    assert!(decision.selected_node_id == 1 || decision.selected_node_id == 2);
+    assert!(decision.target_node_id == 1 || decision.target_node_id == 2);
 }
 
 #[tokio::test]

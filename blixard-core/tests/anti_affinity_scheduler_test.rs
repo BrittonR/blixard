@@ -126,7 +126,7 @@ async fn test_hard_anti_affinity_constraint() {
         .await
         .unwrap();
 
-    assert_eq!(decision.selected_node_id, 3);
+    assert_eq!(decision.target_node_id, 3);
     assert!(decision.reason.contains("anti-affinity rules applied"));
 }
 
@@ -158,7 +158,7 @@ async fn test_soft_anti_affinity_preference() {
         .await
         .unwrap();
 
-    assert_eq!(decision.selected_node_id, 2);
+    assert_eq!(decision.target_node_id, 2);
 }
 
 #[tokio::test]
@@ -192,7 +192,7 @@ async fn test_anti_affinity_with_max_per_node() {
         .unwrap();
 
     // Can be placed on either node since max_per_node=2
-    assert!(decision.selected_node_id == 1 || decision.selected_node_id == 2);
+    assert!(decision.target_node_id == 1 || decision.target_node_id == 2);
 
     // Add one more VM to reach the limit on node 2
     add_vm(&database, "db3", 2, Some(db_rules.clone())).await;
@@ -253,7 +253,7 @@ async fn test_manual_placement_with_anti_affinity() {
         .await
         .unwrap();
 
-    assert_eq!(decision.selected_node_id, 2);
+    assert_eq!(decision.target_node_id, 2);
 }
 
 #[tokio::test]
@@ -280,6 +280,6 @@ async fn test_no_anti_affinity_rules() {
         .unwrap();
 
     // Should place on either node
-    assert!(decision.selected_node_id == 1 || decision.selected_node_id == 2);
+    assert!(decision.target_node_id == 1 || decision.target_node_id == 2);
     assert!(!decision.reason.contains("anti-affinity")); // No mention of anti-affinity
 }
