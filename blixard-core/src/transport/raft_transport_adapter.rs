@@ -37,9 +37,9 @@ impl RaftTransport {
 
         // TODO: Replace with actual Iroh endpoint and node ID when available
         // For now, return a placeholder error since we need proper Iroh integration
-        return Err(crate::error::BlixardError::NotImplemented {
+        Err(crate::error::BlixardError::NotImplemented {
             feature: "Iroh transport adapter".to_string(),
-        });
+        })
     }
 
     /// Send a Raft message to a peer

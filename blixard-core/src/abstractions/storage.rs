@@ -330,7 +330,7 @@ impl VmRepository for MockVmRepository {
 
         let mut result = Vec::new();
         for (name, vm) in vms.iter() {
-            let status = statuses.get(name).cloned().unwrap_or(VmStatus::Stopped);
+            let status = statuses.get(name).copied().unwrap_or(VmStatus::Stopped);
             result.push((vm.clone(), status));
         }
 

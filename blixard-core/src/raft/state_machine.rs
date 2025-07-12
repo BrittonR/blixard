@@ -582,7 +582,7 @@ impl RaftStateMachine {
             })?;
 
         for ip in vm_ips {
-            if let Err(e) = runtime.block_on(self.ip_pool_manager.release_vm_ips(vm_id.clone())) {
+            if let Err(e) = runtime.block_on(self.ip_pool_manager.release_vm_ips(vm_id)) {
                 error!("Failed to release IP {} for VM {}: {}", ip, vm_id, e);
             } else {
                 info!("Released IP {} for VM {}", ip, vm_id);

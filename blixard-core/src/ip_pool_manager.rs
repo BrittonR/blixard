@@ -522,6 +522,12 @@ impl IpPoolManager {
     }
 }
 
+impl Default for IpPoolManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Statistics for an IP pool
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolStats {

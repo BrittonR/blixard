@@ -27,10 +27,22 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::time::{interval, Duration};
 use tracing::{debug, instrument};
 
+// Type aliases for complex types
+type PendingProposals = Arc<RwLock<HashMap<Vec<u8>, oneshot::Sender<BlixardResult<()>>>>>;
+type MessageChannel = mpsc::UnboundedSender<(u64, raft::prelude::Message)>;
+type ProposalChannel = mpsc::UnboundedSender<RaftProposal>;
+type ConfChangeChannel = mpsc::UnboundedSender<RaftConfChange>;
+type RaftNodeHandle = RwLock<RawNode<RedbRaftStorage>>;
+type OnReadyFunction = Arc<
+    dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// Main Raft manager that handles the Raft protocol
 pub struct RaftManager {
     node_id: u64,
-    raft_node: RwLock<RawNode<RedbRaftStorage>>,
+    raft_node: RaftNodeHandle,
     storage: RedbRaftStorage,
     logger: Logger,
     shared_state: Weak<crate::node_shared::SharedNodeState>,
@@ -42,17 +54,17 @@ pub struct RaftManager {
 
     // Channels for communication
     proposal_rx: mpsc::UnboundedReceiver<RaftProposal>,
-    proposal_tx: mpsc::UnboundedSender<RaftProposal>,
+    proposal_tx: ProposalChannel,
     message_rx: mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>,
-    _message_tx: mpsc::UnboundedSender<(u64, raft::prelude::Message)>,
+    _message_tx: MessageChannel,
     conf_change_rx: mpsc::UnboundedReceiver<RaftConfChange>,
-    conf_change_tx: mpsc::UnboundedSender<RaftConfChange>,
+    conf_change_tx: ConfChangeChannel,
 
     // Track pending proposals
-    pending_proposals: Arc<RwLock<HashMap<Vec<u8>, oneshot::Sender<BlixardResult<()>>>>>,
+    pending_proposals: PendingProposals,
 
     // Message sender for outgoing Raft messages
-    outgoing_messages: mpsc::UnboundedSender<(u64, raft::prelude::Message)>,
+    outgoing_messages: MessageChannel,
 }
 
 impl RaftManager {
@@ -65,9 +77,9 @@ impl RaftManager {
         shared_state: Weak<crate::node_shared::SharedNodeState>,
     ) -> BlixardResult<(
         Self,
-        mpsc::UnboundedSender<RaftProposal>,
-        mpsc::UnboundedSender<(u64, raft::prelude::Message)>,
-        mpsc::UnboundedSender<RaftConfChange>,
+        ProposalChannel,
+        MessageChannel,
+        ConfChangeChannel,
         mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>,
     )> {
         tracing::Span::current().record("node_id", node_id);
@@ -157,8 +169,8 @@ impl RaftManager {
     fn setup_batch_processing(
         node_id: u64,
         shared_state: &Weak<crate::node_shared::SharedNodeState>,
-        proposal_tx: mpsc::UnboundedSender<RaftProposal>,
-    ) -> BlixardResult<mpsc::UnboundedSender<RaftProposal>> {
+        proposal_tx: ProposalChannel,
+    ) -> BlixardResult<ProposalChannel> {
         if let Some(_shared) = shared_state.upgrade() {
             let config = config_global::get().map_err(|e| BlixardError::Internal {
                 message: format!("Failed to get config: {}", e),
@@ -279,13 +291,8 @@ impl RaftManager {
     #[allow(dead_code)] // Experimental: future event loop architecture
     async fn run_with_event_loop(
         self,
-        raft_node: Arc<RwLock<RawNode<RedbRaftStorage>>>,
-        on_ready_fn: Arc<
-            dyn Fn()
-                    -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>
-                + Send
-                + Sync,
-        >,
+        raft_node: Arc<RaftNodeHandle>,
+        on_ready_fn: OnReadyFunction,
     ) -> BlixardResult<()> {
         info!(self.logger, "[RAFT-RUN] Starting event loop architecture");
 
@@ -960,12 +967,12 @@ impl RaftManager {
     // Public API methods
 
     /// Get the proposal sender channel
-    pub fn proposal_sender(&self) -> mpsc::UnboundedSender<RaftProposal> {
+    pub fn proposal_sender(&self) -> ProposalChannel {
         self.proposal_tx.clone()
     }
 
     /// Get the configuration change sender channel
-    pub fn conf_change_sender(&self) -> mpsc::UnboundedSender<RaftConfChange> {
+    pub fn conf_change_sender(&self) -> ConfChangeChannel {
         self.conf_change_tx.clone()
     }
 

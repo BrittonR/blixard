@@ -16,6 +16,10 @@ use crate::vm_health_monitor::VmHealthMonitor;
 
 use redb::{Database, ReadableTable};
 
+// Type aliases for complex channel types
+type RaftMessageChannel = (mpsc::UnboundedSender<(u64, raft::prelude::Message)>, mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>);
+type ConfChangeChannel = (mpsc::UnboundedSender<RaftConfChange>, mpsc::UnboundedReceiver<RaftConfChange>);
+
 /// A Blixard cluster node
 pub struct Node {
     /// Shared state that is Send + Sync
@@ -935,23 +939,23 @@ impl Node {
                         // Store peer information from response
                         self.store_peer_information(&peers).await?;
 
-                        return Ok(());
+                        Ok(())
                     } else {
-                        return Err(BlixardError::ClusterJoin {
+                        Err(BlixardError::ClusterJoin {
                             reason: format!("Join request failed: {}", message),
-                        });
+                        })
                     }
                 }
                 Err(e) => {
-                    return Err(BlixardError::ClusterJoin {
+                    Err(BlixardError::ClusterJoin {
                         reason: format!("Failed to send join request via P2P: {}", e),
-                    });
+                    })
                 }
             }
         } else {
-            return Err(BlixardError::Internal {
+            Err(BlixardError::Internal {
                 message: "P2P manager not available".to_string(),
-            });
+            })
         }
     }
 
@@ -1185,14 +1189,8 @@ impl Node {
         // Create new channels
         let (proposal_tx, _proposal_rx) = mpsc::unbounded_channel();
         let (message_tx, _message_rx) = mpsc::unbounded_channel();
-        let (_conf_change_tx, _conf_change_rx): (
-            mpsc::UnboundedSender<RaftConfChange>,
-            mpsc::UnboundedReceiver<RaftConfChange>,
-        ) = mpsc::unbounded_channel();
-        let (_outgoing_tx, _outgoing_rx): (
-            mpsc::UnboundedSender<(u64, raft::prelude::Message)>,
-            mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>,
-        ) = mpsc::unbounded_channel();
+        let (_conf_change_tx, _conf_change_rx): ConfChangeChannel = mpsc::unbounded_channel();
+        let (_outgoing_tx, _outgoing_rx): RaftMessageChannel = mpsc::unbounded_channel();
 
         // Update shared state with new channels
         // Set individual Raft channels

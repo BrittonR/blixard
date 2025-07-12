@@ -20,15 +20,20 @@ use std::sync::{Arc, Weak};
 use tokio::sync::{oneshot, RwLock};
 use tracing::instrument;
 
+// Type aliases for complex types used in handlers
+type PendingProposals = Arc<RwLock<HashMap<Vec<u8>, oneshot::Sender<BlixardResult<()>>>>>;
+type RaftNodeHandle = Arc<RwLock<RawNode<RedbRaftStorage>>>;
+type OnReadyFunction = Arc<
+    dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// Handler for tick events that delegates to RaftManager
 pub struct RaftTickHandler {
-    raft_node: Arc<RwLock<RawNode<RedbRaftStorage>>>,
+    raft_node: RaftNodeHandle,
     snapshot_manager: Arc<RaftSnapshotManager>,
-    on_ready_fn: Arc<
-        dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>
-            + Send
-            + Sync,
-    >,
+    on_ready_fn: OnReadyFunction,
     #[allow(dead_code)] // Shared state reserved for future Raft handler coordination
     shared_state: Weak<crate::node_shared::SharedNodeState>,
     #[allow(dead_code)] // Logger reserved for future Raft event logging
@@ -37,14 +42,9 @@ pub struct RaftTickHandler {
 
 impl RaftTickHandler {
     pub fn new(
-        raft_node: Arc<RwLock<RawNode<RedbRaftStorage>>>,
+        raft_node: RaftNodeHandle,
         snapshot_manager: Arc<RaftSnapshotManager>,
-        on_ready_fn: Arc<
-            dyn Fn()
-                    -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>
-                + Send
-                + Sync,
-        >,
+        on_ready_fn: OnReadyFunction,
         shared_state: Weak<crate::node_shared::SharedNodeState>,
         logger: Logger,
     ) -> Self {
@@ -87,27 +87,18 @@ impl TickHandler for RaftTickHandler {
 
 /// Handler for proposal events that delegates to RaftManager
 pub struct RaftProposalHandler {
-    raft_node: Arc<RwLock<RawNode<RedbRaftStorage>>>,
-    pending_proposals: Arc<RwLock<HashMap<Vec<u8>, oneshot::Sender<BlixardResult<()>>>>>,
-    on_ready_fn: Arc<
-        dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>
-            + Send
-            + Sync,
-    >,
+    raft_node: RaftNodeHandle,
+    pending_proposals: PendingProposals,
+    on_ready_fn: OnReadyFunction,
     #[allow(dead_code)] // Logger reserved for future proposal event logging
     logger: Logger,
 }
 
 impl RaftProposalHandler {
     pub fn new(
-        raft_node: Arc<RwLock<RawNode<RedbRaftStorage>>>,
-        pending_proposals: Arc<RwLock<HashMap<Vec<u8>, oneshot::Sender<BlixardResult<()>>>>>,
-        on_ready_fn: Arc<
-            dyn Fn()
-                    -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>
-                + Send
-                + Sync,
-        >,
+        raft_node: RaftNodeHandle,
+        pending_proposals: PendingProposals,
+        on_ready_fn: OnReadyFunction,
         logger: Logger,
     ) -> Self {
         Self {
@@ -165,24 +156,15 @@ impl ProposalHandler for RaftProposalHandler {
 
 /// Handler for Raft message events that delegates to RaftManager
 pub struct RaftMessageHandler {
-    raft_node: Arc<RwLock<RawNode<RedbRaftStorage>>>,
-    on_ready_fn: Arc<
-        dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>
-            + Send
-            + Sync,
-    >,
+    raft_node: RaftNodeHandle,
+    on_ready_fn: OnReadyFunction,
     logger: Logger,
 }
 
 impl RaftMessageHandler {
     pub fn new(
-        raft_node: Arc<RwLock<RawNode<RedbRaftStorage>>>,
-        on_ready_fn: Arc<
-            dyn Fn()
-                    -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>
-                + Send
-                + Sync,
-        >,
+        raft_node: RaftNodeHandle,
+        on_ready_fn: OnReadyFunction,
         logger: Logger,
     ) -> Self {
         Self {
@@ -222,7 +204,7 @@ impl MessageHandler for RaftMessageHandler {
 
 /// Handler for configuration change events that delegates to RaftManager
 pub struct RaftConfChangeHandler {
-    raft_node: Arc<RwLock<RawNode<RedbRaftStorage>>>,
+    raft_node: RaftNodeHandle,
     config_manager: Arc<RaftConfigManager>,
     #[allow(dead_code)] // Reserved for future logging of configuration changes
     logger: Logger,
@@ -230,7 +212,7 @@ pub struct RaftConfChangeHandler {
 
 impl RaftConfChangeHandler {
     pub fn new(
-        raft_node: Arc<RwLock<RawNode<RedbRaftStorage>>>,
+        raft_node: RaftNodeHandle,
         config_manager: Arc<RaftConfigManager>,
         logger: Logger,
     ) -> Self {
@@ -258,16 +240,11 @@ pub struct HandlerFactory;
 impl HandlerFactory {
     /// Create a complete set of handlers for a RaftManager
     pub fn create_handlers(
-        raft_node: Arc<RwLock<RawNode<RedbRaftStorage>>>,
+        raft_node: RaftNodeHandle,
         config_manager: Arc<RaftConfigManager>,
         snapshot_manager: Arc<RaftSnapshotManager>,
-        pending_proposals: Arc<RwLock<HashMap<Vec<u8>, oneshot::Sender<BlixardResult<()>>>>>,
-        on_ready_fn: Arc<
-            dyn Fn()
-                    -> std::pin::Pin<Box<dyn std::future::Future<Output = BlixardResult<()>> + Send>>
-                + Send
-                + Sync,
-        >,
+        pending_proposals: PendingProposals,
+        on_ready_fn: OnReadyFunction,
         shared_state: Weak<crate::node_shared::SharedNodeState>,
         logger: Logger,
     ) -> (

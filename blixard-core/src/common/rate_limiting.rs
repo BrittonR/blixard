@@ -106,6 +106,12 @@ impl InMemoryRateLimiter {
     }
 }
 
+impl Default for InMemoryRateLimiter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait::async_trait]
 impl RateLimiter for InMemoryRateLimiter {
     async fn check_rate_limit(&self, key: &str, operation: &ApiOperation) -> BlixardResult<()> {

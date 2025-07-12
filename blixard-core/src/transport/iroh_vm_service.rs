@@ -134,41 +134,15 @@ impl IrohVmService {
                     .await
             }
             VmOperationRequest::CreateWithScheduling {
-                name,
-                vcpus,
-                memory_mb,
-                strategy,
-                constraints,
-                features,
-                priority,
+                params,
             } => {
-                self.handle_create_vm_with_scheduling(
-                    name,
-                    vcpus,
-                    memory_mb,
-                    strategy,
-                    constraints,
-                    features,
-                    priority,
-                )
+                self.handle_create_vm_with_scheduling(params)
                 .await
             }
             VmOperationRequest::SchedulePlacement {
-                name,
-                vcpus,
-                memory_mb,
-                strategy,
-                constraints,
-                features,
+                params,
             } => {
-                self.handle_schedule_placement(
-                    name,
-                    vcpus,
-                    memory_mb,
-                    strategy,
-                    constraints,
-                    features,
-                )
+                self.handle_schedule_placement(params)
                 .await
             }
         }
@@ -305,30 +279,16 @@ impl IrohVmService {
     /// Handle VM creation with scheduling operation
     async fn handle_create_vm_with_scheduling(
         &self,
-        name: String,
-        vcpus: u32,
-        memory_mb: u32,
-        strategy: Option<String>,
-        constraints: Option<Vec<String>>,
-        features: Option<Vec<String>>,
-        priority: Option<u32>,
+        params: crate::transport::services::vm::VmSchedulingParams,
     ) -> BlixardResult<VmOperationResponse> {
         match self
             .vm_service
-            .create_vm_with_scheduling(
-                name.clone(),
-                vcpus,
-                memory_mb,
-                strategy,
-                constraints,
-                features,
-                priority,
-            )
+            .create_vm_with_scheduling(params.clone())
             .await
         {
             Ok((vm_id, node_id, reason)) => Ok(VmOperationResponse::CreateWithScheduling {
                 success: true,
-                message: format!("VM '{}' created successfully on node {}", name, node_id),
+                message: format!("VM '{}' created successfully on node {}", params.name, node_id),
                 vm_id,
                 assigned_node_id: node_id,
                 placement_decision: reason,
@@ -346,16 +306,11 @@ impl IrohVmService {
     /// Handle VM placement scheduling operation
     async fn handle_schedule_placement(
         &self,
-        name: String,
-        vcpus: u32,
-        memory_mb: u32,
-        strategy: Option<String>,
-        constraints: Option<Vec<String>>,
-        features: Option<Vec<String>>,
+        params: crate::transport::services::vm::VmPlacementParams,
     ) -> BlixardResult<VmOperationResponse> {
         match self
             .vm_service
-            .schedule_vm_placement(&name, vcpus, memory_mb, strategy, constraints, features)
+            .schedule_vm_placement(params)
             .await
         {
             Ok((node_id, score, reason, alternatives)) => {

@@ -17,6 +17,12 @@ use std::{
 };
 use tokio::sync::Mutex;
 
+// Type aliases for complex types
+type DatabaseHandle = Arc<Mutex<Option<Arc<Database>>>>;
+type InitializedFlag = Arc<RwLock<bool>>;
+type ClusterMembers = Arc<RwLock<HashMap<u64, PeerInfo>>>;
+type LeaderIdState = Arc<RwLock<Option<u64>>>;
+
 // Re-export PeerInfo from p2p_manager for backward compatibility
 pub use crate::p2p_manager::PeerInfo;
 
@@ -40,19 +46,19 @@ pub struct SharedNodeState {
     pub config: NodeConfig,
 
     /// Database handle (when available)
-    database: Arc<Mutex<Option<Arc<Database>>>>,
+    database: DatabaseHandle,
 
     /// Whether the node is initialized and ready to serve requests
-    is_initialized: Arc<RwLock<bool>>,
+    is_initialized: InitializedFlag,
 
     /// Current cluster membership information
-    cluster_members: Arc<RwLock<HashMap<u64, PeerInfo>>>,
+    cluster_members: ClusterMembers,
 
     /// Current leader node ID (if known)
-    leader_id: Arc<RwLock<Option<u64>>>,
+    leader_id: LeaderIdState,
 
     /// Local node status flags
-    is_leader: Arc<RwLock<bool>>,
+    is_leader: InitializedFlag,
 }
 
 impl SharedNodeState {
@@ -60,11 +66,11 @@ impl SharedNodeState {
     pub fn new(config: NodeConfig) -> Self {
         Self {
             config,
-            database: Arc::new(Mutex::new(None)),
-            is_initialized: Arc::new(RwLock::new(false)),
-            cluster_members: Arc::new(RwLock::new(HashMap::new())),
-            leader_id: Arc::new(RwLock::new(None)),
-            is_leader: Arc::new(RwLock::new(false)),
+            database: DatabaseHandle::new(Mutex::new(None)),
+            is_initialized: InitializedFlag::new(RwLock::new(false)),
+            cluster_members: ClusterMembers::new(RwLock::new(HashMap::new())),
+            leader_id: LeaderIdState::new(RwLock::new(None)),
+            is_leader: InitializedFlag::new(RwLock::new(false)),
         }
     }
 

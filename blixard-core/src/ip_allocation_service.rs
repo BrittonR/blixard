@@ -84,7 +84,7 @@ impl IpAllocationService {
                 let mac_address = format!("02:00:00:00:{:02x}:01", (self.node_id & 0xFF) as u8);
 
                 let allocation_request = IpAllocationRequest {
-                    vm_id: vm_id.clone(),
+                    vm_id,
                     preferred_pool: None, // Could be enhanced to support pool preferences
                     required_tags: Default::default(),
                     topology_hint: Some(format!("node-{}", self.node_id)),

@@ -213,6 +213,60 @@ struct LogEntry {
     data: Vec<u8>,
 }
 
+/// Parameters for AppendEntries RPC
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AppendEntriesParams {
+    pub term: u64,
+    pub leader_id: u64,
+    pub prev_log_index: u64,
+    pub prev_log_term: u64,
+    pub entries: Vec<LogEntry>,
+    pub leader_commit: u64,
+}
+
+impl AppendEntriesParams {
+    /// Create new AppendEntries parameters
+    pub fn new(
+        term: u64,
+        leader_id: u64,
+        prev_log_index: u64,
+        prev_log_term: u64,
+        entries: Vec<LogEntry>,
+        leader_commit: u64,
+    ) -> Self {
+        Self {
+            term,
+            leader_id,
+            prev_log_index,
+            prev_log_term,
+            entries,
+            leader_commit,
+        }
+    }
+
+    /// Create from existing AppendEntries message
+    pub fn from_message(msg: &RaftMessage) -> Option<Self> {
+        match msg {
+            RaftMessage::AppendEntries {
+                term,
+                leader_id,
+                prev_log_index,
+                prev_log_term,
+                entries,
+                leader_commit,
+            } => Some(Self {
+                term: *term,
+                leader_id: *leader_id,
+                prev_log_index: *prev_log_index,
+                prev_log_term: *prev_log_term,
+                entries: entries.clone(),
+                leader_commit: *leader_commit,
+            }),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum RaftMessage {
     RequestVote {
@@ -461,7 +515,8 @@ impl TestRaftNode {
                 self.handle_vote_response(term, vote_granted, from).await;
             }
             RaftMessage::AppendEntries { term, leader_id, prev_log_index, prev_log_term, entries, leader_commit } => {
-                self.handle_append_entries(term, leader_id, prev_log_index, prev_log_term, entries, leader_commit).await;
+                let params = AppendEntriesParams::new(term, leader_id, prev_log_index, prev_log_term, entries, leader_commit);
+                self.handle_append_entries(params).await;
             }
             RaftMessage::AppendEntriesResponse { term, success, from, match_index } => {
                 self.handle_append_entries_response(term, success, from, match_index).await;
@@ -654,11 +709,11 @@ impl TestRaftNode {
         }
     }
     
-    async fn handle_append_entries(&self, term: u64, leader_id: u64, prev_log_index: u64, prev_log_term: u64, entries: Vec<LogEntry>, leader_commit: u64) {
+    async fn handle_append_entries(&self, params: AppendEntriesParams) {
         let mut current_term = self.current_term.lock().unwrap();
         
         // Reply false if term < currentTerm (§5.1)
-        if term < *current_term {
+        if params.term < *current_term {
             let response = RaftMessage::AppendEntriesResponse {
                 term: *current_term,
                 success: false,
@@ -667,8 +722,8 @@ impl TestRaftNode {
             };
             
             // Send response if not blocked
-            if !NETWORK_STATE.read().unwrap().is_blocked(self.node_id, leader_id) {
-                let addr = format!("http://10.0.0.{}:700{}", leader_id, leader_id);
+            if !NETWORK_STATE.read().unwrap().is_blocked(self.node_id, params.leader_id) {
+                let addr = format!("http://10.0.0.{}:700{}", params.leader_id, params.leader_id);
                 let _ = spawn(async move {
                     if let Ok(mut client) = ClusterServiceClient::connect(addr).await {
                         let _ = client.send_raft_message(Request::new(RaftMessageRequest {
@@ -681,7 +736,7 @@ impl TestRaftNode {
         }
         
         // If term >= currentTerm, update term and convert to follower
-        *current_term = term;
+        *current_term = params.term;
         *self.state.lock().unwrap() = RaftNodeState::Follower;
         *self.voted_for.lock().unwrap() = None;
         
@@ -689,29 +744,29 @@ impl TestRaftNode {
         *self.election_timeout.lock().unwrap() = Instant::now() + random_election_timeout(
             Duration::from_millis(150),
             Duration::from_millis(300),
-            self.node_id * term,
+            self.node_id * params.term,
         );
         
         // Check log consistency
         let mut log = self.log.lock().unwrap();
-        let success = if prev_log_index == 0 {
+        let success = if params.prev_log_index == 0 {
             // First entry, always matches
             true
-        } else if prev_log_index > log.len() as u64 {
+        } else if params.prev_log_index > log.len() as u64 {
             // Log doesn't contain entry at prevLogIndex
             false
         } else {
             // Check if log entry at prevLogIndex has matching term
-            let prev_entry = &log[(prev_log_index - 1) as usize];
-            prev_entry.term == prev_log_term
+            let prev_entry = &log[(params.prev_log_index - 1) as usize];
+            prev_entry.term == params.prev_log_term
         };
         
-        if success && !entries.is_empty() {
+        if success && !params.entries.is_empty() {
             // Delete conflicting entries and append new ones
             // If an existing entry conflicts with a new one (same index but different terms),
             // delete the existing entry and all that follow it (§5.3)
             let mut log_len = log.len() as u64;
-            for entry in entries {
+            for entry in params.entries {
                 if entry.index <= log_len {
                     // Check for conflict
                     let existing_entry = &log[(entry.index - 1) as usize];
@@ -730,8 +785,8 @@ impl TestRaftNode {
             }
             
             // Update commit index
-            if leader_commit > *self.commit_index.lock().unwrap() {
-                let new_commit_index = std::cmp::min(leader_commit, log.len() as u64);
+            if params.leader_commit > *self.commit_index.lock().unwrap() {
+                let new_commit_index = std::cmp::min(params.leader_commit, log.len() as u64);
                 *self.commit_index.lock().unwrap() = new_commit_index;
                 
                 // Apply newly committed entries to state machine

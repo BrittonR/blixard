@@ -13,6 +13,100 @@ use std::sync::Arc;
 // Removed tonic imports - using Iroh-only transport
 use serde::{Deserialize, Serialize};
 
+/// Parameters for VM creation with scheduling
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VmSchedulingParams {
+    pub name: String,
+    pub vcpus: u32,
+    pub memory_mb: u32,
+    pub strategy: Option<String>,
+    pub constraints: Option<Vec<String>>,
+    pub features: Option<Vec<String>>,
+    pub priority: Option<u32>,
+}
+
+impl VmSchedulingParams {
+    /// Create new scheduling parameters with defaults
+    pub fn new(name: String, vcpus: u32, memory_mb: u32) -> Self {
+        Self {
+            name,
+            vcpus,
+            memory_mb,
+            strategy: None,
+            constraints: None,
+            features: None,
+            priority: None,
+        }
+    }
+
+    /// Set placement strategy
+    pub fn with_strategy(mut self, strategy: String) -> Self {
+        self.strategy = Some(strategy);
+        self
+    }
+
+    /// Set constraints
+    pub fn with_constraints(mut self, constraints: Vec<String>) -> Self {
+        self.constraints = Some(constraints);
+        self
+    }
+
+    /// Set required features
+    pub fn with_features(mut self, features: Vec<String>) -> Self {
+        self.features = Some(features);
+        self
+    }
+
+    /// Set priority
+    pub fn with_priority(mut self, priority: u32) -> Self {
+        self.priority = Some(priority);
+        self
+    }
+}
+
+/// Parameters for VM placement scheduling (without creation)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VmPlacementParams {
+    pub name: String,
+    pub vcpus: u32,
+    pub memory_mb: u32,
+    pub strategy: Option<String>,
+    pub constraints: Option<Vec<String>>,
+    pub features: Option<Vec<String>>,
+}
+
+impl VmPlacementParams {
+    /// Create new placement parameters with defaults
+    pub fn new(name: String, vcpus: u32, memory_mb: u32) -> Self {
+        Self {
+            name,
+            vcpus,
+            memory_mb,
+            strategy: None,
+            constraints: None,
+            features: None,
+        }
+    }
+
+    /// Set placement strategy
+    pub fn with_strategy(mut self, strategy: String) -> Self {
+        self.strategy = Some(strategy);
+        self
+    }
+
+    /// Set constraints
+    pub fn with_constraints(mut self, constraints: Vec<String>) -> Self {
+        self.constraints = Some(constraints);
+        self
+    }
+
+    /// Set required features
+    pub fn with_features(mut self, features: Vec<String>) -> Self {
+        self.features = Some(features);
+        self
+    }
+}
+
 /// VM operation request types for Iroh transport
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum VmOperationRequest {
@@ -23,21 +117,10 @@ pub enum VmOperationRequest {
         memory_mb: u32,
     },
     CreateWithScheduling {
-        name: String,
-        vcpus: u32,
-        memory_mb: u32,
-        strategy: Option<String>,
-        constraints: Option<Vec<String>>,
-        features: Option<Vec<String>>,
-        priority: Option<u32>,
+        params: VmSchedulingParams,
     },
     SchedulePlacement {
-        name: String,
-        vcpus: u32,
-        memory_mb: u32,
-        strategy: Option<String>,
-        constraints: Option<Vec<String>>,
-        features: Option<Vec<String>>,
+        params: VmPlacementParams,
     },
     Start {
         name: String,
@@ -131,24 +214,13 @@ pub trait VmService: Send + Sync {
     /// Create a new VM with automatic scheduling
     async fn create_vm_with_scheduling(
         &self,
-        name: String,
-        vcpus: u32,
-        memory_mb: u32,
-        strategy: Option<String>,
-        constraints: Option<Vec<String>>,
-        features: Option<Vec<String>>,
-        priority: Option<u32>,
+        params: VmSchedulingParams,
     ) -> BlixardResult<(String, u64, String)>; // Returns (vm_id, node_id, placement_decision)
 
     /// Schedule VM placement without creating
     async fn schedule_vm_placement(
         &self,
-        name: &str,
-        vcpus: u32,
-        memory_mb: u32,
-        strategy: Option<String>,
-        constraints: Option<Vec<String>>,
-        features: Option<Vec<String>>,
+        params: VmPlacementParams,
     ) -> BlixardResult<(u64, f32, String, Vec<u64>)>; // Returns (node_id, score, reason, alternatives)
 
     /// Start a VM
@@ -308,31 +380,25 @@ impl VmService for VmServiceImpl {
 
     async fn create_vm_with_scheduling(
         &self,
-        name: String,
-        vcpus: u32,
-        memory_mb: u32,
-        strategy: Option<String>,
-        constraints: Option<Vec<String>>,
-        features: Option<Vec<String>>,
-        priority: Option<u32>,
+        params: VmSchedulingParams,
     ) -> BlixardResult<(String, u64, String)> {
         use crate::anti_affinity::{AntiAffinityRule, AntiAffinityRules};
 
         let mut vm_config = VmConfig {
-            name: name.clone(),
-            config_path: format!("/etc/blixard/vms/{}.yaml", name),
-            vcpus,
-            memory: memory_mb,
+            name: params.name.clone(),
+            config_path: format!("/etc/blixard/vms/{}.yaml", params.name),
+            vcpus: params.vcpus,
+            memory: params.memory_mb,
             tenant_id: "default".to_string(),
             ip_address: None,
             metadata: None,
             anti_affinity: None,
-            priority: priority.unwrap_or(100),
+            priority: params.priority.unwrap_or(100),
             ..Default::default()
         };
 
         // Convert constraints to anti-affinity rules
-        if let Some(constraints) = constraints {
+        if let Some(constraints) = params.constraints {
             let rules: Vec<AntiAffinityRule> = constraints
                 .into_iter()
                 .map(|group| AntiAffinityRule::hard(group))
@@ -343,7 +409,7 @@ impl VmService for VmServiceImpl {
         }
 
         // Add required features
-        if let Some(features) = features {
+        if let Some(features) = params.features {
             vm_config.metadata = Some(
                 vec![("required_features".to_string(), features.join(","))]
                     .into_iter()
@@ -351,32 +417,27 @@ impl VmService for VmServiceImpl {
             );
         }
 
-        let _strategy = Self::parse_strategy(strategy);
+        let _strategy = Self::parse_strategy(params.strategy);
 
         // Use the scheduling method from SharedNodeState
         let _result = self.node.create_vm_with_scheduling(vm_config).await?;
 
         // TODO: Integrate with proper scheduler that returns PlacementDecision
         // For now, return placeholder values since create_vm_with_scheduling returns String, not PlacementDecision
-        Ok((name, 1u64, "VM created with default placement".to_string()))
+        Ok((params.name, 1u64, "VM created with default placement".to_string()))
     }
 
     async fn schedule_vm_placement(
         &self,
-        name: &str,
-        vcpus: u32,
-        memory_mb: u32,
-        strategy: Option<String>,
-        constraints: Option<Vec<String>>,
-        features: Option<Vec<String>>,
+        params: VmPlacementParams,
     ) -> BlixardResult<(u64, f32, String, Vec<u64>)> {
         use crate::anti_affinity::{AntiAffinityRule, AntiAffinityRules};
 
         let mut vm_config = VmConfig {
-            name: name.to_string(),
-            config_path: format!("/etc/blixard/vms/{}.yaml", name),
-            vcpus,
-            memory: memory_mb,
+            name: params.name.clone(),
+            config_path: format!("/etc/blixard/vms/{}.yaml", params.name),
+            vcpus: params.vcpus,
+            memory: params.memory_mb,
             tenant_id: "default".to_string(),
             ip_address: None,
             metadata: None,
@@ -385,7 +446,7 @@ impl VmService for VmServiceImpl {
         };
 
         // Convert constraints to anti-affinity rules
-        if let Some(constraints) = constraints {
+        if let Some(constraints) = params.constraints {
             let rules: Vec<AntiAffinityRule> = constraints
                 .into_iter()
                 .map(|group| AntiAffinityRule::hard(group))
@@ -396,7 +457,7 @@ impl VmService for VmServiceImpl {
         }
 
         // Add required features
-        if let Some(features) = features {
+        if let Some(features) = params.features {
             vm_config.metadata = Some(
                 vec![("required_features".to_string(), features.join(","))]
                     .into_iter()
@@ -404,12 +465,12 @@ impl VmService for VmServiceImpl {
             );
         }
 
-        let _strategy = Self::parse_strategy(strategy.clone());
+        let _strategy = Self::parse_strategy(params.strategy.clone());
 
         // TODO: Implement VM scheduling integration
         let decision = crate::vm_scheduler_modules::placement_strategies::PlacementDecision {
             target_node_id: 1, // For now, always assign to node 1
-            strategy_used: strategy.unwrap_or_else(|| "default".to_string()),
+            strategy_used: params.strategy.unwrap_or_else(|| "default".to_string()),
             confidence_score: 100.0,
             preempted_vms: Vec::new(),
             resource_fit_score: 100.0,
@@ -597,30 +658,16 @@ impl VmProtocolHandler {
                 }
             }
             VmOperationRequest::CreateWithScheduling {
-                name,
-                vcpus,
-                memory_mb,
-                strategy,
-                constraints,
-                features,
-                priority,
+                params,
             } => {
                 match self
                     .service
-                    .create_vm_with_scheduling(
-                        name.clone(),
-                        vcpus,
-                        memory_mb,
-                        strategy,
-                        constraints,
-                        features,
-                        priority,
-                    )
+                    .create_vm_with_scheduling(params.clone())
                     .await
                 {
                     Ok((vm_id, node_id, reason)) => Ok(VmOperationResponse::CreateWithScheduling {
                         success: true,
-                        message: format!("VM '{}' created successfully on node {}", name, node_id),
+                        message: format!("VM '{}' created successfully on node {}", params.name, node_id),
                         vm_id,
                         assigned_node_id: node_id,
                         placement_decision: reason,
@@ -635,16 +682,11 @@ impl VmProtocolHandler {
                 }
             }
             VmOperationRequest::SchedulePlacement {
-                name,
-                vcpus,
-                memory_mb,
-                strategy,
-                constraints,
-                features,
+                params,
             } => {
                 match self
                     .service
-                    .schedule_vm_placement(&name, vcpus, memory_mb, strategy, constraints, features)
+                    .schedule_vm_placement(params)
                     .await
                 {
                     Ok((node_id, score, reason, alternatives)) => {

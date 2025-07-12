@@ -205,3 +205,9 @@ impl BatchProposalBuilder {
         ProposalData::Batch(self.proposals)
     }
 }
+
+impl Default for BatchProposalBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}

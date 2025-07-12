@@ -471,6 +471,12 @@ impl<T> RetryBuilder<T> {
     }
 }
 
+impl<T> Default for RetryBuilder<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Helper function to calculate Fibonacci number
 fn fibonacci(n: u32) -> u32 {
     match n {

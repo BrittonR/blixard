@@ -164,7 +164,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("===================");
     {
         let (mut send, mut recv) = connection.open_bi().await?;
-        let request_id = uuid::Uuid::new_v4().as_bytes().clone();
+        let request_id = *uuid::Uuid::new_v4().as_bytes();
         let ping_header = MessageHeader::new(MessageType::Ping, 0, request_id);
 
         let start = std::time::Instant::now();
@@ -193,7 +193,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         for msg in messages {
             let (mut send, mut recv) = connection.open_bi().await?;
-            let request_id = uuid::Uuid::new_v4().as_bytes().clone();
+            let request_id = *uuid::Uuid::new_v4().as_bytes();
             let request_header =
                 MessageHeader::new(MessageType::Request, msg.len() as u32, request_id);
 
@@ -228,7 +228,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         for i in 0..100 {
             let (mut send, mut recv) = connection.open_bi().await?;
-            let request_id = uuid::Uuid::new_v4().as_bytes().clone();
+            let request_id = *uuid::Uuid::new_v4().as_bytes();
             let msg = format!("Request {}", i);
             let request_header =
                 MessageHeader::new(MessageType::Request, msg.len() as u32, request_id);
