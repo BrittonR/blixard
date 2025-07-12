@@ -21,7 +21,7 @@ use std::sync::Arc;
 struct ClusterStatusRequest {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ClusterStatusResponse {
+pub struct ClusterStatusResponse {
     pub leader_id: u64,
     pub member_ids: Vec<u64>,
     pub term: u64,
@@ -31,7 +31,7 @@ struct ClusterStatusResponse {
 struct GetRaftStatusRequest {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct GetRaftStatusResponse {
+pub struct GetRaftStatusResponse {
     pub is_leader: bool,
     pub node_id: u64,
     pub leader_id: u64,

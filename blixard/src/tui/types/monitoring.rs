@@ -85,3 +85,20 @@ pub struct ClusterResourceInfo {
     pub total_running_vms: u32,
     pub nodes: Vec<NodeResourceInfo>,
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum HealthStatus {
+    Healthy,
+    Warning,
+    Critical,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ClusterHealthStatus {
+    Healthy,
+    Degraded,
+    Critical,
+    PartialOutage,
+    Unknown,
+}

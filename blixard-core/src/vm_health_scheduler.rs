@@ -60,6 +60,7 @@ impl HealthCheckScheduler {
 
     /// Execute a single health check cycle
     async fn run_health_check_cycle(&self) -> BlixardResult<()> {
+        #[cfg(feature = "observability")]
         let metrics = metrics();
         let node_id = self.deps.node_state.get_id();
 
@@ -173,6 +174,7 @@ impl HealthCheckScheduler {
                             "Failed to perform health checks for VM '{}': {}",
                             vm_config.name, e
                         );
+                        #[cfg(feature = "observability")]
                         metrics.vm_health_check_failed.add(
                             1,
                             &[
@@ -186,10 +188,12 @@ impl HealthCheckScheduler {
         }
 
         // Record overall metrics
+        #[cfg(feature = "observability")]
         metrics
             .vm_health_checks_total
             .add(checked_count, &[attributes::node_id(node_id)]);
 
+        #[cfg(feature = "observability")]
         if unhealthy_count > 0 {
             metrics
                 .vm_unhealthy_total
@@ -291,9 +295,11 @@ impl HealthCheckScheduler {
 
     /// Record health metrics for a VM
     fn record_health_metrics(&self, vm_name: &str, health_status: &VmHealthStatus) {
-        let metrics = metrics();
+        #[cfg(feature = "observability")]
+        {
+            let metrics = metrics();
 
-        match health_status.state {
+            match health_status.state {
             HealthState::Healthy => {
                 metrics.vm_health_state.add(
                     1,
@@ -324,6 +330,7 @@ impl HealthCheckScheduler {
             HealthState::Unknown => {
                 // No metrics for unknown state
             }
+        }
         }
     }
 }

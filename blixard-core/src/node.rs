@@ -1505,7 +1505,9 @@ impl Node {
         self.shared.set_initialized(false);
 
         // Shutdown all components to release database references
-        self.shared.shutdown_components().await;
+        if let Err(e) = self.shared.shutdown_components().await {
+            tracing::warn!("Failed to shutdown components cleanly: {}", e);
+        }
 
         // Add a small delay to ensure file locks are released
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;

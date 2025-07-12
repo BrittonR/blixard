@@ -37,3 +37,19 @@ impl ImportForm {
         }
     }
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExportFormField {
+    FilePath,
+    IncludeVms,
+    IncludeNodes,
+    IncludeConfig,
+    Compress,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImportFormField {
+    FilePath,
+    ValidateOnly,
+    MergeExisting,
+}

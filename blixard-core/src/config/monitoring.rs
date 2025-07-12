@@ -311,14 +311,11 @@ impl MonitoringConfig {
         }
         
         // Validate alerting config
-        if self.alerting.enabled {
-            if self.alerting.alertmanager_url.is_none() && 
-               self.alerting.webhook_urls.is_empty() && 
-               self.alerting.email.is_none() {
-                return Err(BlixardError::ConfigError(
-                    "At least one alert destination must be configured".to_string()
-                ));
-            }
+        if self.alerting.enabled && self.alerting.alertmanager_url.is_none() && 
+               self.alerting.webhook_urls.is_empty() && self.alerting.email.is_none() {
+            return Err(BlixardError::ConfigError(
+                "At least one alert destination must be configured".to_string()
+            ));
         }
         
         Ok(())

@@ -174,23 +174,28 @@ impl raft::Storage for RedbRaftStorage {
             .open_table(RAFT_LOG_TABLE)
             .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
 
-        let mut entries = Vec::new();
+        // Pre-allocate with estimated capacity to avoid reallocations
+        let estimated_entries = std::cmp::min(high - low, 100) as usize; 
+        let mut entries = Vec::with_capacity(estimated_entries);
         let mut size = 0u64;
 
         for idx in low..high {
             if let Ok(Some(data)) = table.get(&idx) {
-                let entry = raft_codec::deserialize_entry(data.value())
-                    .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
-
-                let entry_size = data.value().len() as u64;
-                size += entry_size;
-                entries.push(entry);
-
+                let entry_data = data.value();
+                let entry_size = entry_data.len() as u64;
+                
+                // Check size limit before expensive deserialization
                 if let Some(max) = max_size {
-                    if size > max {
+                    if size + entry_size > max {
                         break;
                     }
                 }
+                
+                let entry = raft_codec::deserialize_entry(entry_data)
+                    .map_err(|e| raft::Error::Store(raft::StorageError::Other(Box::new(e))))?;
+
+                size += entry_size;
+                entries.push(entry);
             }
         }
 

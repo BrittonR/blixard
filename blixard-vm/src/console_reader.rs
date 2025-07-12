@@ -6,7 +6,7 @@
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::time::timeout;
 use tracing::{debug, error, warn};
@@ -256,7 +256,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_console_pattern_matching() -> BlixardResult<()> {
-        let dir = tempdir().map_err(|e| BlixardError::Io(e))?;
+        let dir = tempdir().map_err(|e| BlixardError::IoError(e))?;
         let socket_path = dir.path().join("test.sock");
         let socket_path_str = socket_path.to_str()
             .ok_or_else(|| BlixardError::InvalidConfiguration {
@@ -265,17 +265,17 @@ mod tests {
             .to_string();
 
         // Create a mock console server
-        let listener = UnixListener::bind(&socket_path).map_err(|e| BlixardError::Io(e))?;
+        let listener = UnixListener::bind(&socket_path).map_err(|e| BlixardError::IoError(e))?;
         
         // Spawn server task
         let server_handle = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.map_err(|e| BlixardError::Io(e))?;
+            let (mut stream, _) = listener.accept().await.map_err(|e| BlixardError::IoError(e))?;
             
             // Write some console output
-            stream.write_all(b"Starting VM...\n").await.map_err(|e| BlixardError::Io(e))?;
-            stream.write_all(b"Network initialized\n").await.map_err(|e| BlixardError::Io(e))?;
-            stream.write_all(b"System ready\n").await.map_err(|e| BlixardError::Io(e))?;
-            stream.flush().await.map_err(|e| BlixardError::Io(e))?;
+            stream.write_all(b"Starting VM...\n").await.map_err(|e| BlixardError::IoError(e))?;
+            stream.write_all(b"Network initialized\n").await.map_err(|e| BlixardError::IoError(e))?;
+            stream.write_all(b"System ready\n").await.map_err(|e| BlixardError::IoError(e))?;
+            stream.flush().await.map_err(|e| BlixardError::IoError(e))?;
             
             // Keep connection open briefly
             tokio::time::sleep(constants::TEST_SERVER_HOLD_TIME).await;
@@ -301,7 +301,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_unhealthy_pattern_detection() -> BlixardResult<()> {
-        let dir = tempdir().map_err(|e| BlixardError::Io(e))?;
+        let dir = tempdir().map_err(|e| BlixardError::IoError(e))?;
         let socket_path = dir.path().join("test.sock");
         let socket_path_str = socket_path.to_str()
             .ok_or_else(|| BlixardError::InvalidConfiguration {
@@ -310,17 +310,17 @@ mod tests {
             .to_string();
 
         // Create a mock console server
-        let listener = UnixListener::bind(&socket_path).map_err(|e| BlixardError::Io(e))?;
+        let listener = UnixListener::bind(&socket_path).map_err(|e| BlixardError::IoError(e))?;
         
         // Spawn server task
         let server_handle = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.map_err(|e| BlixardError::Io(e))?;
+            let (mut stream, _) = listener.accept().await.map_err(|e| BlixardError::IoError(e))?;
             
             // Write some console output with error
-            stream.write_all(b"Starting VM...\n").await.map_err(|e| BlixardError::Io(e))?;
-            stream.write_all(b"PANIC: kernel panic\n").await.map_err(|e| BlixardError::Io(e))?;
-            stream.write_all(b"System halted\n").await.map_err(|e| BlixardError::Io(e))?;
-            stream.flush().await.map_err(|e| BlixardError::Io(e))?;
+            stream.write_all(b"Starting VM...\n").await.map_err(|e| BlixardError::IoError(e))?;
+            stream.write_all(b"PANIC: kernel panic\n").await.map_err(|e| BlixardError::IoError(e))?;
+            stream.write_all(b"System halted\n").await.map_err(|e| BlixardError::IoError(e))?;
+            stream.flush().await.map_err(|e| BlixardError::IoError(e))?;
             
             // Keep connection open briefly
             tokio::time::sleep(constants::TEST_SERVER_HOLD_TIME).await;

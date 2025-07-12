@@ -46,7 +46,7 @@ mod stub_impl {
         
         /// Start a timer for duration recording (no-op)
         fn start_timer(&self, metric_name: &str) -> MetricTimer {
-            MetricTimer::new(metric_name.to_string())
+            MetricTimer::new_stub(metric_name.to_string())
         }
     }
 }
@@ -156,7 +156,10 @@ impl Drop for MetricTimer {
         // Auto-record on drop if not explicitly recorded
         let duration = self.start.elapsed().as_secs_f64();
         let recorder = GlobalMetricsRecorder;
+        #[cfg(feature = "observability")]
         recorder.record_histogram(&self.metric_name, duration, &self.labels);
+        #[cfg(not(feature = "observability"))]
+        recorder.record_histogram(&self.metric_name, duration);
     }
 }
 

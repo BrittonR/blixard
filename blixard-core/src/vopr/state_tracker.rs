@@ -154,7 +154,7 @@ impl LatencyTracker {
             let duration = start.elapsed();
             self.latencies
                 .entry(op_type)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(duration);
             Some(duration)
         } else {
@@ -224,7 +224,7 @@ impl StateTracker {
     pub fn snapshot(&mut self, state: StateSnapshot) {
         // Check for anomalies
         if let Some(prev) = self.snapshots.back() {
-            let anomalies = self.anomaly_detector.check(&prev, &state);
+            let anomalies = self.anomaly_detector.check(prev, &state);
             for anomaly in anomalies {
                 self.record_event(Event {
                     timestamp: Instant::now(),
@@ -346,7 +346,7 @@ impl AnomalyDetector {
         let mut anomalies = Vec::new();
 
         // Check for missing heartbeats
-        for (node_id, _node) in &curr.nodes {
+        for node_id in curr.nodes.keys() {
             if let Some(prev_node) = prev.nodes.get(node_id) {
                 let time_diff = curr.timestamp - prev_node.last_heartbeat;
                 if time_diff > self.heartbeat_interval.as_nanos() * 10 {

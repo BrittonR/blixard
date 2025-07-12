@@ -404,7 +404,7 @@ impl VmClient {
             });
         }
 
-        Ok((resp.selected_node_id, resp.placement_reason))
+        Ok((resp.target_node_id, resp.placement_reason))
     }
 
     /// Get cluster resource summary
@@ -501,7 +501,7 @@ impl VmClient {
         }
 
         Ok((
-            resp.selected_node_id,
+            resp.target_node_id,
             resp.placement_reason,
             resp.alternative_nodes,
         ))

@@ -134,12 +134,10 @@ impl BatchConfig {
         }
         
         // Validate adaptive batching
-        if self.adaptive {
-            if self.adaptive_min_size == 0 || self.adaptive_min_size > self.max_batch_size {
-                return Err(BlixardError::ConfigError(
-                    "adaptive_min_size must be between 1 and max_batch_size".to_string()
-                ));
-            }
+        if self.adaptive && (self.adaptive_min_size == 0 || self.adaptive_min_size > self.max_batch_size) {
+            return Err(BlixardError::ConfigError(
+                "adaptive_min_size must be between 1 and max_batch_size".to_string()
+            ));
         }
         
         Ok(())

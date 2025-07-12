@@ -11,6 +11,7 @@ use tokio::task::JoinHandle;
 use tokio::time::interval;
 use tracing::{debug, error, info};
 
+
 use crate::{
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
@@ -131,9 +132,15 @@ impl ResourceMonitor {
         self.vm_usage.read().await.get(vm_name).cloned()
     }
 
-    /// Get all VM resource usage
+    /// Get all VM resource usage with pre-allocated capacity
     pub async fn get_all_vm_usage(&self) -> HashMap<String, VmResourceUsage> {
-        self.vm_usage.read().await.clone()
+        let usage_map = self.vm_usage.read().await;
+        // Pre-allocate the map with the known size to avoid rehashing
+        let mut result = HashMap::with_capacity(usage_map.len());
+        for (name, usage) in usage_map.iter() {
+            result.insert(name.clone(), usage.clone());
+        }
+        result
     }
 
     /// Get current node resource utilization
@@ -335,6 +342,7 @@ impl ResourceMonitor {
         }
 
         // Record metrics for observability
+        #[cfg(feature = "observability")]
         crate::metrics_otel::record_resource_utilization(
             node_id,
             total_actual_cpu_percent,

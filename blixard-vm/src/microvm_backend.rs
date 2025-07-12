@@ -1,6 +1,5 @@
 use async_trait::async_trait;
-use std::collections::{HashMap, HashSet};
-use std::net::Ipv4Addr;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -8,7 +7,7 @@ use tracing::{debug, info, warn};
 
 use blixard_core::{
     error::{BlixardError, BlixardResult},
-    common::error_context::{StorageContext, VmContext},
+    common::error_context::StorageContext,
     types::{VmConfig as CoreVmConfig, VmState, VmStatus},
     vm_backend::{VmBackend, VmBackendFactory},
     vm_health_types::{HealthCheckResult, HealthCheckType, VmHealthStatus},
@@ -19,7 +18,7 @@ use chrono::Utc;
 use crate::{
     config_converter::VmConfigConverter,
     health_check_helpers::health_check_result,
-    ip_pool::{IpAddressPool, constants as ip_constants},
+    ip_pool::IpAddressPool,
     nix_generator::NixFlakeGenerator, 
     process_manager::VmProcessManager, 
     types as vm_types,

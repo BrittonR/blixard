@@ -20,7 +20,7 @@ mod traditional_patterns {
     const VM_STATE_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vm_states");
 
     #[derive(Serialize, Deserialize, Clone)]
-    struct VmState {
+    pub struct VmState {
         name: String,
         status: String,
     }
@@ -198,7 +198,7 @@ mod wrapper_patterns {
     const VM_STATE_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vm_states");
 
     #[derive(Serialize, Deserialize, Clone)]
-    struct VmState {
+    pub struct VmState {
         name: String,
         status: String,
     }
@@ -341,8 +341,8 @@ mod wrapper_patterns {
     // Automatic: error handling, serialization, transaction management, context
 }
 
-/// Code reduction analysis
 pub mod analysis {
+    //! # Code reduction analysis
     //! # DatabaseTransaction Benefits Analysis
     //!
     //! ## Code Reduction Summary:

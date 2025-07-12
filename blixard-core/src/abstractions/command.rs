@@ -377,7 +377,7 @@ impl CommandExecutor for TokioCommandExecutor {
         {
             use std::process::Command as StdCommand;
             let output = StdCommand::new("kill")
-                .args(&["-TERM", &pid.to_string()])
+                .args(["-TERM", &pid.to_string()])
                 .output()
                 .map_err(|e| BlixardError::Internal {
                     message: format!("Failed to kill process {}: {}", pid, e),
@@ -424,7 +424,7 @@ impl CommandExecutor for TokioCommandExecutor {
         {
             use std::process::Command as StdCommand;
             let output = StdCommand::new("kill")
-                .args(&["-0", &pid.to_string()])
+                .args(["-0", &pid.to_string()])
                 .output()
                 .map_err(|e| BlixardError::Internal {
                     message: format!("Failed to check process {}: {}", pid, e),

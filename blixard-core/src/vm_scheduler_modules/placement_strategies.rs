@@ -138,12 +138,16 @@ impl super::VmScheduler {
         context: &'a SchedulingContext,
         vm_config: &VmConfig,
     ) -> Vec<&'a NodeResourceUsage> {
-        // Filter nodes that can accommodate the VM
-        let mut candidate_nodes: Vec<_> = context
-            .node_usage
-            .iter()
-            .filter(|node| node.can_accommodate(&context.requirements))
-            .collect();
+        // Pre-allocate with estimated capacity to avoid reallocations
+        let estimated_capacity = (context.node_usage.len() * 3) / 4; // Estimate 75% pass filter
+        let mut candidate_nodes = Vec::with_capacity(estimated_capacity);
+        
+        // Filter nodes that can accommodate the VM (avoid collect() allocation)
+        for node in &context.node_usage {
+            if node.can_accommodate(&context.requirements) {
+                candidate_nodes.push(node);
+            }
+        }
 
         // Apply anti-affinity constraints if present
         if let (Some(checker), Some(rules)) = (&context.anti_affinity_checker, &vm_config.anti_affinity) {
@@ -182,12 +186,13 @@ impl super::VmScheduler {
         let confidence_score = best_node.calculate_availability_score();
         let resource_fit_score = self.calculate_resource_fit_score(best_node, &context.requirements);
 
-        let alternative_nodes: Vec<u64> = candidate_nodes
-            .iter()
-            .filter(|node| node.node_id != best_node.node_id)
-            .take(3)
-            .map(|node| node.node_id)
-            .collect();
+        // Pre-allocate alternative nodes vector for better performance
+        let mut alternative_nodes = Vec::with_capacity(3);
+        for node in candidate_nodes.iter().take(4) { // Take 4 to account for best_node exclusion
+            if node.node_id != best_node.node_id && alternative_nodes.len() < 3 {
+                alternative_nodes.push(node.node_id);
+            }
+        }
 
         Ok(PlacementDecision {
             target_node_id: best_node.node_id,

@@ -265,7 +265,7 @@ impl TestHarness {
     async fn clock_jump(&self, node_id: u64, delta_ms: i64) -> BlixardResult<()> {
         self.time.jump_node_time(
             node_id,
-            std::time::Duration::from_millis(delta_ms.abs() as u64),
+            std::time::Duration::from_millis(delta_ms.unsigned_abs()),
             delta_ms > 0,
         );
         Ok(())

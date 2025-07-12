@@ -20,7 +20,7 @@ use std::sync::Arc;
 struct HealthCheckRequest {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct HealthCheckResponse {
+pub struct HealthCheckResponse {
     pub healthy: bool,
     pub message: String,
 }

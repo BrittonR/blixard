@@ -186,7 +186,7 @@ impl TimeAccelerator {
     pub fn advance_by_real_time(&self) {
         let real_elapsed = self.start_real_time.elapsed();
         let sim_elapsed = Duration::from_nanos(
-            (real_elapsed.as_nanos() as u128 * self.acceleration as u128) as u64,
+            (real_elapsed.as_nanos() * self.acceleration as u128) as u64,
         );
 
         let mut global = self.global_time.lock().unwrap();
@@ -275,11 +275,9 @@ impl TimeAccelerator {
         // Note: In a real implementation, we'd need to handle this more carefully
         // to avoid race conditions
 
-        let result = f();
-
         // Restore original acceleration
 
-        result
+        f()
     }
 }
 

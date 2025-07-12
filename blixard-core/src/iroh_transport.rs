@@ -11,7 +11,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::info;
+use tokio::time::{Duration, Instant};
+use tracing::{info, debug};
 
 /// Types of data channels used in Blixard
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -44,16 +45,46 @@ impl DocumentType {
     }
 }
 
-/// P2P transport using Iroh for node-to-node communication
+/// Connection metadata for health tracking
+#[derive(Debug, Clone)]
+struct ConnectionInfo {
+    connection: Connection,
+    last_used: Instant,
+    use_count: u64,
+}
+
+impl ConnectionInfo {
+    fn new(connection: Connection) -> Self {
+        Self {
+            connection,
+            last_used: Instant::now(),
+            use_count: 1,
+        }
+    }
+    
+    fn mark_used(&mut self) {
+        self.last_used = Instant::now();
+        self.use_count += 1;
+    }
+    
+    fn is_stale(&self, max_idle: Duration) -> bool {
+        self.last_used.elapsed() > max_idle
+    }
+}
+
+/// P2P transport using Iroh for node-to-node communication with connection pooling
 pub struct IrohTransport {
     /// The Iroh endpoint for connections
     endpoint: Endpoint,
-    /// Active connections by peer
-    connections: Arc<RwLock<HashMap<iroh::NodeId, Connection>>>,
+    /// Active connections by peer with metadata
+    connections: Arc<RwLock<HashMap<iroh::NodeId, ConnectionInfo>>>,
     /// Node ID for identification
     node_id: u64,
     /// Data directory
     data_dir: PathBuf,
+    /// Connection pool configuration
+    max_idle_duration: Duration,
+    max_connections_per_peer: usize,
 }
 
 impl IrohTransport {
@@ -90,9 +121,11 @@ impl IrohTransport {
 
         Ok(Self {
             endpoint,
-            connections: Arc::new(RwLock::new(HashMap::new())),
+            connections: Arc::new(RwLock::new(HashMap::with_capacity(16))), // Pre-allocate for common case
             node_id,
             data_dir: data_dir.to_path_buf(),
+            max_idle_duration: Duration::from_secs(300), // 5 minutes idle timeout
+            max_connections_per_peer: 1, // For now, limit to 1 connection per peer
         })
     }
 
@@ -110,20 +143,41 @@ impl IrohTransport {
         (self.endpoint.clone(), node_id)
     }
 
-    /// Connect to a peer
+    /// Connect to a peer with connection pooling and health checking
     async fn connect_to_peer(
         &self,
         addr: &NodeAddr,
         doc_type: DocumentType,
     ) -> BlixardResult<Connection> {
-        let mut connections = self.connections.write().await;
-
-        if let Some(conn) = connections.get(&addr.node_id) {
-            // For now, just reuse existing connections without checking if closed
-            // TODO: Implement proper connection health checking
-            return Ok(conn.clone());
+        // Try to get existing healthy connection first
+        {
+            let mut connections = self.connections.write().await;
+            
+            // Clean up stale connections
+            let stale_keys: Vec<_> = connections
+                .iter()
+                .filter(|(_, info)| info.is_stale(self.max_idle_duration))
+                .map(|(key, _)| *key)
+                .collect();
+            
+            for key in stale_keys {
+                debug!("Removing stale connection to peer: {:?}", key);
+                connections.remove(&key);
+            }
+            
+            // Check for existing healthy connection
+            if let Some(info) = connections.get_mut(&addr.node_id) {
+                info.mark_used();
+                debug!(
+                    "Reusing existing connection to peer: {:?} (use count: {})", 
+                    addr.node_id, info.use_count
+                );
+                return Ok(info.connection.clone());
+            }
         }
 
+        // Create new connection
+        debug!("Creating new connection to peer: {:?}", addr.node_id);
         let conn = self
             .endpoint
             .connect(addr.clone(), doc_type.to_alpn())
@@ -132,8 +186,33 @@ impl IrohTransport {
                 message: format!("Failed to connect to peer: {}", e),
             })?;
 
-        connections.insert(addr.node_id, conn.clone());
+        // Store in connection pool
+        {
+            let mut connections = self.connections.write().await;
+            connections.insert(addr.node_id, ConnectionInfo::new(conn.clone()));
+            info!("Added new connection to pool for peer: {:?}", addr.node_id);
+        }
+
         Ok(conn)
+    }
+    
+    /// Cleanup stale connections (can be called periodically)
+    pub async fn cleanup_stale_connections(&self) {
+        let mut connections = self.connections.write().await;
+        let initial_count = connections.len();
+        
+        connections.retain(|peer_id, info| {
+            let keep = !info.is_stale(self.max_idle_duration);
+            if !keep {
+                debug!("Removing stale connection to peer: {:?}", peer_id);
+            }
+            keep
+        });
+        
+        let removed_count = initial_count - connections.len();
+        if removed_count > 0 {
+            info!("Cleaned up {} stale connections", removed_count);
+        }
     }
 
     /// Share a file and return its hash

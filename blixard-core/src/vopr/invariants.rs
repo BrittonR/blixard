@@ -114,6 +114,12 @@ pub struct InvariantChecker {
     liveness: LivenessInvariant,
 }
 
+impl Default for InvariantChecker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InvariantChecker {
     /// Create a new invariant checker
     pub fn new() -> Self {
@@ -150,7 +156,7 @@ impl Invariant for SingleLeaderInvariant {
                 if let Some(term) = state.views.get(node_id) {
                     leaders_by_term
                         .entry(*term)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(*node_id);
                 }
             }
@@ -381,7 +387,7 @@ impl Invariant for ProgressInvariant {
         // For now, just check that some node has non-zero commit
         let max_commit = state.commit_points.values().max().copied().unwrap_or(0);
 
-        if max_commit == 0 && state.nodes.len() > 0 {
+        if max_commit == 0 && !state.nodes.is_empty() {
             return Err("No progress: all nodes have commit point 0".to_string());
         }
 

@@ -12,17 +12,19 @@ pub use crate::tui::state::App;
 
 // Re-export types that are commonly used outside this module
 pub use crate::tui::types::{
-    vm::{VmInfo, VmFilter, PlacementStrategy},
-    node::{NodeInfo, NodeStatus, NodeRole, NodeFilter},
-    cluster::{ClusterInfo, ClusterMetrics},
-    monitoring::{SystemEvent, EventLevel},
-    ui::{AppTab, AppMode, InputMode, ConnectionStatus},
-    debug::{RaftDebugInfo, DebugMetrics},
+    VmInfo, VmFilter, PlacementStrategy,
+    NodeInfo, NodeStatus, NodeRole, NodeFilter, NodeResourceInfo,
+    ClusterInfo, ClusterMetrics, ClusterNodeInfo, ClusterResourceInfo,
+    SystemEvent, EventLevel, HealthAlert, AlertSeverity, HealthStatus, ClusterHealthStatus,
+    AppTab, AppMode, InputMode, ConnectionStatus, SearchMode, LogLevel, LogEntry, LogSourceType,
+    RaftDebugInfo, DebugMetrics, RaftNodeState, DebugLevel,
+    NetworkQuality,
 };
 
 pub use crate::tui::forms::{
-    vm::{CreateVmForm, CreateVmField},
-    node::{CreateNodeForm, CreateNodeField},
+    CreateVmForm, CreateVmField, VmMigrationForm, VmMigrationField,
+    CreateNodeForm, CreateNodeField, EditNodeForm, EditNodeField,
+    SaveConfigField, ExportForm, ImportForm, ExportFormField, ImportFormField,
     ConfirmDialog,
 };
 

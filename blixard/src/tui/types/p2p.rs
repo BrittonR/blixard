@@ -47,3 +47,12 @@ pub enum TransferDirection {
     Upload,
     Download,
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum NetworkQuality {
+    Excellent,
+    Good,
+    Fair,
+    Poor,
+    Unknown,
+}

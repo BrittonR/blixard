@@ -10,7 +10,7 @@ pub mod settings;
 pub use vm::{CreateVmForm, CreateVmField, VmMigrationForm, VmMigrationField};
 pub use node::{CreateNodeForm, CreateNodeField, EditNodeForm, EditNodeField};
 pub use cluster::{CreateClusterForm, CreateClusterField};
-pub use export_import::{ExportForm, ImportForm};
+pub use export_import::{ExportForm, ImportForm, ExportFormField, ImportFormField};
 pub use settings::{SettingsForm, SaveConfigField};
 
 #[derive(Debug, Clone)]

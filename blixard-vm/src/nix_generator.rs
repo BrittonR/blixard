@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn test_nix_generator_initialization() -> BlixardResult<()> {
-        let temp_dir = TempDir::new().map_err(|e| BlixardError::Io(e))?;
+        let temp_dir = TempDir::new().map_err(|e| BlixardError::IoError(e))?;
         let generator = NixFlakeGenerator::new(
             temp_dir.path().to_path_buf(),
             temp_dir.path().join("modules"),
@@ -311,7 +311,7 @@ mod tests {
 
     #[test]
     fn test_flake_parts_generation() -> BlixardResult<()> {
-        let temp_dir = TempDir::new().map_err(|e| BlixardError::Io(e))?;
+        let temp_dir = TempDir::new().map_err(|e| BlixardError::IoError(e))?;
         let generator = NixFlakeGenerator::new(
             temp_dir.path().to_path_buf(),
             temp_dir.path().join("modules"),

@@ -307,17 +307,21 @@ impl VmManager {
     pub async fn list_vms(&self) -> BlixardResult<Vec<(VmConfig, VmStatus)>> {
         // Read from database instead of backend to ensure Raft consistency
         let read_txn = self.database.begin_read()?;
-        let mut result = Vec::new();
-
+        
         if let Ok(table) = read_txn.open_table(crate::raft_storage::VM_STATE_TABLE) {
+            // Pre-allocate with estimated capacity
+            let mut result = Vec::with_capacity(16); // Reasonable default for most clusters
+            
             for entry in table.iter()? {
                 let (_key, value) = entry?;
                 let vm_state: crate::types::VmState = bincode::deserialize(value.value())?;
                 result.push((vm_state.config, vm_state.status));
             }
+            
+            Ok(result)
+        } else {
+            Ok(Vec::new())
         }
-
-        Ok(result)
     }
 
     /// Get status of a specific VM (reads from Raft-managed database)

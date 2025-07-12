@@ -76,6 +76,7 @@ impl VmAutoRecovery {
 
     /// Trigger recovery for a failed VM
     pub async fn trigger_recovery(&self, vm_name: &str, vm_config: &VmConfig) -> BlixardResult<()> {
+        #[cfg(feature = "observability")]
         let metrics = metrics();
 
         // Check recovery state
@@ -131,6 +132,7 @@ impl VmAutoRecovery {
         match restart_result {
             Ok(()) => {
                 info!("Successfully restarted VM '{}'", vm_name);
+                #[cfg(feature = "observability")]
                 metrics.vm_recovery_success.add(
                     1,
                     &[
@@ -144,6 +146,7 @@ impl VmAutoRecovery {
             }
             Err(e) => {
                 warn!("Failed to restart VM '{}': {}", vm_name, e);
+                #[cfg(feature = "observability")]
                 metrics.vm_recovery_failed.add(
                     1,
                     &[
@@ -202,6 +205,7 @@ impl VmAutoRecovery {
     /// Attempt to migrate the VM to another node
     async fn attempt_migration(&self, vm_name: &str, vm_config: &VmConfig) -> BlixardResult<()> {
         info!("Attempting migration for VM '{}'", vm_name);
+        #[cfg(feature = "observability")]
         let metrics = metrics();
 
         // Get the database to access scheduler
@@ -227,6 +231,7 @@ impl VmAutoRecovery {
                 "No alternative node available for VM '{}' migration",
                 vm_name
             );
+            #[cfg(feature = "observability")]
             metrics.vm_recovery_failed.add(
                 1,
                 &[
@@ -250,6 +255,7 @@ impl VmAutoRecovery {
         match self.node_state.migrate_vm(vm_name, placement.target_node_id).await {
             Ok(()) => {
                 info!("Successfully initiated migration for VM '{}'", vm_name);
+                #[cfg(feature = "observability")]
                 metrics.vm_recovery_success.add(
                     1,
                     &[
@@ -266,6 +272,7 @@ impl VmAutoRecovery {
             }
             Err(e) => {
                 error!("Failed to migrate VM '{}': {}", vm_name, e);
+                #[cfg(feature = "observability")]
                 metrics.vm_recovery_failed.add(
                     1,
                     &[

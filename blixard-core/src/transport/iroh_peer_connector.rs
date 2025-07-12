@@ -91,15 +91,13 @@ impl CircuitBreaker {
         self.consecutive_failures += 1;
         self.last_failure = Some(Instant::now());
 
-        if self.consecutive_failures >= self.failure_threshold {
-            if self.state != CircuitState::Open {
-                tracing::warn!(
-                    "Circuit breaker opening after {} failures",
-                    self.consecutive_failures
-                );
-                self.state = CircuitState::Open;
-                self.opened_at = Some(Instant::now());
-            }
+        if self.consecutive_failures >= self.failure_threshold && self.state != CircuitState::Open {
+            tracing::warn!(
+                "Circuit breaker opening after {} failures",
+                self.consecutive_failures
+            );
+            self.state = CircuitState::Open;
+            self.opened_at = Some(Instant::now());
         }
 
         if self.state == CircuitState::HalfOpen {
@@ -130,7 +128,7 @@ struct BufferedMessage {
 }
 
 #[derive(Debug, Clone)]
-enum MessageType {
+pub enum MessageType {
     RaftMessage,
     StatusQuery,
     HealthCheck,

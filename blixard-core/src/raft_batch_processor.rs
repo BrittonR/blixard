@@ -50,7 +50,15 @@ struct ProposalBatch {
 impl ProposalBatch {
     fn new() -> Self {
         Self {
-            proposals: Vec::new(),
+            proposals: Vec::with_capacity(32), // Pre-allocate for common batch sizes
+            total_size: 0,
+            created_at: Instant::now(),
+        }
+    }
+    
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            proposals: Vec::with_capacity(capacity),
             total_size: 0,
             created_at: Instant::now(),
         }
@@ -96,10 +104,10 @@ impl RaftBatchProcessor {
         node_id: u64,
     ) -> Self {
         Self {
-            config,
+            config: config.clone(),
             proposal_rx,
             raft_tx,
-            current_batch: Arc::new(RwLock::new(ProposalBatch::new())),
+            current_batch: Arc::new(RwLock::new(ProposalBatch::with_capacity(config.max_batch_size))),
             node_id,
         }
     }

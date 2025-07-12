@@ -358,7 +358,6 @@ impl MigrationStatus {
 }
 
 /// Utility functions for code migration
-
 /// Convert legacy tenant quota to resource manager limits
 pub fn convert_tenant_quota_to_limits(quota: &TenantQuota) -> Vec<ResourceLimits> {
     let mut limits = Vec::new();

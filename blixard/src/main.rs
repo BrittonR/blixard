@@ -1749,13 +1749,13 @@ async fn handle_reset_command(
         print!("❓ Are you sure you want to continue? (y/N): ");
         if let Err(e) = io::stdout().flush() {
             eprintln!("Error flushing stdout: {}", e);
-            return Err(BlixardError::Io(e));
+            return Err(BlixardError::IoError(e));
         }
 
         let mut input = String::new();
         if let Err(e) = io::stdin().read_line(&mut input) {
             eprintln!("Error reading input: {}", e);
-            return Err(BlixardError::Io(e));
+            return Err(BlixardError::IoError(e));
         }
         let input = input.trim().to_lowercase();
 

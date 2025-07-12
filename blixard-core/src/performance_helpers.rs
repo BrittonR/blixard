@@ -255,6 +255,116 @@ impl<T, E> ResultExt<T, E> for Result<T, E> {
     }
 }
 
+/// Object pool for reusing expensive-to-allocate objects
+pub struct ObjectPool<T> {
+    pool: parking_lot::Mutex<Vec<T>>,
+    factory: Box<dyn Fn() -> T + Send + Sync>,
+}
+
+impl<T> ObjectPool<T> {
+    pub fn new<F>(factory: F) -> Self 
+    where
+        F: Fn() -> T + Send + Sync + 'static,
+    {
+        Self {
+            pool: parking_lot::Mutex::new(Vec::new()),
+            factory: Box::new(factory),
+        }
+    }
+    
+    pub fn get(&self) -> PooledObject<T> {
+        let object = {
+            let mut pool = self.pool.lock();
+            pool.pop().unwrap_or_else(|| (self.factory)())
+        };
+        
+        PooledObject {
+            object: Some(object),
+            pool: &self.pool,
+        }
+    }
+}
+
+/// RAII wrapper that returns objects to pool on drop
+pub struct PooledObject<'a, T> {
+    object: Option<T>,
+    pool: &'a parking_lot::Mutex<Vec<T>>,
+}
+
+impl<'a, T> PooledObject<'a, T> {
+    pub fn get(&self) -> &T {
+        self.object.as_ref().unwrap()
+    }
+    
+    pub fn get_mut(&mut self) -> &mut T {
+        self.object.as_mut().unwrap()
+    }
+}
+
+impl<'a, T> Drop for PooledObject<'a, T> {
+    fn drop(&mut self) {
+        if let Some(object) = self.object.take() {
+            let mut pool = self.pool.lock();
+            // Limit pool size to prevent unbounded growth
+            if pool.len() < 32 {
+                pool.push(object);
+            }
+        }
+    }
+}
+
+impl<'a, T> std::ops::Deref for PooledObject<'a, T> {
+    type Target = T;
+    
+    fn deref(&self) -> &Self::Target {
+        self.object.as_ref().unwrap()
+    }
+}
+
+impl<'a, T> std::ops::DerefMut for PooledObject<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.object.as_mut().unwrap()
+    }
+}
+
+/// Pre-allocated hash map with known capacity for better performance
+pub type FastHashMap<K, V> = std::collections::HashMap<K, V>;
+pub type FastHashSet<T> = std::collections::HashSet<T>;
+
+/// Helper to create pre-allocated HashMap with capacity
+pub fn fast_hash_map_with_capacity<K, V>(capacity: usize) -> FastHashMap<K, V> {
+    std::collections::HashMap::with_capacity(capacity)
+}
+
+/// Helper to create pre-allocated HashSet with capacity
+pub fn fast_hash_set_with_capacity<T>(capacity: usize) -> FastHashSet<T> {
+    std::collections::HashSet::with_capacity(capacity)
+}
+
+/// Helper trait for efficient formatting (example implementation)
+/// In practice, use format_args! directly at call sites for best performance
+pub trait LazyFormat {
+    fn format_efficiently(&self) -> String;
+}
+
+impl LazyFormat for u64 {
+    fn format_efficiently(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl LazyFormat for f64 {
+    fn format_efficiently(&self) -> String {
+        format!("{:.2}", self)
+    }
+}
+
+impl<'a> LazyFormat for &'a str {
+    fn format_efficiently(&self) -> String {
+        (*self).to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,5 +394,30 @@ mod tests {
         let _ref2 = shared.as_ref(); // No clone
         
         assert_eq!(Arc::strong_count(&shared.inner), 1);
+    }
+    
+    #[test]
+    fn test_object_pool() {
+        let pool = ObjectPool::new(|| Vec::<i32>::with_capacity(10));
+        
+        {
+            let mut obj1 = pool.get();
+            obj1.push(1);
+            obj1.push(2);
+            assert_eq!(obj1.len(), 2);
+        } // Object returned to pool here
+        
+        {
+            let obj2 = pool.get();
+            // Should reuse the object from pool, but it might be cleared
+            assert!(obj2.capacity() >= 10);
+        }
+    }
+    
+    #[test]
+    fn test_fast_hash_map() {
+        let mut map = fast_hash_map_with_capacity::<String, i32>(10);
+        map.insert("test".to_string(), 42);
+        assert_eq!(map.get("test"), Some(&42));
     }
 }
