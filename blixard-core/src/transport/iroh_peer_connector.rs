@@ -216,6 +216,18 @@ pub struct IrohPeerConnector {
     p2p_monitor: Arc<dyn P2pMonitor>,
 }
 
+impl std::fmt::Debug for IrohPeerConnector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IrohPeerConnector")
+            .field("endpoint", &format!("Endpoint({})", self.endpoint.node_id()))
+            .field("connections", &self.connections.len())
+            .field("connection_count", &"Arc<Mutex<usize>>")
+            .field("shutdown_tx", &"watch::Sender<bool>")
+            .field("background_tasks", &format!("Mutex<Vec<JoinHandle<{}>>> (len: {})", "()", self.background_tasks.try_lock().map(|t| t.len()).unwrap_or(0)))
+            .finish()
+    }
+}
+
 impl IrohPeerConnector {
     /// Create a new Iroh peer connector
     pub fn new(

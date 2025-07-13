@@ -211,14 +211,15 @@ impl BlixardOrchestrator {
 
         // Get P2P information from Iroh transport
         let (iroh_node_id, direct_addresses, relay_url) =
-            if let Some(node_addr_str) = shared.get_p2p_node_addr() {
-                // For now, we'll use the node address string as the node ID
-                // TODO: Parse the actual node address structure when available
+            if let Some(node_addr) = shared.get_p2p_node_addr().await {
+                // Extract components from NodeAddr
                 let node_id_base64 = base64::prelude::BASE64_STANDARD.encode(
-                    node_addr_str.as_bytes(),
+                    node_addr.node_id.as_bytes(),
                 );
-                let addresses = vec![node_addr_str.clone()];
-                let relay = None; // TODO: Extract relay URL when structure is available
+                let addresses: Vec<String> = node_addr.direct_addresses()
+                    .map(|addr| addr.to_string())
+                    .collect();
+                let relay = node_addr.relay_url().map(|url| url.to_string());
                 (node_id_base64, addresses, relay)
             } else {
                 tracing::warn!("P2P node address not available, using placeholder values");

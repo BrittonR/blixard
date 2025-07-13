@@ -50,10 +50,14 @@ impl ClusterOperations for ClusterOperationsAdapter {
 
         // Get our P2P info if available
         let (our_p2p_node_id, our_p2p_addresses, our_p2p_relay_url) =
-            // TODO: Fix API mismatch - get_p2p_node_addr() returns Option<String> not iroh::NodeAddr
-            if let Some(node_addr_str) = self.shared_state.get_p2p_node_addr() {
-                // For now, return the string as node ID and empty addresses
-                (Some(node_addr_str), Vec::new(), None)
+            if let Some(node_addr) = self.shared_state.get_p2p_node_addr().await {
+                // Extract components from NodeAddr
+                let node_id_str = node_addr.node_id.to_string();
+                let addresses: Vec<String> = node_addr.direct_addresses()
+                    .map(|addr| addr.to_string())
+                    .collect();
+                let relay_url = node_addr.relay_url().map(|url| url.to_string());
+                (Some(node_id_str), addresses, relay_url)
             } else {
                 (None, Vec::new(), None)
             };
@@ -77,7 +81,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
                     p2p_addresses: p2p_addresses.clone(),
                     p2p_relay_url: p2p_relay_url.clone(),
                 };
-                self.shared_state.add_peer_with_p2p(node_id, peer_info);
+                self.shared_state.add_peer_with_p2p(node_id, peer_info).await;
             } else {
                 let peer_info = crate::p2p_manager::PeerInfo {
                     node_id: node_id.to_string(),
@@ -95,14 +99,14 @@ impl ClusterOperations for ClusterOperationsAdapter {
                     p2p_addresses: Vec::new(),
                     p2p_relay_url: None,
                 };
-                self.shared_state.add_peer(node_id, peer_info);
+                self.shared_state.add_peer(node_id, peer_info).await;
             }
         } else {
             debug!("Peer {} already exists, updating P2P info", node_id);
             // Update P2P info if provided
             if p2p_node_id.is_some() || !p2p_addresses.is_empty() {
                 // Remove and re-add to update P2P info
-                self.shared_state.remove_peer(node_id);
+                self.shared_state.remove_peer(node_id).await;
                 let peer_info = crate::p2p_manager::PeerInfo {
                     node_id: p2p_node_id.clone().unwrap_or_else(|| node_id.to_string()),
                     address: addr.to_string(),
@@ -119,7 +123,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
                     p2p_addresses: p2p_addresses.clone(),
                     p2p_relay_url: p2p_relay_url.clone(),
                 };
-                self.shared_state.add_peer_with_p2p(node_id, peer_info);
+                self.shared_state.add_peer_with_p2p(node_id, peer_info).await;
             }
         }
 
@@ -283,7 +287,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
                 info!("Node {} successfully left cluster", node_id);
 
                 // Remove peer from our peer list
-                self.shared_state.remove_peer(node_id);
+                self.shared_state.remove_peer(node_id).await;
 
                 Ok((true, "Successfully left cluster".to_string()))
             }
@@ -309,10 +313,14 @@ impl ClusterOperations for ClusterOperationsAdapter {
 
         // Get our P2P info if available
         let (our_p2p_node_id, our_p2p_addresses, our_p2p_relay_url) =
-            // TODO: Fix API mismatch - get_p2p_node_addr() returns Option<String> not iroh::NodeAddr
-            if let Some(node_addr_str) = self.shared_state.get_p2p_node_addr() {
-                // For now, return the string as node ID and empty addresses
-                (Some(node_addr_str), Vec::new(), None)
+            if let Some(node_addr) = self.shared_state.get_p2p_node_addr().await {
+                // Extract components from NodeAddr
+                let node_id_str = node_addr.node_id.to_string();
+                let addresses: Vec<String> = node_addr.direct_addresses()
+                    .map(|addr| addr.to_string())
+                    .collect();
+                let relay_url = node_addr.relay_url().map(|url| url.to_string());
+                (Some(node_id_str), addresses, relay_url)
             } else {
                 (None, Vec::new(), None)
             };

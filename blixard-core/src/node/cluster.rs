@@ -75,7 +75,7 @@ impl Node {
                     p2p_relay_url: None,
                 };
                 self.shared
-                    .add_peer_with_p2p(bootstrap_info.node_id, peer_info);
+                    .add_peer_with_p2p(bootstrap_info.node_id, peer_info).await;
 
                 // Execute HTTP bootstrap join
                 self.execute_http_bootstrap_join(
@@ -93,10 +93,14 @@ impl Node {
 
     /// Gather local P2P info if available
     async fn gather_local_p2p_info(&self) -> (Option<String>, Vec<String>, Option<String>) {
-        // TODO: Fix API mismatch - get_p2p_node_addr() returns Option<String> not iroh::NodeAddr
-        if let Some(node_addr_str) = self.shared.get_p2p_node_addr() {
-            // For now, return the string as node ID and empty addresses
-            (Some(node_addr_str), Vec::new(), None)
+        if let Some(node_addr) = self.shared.get_p2p_node_addr().await {
+            // Extract components from NodeAddr
+            let node_id_str = node_addr.node_id.to_string();
+            let addresses: Vec<String> = node_addr.direct_addresses()
+                .map(|addr| addr.to_string())
+                .collect();
+            let relay_url = node_addr.relay_url().map(|url| url.to_string());
+            (Some(node_id_str), addresses, relay_url)
         } else {
             (None, Vec::new(), None)
         }
@@ -258,7 +262,7 @@ impl Node {
                         p2p_addresses: node_info.addresses.iter().map(|a| a.to_string()).collect(),
                         p2p_relay_url: None,
                     };
-                    self.shared.add_peer_with_p2p(leader_node_id, peer_info);
+                    self.shared.add_peer_with_p2p(leader_node_id, peer_info).await;
 
                     // Now we can make the P2P connection
                     if let Some(p2p_manager) = self.shared.get_p2p_manager() {
@@ -303,15 +307,53 @@ impl Node {
     /// Execute P2P join request
     async fn execute_p2p_join_request(
         &self,
-        _node_addr: &iroh::NodeAddr,
-        _p2p_node_id: &Option<String>,
-        _p2p_addresses: &[String],
-        _p2p_relay_url: &Option<String>,
+        node_addr: &iroh::NodeAddr,
+        p2p_node_id: &Option<String>,
+        p2p_addresses: &[String],
+        p2p_relay_url: &Option<String>,
     ) -> BlixardResult<(bool, String, Vec<crate::iroh_types::NodeInfo>, Vec<u64>)> {
-        // TODO: Fix to handle proper endpoint retrieval
-        Err(BlixardError::NotImplemented {
-            feature: "P2P cluster join".to_string(),
-        })
+        // Get the P2P manager and endpoint
+        if let Some(p2p_manager) = self.shared.get_p2p_manager() {
+            let (endpoint, _our_node_id) = p2p_manager.get_endpoint();
+            
+            // Create P2P client for the join request
+            let transport_client = crate::transport::iroh_client::IrohClusterServiceClient::new(
+                Arc::new(endpoint),
+                node_addr.clone(),
+            );
+
+            // Send join request with our node info
+            let our_node_id = self.shared.get_id();
+            let our_bind_address = self.shared.get_bind_addr().to_string();
+            
+            // Get our P2P info
+            let (our_p2p_node_id, our_p2p_addresses, our_p2p_relay_url) =
+                if let Some(node_addr) = self.shared.get_p2p_node_addr().await {
+                    let node_id_str = node_addr.node_id.to_string();
+                    let addresses: Vec<String> = node_addr.direct_addresses()
+                        .map(|addr| addr.to_string())
+                        .collect();
+                    let relay_url = node_addr.relay_url().map(|url| url.to_string());
+                    (Some(node_id_str), addresses, relay_url)
+                } else {
+                    (p2p_node_id.clone(), p2p_addresses.to_vec(), p2p_relay_url.clone())
+                };
+
+            // Execute the join request
+            transport_client
+                .join_cluster(
+                    our_node_id,
+                    our_bind_address,
+                    our_p2p_node_id,
+                    our_p2p_addresses,
+                    our_p2p_relay_url,
+                )
+                .await
+        } else {
+            Err(BlixardError::Internal {
+                message: "P2P manager not available".to_string(),
+            })
+        }
     }
 
     /// Update shared state after joining cluster
@@ -354,7 +396,7 @@ impl Node {
                     p2p_addresses: vec![],
                     p2p_relay_url: None,
                 };
-                self.shared.add_peer_with_p2p(peer_info.id, p2p_peer_info);
+                self.shared.add_peer_with_p2p(peer_info.id, p2p_peer_info).await;
 
                 // Establish P2P connection to this peer
                 if let Ok(node_id_parsed) = peer_info.p2p_node_id.parse::<iroh::NodeId>() {
@@ -434,9 +476,14 @@ impl Node {
             let our_node_id = self.shared.get_id();
             let our_bind_address = self.shared.get_bind_addr().to_string();
             let (our_p2p_node_id, our_p2p_addresses, our_p2p_relay_url) =
-                if let Some(node_addr_str) = self.shared.get_p2p_node_addr() {
-                    // TODO: Parse node_addr_str into proper components when p2p is fully implemented
-                    (Some(node_addr_str), Vec::new(), None)
+                if let Some(node_addr) = self.shared.get_p2p_node_addr().await {
+                    // Extract components from NodeAddr
+                    let node_id_str = node_addr.node_id.to_string();
+                    let addresses: Vec<String> = node_addr.direct_addresses()
+                        .map(|addr| addr.to_string())
+                        .collect();
+                    let relay_url = node_addr.relay_url().map(|url| url.to_string());
+                    (Some(node_id_str), addresses, relay_url)
                 } else {
                     (None, Vec::new(), None)
                 };

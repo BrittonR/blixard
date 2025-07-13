@@ -48,6 +48,9 @@ impl RaftTransport {
         let local_node_id = endpoint.node_id();
         tracing::info!("Created Raft transport with Iroh node ID: {}", local_node_id);
         
+        // Store the endpoint in SharedNodeState for other components to access
+        node.set_iroh_endpoint(Some(endpoint.clone())).await;
+        
         // Create the IrohRaftTransport
         let iroh_transport = Arc::new(IrohRaftTransport::new(
             node,

@@ -126,17 +126,32 @@ fn handle_not_found() -> Response<Body> {
 
 /// Get bootstrap information from shared state
 async fn get_bootstrap_info(shared_state: &SharedNodeState) -> BlixardResult<BootstrapInfo> {
-    // Get the Iroh endpoint information (stub implementation for now)
-    let endpoint_info = shared_state.get_iroh_endpoint().ok_or_else(|| {
+    // Get the Iroh endpoint information
+    let endpoint = shared_state.get_iroh_endpoint().await.ok_or_else(|| {
         crate::error::BlixardError::NotInitialized {
             component: "Iroh endpoint".to_string(),
         }
     })?;
 
-    // For now, use placeholder values since endpoint is not fully implemented
-    let p2p_addresses = vec![endpoint_info]; // Use the endpoint string as address
-    let p2p_relay_url = None;
-    let p2p_node_id = "placeholder_node_id".to_string(); // TODO: Get real node ID
+    // Get P2P node address if available
+    let (p2p_node_id, p2p_addresses, p2p_relay_url) = 
+        if let Some(node_addr) = shared_state.get_p2p_node_addr().await {
+            let node_id_str = node_addr.node_id.to_string();
+            let addresses: Vec<String> = node_addr.direct_addresses()
+                .map(|addr| addr.to_string())
+                .collect();
+            let relay_url = node_addr.relay_url().map(|url| url.to_string());
+            (node_id_str, addresses, relay_url)
+        } else {
+            // Fallback to endpoint info
+            let node_id_str = endpoint.node_id().to_string();
+            let addresses = if let Some(socket) = endpoint.bound_sockets().first() {
+                vec![socket.to_string()]
+            } else {
+                vec!["127.0.0.1:0".to_string()]
+            };
+            (node_id_str, addresses, None)
+        };
 
     Ok(BootstrapInfo {
         node_id: shared_state.get_id(),

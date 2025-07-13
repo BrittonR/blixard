@@ -380,19 +380,19 @@ impl IrohRaftTransport {
         // Create NodeAddr with the peer's P2P addresses
         let mut node_addr = iroh::NodeAddr::new(iroh_node_id);
 
-        // TODO: Add relay URL if available - p2p_relay_url field doesn't exist in PeerInfo
-        // Need to extend PeerInfo with Iroh-specific fields when P2P is fully implemented
-        // if let Some(ref relay_url) = peer_info.p2p_relay_url {
-        //     if let Ok(relay) = relay_url.parse() {
-        //         node_addr = node_addr.with_relay_url(relay);
-        //     }
-        // }
+        // Add relay URL if available
+        if let Some(ref relay_url) = peer_info.p2p_relay_url {
+            if !relay_url.is_empty() {
+                if let Ok(relay) = relay_url.parse() {
+                    node_addr = node_addr.with_relay_url(relay);
+                }
+            }
+        }
 
-        // TODO: Add direct addresses - p2p_addresses field doesn't exist in PeerInfo
-        // For now, try to parse the address field as a socket address
-        let addrs: Vec<std::net::SocketAddr> = vec![peer_info.address.parse().ok()]
-            .into_iter()
-            .flatten()
+        // Add direct P2P addresses
+        let addrs: Vec<std::net::SocketAddr> = peer_info.p2p_addresses
+            .iter()
+            .filter_map(|addr_str| addr_str.parse().ok())
             .collect();
         if !addrs.is_empty() {
             node_addr = node_addr.with_direct_addresses(addrs);

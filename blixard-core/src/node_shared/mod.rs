@@ -16,7 +16,8 @@ use std::{
     collections::HashMap,
     sync::Arc,
 };
-use tokio::sync::RwLock as AsyncRwLock;
+use tokio::sync::{RwLock as AsyncRwLock, Mutex};
+use iroh::{Endpoint, NodeAddr};
 
 // Type aliases for complex types
 type DatabaseHandle = OptionalArc<Database>;
@@ -59,6 +60,15 @@ pub struct SharedNodeState {
 
     /// Local node status flags
     is_leader: AtomicCounter,
+
+    /// Iroh endpoint for P2P communication (when available)
+    iroh_endpoint: Arc<Mutex<Option<Endpoint>>>,
+
+    /// Our Iroh node address for peer discovery
+    iroh_node_addr: Arc<Mutex<Option<NodeAddr>>>,
+
+    /// Peer connector for managing P2P connections
+    peer_connector: Arc<Mutex<Option<Arc<crate::transport::iroh_peer_connector::IrohPeerConnector>>>>,
 }
 
 impl SharedNodeState {
@@ -71,6 +81,9 @@ impl SharedNodeState {
             cluster_members: ClusterMembers::new(AsyncRwLock::new(HashMap::new())),
             leader_id: LeaderIdState::new(AsyncRwLock::new(None)),
             is_leader: AtomicCounter::new(0),
+            iroh_endpoint: Arc::new(Mutex::new(None)),
+            iroh_node_addr: Arc::new(Mutex::new(None)),
+            peer_connector: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -321,14 +334,28 @@ impl SharedNodeState {
         self.add_cluster_member(_node_id, _peer_info).await;
     }
 
-    pub fn get_p2p_node_addr(&self) -> Option<String> {
-        // TODO: Return actual P2P node address
-        None
+    pub async fn get_p2p_node_addr(&self) -> Option<NodeAddr> {
+        let addr = self.iroh_node_addr.lock().await;
+        addr.clone()
     }
 
-    pub fn get_iroh_endpoint(&self) -> Option<String> {
-        // TODO: Return actual Iroh endpoint
-        None
+    pub async fn get_iroh_endpoint(&self) -> Option<Endpoint> {
+        let endpoint = self.iroh_endpoint.lock().await;
+        endpoint.clone()
+    }
+
+    /// Set the Iroh endpoint
+    pub async fn set_iroh_endpoint(&self, endpoint: Option<Endpoint>) {
+        let mut stored_endpoint = self.iroh_endpoint.lock().await;
+        *stored_endpoint = endpoint.clone();
+        
+        // If we have an endpoint, also store the node address
+        if let Some(ref ep) = endpoint {
+            let node_id = ep.node_id();
+            let node_addr = NodeAddr::new(node_id);
+            let mut stored_addr = self.iroh_node_addr.lock().await;
+            *stored_addr = Some(node_addr);
+        }
     }
 
     pub async fn submit_task(
@@ -478,9 +505,15 @@ impl SharedNodeState {
 
     pub fn set_peer_connector(
         &self,
-        _connector: Arc<crate::transport::iroh_peer_connector::IrohPeerConnector>,
+        connector: Arc<crate::transport::iroh_peer_connector::IrohPeerConnector>,
     ) {
-        // TODO: Store peer connector reference
+        tokio::spawn({
+            let peer_connector = self.peer_connector.clone();
+            async move {
+                let mut stored_connector = peer_connector.lock().await;
+                *stored_connector = Some(connector);
+            }
+        });
     }
 
     pub fn set_shutdown_tx(&self, _tx: tokio::sync::oneshot::Sender<()>) {
