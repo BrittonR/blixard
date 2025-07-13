@@ -115,7 +115,8 @@ impl VmAutoRecovery {
                 self.handle_restart_success(vm_name, &mut states).await
             }
             Err(e) => {
-                self.handle_restart_failure(vm_name, vm_config, e).await
+                let mut states = self.recovery_states.write().await;
+                self.handle_restart_failure(vm_name, vm_config, e, &mut states).await
             }
         }
     }
@@ -210,10 +211,13 @@ impl VmAutoRecovery {
         vm_name: &str,
         vm_config: &VmConfig,
         error: BlixardError,
+        states: &mut HashMap<String, VmRecoveryState>,
     ) -> BlixardResult<()> {
-        // Re-acquire lock to access state
-        let mut states = self.recovery_states.write().await;
-        let state = states.get_mut(vm_name).unwrap(); // Safe: we just created/accessed it
+        let state = states.get_mut(vm_name).ok_or_else(|| {
+            BlixardError::Internal {
+                message: format!("Recovery state missing for VM '{}' during failure handling", vm_name),
+            }
+        })?;
         warn!("Failed to restart VM '{}': {}", vm_name, error);
         
         #[cfg(feature = "observability")]
