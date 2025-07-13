@@ -71,6 +71,72 @@ macro_rules! security_err {
     };
 }
 
+/// Convert an error to IoError
+#[macro_export]
+macro_rules! io_err {
+    ($result:expr) => {
+        $result.map_err(|e| $crate::error::BlixardError::IoError(Box::new(e)))
+    };
+}
+
+/// Convert an error to SerializationError
+#[macro_export]
+macro_rules! serialization_err {
+    ($result:expr, $($arg:tt)*) => {
+        $result.map_err(|e| $crate::error::BlixardError::SerializationError(
+            format!($($arg)*, e)
+        ))
+    };
+}
+
+/// Convert an error to LockPoisoned
+#[macro_export]
+macro_rules! lock_poisoned {
+    ($result:expr, $resource:expr) => {
+        $result.map_err(|_| $crate::error::BlixardError::LockPoisoned {
+            resource: $resource.to_string(),
+        })
+    };
+}
+
+/// Convert an error to RaftStorageError
+#[macro_export]
+macro_rules! raft_storage_err {
+    ($result:expr, $($arg:tt)*) => {
+        $result.map_err(|e| $crate::error::BlixardError::RaftStorageError(
+            format!($($arg)*, e)
+        ))
+    };
+}
+
+/// Convert an error to P2P error with formatted message
+#[macro_export]
+macro_rules! p2p_err {
+    ($result:expr, $($arg:tt)*) => {
+        $result.map_err(|e| $crate::error::BlixardError::P2P(
+            format!($($arg)*, e)
+        ))
+    };
+}
+
+/// Convert an error to CertificateError
+#[macro_export]
+macro_rules! cert_err {
+    ($result:expr, $($arg:tt)*) => {
+        $result.map_err(|e| $crate::error::BlixardError::CertificateError(
+            format!($($arg)*, e)
+        ))
+    };
+}
+
+/// Convert an error to DatabaseError
+#[macro_export]
+macro_rules! db_err {
+    ($result:expr) => {
+        $result.map_err(|e| $crate::error::BlixardError::DatabaseError(e))
+    };
+}
+
 /// Convert None to NotFound error
 #[macro_export]
 macro_rules! or_not_found {
