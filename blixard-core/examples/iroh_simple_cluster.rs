@@ -6,7 +6,7 @@ use blixard_core::node_shared::SharedNodeState;
 use blixard_core::transport::config::{IrohConfig, TransportConfig};
 use blixard_core::transport::iroh_health_service::IrohHealthService;
 use blixard_core::transport::iroh_service::{IrohRpcClient, IrohRpcServer};
-use blixard_core::types::NodeConfig;
+use blixard_core::types::{NodeConfig, NodeTopology};
 use iroh::{Endpoint, NodeAddr, SecretKey};
 use std::sync::Arc;
 use std::time::Duration;
@@ -40,7 +40,7 @@ async fn main() -> BlixardResult<()> {
     let node1_addr = NodeAddr::new(node1.endpoint.node_id()).with_direct_addresses(addrs);
 
     println!("Node 1 ID: {}", node1.endpoint.node_id());
-    println!("Node 1 addr: {:?}", node1_addr.direct_addresses());
+    println!("Node 1 addr: {:?}", node1_addr.direct_addresses().collect::<Vec<_>>());
 
     // Test health check via RPC
     let request = HealthCheckRequest {};
@@ -55,8 +55,11 @@ async fn main() -> BlixardResult<()> {
     {
         Ok(response) => {
             println!("✓ Health check successful!");
-            println!("  Status: {}", response.status);
+            println!("  Healthy: {}", response.healthy);
             println!("  Message: {}", response.message);
+            if let Some(status) = &response.status {
+                println!("  Status: {}", status);
+            }
         }
         Err(e) => {
             println!("✗ Health check failed: {}", e);
@@ -93,6 +96,7 @@ async fn create_node(id: u64) -> BlixardResult<TestNode> {
         join_addr: None,
         use_tailscale: false,
         transport_config: Some(IrohConfig::default()),
+        topology: NodeTopology::default(),
     };
 
     // Create Iroh endpoint

@@ -6,6 +6,7 @@ use blixard_core::{
         iroh_health_service::{IrohHealthClient, IrohHealthService},
         iroh_service::{IrohRpcClient, IrohRpcServer},
     },
+    types::{NodeConfig, NodeTopology},
 };
 use iroh::{Endpoint, NodeAddr};
 use std::sync::Arc;
@@ -29,7 +30,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let server = Arc::new(IrohRpcServer::new(server_endpoint));
 
     // Create and register health service
-    let node_state = Arc::new(SharedNodeState::new(1));
+    let node_config = NodeConfig {
+        id: 1,
+        bind_addr: "127.0.0.1:7001".parse().unwrap(),
+        data_dir: "/tmp/iroh-test-demo".to_string(),
+        vm_backend: "test".to_string(),
+        join_addr: None,
+        use_tailscale: false,
+        transport_config: None,
+        topology: NodeTopology::default(),
+    };
+    let node_state = Arc::new(SharedNodeState::new(node_config));
     let health_service = IrohHealthService::new(node_state);
     server.register_service(health_service).await;
 
@@ -58,10 +69,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match health_client.check().await {
         Ok(response) => {
             println!("Health check response:");
-            println!("  Status: {}", response.status);
-            println!("  Node ID: {}", response.node_id);
-            println!("  Uptime: {} seconds", response.uptime);
-            println!("  Connected peers: {:?}", response.connected_peers);
+            println!("  Healthy: {}", response.healthy);
+            println!("  Message: {}", response.message);
         }
         Err(e) => {
             eprintln!("Health check failed: {}", e);
