@@ -13,3 +13,11 @@ pub struct GetP2pStatusResponse {
     pub direct_addresses: Vec<String>,
     pub relay_url: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BootstrapInfo {
+    pub node_id: u64,                    // Cluster node ID
+    pub p2p_node_id: String,            // Iroh P2P node ID (base64)
+    pub p2p_addresses: Vec<String>,     // Direct P2P addresses
+    pub p2p_relay_url: Option<String>,  // Optional relay URL
+}

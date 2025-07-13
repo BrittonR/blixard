@@ -58,6 +58,30 @@ pub enum NodeState {
     NodeStateLeader = 3,
 }
 
+// Protocol compatibility conversions
+impl From<NodeState> for i32 {
+    fn from(state: NodeState) -> Self {
+        state as i32
+    }
+}
+
+impl TryFrom<i32> for NodeState {
+    type Error = crate::error::BlixardError;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(NodeState::NodeStateUnknown),
+            1 => Ok(NodeState::NodeStateFollower),
+            2 => Ok(NodeState::NodeStateCandidate),
+            3 => Ok(NodeState::NodeStateLeader),
+            _ => Err(crate::error::BlixardError::ConfigurationError {
+                component: "node_state".to_string(),
+                message: format!("Invalid node state code {}. Valid codes: 0-3", value),
+            }),
+        }
+    }
+}
+
 impl NodeInfo {
     pub fn new(id: u64, address: String, p2p_node_id: String) -> Self {
         Self {

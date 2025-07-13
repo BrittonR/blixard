@@ -327,14 +327,16 @@ impl VmAutoRecovery {
                 vm_name
             );
             #[cfg(feature = "observability")]
-            metrics.vm_recovery_failed.add(
-                1,
-                &[
-                    attributes::vm_name(vm_name),
-                    attributes::recovery_type("migration"),
-                    attributes::error(true),
-                ],
-            );
+            if let Some(m) = &metrics {
+                m.vm_recovery_failed.add(
+                    1,
+                    &[
+                        attributes::vm_name(vm_name),
+                        attributes::recovery_type("migration"),
+                        attributes::error(true),
+                    ],
+                );
+            }
             return Err(BlixardError::VmOperationFailed {
                 operation: "auto_recovery_migration".to_string(),
                 details: "No alternative node available for migration".to_string(),
@@ -355,13 +357,15 @@ impl VmAutoRecovery {
             Ok(()) => {
                 info!("Successfully initiated migration for VM '{}'", vm_name);
                 #[cfg(feature = "observability")]
-                metrics.vm_recovery_success.add(
-                    1,
-                    &[
-                        attributes::vm_name(vm_name),
-                        attributes::recovery_type("migration"),
-                    ],
-                );
+                if let Some(m) = &metrics {
+                    m.vm_recovery_success.add(
+                        1,
+                        &[
+                            attributes::vm_name(vm_name),
+                            attributes::recovery_type("migration"),
+                        ],
+                    );
+                }
 
                 // Clear recovery state after successful migration
                 let mut states = self.recovery_states.write().await;
@@ -372,14 +376,16 @@ impl VmAutoRecovery {
             Err(e) => {
                 error!("Failed to migrate VM '{}': {}", vm_name, e);
                 #[cfg(feature = "observability")]
-                metrics.vm_recovery_failed.add(
-                    1,
-                    &[
-                        attributes::vm_name(vm_name),
-                        attributes::recovery_type("migration"),
-                        attributes::error(true),
-                    ],
-                );
+                if let Some(m) = &metrics {
+                    m.vm_recovery_failed.add(
+                        1,
+                        &[
+                            attributes::vm_name(vm_name),
+                            attributes::recovery_type("migration"),
+                            attributes::error(true),
+                        ],
+                    );
+                }
 
                 // Mark recovery as exhausted
                 let mut states = self.recovery_states.write().await;

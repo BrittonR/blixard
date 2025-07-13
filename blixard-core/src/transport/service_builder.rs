@@ -235,13 +235,15 @@ impl BuiltService {
 
         // Increment request counter
         #[cfg(feature = "observability")]
-        metrics.grpc_requests_total.add(
-            1,
-            &[
-                attributes::method(method),
-                attributes::service_name(&self.name),
-            ],
-        );
+        if let Some(m) = &metrics {
+            m.grpc_requests_total.add(
+                1,
+                &[
+                    attributes::method(method),
+                    attributes::service_name(&self.name),
+                ],
+            );
+        }
 
         // Find and execute handler
         match self.methods.get(method) {
@@ -250,9 +252,9 @@ impl BuiltService {
 
                 // Record success/failure metrics
                 #[cfg(feature = "observability")]
-                {
+                if let Some(m) = &metrics {
                     let status = if result.is_ok() { "success" } else { "error" };
-                    metrics.grpc_requests_total.add(
+                    m.grpc_requests_total.add(
                         1,
                         &[
                             attributes::method(method),

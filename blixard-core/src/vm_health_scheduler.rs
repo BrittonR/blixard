@@ -187,13 +187,15 @@ impl HealthCheckScheduler {
                             vm_config.name, e
                         );
                         #[cfg(feature = "observability")]
-                        metrics.vm_health_check_failed.add(
-                            1,
-                            &[
-                                attributes::vm_name(&vm_config.name),
-                                attributes::error(true),
-                            ],
-                        );
+                        if let Some(m) = &metrics {
+                            m.vm_health_check_failed.add(
+                                1,
+                                &[
+                                    attributes::vm_name(&vm_config.name),
+                                    attributes::error(true),
+                                ],
+                            );
+                        }
                     }
                 }
             }
@@ -201,15 +203,14 @@ impl HealthCheckScheduler {
 
         // Record overall metrics
         #[cfg(feature = "observability")]
-        metrics
-            .vm_health_checks_total
-            .add(checked_count, &[attributes::node_id(node_id)]);
+        if let Some(m) = &metrics {
+            m.vm_health_checks_total
+                .add(checked_count, &[attributes::node_id(node_id)]);
 
-        #[cfg(feature = "observability")]
-        if unhealthy_count > 0 {
-            metrics
-                .vm_unhealthy_total
-                .add(unhealthy_count, &[attributes::node_id(node_id)]);
+            if unhealthy_count > 0 {
+                m.vm_unhealthy_total
+                    .add(unhealthy_count, &[attributes::node_id(node_id)]);
+            }
         }
 
         Ok(())
@@ -323,9 +324,7 @@ impl HealthCheckScheduler {
     /// Record health metrics for a VM
     fn record_health_metrics(&self, vm_name: &str, health_status: &VmHealthStatus) {
         #[cfg(feature = "observability")]
-        {
-            let metrics = safe_metrics().ok();
-
+        if let Some(metrics) = safe_metrics().ok() {
             match health_status.state {
                 HealthState::Healthy => {
                     metrics.vm_health_state.add(
