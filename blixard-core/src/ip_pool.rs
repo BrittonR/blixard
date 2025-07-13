@@ -198,7 +198,8 @@ impl IpPoolConfig {
     pub fn validate(&self) -> BlixardResult<()> {
         // Check gateway is within subnet
         if !self.subnet.contains(&self.gateway) {
-            return Err(BlixardError::InvalidConfiguration {
+            return Err(BlixardError::ConfigurationError {
+                component: "ip_pool.gateway".to_string(),
                 message: format!(
                     "Gateway {} is not within subnet {}",
                     self.gateway, self.subnet
@@ -208,7 +209,8 @@ impl IpPoolConfig {
 
         // Check allocation range is within subnet
         if !self.subnet.contains(&self.allocation_start) {
-            return Err(BlixardError::InvalidConfiguration {
+            return Err(BlixardError::ConfigurationError {
+                component: "ip_pool.allocation_start".to_string(),
                 message: format!(
                     "Allocation start {} is not within subnet {}",
                     self.allocation_start, self.subnet
@@ -217,7 +219,8 @@ impl IpPoolConfig {
         }
 
         if !self.subnet.contains(&self.allocation_end) {
-            return Err(BlixardError::InvalidConfiguration {
+            return Err(BlixardError::ConfigurationError {
+                component: "ip_pool.allocation_end".to_string(),
                 message: format!(
                     "Allocation end {} is not within subnet {}",
                     self.allocation_end, self.subnet
@@ -229,20 +232,23 @@ impl IpPoolConfig {
         match (self.allocation_start, self.allocation_end) {
             (IpAddr::V4(start), IpAddr::V4(end)) => {
                 if u32::from(start) > u32::from(end) {
-                    return Err(BlixardError::InvalidConfiguration {
+                    return Err(BlixardError::ConfigurationError {
+                        component: "ip_pool.allocation_range".to_string(),
                         message: "Allocation start is after allocation end".to_string(),
                     });
                 }
             }
             (IpAddr::V6(start), IpAddr::V6(end)) => {
                 if u128::from(start) > u128::from(end) {
-                    return Err(BlixardError::InvalidConfiguration {
+                    return Err(BlixardError::ConfigurationError {
+                        component: "ip_pool.allocation_range".to_string(),
                         message: "Allocation start is after allocation end".to_string(),
                     });
                 }
             }
             _ => {
-                return Err(BlixardError::InvalidConfiguration {
+                return Err(BlixardError::ConfigurationError {
+                    component: "ip_pool.allocation_range".to_string(),
                     message: "Allocation range addresses must be same IP version".to_string(),
                 });
             }
@@ -251,7 +257,8 @@ impl IpPoolConfig {
         // Check reserved IPs are within subnet
         for ip in &self.reserved_ips {
             if !self.subnet.contains(ip) {
-                return Err(BlixardError::InvalidConfiguration {
+                return Err(BlixardError::ConfigurationError {
+                    component: "ip_pool.reserved_ips".to_string(),
                     message: format!("Reserved IP {} is not within subnet {}", ip, self.subnet),
                 });
             }
@@ -260,7 +267,8 @@ impl IpPoolConfig {
         // Validate VLAN ID if specified
         if let Some(vlan) = self.vlan_id {
             if vlan == 0 || vlan > 4094 {
-                return Err(BlixardError::InvalidConfiguration {
+                return Err(BlixardError::ConfigurationError {
+                    component: "ip_pool.vlan_id".to_string(),
                     message: format!("Invalid VLAN ID {}: must be 1-4094", vlan),
                 });
             }

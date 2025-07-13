@@ -247,8 +247,8 @@ impl std::str::FromStr for VmStatus {
             "stopping" => Ok(VmStatus::Stopping),
             "stopped" => Ok(VmStatus::Stopped),
             "failed" => Ok(VmStatus::Failed),
-            _ => Err(crate::error::BlixardError::InvalidInput {
-                field: "vm_status".to_string(),
+            _ => Err(crate::error::BlixardError::ConfigurationError {
+                component: "vm_status".to_string(),
                 message: format!("Invalid VM status '{}'. Valid values: creating, starting, running, stopping, stopped, failed", s),
             }),
         }
@@ -296,8 +296,8 @@ impl TryFrom<i32> for VmStatus {
             4 => Ok(VmStatus::Stopping),
             5 => Ok(VmStatus::Stopped),
             6 => Ok(VmStatus::Failed),
-            _ => Err(crate::error::BlixardError::InvalidInput {
-                field: "vm_status".to_string(),
+            _ => Err(crate::error::BlixardError::ConfigurationError {
+                component: "vm_status".to_string(),
                 message: format!("Invalid VM status code {}. Valid codes: 1-6", value),
             }),
         }
@@ -346,8 +346,8 @@ impl std::str::FromStr for NodeState {
             "active" => Ok(NodeState::Active),
             "leaving_cluster" | "leaving-cluster" => Ok(NodeState::LeavingCluster),
             "error" => Ok(NodeState::Error),
-            _ => Err(crate::error::BlixardError::InvalidInput {
-                field: "node_state".to_string(),
+            _ => Err(crate::error::BlixardError::ConfigurationError {
+                component: "node_state".to_string(),
                 message: format!("Invalid node state '{}'. Valid values: uninitialized, initialized, joining_cluster, active, leaving_cluster, error", s),
             }),
         }
@@ -476,8 +476,8 @@ impl std::str::FromStr for NodeId {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         s.parse::<u64>()
             .map(Self)
-            .map_err(|e| crate::error::BlixardError::InvalidInput {
-                field: "node_id".to_string(),
+            .map_err(|e| crate::error::BlixardError::ConfigurationError {
+                component: "node_id".to_string(),
                 message: format!("Invalid node ID '{}': {}", s, e),
             })
     }
@@ -507,15 +507,15 @@ pub trait SocketAddrExt {
 
 impl SocketAddrExt for SocketAddr {
     fn try_from_string(s: String) -> Result<SocketAddr, crate::error::BlixardError> {
-        s.parse().map_err(|e| crate::error::BlixardError::InvalidInput {
-            field: "socket_address".to_string(),
+        s.parse().map_err(|e| crate::error::BlixardError::ConfigurationError {
+            component: "socket_address".to_string(),
             message: format!("Invalid socket address '{}': {}", s, e),
         })
     }
 
     fn try_from_str(s: &str) -> Result<SocketAddr, crate::error::BlixardError> {
-        s.parse().map_err(|e| crate::error::BlixardError::InvalidInput {
-            field: "socket_address".to_string(),
+        s.parse().map_err(|e| crate::error::BlixardError::ConfigurationError {
+            component: "socket_address".to_string(),
             message: format!("Invalid socket address '{}': {}", s, e),
         })
     }
@@ -553,8 +553,8 @@ pub trait OptionExt<T> {
 
 impl<T> OptionExt<T> for Option<T> {
     fn ok_or_invalid_input(self, field: &str, message: &str) -> Result<T, crate::error::BlixardError> {
-        self.ok_or_else(|| crate::error::BlixardError::InvalidInput {
-            field: field.to_string(),
+        self.ok_or_else(|| crate::error::BlixardError::ConfigurationError {
+            component: field.to_string(),
             message: message.to_string(),
         })
     }
@@ -592,8 +592,8 @@ impl std::str::FromStr for Hypervisor {
             "cloud-hypervisor" | "cloudhypervisor" => Ok(Hypervisor::CloudHypervisor),
             "firecracker" => Ok(Hypervisor::Firecracker),
             "qemu" => Ok(Hypervisor::Qemu),
-            _ => Err(crate::error::BlixardError::InvalidInput {
-                field: "hypervisor".to_string(),
+            _ => Err(crate::error::BlixardError::ConfigurationError {
+                component: "hypervisor".to_string(),
                 message: format!("Invalid hypervisor type: {}. Valid options: cloud-hypervisor, firecracker, qemu", s),
             }),
         }
