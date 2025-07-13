@@ -3,6 +3,7 @@
 //! This module provides peer-to-peer communication capabilities using Iroh,
 //! enabling direct connections between nodes for efficient data transfer.
 
+use crate::common::p2p_utils::DocumentEntry;
 use crate::error::{BlixardError, BlixardResult};
 use iroh::endpoint::Connection;
 use iroh::{Endpoint, NodeAddr, SecretKey};
@@ -53,14 +54,7 @@ struct ConnectionInfo {
     use_count: u64,
 }
 
-/// Document entry for distributed storage
-#[derive(Debug, Clone)]
-struct DocumentEntry {
-    key: String,
-    value: Vec<u8>,
-    author: String,
-    timestamp: std::time::SystemTime,
-}
+// DocumentEntry moved to common::p2p_utils
 
 impl ConnectionInfo {
     fn new(connection: Connection) -> Self {

@@ -3,6 +3,7 @@
 //! This module provides peer-to-peer communication capabilities using Iroh 0.90,
 //! enabling direct connections between nodes for efficient data transfer.
 
+use crate::common::p2p_utils::{BandwidthTracker, DocumentEntry};
 use crate::discovery::{create_combined_discovery, DiscoveryManager, IrohDiscoveryBridge};
 use crate::error::{BlixardError, BlixardResult};
 use crate::p2p_monitor::{ConnectionState, Direction, NoOpMonitor, P2pMonitor};
@@ -12,7 +13,7 @@ use crate::transport::BLIXARD_ALPN;
 use crate::fail_point;
 use iroh::{Endpoint, NodeAddr, SecretKey};
 use iroh_blobs::Hash;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -52,91 +53,7 @@ impl DocumentType {
     }
 }
 
-/// Simplified document storage
-#[derive(Debug, Clone)]
-struct DocumentEntry {
-    #[allow(dead_code)] // Future: implement document querying by key
-    key: String,
-    value: Vec<u8>,
-    #[allow(dead_code)] // Future: implement author-based permissions
-    author: String,
-    #[allow(dead_code)] // Future: implement document versioning and expiration
-    timestamp: std::time::SystemTime,
-}
-
-/// Bandwidth tracking entry
-#[derive(Debug, Clone)]
-struct BandwidthEntry {
-    timestamp: Instant,
-    bytes: u64,
-    direction: Direction,
-}
-
-/// Time-windowed bandwidth tracker
-#[derive(Debug)]
-struct BandwidthTracker {
-    /// Rolling window of bandwidth entries
-    entries: VecDeque<BandwidthEntry>,
-    /// Window duration
-    window: Duration,
-    /// Total bytes in current window
-    total_bytes_in: u64,
-    total_bytes_out: u64,
-}
-
-impl BandwidthTracker {
-    fn new(window: Duration) -> Self {
-        Self {
-            entries: VecDeque::new(),
-            window,
-            total_bytes_in: 0,
-            total_bytes_out: 0,
-        }
-    }
-
-    fn add_entry(&mut self, bytes: u64, direction: Direction) {
-        let now = Instant::now();
-        self.cleanup_old_entries(now);
-
-        self.entries.push_back(BandwidthEntry {
-            timestamp: now,
-            bytes,
-            direction,
-        });
-
-        match direction {
-            Direction::Inbound => self.total_bytes_in += bytes,
-            Direction::Outbound => self.total_bytes_out += bytes,
-        }
-    }
-
-    fn cleanup_old_entries(&mut self, now: Instant) {
-        while let Some(front) = self.entries.front() {
-            if now.duration_since(front.timestamp) > self.window {
-                // Safe to pop since we just checked front() exists
-                if let Some(entry) = self.entries.pop_front() {
-                    match entry.direction {
-                        Direction::Inbound => self.total_bytes_in -= entry.bytes,
-                        Direction::Outbound => self.total_bytes_out -= entry.bytes,
-                    }
-                }
-            } else {
-                break;
-            }
-        }
-    }
-
-    fn get_bandwidth(&mut self) -> (f64, f64) {
-        let now = Instant::now();
-        self.cleanup_old_entries(now);
-
-        let window_secs = self.window.as_secs_f64();
-        let bytes_per_sec_in = self.total_bytes_in as f64 / window_secs;
-        let bytes_per_sec_out = self.total_bytes_out as f64 / window_secs;
-
-        (bytes_per_sec_in, bytes_per_sec_out)
-    }
-}
+// DocumentEntry and BandwidthTracker moved to common::p2p_utils
 
 /// P2P transport using Iroh for node-to-node communication
 pub struct IrohTransportV2 {

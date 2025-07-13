@@ -7,6 +7,7 @@ pub mod async_utils;
 pub mod error_context;
 pub mod error_macros;
 pub mod file_io;
+pub mod p2p_utils;
 // Temporarily disabled due to tonic dependencies
 // pub mod conversions;
 pub mod metrics;
