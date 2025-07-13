@@ -982,59 +982,52 @@ impl NixImageStore {
     }
 
     /// Verify a downloaded Nix image against its NAR hash
-    async fn verify_nix_image(
+    /// Verify NAR hash using nix path-info for store paths
+    async fn verify_store_path_hash(
         &self,
-        metadata: &NixImageMetadata,
         path: &Path,
-    ) -> BlixardResult<()> {
-        let expected_nar_hash =
-            metadata
-                .nar_hash
-                .as_ref()
-                .ok_or_else(|| BlixardError::Internal {
-                    message: "No NAR hash available for verification".to_string(),
-                })?;
+        expected_nar_hash: &str,
+        image_name: &str,
+    ) -> BlixardResult<Option<String>> {
+        let options = CommandOptions::new()
+            .with_env_var("NIX_CONFIG", "experimental-features = nix-command");
 
-        info!(
-            "Verifying Nix image {} against NAR hash {}",
-            metadata.name, expected_nar_hash
-        );
+        let output = self
+            .command_executor
+            .execute(
+                "nix",
+                &["path-info", "--json", &path.to_string_lossy()],
+                options,
+            )
+            .await?;
 
-        // First try to get the NAR hash if the path is already in the store
-        if path.starts_with(&self.nix_store_dir) {
-            let options = CommandOptions::new()
-                .with_env_var("NIX_CONFIG", "experimental-features = nix-command");
-
-            let output = self
-                .command_executor
-                .execute(
-                    "nix",
-                    &["path-info", "--json", &path.to_string_lossy()],
-                    options,
-                )
-                .await?;
-
-            if output.success {
-                let (nar_hash, _) = self
-                    .parse_nix_path_info_output(&output.stdout, path)
-                    .await?;
-                if let Some(actual_hash) = nar_hash {
-                    if actual_hash == *expected_nar_hash {
-                        info!("NAR hash verification succeeded for {}", metadata.name);
-                        return Ok(());
-                    } else {
-                        return Err(BlixardError::Internal {
-                            message: format!(
-                                "NAR hash mismatch for {}: expected {}, got {}",
-                                metadata.name, expected_nar_hash, actual_hash
-                            ),
-                        });
-                    }
-                }
-            }
+        if !output.success {
+            return Ok(None);
         }
 
-        // Otherwise, compute the NAR hash directly
+        let (nar_hash, _) = self
+            .parse_nix_path_info_output(&output.stdout, path)
+            .await?;
+        
+        if let Some(actual_hash) = nar_hash {
+            if actual_hash == expected_nar_hash {
+                info!("NAR hash verification succeeded for {}", image_name);
+                Ok(Some(actual_hash))
+            } else {
+                Err(BlixardError::Internal {
+                    message: format!(
+                        "NAR hash mismatch for {}: expected {}, got {}",
+                        image_name, expected_nar_hash, actual_hash
+                    ),
+                })
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Compute NAR hash directly by dumping and hashing
+    async fn compute_nar_hash_directly(&self, path: &Path) -> BlixardResult<String> {
         // First, dump the NAR
         let dump_options = CommandOptions::new();
         let dump_output = self
@@ -1087,40 +1080,86 @@ impl NixImageStore {
             "sha256:{}",
             String::from_utf8_lossy(&hash_result.stdout).trim()
         );
+        
+        Ok(computed_hash)
+    }
+
+    /// Verify NAR size if available in metadata
+    fn verify_nar_size(
+        &self,
+        metadata: &NixImageMetadata,
+        path: &Path,
+    ) -> BlixardResult<()> {
+        if let Some(expected_size) = metadata.nar_size {
+            if path.starts_with(&self.nix_store_dir) {
+                // For store paths, we already have the exact NAR size
+                // The file size might be different from NAR size
+                debug!(
+                    "NAR size verification skipped for store path (size: {})",
+                    expected_size
+                );
+            } else {
+                // For non-store paths, verify the actual file size
+                let actual_size = if path.is_file() {
+                    std::fs::metadata(path)?.len()
+                } else {
+                    // For directories, we'd need to compute the NAR size
+                    // which is complex, so skip for now
+                    expected_size
+                };
+
+                if actual_size != expected_size {
+                    warn!(
+                        "Size mismatch for {}: expected {} bytes, got {} bytes",
+                        metadata.name, expected_size, actual_size
+                    );
+                    // Don't fail on size mismatch as NAR size != file size
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn verify_nix_image(
+        &self,
+        metadata: &NixImageMetadata,
+        path: &Path,
+    ) -> BlixardResult<()> {
+        let expected_nar_hash =
+            metadata
+                .nar_hash
+                .as_ref()
+                .ok_or_else(|| BlixardError::Internal {
+                    message: "No NAR hash available for verification".to_string(),
+                })?;
+
+        info!(
+            "Verifying Nix image {} against NAR hash {}",
+            metadata.name, expected_nar_hash
+        );
+
+        // First try to get the NAR hash if the path is already in the store
+        let computed_hash = if path.starts_with(&self.nix_store_dir) {
+            match self.verify_store_path_hash(path, expected_nar_hash, &metadata.name).await? {
+                Some(_) => {
+                    // Verification succeeded, also check size
+                    self.verify_nar_size(metadata, path)?;
+                    return Ok(());
+                }
+                None => {
+                    // Store path verification failed, fall back to direct computation
+                    self.compute_nar_hash_directly(path).await?
+                }
+            }
+        } else {
+            // Not a store path, compute hash directly
+            self.compute_nar_hash_directly(path).await?
+        };
 
         // Compare the computed hash with the expected hash
         if computed_hash == *expected_nar_hash {
             info!("NAR hash verification succeeded for {}", metadata.name);
-
-            // Also check NAR size if available
-            if let Some(expected_size) = metadata.nar_size {
-                if path.starts_with(&self.nix_store_dir) {
-                    // For store paths, we already have the exact NAR size
-                    // The file size might be different from NAR size
-                    debug!(
-                        "NAR size verification skipped for store path (size: {})",
-                        expected_size
-                    );
-                } else {
-                    // For non-store paths, verify the actual file size
-                    let actual_size = if path.is_file() {
-                        std::fs::metadata(path)?.len()
-                    } else {
-                        // For directories, we'd need to compute the NAR size
-                        // which is complex, so skip for now
-                        expected_size
-                    };
-
-                    if actual_size != expected_size {
-                        warn!(
-                            "Size mismatch for {}: expected {} bytes, got {} bytes",
-                            metadata.name, expected_size, actual_size
-                        );
-                        // Don't fail on size mismatch as NAR size != file size
-                    }
-                }
-            }
-
+            self.verify_nar_size(metadata, path)?;
             Ok(())
         } else {
             Err(BlixardError::Internal {
