@@ -493,11 +493,18 @@ mod tests {
     };
 
     /// Helper function to parse certificate and validate basic structure
-    fn parse_certificate_pem(cert_pem: &str) -> X509Certificate {
-        let cert_der = pem::parse(cert_pem).expect("Failed to parse PEM");
-        let (_, cert) =
-            parse_x509_certificate(&cert_der.contents).expect("Failed to parse certificate");
-        cert
+    fn parse_certificate_pem(cert_pem: &str) -> crate::error::BlixardResult<X509Certificate> {
+        let cert_der = pem::parse(cert_pem)
+            .map_err(|e| crate::error::BlixardError::Security {
+                message: format!("Failed to parse PEM certificate: {}", e),
+            })?;
+        
+        let (_, cert) = parse_x509_certificate(&cert_der.contents)
+            .map_err(|e| crate::error::BlixardError::Security {
+                message: format!("Failed to parse X.509 certificate: {}", e),
+            })?;
+        
+        Ok(cert)
     }
 
     /// Helper function to create test config with temporary directory
@@ -533,7 +540,7 @@ mod tests {
         let (_, ca_bundle) = generator.generate_ca("test-ca").await.unwrap();
 
         // Parse and validate CA certificate structure
-        let cert = parse_certificate_pem(&ca_bundle.cert_pem);
+        let cert = parse_certificate_pem(&ca_bundle.cert_pem).unwrap();
 
         // Verify it's a CA certificate
         assert!(cert.is_ca());
@@ -594,7 +601,7 @@ mod tests {
             .await
             .unwrap();
 
-        let cert = parse_certificate_pem(&server_bundle.cert_pem);
+        let cert = parse_certificate_pem(&server_bundle.cert_pem).unwrap();
 
         // Verify it's NOT a CA certificate
         assert!(!cert.is_ca());
@@ -654,7 +661,7 @@ mod tests {
             .await
             .unwrap();
 
-        let cert = parse_certificate_pem(&client_bundle.cert_pem);
+        let cert = parse_certificate_pem(&client_bundle.cert_pem).unwrap();
 
         // Verify it's NOT a CA certificate
         assert!(!cert.is_ca());
@@ -711,7 +718,7 @@ mod tests {
         let generator = CertGenerator::new(config);
         let (_, ca_bundle) = generator.generate_ca("test-ca").await.unwrap();
 
-        let cert = parse_certificate_pem(&ca_bundle.cert_pem);
+        let cert = parse_certificate_pem(&ca_bundle.cert_pem).unwrap();
         let validity = cert.validity();
 
         // Check validity period is approximately 7 days
@@ -738,8 +745,8 @@ mod tests {
             .unwrap();
 
         // Parse both certificates
-        let ca_x509 = parse_certificate_pem(&ca_bundle.cert_pem);
-        let server_x509 = parse_certificate_pem(&server_bundle.cert_pem);
+        let ca_x509 = parse_certificate_pem(&ca_bundle.cert_pem).unwrap();
+        let server_x509 = parse_certificate_pem(&server_bundle.cert_pem).unwrap();
 
         // Verify server certificate is signed by CA
         // This is a basic check - in production you'd use proper certificate chain validation
@@ -794,12 +801,12 @@ mod tests {
             .unwrap();
 
         // Validate CA
-        let ca_cert = parse_certificate_pem(&pki.ca_bundle.cert_pem);
+        let ca_cert = parse_certificate_pem(&pki.ca_bundle.cert_pem).unwrap();
         assert!(ca_cert.is_ca());
 
         // Validate all server certificates
         for (name, bundle) in &pki.server_bundles {
-            let cert = parse_certificate_pem(&bundle.cert_pem);
+            let cert = parse_certificate_pem(&bundle.cert_pem).unwrap();
             assert!(!cert.is_ca());
             assert!(cert.subject().to_string().contains(&format!("CN={}", name)));
 
@@ -811,7 +818,7 @@ mod tests {
 
         // Validate all client certificates
         for (name, bundle) in &pki.client_bundles {
-            let cert = parse_certificate_pem(&bundle.cert_pem);
+            let cert = parse_certificate_pem(&bundle.cert_pem).unwrap();
             assert!(!cert.is_ca());
             assert!(cert.subject().to_string().contains(&format!("CN={}", name)));
 
@@ -884,7 +891,7 @@ mod tests {
             .await
             .unwrap();
 
-        let cert = parse_certificate_pem(&server_bundle.cert_pem);
+        let cert = parse_certificate_pem(&server_bundle.cert_pem).unwrap();
 
         // Verify SAN extension exists
         assert!(cert.subject_alternative_name().is_some());

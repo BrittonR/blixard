@@ -300,7 +300,210 @@ impl std::fmt::Debug for VmManager {
     }
 }
 
+/// Configuration for VM status monitoring operations
+#[derive(Clone)]
+struct VmStatusMonitorConfig {
+    /// Initial delay before starting monitoring (allows VM operation to take effect)
+    initial_delay_ms: u64,
+    /// Polling interval between status checks
+    poll_interval_ms: u64,
+    /// Maximum number of polling attempts before timeout
+    max_attempts: u32,
+}
+
+impl Default for VmStatusMonitorConfig {
+    fn default() -> Self {
+        Self {
+            initial_delay_ms: 500,
+            poll_interval_ms: 500,
+            max_attempts: 20, // 10 seconds total (500ms * 20)
+        }
+    }
+}
+
+/// Context for VM status monitoring operations
+struct VmStatusMonitorContext {
+    backend: Arc<dyn VmBackend>,
+    database: Arc<Database>,
+    node_state: Arc<crate::node_shared::SharedNodeState>,
+    vm_name: String,
+}
+
+impl VmStatusMonitorContext {
+    /// Run the complete monitoring loop
+    async fn run_monitoring_loop(&self) {
+        let config = VmStatusMonitorConfig::default();
+        
+        // Wait a moment for the VM operation to take effect
+        tokio::time::sleep(tokio::time::Duration::from_millis(config.initial_delay_ms)).await;
+
+        let mut attempts = 0;
+        while attempts < config.max_attempts {
+            match self.check_and_update_status().await {
+                MonitoringResult::StatusUpdated => {
+                    tracing::info!("VM '{}' status monitoring complete - update triggered", self.vm_name);
+                    return;
+                }
+                MonitoringResult::StableStateReached => {
+                    tracing::debug!("VM '{}' status monitoring complete - stable state", self.vm_name);
+                    return;
+                }
+                MonitoringResult::ContinueMonitoring => {
+                    // Continue to next iteration
+                }
+                MonitoringResult::ErrorOccurred => {
+                    return; // Error already logged
+                }
+            }
+
+            attempts += 1;
+            tokio::time::sleep(tokio::time::Duration::from_millis(config.poll_interval_ms)).await;
+        }
+
+        tracing::warn!(
+            "VM '{}' status monitoring timed out after {} attempts",
+            self.vm_name,
+            config.max_attempts
+        );
+    }
+
+    /// Check current VM status and update if needed
+    async fn check_and_update_status(&self) -> MonitoringResult {
+        // Get current status from backend (actual VM state)
+        let actual_status = match self.get_actual_vm_status().await {
+            Some(status) => status,
+            None => return MonitoringResult::ErrorOccurred,
+        };
+
+        // Get stored status from database (distributed state)
+        let stored_status = match self.get_stored_vm_status().await {
+            Some(status) => status,
+            None => return MonitoringResult::ErrorOccurred,
+        };
+
+        // Compare and update if necessary
+        if let Some(stored) = stored_status {
+            if actual_status != stored {
+                self.trigger_status_update(stored, actual_status).await;
+                return MonitoringResult::StatusUpdated;
+            } else if self.is_stable_state(actual_status) {
+                return MonitoringResult::StableStateReached;
+            }
+        }
+
+        MonitoringResult::ContinueMonitoring
+    }
+
+    /// Get actual VM status from backend
+    async fn get_actual_vm_status(&self) -> Option<VmStatus> {
+        match self.backend.get_vm_status(&self.vm_name).await {
+            Ok(Some(status)) => Some(status),
+            Ok(None) => {
+                tracing::warn!(
+                    "VM '{}' not found in backend during status monitoring",
+                    self.vm_name
+                );
+                None
+            }
+            Err(e) => {
+                tracing::warn!("Failed to get VM '{}' status from backend: {}", self.vm_name, e);
+                None
+            }
+        }
+    }
+
+    /// Get stored VM status from database
+    async fn get_stored_vm_status(&self) -> Option<Option<VmStatus>> {
+        let read_txn = match self.database.begin_read() {
+            Ok(txn) => txn,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to read database during status monitoring: {}",
+                    e
+                );
+                return None;
+            }
+        };
+
+        let table = match read_txn.open_table(crate::raft_storage::VM_STATE_TABLE) {
+            Ok(table) => table,
+            Err(_) => return Some(None),
+        };
+
+        match table.get(self.vm_name.as_str()) {
+            Ok(Some(data)) => {
+                match bincode::deserialize::<crate::types::VmState>(data.value()) {
+                    Ok(vm_state) => Some(Some(vm_state.status)),
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to deserialize VM state during monitoring: {}",
+                            e
+                        );
+                        None
+                    }
+                }
+            }
+            Ok(None) => Some(None),
+            Err(_) => Some(None),
+        }
+    }
+
+    /// Trigger status update through Raft
+    async fn trigger_status_update(&self, old_status: VmStatus, new_status: VmStatus) {
+        tracing::info!(
+            "VM '{}' status changed: {:?} -> {:?} (triggering Raft update)",
+            self.vm_name,
+            old_status,
+            new_status
+        );
+
+        match self
+            .node_state
+            .update_vm_status_through_raft(&self.vm_name, format!("{:?}", new_status))
+            .await
+        {
+            Ok(_) => {
+                tracing::info!(
+                    "Successfully triggered status update for VM '{}' to {:?}",
+                    self.vm_name,
+                    new_status
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to trigger status update for VM '{}': {}",
+                    self.vm_name,
+                    e
+                );
+            }
+        }
+    }
+
+    /// Check if VM status represents a stable state
+    fn is_stable_state(&self, status: VmStatus) -> bool {
+        matches!(
+            status,
+            VmStatus::Running | VmStatus::Stopped | VmStatus::Failed
+        )
+    }
+}
+
+/// Result of a status monitoring check
+enum MonitoringResult {
+    /// Status was updated, monitoring complete
+    StatusUpdated,
+    /// VM reached stable state, monitoring complete
+    StableStateReached,
+    /// Continue monitoring
+    ContinueMonitoring,
+    /// Error occurred, stop monitoring
+    ErrorOccurred,
+}
+
 impl VmManager {
+    /// Default initial capacity for VM list pre-allocation
+    const DEFAULT_VM_LIST_CAPACITY: usize = 16;
+
     /// Create a new VM manager with the given backend
     pub fn new(
         database: Arc<Database>,
@@ -482,7 +685,7 @@ impl VmManager {
 
         if let Ok(table) = read_txn.open_table(crate::raft_storage::VM_STATE_TABLE) {
             // Pre-allocate with estimated capacity
-            let mut result = Vec::with_capacity(16); // Reasonable default for most clusters
+            let mut result = Vec::with_capacity(Self::DEFAULT_VM_LIST_CAPACITY);
 
             for entry in table.iter()? {
                 let (_key, value) = entry?;
@@ -524,124 +727,15 @@ impl VmManager {
     /// the status stored in the database. If there's a difference, it triggers a
     /// status update through the Raft consensus mechanism.
     async fn monitor_vm_status_after_operation(&self, vm_name: &str) {
-        // Spawn a background task to avoid blocking the main operation
-        let backend = Arc::clone(&self.backend);
-        let database = Arc::clone(&self.database);
-        let node_state = Arc::clone(&self.node_state);
-        let name = vm_name.to_string();
+        let monitor_context = VmStatusMonitorContext {
+            backend: Arc::clone(&self.backend),
+            database: Arc::clone(&self.database),
+            node_state: Arc::clone(&self.node_state),
+            vm_name: vm_name.to_string(),
+        };
 
         tokio::spawn(async move {
-            // Wait a moment for the VM operation to take effect
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
-            // Poll for status changes with timeout
-            let mut attempts = 0;
-            const MAX_ATTEMPTS: u32 = 20; // 10 seconds total (500ms * 20)
-
-            while attempts < MAX_ATTEMPTS {
-                // Get current status from backend (actual VM state)
-                let actual_status = match backend.get_vm_status(&name).await {
-                    Ok(Some(status)) => status,
-                    Ok(None) => {
-                        tracing::warn!(
-                            "VM '{}' not found in backend during status monitoring",
-                            name
-                        );
-                        return;
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to get VM '{}' status from backend: {}", name, e);
-                        return;
-                    }
-                };
-
-                // Get stored status from database (distributed state)
-                let stored_status = {
-                    let read_txn = match database.begin_read() {
-                        Ok(txn) => txn,
-                        Err(e) => {
-                            tracing::warn!(
-                                "Failed to read database during status monitoring: {}",
-                                e
-                            );
-                            return;
-                        }
-                    };
-
-                    if let Ok(table) = read_txn.open_table(crate::raft_storage::VM_STATE_TABLE) {
-                        if let Ok(Some(data)) = table.get(name.as_str()) {
-                            match bincode::deserialize::<crate::types::VmState>(data.value()) {
-                                Ok(vm_state) => Some(vm_state.status),
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "Failed to deserialize VM state during monitoring: {}",
-                                        e
-                                    );
-                                    return;
-                                }
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                };
-
-                // Check if status has changed and needs updating
-                if let Some(stored) = stored_status {
-                    if actual_status != stored {
-                        tracing::info!(
-                            "VM '{}' status changed: {:?} -> {:?} (triggering Raft update)",
-                            name,
-                            stored,
-                            actual_status
-                        );
-
-                        // Trigger Raft status update
-                        match node_state
-                            .update_vm_status_through_raft(&name, format!("{:?}", actual_status))
-                            .await
-                        {
-                            Ok(_) => {
-                                tracing::info!(
-                                    "Successfully triggered status update for VM '{}' to {:?}",
-                                    name,
-                                    actual_status
-                                );
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    "Failed to trigger status update for VM '{}': {}",
-                                    name,
-                                    e
-                                );
-                            }
-                        }
-                        return;
-                    } else if matches!(
-                        actual_status,
-                        VmStatus::Running | VmStatus::Stopped | VmStatus::Failed
-                    ) {
-                        // VM has reached a stable state, stop monitoring
-                        tracing::debug!(
-                            "VM '{}' status monitoring complete: {:?}",
-                            name,
-                            actual_status
-                        );
-                        return;
-                    }
-                }
-
-                attempts += 1;
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            }
-
-            tracing::warn!(
-                "VM '{}' status monitoring timed out after {} attempts",
-                name,
-                MAX_ATTEMPTS
-            );
+            monitor_context.run_monitoring_loop().await;
         });
     }
 
@@ -729,12 +823,7 @@ impl VmManager {
         tracing::info!("Starting VM recovery from persisted state");
 
         // Create persistence manager with default config
-        let persistence_config = VmPersistenceConfig {
-            auto_recovery_enabled: true,
-            skip_failed_vms: true,
-            max_parallel_recovery: 3,
-            recovery_delay_secs: 2,
-        };
+        let persistence_config = VmPersistenceConfig::default();
 
         let persistence = VmStatePersistence::new(self.database.clone(), persistence_config);
 
