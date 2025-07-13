@@ -37,6 +37,14 @@ reqwest = { version = "0.11", features = ["json"] }
 http = "0.2"
 http-body = "0.4"
 
+# Web framework and OpenAPI
+axum = { version = "0.7", features = ["json", "tokio", "tower-log"] }
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.5", features = ["full"] }
+utoipa = { version = "4.2", features = ["axum_extras", "chrono", "uuid"] }
+utoipa-swagger-ui = { version = "6.0", features = ["axum"] }
+validator = { version = "0.16", features = ["derive"] }
+
 # gRPC/Networking  
 prost = "0.13"
 tonic = "0.12"

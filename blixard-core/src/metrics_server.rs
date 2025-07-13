@@ -61,7 +61,7 @@ fn handle_metrics_endpoint() -> Response<Body> {
     build_response(
         StatusCode::OK,
         Some("text/plain; version=0.0.4"),
-        metrics,
+        metrics.to_string(),
     )
 }
 

@@ -50,6 +50,14 @@ opentelemetry-prometheus = { workspace = true, optional = true }
 prometheus = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
 
+# Web framework and OpenAPI
+axum = { workspace = true, optional = true }
+tower = { workspace = true, optional = true }
+tower-http = { workspace = true, optional = true }
+utoipa = { workspace = true, optional = true }
+utoipa-swagger-ui = { workspace = true, optional = true }
+validator = { workspace = true, optional = true }
+
 # Networking - updated to latest versions
 hyper = { workspace = true }
 reqwest = { workspace = true }
@@ -179,6 +187,14 @@ observability = [
     "opentelemetry-prometheus",
     "prometheus",
     "tracing-opentelemetry"
+]
+openapi = [
+    "axum",
+    "tower", 
+    "tower-http",
+    "utoipa",
+    "utoipa-swagger-ui",
+    "validator"
 ]
 simulation = [
     "pnet",
