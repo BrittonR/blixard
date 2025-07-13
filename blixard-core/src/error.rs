@@ -439,9 +439,23 @@ pub enum BlixardError {
     #[error("Node error: {0}")]
     NodeError(String),
 
+    /// Consolidated configuration error for all config-related issues
+    /// 
+    /// This replaces: ConfigError, Configuration, InvalidInput, InvalidConfiguration
+    #[error("Configuration error in {component}: {message}")]
+    ConfigurationError {
+        /// Component or field that has the configuration issue
+        /// Examples: "node.bind_address", "cluster.timeout", "vm.memory", "general"
+        component: String,
+        /// Detailed error message explaining the issue
+        message: String,
+    },
+
+    #[deprecated(since = "0.1.0", note = "Use ConfigurationError instead")]
     #[error("Configuration error: {0}")]
     ConfigError(String),
 
+    #[deprecated(since = "0.1.0", note = "Use ConfigurationError instead")]
     #[error("Configuration error: {message}")]
     Configuration { message: String },
 
@@ -511,6 +525,7 @@ pub enum BlixardError {
         leader_id: Option<u64>,
     },
 
+    #[deprecated(since = "0.1.0", note = "Use ConfigurationError instead")]
     #[error("Invalid input for {field}: {message}")]
     InvalidInput { field: String, message: String },
 
@@ -564,6 +579,7 @@ pub enum BlixardError {
     #[error("Invalid operation '{operation}': {reason}")]
     InvalidOperation { operation: String, reason: String },
 
+    #[deprecated(since = "0.1.0", note = "Use ConfigurationError instead")]
     #[error("Invalid configuration: {message}")]
     InvalidConfiguration { message: String },
 
@@ -607,6 +623,42 @@ pub type Result<T> = std::result::Result<T, BlixardError>;
 pub type BlixardResult<T> = std::result::Result<T, BlixardError>;
 
 impl BlixardError {
+    /// Create a configuration error with component and message
+    /// 
+    /// This is the preferred way to create configuration errors.
+    /// 
+    /// # Examples
+    /// ```rust
+    /// use blixard_core::error::BlixardError;
+    /// 
+    /// let err = BlixardError::configuration("node.bind_address", "Invalid port number");
+    /// let err = BlixardError::configuration("vm.memory", "Memory must be at least 512MB");
+    /// ```
+    pub fn configuration(component: impl Into<String>, message: impl Into<String>) -> Self {
+        BlixardError::ConfigurationError {
+            component: component.into(),
+            message: message.into(),
+        }
+    }
+
+    /// Create a general configuration error (for backward compatibility)
+    /// 
+    /// Prefer using `configuration()` with a specific component when possible.
+    pub fn config_general(message: impl Into<String>) -> Self {
+        BlixardError::ConfigurationError {
+            component: "general".to_string(),
+            message: message.into(),
+        }
+    }
+
+    /// Create a validation configuration error (for input validation)
+    pub fn config_validation(field: impl Into<String>, message: impl Into<String>) -> Self {
+        BlixardError::ConfigurationError {
+            component: field.into(),
+            message: message.into(),
+        }
+    }
+
     /// Create a Storage error with a boxed source
     pub fn storage<E: std::error::Error + Send + Sync + 'static>(
         operation: impl Into<String>,
