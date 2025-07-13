@@ -360,6 +360,7 @@ pub mod iroh_vm_service;
 pub mod metrics;
 pub mod raft_transport_adapter;
 pub mod service_builder;
+pub mod service_consolidation;
 pub mod services;
 
 // Iroh security modules
