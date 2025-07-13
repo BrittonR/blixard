@@ -64,8 +64,7 @@ pub use types::{BlixardError, Result, BlixardResult, format_errors};
 
 // Import all constructor and conversion implementations
 // These are automatically available when BlixardError is in scope
-pub use constructors::*;
-pub use conversions::*;
+// constructors and conversions modules provide internal functionality
 
 // Re-export enhanced error context and domain-specific errors
 pub use context::{

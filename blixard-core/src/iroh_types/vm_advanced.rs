@@ -1,7 +1,7 @@
 //! Advanced VM operations types
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+// Advanced VM types for Iroh transport
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateVmWithSchedulingRequest {

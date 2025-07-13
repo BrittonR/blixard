@@ -11,7 +11,7 @@ use crate::{
     unwrap_helpers::time_since_epoch_safe,
 };
 use bytes::{Bytes, BytesMut};
-use iroh::{Endpoint, NodeAddr, NodeId};
+use iroh::{Endpoint, NodeAddr};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};

@@ -3,7 +3,7 @@
 //! This module provides specialized error types for different domains within Blixard,
 //! each with appropriate recovery strategies and structured error information.
 
-use crate::error::context::{ErrorCategory, ErrorContext, ErrorSeverity, RecoveryAction, RecoveryHint};
+use crate::error::context::{ErrorCategory, ErrorSeverity, RecoveryAction, RecoveryHint};
 use crate::error::BlixardError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot, RwLock, Semaphore};
 use tokio::time::interval;
 use tracing::{debug, info, warn};
-use futures::stream::{self, StreamExt};
+// Optimized batch processing for Raft proposals
 
 use crate::{
     common::async_utils::{
@@ -377,7 +377,7 @@ impl OptimizedRaftBatchProcessor {
         
         // Initialize load balancer with workers after construction
         
-        let mut processor = Self {
+        let processor = Self {
             config,
             node_id,
             proposal_rx,
@@ -429,7 +429,6 @@ impl OptimizedRaftBatchProcessor {
     
     /// Run in streaming mode with continuous processing
     async fn run_streaming_mode(&mut self) {
-        use futures::StreamExt;
         
         loop {
             let mut chunk = Vec::with_capacity(self.config.stream_buffer_size);
@@ -807,7 +806,7 @@ impl OptimizedRaftBatchProcessor {
     async fn start_background_tasks(&mut self) {
         // Cleanup task for expired proposals
         let priority_batches = Arc::clone(&self.priority_batches);
-        let config = self.config.clone();
+        let _config = self.config.clone();
         self.background_tasks.push(tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(30));
             

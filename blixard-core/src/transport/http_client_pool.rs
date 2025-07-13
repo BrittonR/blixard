@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::common::async_utils::{AtomicCounter, with_timeout};

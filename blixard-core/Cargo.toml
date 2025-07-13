@@ -118,6 +118,8 @@ zstd = { workspace = true }
 # Hashing
 md5 = { workspace = true }
 blake3 = { workspace = true }
+rustc-hash = "2.0"  # Fast hash for internal use
+smallvec = "1.13"   # Small vector optimization
 
 # Encoding
 base64 = { workspace = true }
@@ -204,6 +206,7 @@ simulation = [
 failpoints = ["fail"]
 test-helpers = []
 vopr = ["test-helpers"]
+allocation-tracking = []
 # microvm-backend feature removed - backends must be registered by main binary
 
 [[bench]]

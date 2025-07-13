@@ -6,7 +6,7 @@
 //! - Efficient batch processing
 //! - Zero-copy message forwarding
 
-use crate::error::{BlixardError, BlixardResult};
+use crate::error::BlixardResult;
 use bytes::{Bytes, BytesMut};
 use raft::prelude::*;
 use std::collections::VecDeque;

@@ -1,5 +1,6 @@
 pub mod placement_strategies;
 pub mod resource_analysis;
+pub mod memory_optimized;
 
 use redb::Database;
 use std::collections::HashMap;

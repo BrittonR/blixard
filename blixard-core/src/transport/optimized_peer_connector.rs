@@ -6,7 +6,7 @@
 
 use dashmap::DashMap;
 use futures::stream::{self, StreamExt};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -14,10 +14,10 @@ use tokio::sync::{watch, Mutex, RwLock, Semaphore};
 use tokio::task::JoinHandle;
 
 use crate::{
-    common::async_utils::{concurrent_map, conditional_update, AtomicCounter, OptionalArc},
+    common::async_utils::{concurrent_map, AtomicCounter},
     error::{BlixardError, BlixardResult},
     node_shared::{PeerInfo, SharedNodeState},
-    p2p_monitor::{ConnectionQuality, ConnectionState, Direction, P2pErrorType, P2pMonitor},
+    p2p_monitor::P2pMonitor,
     transport::iroh_peer_connector::{IrohClient, MessageType},
 };
 use iroh::{Endpoint, NodeAddr, NodeId};
@@ -598,8 +598,8 @@ impl OptimizedPeerConnector {
         let peer_pools = Arc::clone(&self.peer_pools);
         let config = self.config.clone();
         let node = Arc::clone(&self.node);
-        let endpoint = self.endpoint.clone();
-        let p2p_monitor = Arc::clone(&self.p2p_monitor);
+        let _endpoint = self.endpoint.clone();
+        let _p2p_monitor = Arc::clone(&self.p2p_monitor);
         let mut shutdown_rx = self.shutdown_rx.clone();
 
         tokio::spawn(async move {
@@ -615,7 +615,7 @@ impl OptimizedPeerConnector {
                             if let Ok(peer_id) = peer.node_id.parse::<u64>() {
                                 if let Some(pool_ref) = peer_pools.get(&peer_id) {
                                     let pool = pool_ref.clone();
-                                    let mut pool_guard = pool.lock().await;
+                                    let pool_guard = pool.lock().await;
                                     
                                     // Check if we need to warm connections
                                     if pool_guard.connections.len() < config.warm_connection_count {
@@ -639,7 +639,7 @@ impl OptimizedPeerConnector {
     /// Start adaptive management task
     fn start_adaptive_management_task(&self) -> JoinHandle<()> {
         let peer_pools = Arc::clone(&self.peer_pools);
-        let config = self.config.clone();
+        let _config = self.config.clone(); // TODO: Use for adaptive configuration
         let mut shutdown_rx = self.shutdown_rx.clone();
 
         tokio::spawn(async move {

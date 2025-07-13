@@ -239,6 +239,8 @@ pub mod p2p_monitor;
 pub mod p2p_monitor_otel;
 pub mod patterns;
 pub mod transport;
+// Zero-cost abstractions and advanced patterns
+pub mod zero_cost;
 pub mod vm_auto_recovery;
 pub mod vm_health_config;
 // pub mod vm_health_escalation;
@@ -251,6 +253,9 @@ pub mod vm_network_isolation;
 // Temporarily disabled: uses gRPC/tonic which we're removing
 pub mod common;
 pub mod discovery;
+
+// Memory optimization utilities
+pub mod memory_optimization;
 
 // Test helpers are exposed for integration tests
 #[cfg(any(test, feature = "test-helpers"))]

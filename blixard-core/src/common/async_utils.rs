@@ -183,7 +183,7 @@ where
 /// Processes items in a stream without loading all into memory,
 /// useful for large collections or real-time processing.
 pub async fn stream_process<T, F, R, Fut>(
-    mut items: impl futures::Stream<Item = T> + Unpin,
+    items: impl futures::Stream<Item = T> + Unpin,
     max_concurrent: usize,
     f: F,
 ) -> Vec<R>
