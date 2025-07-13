@@ -265,7 +265,7 @@ impl AuditLogger {
         
         // Add signature if enabled
         if let Some(key) = &self.signing_key {
-            let signature = Self::sign_entry(&json, key);
+            let signature = Self::sign_entry(&json, key)?;
             json.push_str(&format!(" SIG:{}", signature));
         }
         
@@ -307,15 +307,17 @@ impl AuditLogger {
     }
     
     /// Sign an audit log entry
-    fn sign_entry(entry: &str, key: &[u8]) -> String {
+    fn sign_entry(entry: &str, key: &[u8]) -> BlixardResult<String> {
         use hmac::{Hmac, Mac};
         type HmacSha256 = Hmac<Sha256>;
         
         let mut mac = HmacSha256::new_from_slice(key)
-            .expect("HMAC can take key of any size");
+            .map_err(|e| BlixardError::Security {
+                message: format!("Failed to create HMAC key: {}", e),
+            })?;
         mac.update(entry.as_bytes());
         let result = mac.finalize();
-        hex::encode(result.into_bytes())
+        Ok(hex::encode(result.into_bytes()))
     }
     
     /// Rotate audit log files

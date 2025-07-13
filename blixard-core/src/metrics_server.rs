@@ -44,10 +44,11 @@ fn build_response(
     }
     
     builder.body(Body::from(body)).unwrap_or_else(|_| {
-        Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(Body::from("Failed to build response"))
-            .expect("Failed to build error response")
+        // Create an absolutely minimal response that cannot fail
+        // Using new() instead of builder() to avoid any potential failures
+        let mut response = Response::new(Body::from("Internal Server Error"));
+        *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+        response
     })
 }
 
