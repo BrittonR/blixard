@@ -199,9 +199,8 @@ impl RetryConfig {
             is_retryable: |e| {
                 !matches!(
                     e,
-                    BlixardError::InvalidInput { .. }
+                    BlixardError::ConfigurationError { .. }
                         | BlixardError::NotImplemented { .. }
-                        | BlixardError::ConfigError(_)
                         | BlixardError::Validation { .. }
                 )
             },
@@ -570,9 +569,8 @@ pub mod presets {
             is_retryable: |e| {
                 !matches!(
                     e,
-                    BlixardError::InvalidInput { .. }
+                    BlixardError::ConfigurationError { .. }
                         | BlixardError::NotImplemented { .. }
-                        | BlixardError::ConfigError(_)
                 )
             },
             operation_name: Some("critical_operation".to_string()),
@@ -652,10 +650,9 @@ mod tests {
         let result = retry(config, move || {
             counter_clone.fetch_add(1, Ordering::SeqCst);
             Box::pin(async move {
-                Err::<(), _>(BlixardError::InvalidInput {
-                    field: "test".to_string(),
-                    value: "value".to_string(),
-                    reason: "Not retryable".to_string(),
+                Err::<(), _>(BlixardError::ConfigurationError {
+                    component: "test".to_string(),
+                    message: "Not retryable".to_string(),
                 })
             })
         })
