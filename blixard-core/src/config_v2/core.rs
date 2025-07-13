@@ -401,9 +401,7 @@ pub async fn reload<P: AsRef<Path>>(config_path: P) -> BlixardResult<()> {
     // Update global config
     if let Some(config) = CONFIG.get() {
         let mut config_write = config.write().map_err(|_| {
-            BlixardError::ConfigError(
-                "Failed to acquire write lock on configuration (lock poisoned)".to_string(),
-            )
+            BlixardError::lock_poisoned_internal("configuration write lock")
         })?;
 
         // Apply only hot-reloadable changes

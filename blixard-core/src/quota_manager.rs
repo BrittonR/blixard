@@ -108,30 +108,22 @@ impl QuotaManager {
 
     /// Helper to safely acquire read lock
     fn read_quotas(&self) -> BlixardResult<RwLockReadGuard<HashMap<TenantId, TenantQuota>>> {
-        self.quotas.read().map_err(|_| BlixardError::Internal {
-            message: "Failed to acquire quota read lock - lock poisoned".to_string(),
-        })
+        self.quotas.read().map_err(|_| BlixardError::lock_poisoned_internal("quota read lock"))
     }
 
     /// Helper to safely acquire write lock
     fn write_quotas(&self) -> BlixardResult<RwLockWriteGuard<HashMap<TenantId, TenantQuota>>> {
-        self.quotas.write().map_err(|_| BlixardError::Internal {
-            message: "Failed to acquire quota write lock - lock poisoned".to_string(),
-        })
+        self.quotas.write().map_err(|_| BlixardError::lock_poisoned_internal("quota write lock"))
     }
 
     /// Helper to safely acquire usage read lock
     fn read_usage(&self) -> BlixardResult<RwLockReadGuard<HashMap<TenantId, TenantUsage>>> {
-        self.usage.read().map_err(|_| BlixardError::Internal {
-            message: "Failed to acquire usage read lock - lock poisoned".to_string(),
-        })
+        self.usage.read().map_err(|_| BlixardError::lock_poisoned_internal("usage read lock"))
     }
 
     /// Helper to safely acquire usage write lock
     fn write_usage(&self) -> BlixardResult<RwLockWriteGuard<HashMap<TenantId, TenantUsage>>> {
-        self.usage.write().map_err(|_| BlixardError::Internal {
-            message: "Failed to acquire usage write lock - lock poisoned".to_string(),
-        })
+        self.usage.write().map_err(|_| BlixardError::lock_poisoned_internal("usage write lock"))
     }
 
     /// Set quota for a tenant

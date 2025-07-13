@@ -336,11 +336,11 @@ impl FuzzerEngine {
         coverage: Coverage,
         found_bug: bool,
         execution_time: std::time::Duration,
-    ) {
+    ) -> BlixardResult<()> {
         let mut global_cov = self
             .global_coverage
             .lock()
-            .expect("Lock poisoned during: record execution coverage");
+            .map_err(|_| BlixardError::lock_poisoned_internal("global_coverage"))?;
 
         // Check if this execution found new coverage
         let is_interesting = global_cov.has_new_coverage(&coverage) || found_bug;
@@ -361,15 +361,18 @@ impl FuzzerEngine {
 
             self.corpus
                 .lock()
-                .expect("Lock poisoned during: add interesting test case to corpus")
+                .map_err(|_| BlixardError::lock_poisoned_internal("corpus"))?
                 .push(test_case);
         }
+        Ok(())
     }
 
     /// Get corpus statistics
     pub fn corpus_stats(&self) -> CorpusStats {
-        let corpus = self.corpus.lock().unwrap();
-        let global_cov = self.global_coverage.lock().unwrap();
+        let (corpus, global_cov) = match (self.corpus.lock(), self.global_coverage.lock()) {
+            (Ok(c), Ok(g)) => (c, g),
+            _ => return CorpusStats::default(), // Return default stats on lock failure
+        };
 
         CorpusStats {
             total_test_cases: corpus.len(),

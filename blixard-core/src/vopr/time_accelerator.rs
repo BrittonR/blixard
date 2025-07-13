@@ -3,6 +3,7 @@
 //! Provides simulated time that can run much faster than real time,
 //! with support for clock skew, time jumps, and controlled progression.
 
+use crate::error::{BlixardError, BlixardResult};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use std::collections::HashMap;
@@ -156,21 +157,26 @@ impl TimeAccelerator {
     }
 
     /// Set the random seed for deterministic behavior
-    pub fn set_seed(&mut self, seed: u64) {
-        *self.rng.lock().unwrap() = ChaCha8Rng::seed_from_u64(seed);
+    pub fn set_seed(&mut self, seed: u64) -> BlixardResult<()> {
+        let mut rng = self.rng.lock().map_err(|_| BlixardError::lock_poisoned_internal("rng"))?;
+        *rng = ChaCha8Rng::seed_from_u64(seed);
+        Ok(())
     }
 
     /// Register a new node with the time system
-    pub fn register_node(&self, node_id: u64) {
-        let mut clocks = self.node_clocks.lock().unwrap();
-        let global = self.global_time.lock().unwrap();
+    pub fn register_node(&self, node_id: u64) -> BlixardResult<()> {
+        let mut clocks = self.node_clocks.lock().map_err(|_| BlixardError::lock_poisoned_internal("node_clocks"))?;
+        let global = self.global_time.lock().map_err(|_| BlixardError::lock_poisoned_internal("global_time"))?;
         clocks.insert(node_id, NodeClock::new(*global));
+        Ok(())
     }
 
     /// Get the current time for a specific node
     pub fn now(&self, node_id: u64) -> SimulatedTime {
-        let clocks = self.node_clocks.lock().unwrap();
-        let global = self.global_time.lock().unwrap();
+        let (clocks, global) = match (self.node_clocks.lock(), self.global_time.lock()) {
+            (Ok(c), Ok(g)) => (c, g),
+            _ => return SimulatedTime::from_nanos(0), // Default fallback on lock failure
+        };
 
         clocks
             .get(&node_id)
@@ -179,54 +185,59 @@ impl TimeAccelerator {
     }
 
     /// Advance global time by the given duration
-    pub fn advance(&self, duration: Duration) {
-        let mut global = self.global_time.lock().unwrap();
+    pub fn advance(&self, duration: Duration) -> BlixardResult<()> {
+        let mut global = self.global_time.lock().map_err(|_| BlixardError::lock_poisoned_internal("global_time"))?;
         *global = global.add(duration);
+        Ok(())
     }
 
     /// Advance time based on real time elapsed (with acceleration)
-    pub fn advance_by_real_time(&self) {
+    pub fn advance_by_real_time(&self) -> BlixardResult<()> {
         let real_elapsed = self.start_real_time.elapsed();
         let sim_elapsed =
             Duration::from_nanos((real_elapsed.as_nanos() * self.acceleration as u128) as u64);
 
-        let mut global = self.global_time.lock().unwrap();
+        let mut global = self.global_time.lock().map_err(|_| BlixardError::lock_poisoned_internal("global_time"))?;
         *global = self.start_sim_time.add(sim_elapsed);
+        Ok(())
     }
 
     /// Introduce random clock skew to a node
-    pub fn randomize_clock_skew(&self, node_id: u64) {
-        let mut rng = self.rng.lock().unwrap();
+    pub fn randomize_clock_skew(&self, node_id: u64) -> BlixardResult<()> {
+        let mut rng = self.rng.lock().map_err(|_| BlixardError::lock_poisoned_internal("rng"))?;
         let skew = rng.gen_range(-(self.max_skew_nanos as i64)..=(self.max_skew_nanos as i64));
 
-        let mut clocks = self.node_clocks.lock().unwrap();
+        let mut clocks = self.node_clocks.lock().map_err(|_| BlixardError::lock_poisoned_internal("node_clocks"))?;
         if let Some(clock) = clocks.get_mut(&node_id) {
             clock.skew = skew;
         }
+        Ok(())
     }
 
     /// Apply a sudden time jump to a node
-    pub fn jump_node_time(&self, node_id: u64, delta: Duration, forward: bool) {
+    pub fn jump_node_time(&self, node_id: u64, delta: Duration, forward: bool) -> BlixardResult<()> {
         let delta_nanos = if forward {
             delta.as_nanos() as i64
         } else {
             -(delta.as_nanos() as i64)
         };
 
-        let mut clocks = self.node_clocks.lock().unwrap();
+        let mut clocks = self.node_clocks.lock().map_err(|_| BlixardError::lock_poisoned_internal("node_clocks"))?;
         if let Some(clock) = clocks.get_mut(&node_id) {
             clock.jump(delta_nanos);
         }
+        Ok(())
     }
 
     /// Set clock drift rate for a node (nanoseconds per second)
-    pub fn set_clock_drift(&self, node_id: u64, drift_rate: i64) {
-        let mut clocks = self.node_clocks.lock().unwrap();
-        let global = self.global_time.lock().unwrap();
+    pub fn set_clock_drift(&self, node_id: u64, drift_rate: i64) -> BlixardResult<()> {
+        let mut clocks = self.node_clocks.lock().map_err(|_| BlixardError::lock_poisoned_internal("node_clocks"))?;
+        let global = self.global_time.lock().map_err(|_| BlixardError::lock_poisoned_internal("global_time"))?;
 
         if let Some(clock) = clocks.get_mut(&node_id) {
             clock.set_drift(drift_rate, *global);
         }
+        Ok(())
     }
 
     /// Get statistics about clock skew across all nodes
