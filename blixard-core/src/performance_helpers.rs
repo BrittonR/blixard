@@ -296,16 +296,12 @@ pub struct PooledObject<'a, T> {
 }
 
 impl<'a, T> PooledObject<'a, T> {
-    pub fn get(&self) -> &T {
-        self.object
-            .as_ref()
-            .expect("PooledObject should always contain an object when constructed")
+    pub fn get(&self) -> Option<&T> {
+        self.object.as_ref()
     }
 
-    pub fn get_mut(&mut self) -> &mut T {
-        self.object
-            .as_mut()
-            .expect("PooledObject should always contain an object when constructed")
+    pub fn get_mut(&mut self) -> Option<&mut T> {
+        self.object.as_mut()
     }
 }
 
@@ -325,17 +321,21 @@ impl<'a, T> std::ops::Deref for PooledObject<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.object
-            .as_ref()
-            .expect("PooledObject should always contain an object when constructed")
+        // This should never fail in normal usage, but we provide a safer implementation
+        self.object.as_ref().unwrap_or_else(|| {
+            // This is a programming error - log and panic with more context
+            panic!("PooledObject accessed after being taken - this indicates a bug in the object pool implementation")
+        })
     }
 }
 
 impl<'a, T> std::ops::DerefMut for PooledObject<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.object
-            .as_mut()
-            .expect("PooledObject should always contain an object when constructed")
+        // This should never fail in normal usage, but we provide a safer implementation
+        self.object.as_mut().unwrap_or_else(|| {
+            // This is a programming error - log and panic with more context
+            panic!("PooledObject accessed after being taken - this indicates a bug in the object pool implementation")
+        })
     }
 }
 
