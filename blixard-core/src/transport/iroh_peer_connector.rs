@@ -12,7 +12,7 @@ use tokio::sync::{watch, Mutex, RwLock};
 use tokio::task::JoinHandle;
 
 #[cfg(feature = "observability")]
-use crate::metrics_otel::{attributes, metrics, Timer};
+use crate::metrics_otel::{attributes, safe_metrics, Timer};
 use crate::{
     config_global,
     error::{BlixardError, BlixardResult},
@@ -275,14 +275,16 @@ impl IrohPeerConnector {
     /// Connect to a peer using a discovered NodeAddr
     pub async fn connect_to_peer(&self, peer_id: u64, node_addr: NodeAddr) -> BlixardResult<()> {
         #[cfg(feature = "observability")]
-        let metrics = metrics();
+        let metrics = safe_metrics().ok();
         #[cfg(feature = "observability")]
         let peer_attrs = vec![attributes::peer_id(peer_id)];
         #[cfg(feature = "observability")]
-        let _timer =
-            Timer::with_attributes(metrics.grpc_request_duration.clone(), peer_attrs.clone());
+        let _timer = metrics.as_ref().map(|m| 
+            Timer::with_attributes(m.grpc_request_duration.clone(), peer_attrs.clone()));
         #[cfg(feature = "observability")]
-        metrics.peer_reconnect_attempts.add(1, &peer_attrs);
+        if let Some(ref metrics) = metrics {
+            metrics.peer_reconnect_attempts.add(1, &peer_attrs);
+        }
 
         let peer_id_str = peer_id.to_string();
 
@@ -384,14 +386,16 @@ impl IrohPeerConnector {
     /// Connect to a peer using their node ID (looks up address from peer info)
     pub async fn connect_to_peer_by_id(&self, peer_id: u64) -> BlixardResult<IrohClient> {
         #[cfg(feature = "observability")]
-        let metrics = metrics();
+        let metrics = safe_metrics().ok();
         #[cfg(feature = "observability")]
         let peer_attrs = vec![attributes::peer_id(peer_id)];
         #[cfg(feature = "observability")]
-        let _timer =
-            Timer::with_attributes(metrics.grpc_request_duration.clone(), peer_attrs.clone());
+        let _timer = metrics.as_ref().map(|m| 
+            Timer::with_attributes(m.grpc_request_duration.clone(), peer_attrs.clone()));
         #[cfg(feature = "observability")]
-        metrics.peer_reconnect_attempts.add(1, &peer_attrs);
+        if let Some(ref metrics) = metrics {
+            metrics.peer_reconnect_attempts.add(1, &peer_attrs);
+        }
 
         // Check if already connected
         if let Some(client) = self.connections.get(&peer_id) {

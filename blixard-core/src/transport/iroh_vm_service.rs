@@ -1,7 +1,7 @@
 //! Iroh transport implementation for VM service
 
 #[cfg(feature = "observability")]
-use crate::metrics_otel::{attributes, metrics, Timer};
+use crate::metrics_otel::{attributes, safe_metrics, Timer};
 use crate::{
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
@@ -689,19 +689,21 @@ impl IrohService for IrohVmService {
 
     async fn handle_call(&self, method: &str, payload: Bytes) -> BlixardResult<Bytes> {
         #[cfg(feature = "observability")]
-        let metrics = metrics();
+        let metrics = safe_metrics().ok();
         #[cfg(feature = "observability")]
-        let _timer = Timer::with_attributes(
-            metrics.grpc_request_duration.clone(),
+        let _timer = metrics.as_ref().map(|m| Timer::with_attributes(
+            m.grpc_request_duration.clone(),
             vec![
                 attributes::method(method),
                 attributes::node_id(self.node.get_id()),
             ],
-        );
+        ));
         #[cfg(feature = "observability")]
-        metrics
-            .grpc_requests_total
-            .add(1, &[attributes::method(method)]);
+        if let Some(ref metrics) = metrics {
+            metrics
+                .grpc_requests_total
+                .add(1, &[attributes::method(method)]);
+        }
 
         match method {
             // VM lifecycle operations

@@ -1183,7 +1183,7 @@ mod tests {
         let result = init_noop();
         assert!(result.is_ok());
 
-        let metrics = metrics();
+        let metrics = safe_metrics().unwrap();
 
         // Test counter
         metrics.raft_proposals_total.add(1, &[]);

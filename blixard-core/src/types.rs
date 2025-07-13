@@ -422,7 +422,7 @@ impl Default for NodeConfig {
         Self {
             id: 1,
             data_dir: "./data".to_string(),
-            bind_addr: "127.0.0.1:7001".parse().expect("Invalid default bind address"),
+            bind_addr: SocketAddr::from(([127, 0, 0, 1], 7001)),
             join_addr: None,
             use_tailscale: false,
             vm_backend: "mock".to_string(),

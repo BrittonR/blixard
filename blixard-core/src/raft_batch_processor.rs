@@ -11,7 +11,7 @@ use tracing::{info, warn};
 
 use crate::error::{BlixardError, BlixardResult};
 #[cfg(feature = "observability")]
-use crate::metrics_otel::{attributes, metrics};
+use crate::metrics_otel::{attributes, safe_metrics};
 use crate::raft::messages::RaftProposal;
 use crate::raft_manager::ProposalData;
 
@@ -265,17 +265,19 @@ impl RaftBatchProcessor {
             // Record batch metrics
             #[cfg(feature = "observability")]
             {
-                let node_attr = attributes::node_id(self.node_id);
-                metrics().raft_batches_total.add(1, &[node_attr.clone()]);
-                metrics()
-                    .raft_batch_size
-                    .record(batch_size as f64, &[node_attr.clone()]);
-                metrics()
-                    .raft_batch_bytes
-                    .record(batch_bytes as f64, &[node_attr.clone()]);
-                metrics()
-                    .raft_batch_age_ms
-                    .record(batch_age_ms as f64, &[node_attr]);
+                if let Ok(metrics) = safe_metrics() {
+                    let node_attr = attributes::node_id(self.node_id);
+                    metrics.raft_batches_total.add(1, &[node_attr.clone()]);
+                    metrics
+                        .raft_batch_size
+                        .record(batch_size as f64, &[node_attr.clone()]);
+                    metrics
+                        .raft_batch_bytes
+                        .record(batch_bytes as f64, &[node_attr.clone()]);
+                    metrics
+                        .raft_batch_age_ms
+                        .record(batch_age_ms as f64, &[node_attr]);
+                }
             }
         }
 

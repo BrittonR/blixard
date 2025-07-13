@@ -11,7 +11,7 @@ use tokio::time::interval;
 use tracing::{error, info, warn};
 
 #[cfg(feature = "observability")]
-use crate::metrics_otel::{attributes, metrics};
+use crate::metrics_otel::{attributes, safe_metrics};
 use crate::{
     error::{BlixardError, BlixardResult},
     patterns::LifecycleManager,
@@ -61,7 +61,7 @@ impl HealthCheckScheduler {
     /// Execute a single health check cycle
     async fn run_health_check_cycle(&self) -> BlixardResult<()> {
         #[cfg(feature = "observability")]
-        let metrics = metrics();
+        let metrics = safe_metrics().ok();
         let node_id = self.deps.node_state.get_id();
 
         // Get all VMs from the database (source of truth)
@@ -324,7 +324,7 @@ impl HealthCheckScheduler {
     fn record_health_metrics(&self, vm_name: &str, health_status: &VmHealthStatus) {
         #[cfg(feature = "observability")]
         {
-            let metrics = metrics();
+            let metrics = safe_metrics().ok();
 
             match health_status.state {
                 HealthState::Healthy => {

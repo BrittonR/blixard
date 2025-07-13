@@ -107,7 +107,7 @@ tera = { workspace = true }
 # P2P networking
 iroh = { workspace = true }
 iroh-blobs = { workspace = true }
-iroh-docs = { git = "https://github.com/n0-computer/iroh-docs", rev = "01f21e4100015d9e37e0e66856e3d4c82afbbc9e" }
+# iroh-docs = { git = "https://github.com/n0-computer/iroh-docs", branch = "Frando/iroh-0.90" }  # Temporarily disabled due to compatibility issue
 iroh-gossip = { git = "https://github.com/n0-computer/iroh-gossip", branch = "main" }
 
 # Compression

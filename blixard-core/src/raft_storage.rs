@@ -1,6 +1,6 @@
 use crate::error::{BlixardError, BlixardResult};
 #[cfg(feature = "observability")]
-use crate::metrics_otel::{attributes, metrics, Timer};
+use crate::metrics_otel::{attributes, safe_metrics, Timer};
 use crate::raft_codec;
 use raft::{Config, GetEntriesContext, RawNode};
 use redb::{Database, ReadableTable, TableDefinition};
@@ -89,15 +89,13 @@ impl raft::Storage for RedbRaftStorage {
         // let _enter = span.enter();
 
         #[cfg(feature = "observability")]
-        let metrics = metrics();
-        #[cfg(feature = "observability")]
-        let _timer = Timer::with_attributes(
+        let _timer = safe_metrics().ok().map(|metrics| Timer::with_attributes(
             metrics.storage_read_duration.clone(),
             vec![
                 attributes::table("raft_state"),
                 attributes::operation("initial_state"),
             ],
-        );
+        ));
 
         let read_txn = self
             .database
@@ -110,13 +108,31 @@ impl raft::Storage for RedbRaftStorage {
             metrics
                 .storage_reads
                 .add(1, &[attributes::table("raft_hard_state")]);
-            if let Ok(Some(data)) = table.get("hard_state") {
-                raft_codec::deserialize_hard_state(data.value())
-                    .unwrap_or_else(|_| raft::prelude::HardState::default())
-            } else {
-                raft::prelude::HardState::default()
+            match table.get("hard_state") {
+                Ok(Some(data)) => {
+                    match raft_codec::deserialize_hard_state(data.value()) {
+                        Ok(state) => state,
+                        Err(e) => {
+                            tracing::error!(
+                                "Corrupted hard state detected in Raft storage: {}. Using default state. \
+                                This may indicate data corruption.",
+                                e
+                            );
+                            raft::prelude::HardState::default()
+                        }
+                    }
+                }
+                Ok(None) => {
+                    tracing::debug!("No hard state found in Raft storage, using default");
+                    raft::prelude::HardState::default()
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to read hard state from Raft storage: {}. Using default.", e);
+                    raft::prelude::HardState::default()
+                }
             }
         } else {
+            tracing::warn!("Failed to open hard state table in Raft storage, using default");
             raft::prelude::HardState::default()
         };
 
@@ -322,15 +338,13 @@ impl RedbRaftStorage {
         fail_point!("storage::append_entries");
 
         #[cfg(feature = "observability")]
-        let metrics = metrics();
-        #[cfg(feature = "observability")]
-        let _timer = Timer::with_attributes(
+        let _timer = safe_metrics().ok().map(|metrics| Timer::with_attributes(
             metrics.storage_write_duration.clone(),
             vec![
                 attributes::table("raft_log"),
                 attributes::operation("append"),
             ],
-        );
+        ));
 
         let write_txn = self.database.begin_write()?;
 
@@ -357,15 +371,13 @@ impl RedbRaftStorage {
     /// Save hard state
     pub fn save_hard_state(&self, hard_state: &raft::prelude::HardState) -> BlixardResult<()> {
         #[cfg(feature = "observability")]
-        let metrics = metrics();
-        #[cfg(feature = "observability")]
-        let _timer = Timer::with_attributes(
+        let _timer = safe_metrics().ok().map(|metrics| Timer::with_attributes(
             metrics.storage_write_duration.clone(),
             vec![
                 attributes::table("raft_hard_state"),
                 attributes::operation("save"),
             ],
-        );
+        ));
 
         let write_txn = self.database.begin_write()?;
 

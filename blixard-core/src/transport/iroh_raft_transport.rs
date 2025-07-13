@@ -18,7 +18,7 @@ use tokio::task::JoinHandle;
 
 use crate::error::{BlixardError, BlixardResult};
 #[cfg(feature = "observability")]
-use crate::metrics_otel::{attributes, metrics, Timer};
+use crate::metrics_otel::{attributes, safe_metrics, Timer};
 use crate::node_shared::SharedNodeState;
 use crate::transport::iroh_protocol::{
     generate_request_id, read_message, write_message, MessageType as ProtocolMessageType,
@@ -285,7 +285,7 @@ impl IrohRaftTransport {
         priority: RaftMessagePriority,
     ) -> BlixardResult<()> {
         #[cfg(feature = "observability")]
-        let _timer = Timer::new(metrics().raft_proposal_duration.clone());
+        let _timer = safe_metrics().ok().map(|m| Timer::new(m.raft_proposal_duration.clone()));
 
         // Get or create connection
         let mut conn = self.get_or_create_connection(to).await?;

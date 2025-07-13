@@ -6,7 +6,7 @@
 use crate::config_global;
 use crate::error::{BlixardError, BlixardResult};
 #[cfg(feature = "observability")]
-use crate::metrics_otel::{attributes, metrics, Timer};
+use crate::metrics_otel::{attributes, safe_metrics, Timer};
 use crate::raft_storage::RedbRaftStorage;
 
 use super::bootstrap::RaftBootstrapCoordinator;
@@ -415,10 +415,10 @@ impl RaftManager {
     #[instrument(skip(self, proposal), fields(proposal_id = %hex::encode(&proposal.id)))]
     async fn handle_proposal(&self, proposal: RaftProposal) -> BlixardResult<()> {
         #[cfg(feature = "observability")]
-        let _timer = Timer::with_attributes(
-            metrics().raft_proposal_duration.clone(),
+        let _timer = safe_metrics().ok().map(|m| Timer::with_attributes(
+            m.raft_proposal_duration.clone(),
             vec![attributes::operation("handle_proposal")],
-        );
+        ));
 
         info!(self.logger, "[RAFT-PROPOSAL] Handling proposal");
 
@@ -471,10 +471,10 @@ impl RaftManager {
         msg: raft::prelude::Message,
     ) -> BlixardResult<()> {
         #[cfg(feature = "observability")]
-        let _timer = Timer::with_attributes(
-            metrics().raft_proposal_duration.clone(),
+        let _timer = safe_metrics().ok().map(|m| Timer::with_attributes(
+            m.raft_proposal_duration.clone(),
             vec![attributes::operation("handle_message")],
-        );
+        ));
 
         tracing::Span::current().record("from", from);
 

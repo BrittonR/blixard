@@ -6,7 +6,7 @@
 use crate::common::error_context::{SerializationContext, StorageContext};
 use crate::error::{BlixardError, BlixardResult};
 #[cfg(feature = "observability")]
-use crate::metrics_otel::{attributes, metrics, Timer};
+use crate::metrics_otel::{attributes, safe_metrics, Timer};
 use crate::raft_storage::{
     IP_ALLOCATION_TABLE, NODE_TOPOLOGY_TABLE, RESOURCE_POLICY_TABLE, TASK_ASSIGNMENT_TABLE,
     TASK_RESULT_TABLE, TASK_TABLE, VM_IP_MAPPING_TABLE, VM_STATE_TABLE, WORKER_STATUS_TABLE,
@@ -71,10 +71,10 @@ impl RaftStateMachine {
             bincode::deserialize(&entry.data).deserialize_context("proposal", "ProposalData")?;
 
         #[cfg(feature = "observability")]
-        let _timer = Timer::with_attributes(
-            metrics().raft_proposal_duration.clone(),
+        let _timer = safe_metrics().ok().map(|m| Timer::with_attributes(
+            m.raft_proposal_duration.clone(),
             vec![attributes::operation(proposal.proposal_type())],
-        );
+        ));
 
         debug!("Applying proposal: {:?}", proposal.proposal_type());
 

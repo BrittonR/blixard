@@ -5,7 +5,7 @@ use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
 #[cfg(feature = "observability")]
-use crate::metrics_otel::{attributes, metrics};
+use crate::metrics_otel::{attributes, safe_metrics};
 use crate::{
     error::{BlixardError, BlixardResult},
     node_shared::SharedNodeState,
@@ -77,7 +77,7 @@ impl VmAutoRecovery {
     /// Trigger recovery for a failed VM
     pub async fn trigger_recovery(&self, vm_name: &str, vm_config: &VmConfig) -> BlixardResult<()> {
         #[cfg(feature = "observability")]
-        let _metrics = metrics();
+        let _metrics = safe_metrics().ok();
 
         // Check recovery state
         let (_should_attempt, restart_attempts, max_attempts) = {
@@ -190,14 +190,15 @@ impl VmAutoRecovery {
         
         #[cfg(feature = "observability")]
         {
-            let metrics = metrics();
-            metrics.vm_recovery_success.add(
-                1,
-                &[
-                    attributes::vm_name(vm_name),
-                    attributes::recovery_type("restart"),
-                ],
-            );
+            if let Ok(metrics) = safe_metrics() {
+                metrics.vm_recovery_success.add(
+                    1,
+                    &[
+                        attributes::vm_name(vm_name),
+                        attributes::recovery_type("restart"),
+                    ],
+                );
+            }
         }
         
         // Reset recovery state on success
@@ -222,15 +223,16 @@ impl VmAutoRecovery {
         
         #[cfg(feature = "observability")]
         {
-            let metrics = metrics();
-            metrics.vm_recovery_failed.add(
-                1,
-                &[
-                    attributes::vm_name(vm_name),
-                    attributes::recovery_type("restart"),
-                    attributes::error(true),
-                ],
-            );
+            if let Ok(metrics) = safe_metrics() {
+                metrics.vm_recovery_failed.add(
+                    1,
+                    &[
+                        attributes::vm_name(vm_name),
+                        attributes::recovery_type("restart"),
+                        attributes::error(true),
+                    ],
+                );
+            }
         }
 
         // Check if we've exhausted restart attempts
@@ -299,7 +301,7 @@ impl VmAutoRecovery {
     async fn attempt_migration(&self, vm_name: &str, vm_config: &VmConfig) -> BlixardResult<()> {
         info!("Attempting migration for VM '{}'", vm_name);
         #[cfg(feature = "observability")]
-        let metrics = metrics();
+        let metrics = safe_metrics().ok();
 
         // Get the database to access scheduler
         let database =

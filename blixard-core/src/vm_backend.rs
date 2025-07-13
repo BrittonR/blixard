@@ -7,7 +7,7 @@ use uuid;
 
 use crate::error::{BlixardError, BlixardResult};
 #[cfg(feature = "observability")]
-use crate::metrics_otel::{attributes, metrics, Timer};
+use crate::metrics_otel::{attributes, safe_metrics, Timer};
 // use crate::patterns::{CircuitBreaker, CircuitBreakerConfig, RetryConfig, retry};
 use crate::types::{VmCommand, VmConfig, VmStatus};
 use crate::vm_health_types::{HealthCheckResult, HealthCheckType, VmHealthStatus};
@@ -550,30 +550,34 @@ impl VmManager {
     /// Handle VM creation command with observability
     async fn handle_create_command(&self, config: VmConfig, node_id: u64) -> BlixardResult<()> {
         #[cfg(feature = "observability")]
-        let metrics = metrics();
+        let metrics = safe_metrics().ok();
         
         #[cfg(feature = "observability")]
-        let _timer = Timer::with_attributes(
-            metrics.vm_create_duration.clone(),
+        let _timer = metrics.as_ref().map(|m| Timer::with_attributes(
+            m.vm_create_duration.clone(),
             vec![
                 attributes::vm_name(&config.name),
                 attributes::node_id(node_id),
                 attributes::operation("backend_create"),
             ],
-        );
+        ));
 
         let result = self.backend.create_vm(&config, node_id).await;
 
         if result.is_ok() {
             #[cfg(feature = "observability")]
-            metrics.vm_total.add(1, &[]);
+            if let Some(ref metrics) = metrics {
+                metrics.vm_total.add(1, &[]);
+            }
             // Monitor VM status after creation attempt
             self.monitor_vm_status_after_operation(&config.name).await;
         } else {
             #[cfg(feature = "observability")]
-            metrics
-                .vm_create_failed
-                .add(1, &[attributes::vm_name(&config.name)]);
+            if let Some(ref metrics) = metrics {
+                metrics
+                    .vm_create_failed
+                    .add(1, &[attributes::vm_name(&config.name)]);
+            }
         }
 
         result
@@ -582,13 +586,15 @@ impl VmManager {
     /// Handle VM start command with observability
     async fn handle_start_command(&self, name: String) -> BlixardResult<()> {
         #[cfg(feature = "observability")]
-        let metrics = metrics();
+        let metrics = safe_metrics().ok();
         
         let result = self.backend.start_vm(&name).await;
 
         if result.is_ok() {
             #[cfg(feature = "observability")]
-            metrics.vm_running.add(1, &[]);
+            if let Some(ref metrics) = metrics {
+                metrics.vm_running.add(1, &[]);
+            }
             // Monitor VM status after start attempt
             self.monitor_vm_status_after_operation(&name).await;
         }
@@ -599,13 +605,15 @@ impl VmManager {
     /// Handle VM stop command with observability
     async fn handle_stop_command(&self, name: String) -> BlixardResult<()> {
         #[cfg(feature = "observability")]
-        let metrics = metrics();
+        let metrics = safe_metrics().ok();
         
         let result = self.backend.stop_vm(&name).await;
 
         if result.is_ok() {
             #[cfg(feature = "observability")]
-            metrics.vm_running.add(-1, &[]);
+            if let Some(ref metrics) = metrics {
+                metrics.vm_running.add(-1, &[]);
+            }
             // Monitor VM status after stop attempt
             self.monitor_vm_status_after_operation(&name).await;
         }
@@ -616,13 +624,15 @@ impl VmManager {
     /// Handle VM delete command with observability
     async fn handle_delete_command(&self, name: String) -> BlixardResult<()> {
         #[cfg(feature = "observability")]
-        let metrics = metrics();
+        let metrics = safe_metrics().ok();
         
         let result = self.backend.delete_vm(&name).await;
 
         if result.is_ok() {
             #[cfg(feature = "observability")]
-            metrics.vm_total.add(-1, &[]);
+            if let Some(ref metrics) = metrics {
+                metrics.vm_total.add(-1, &[]);
+            }
         }
 
         result
