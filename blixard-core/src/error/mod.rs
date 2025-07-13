@@ -59,6 +59,9 @@ pub mod conversions;
 pub mod context;
 pub mod domain;
 
+#[cfg(test)]
+mod tests;
+
 // Re-export all public types for backward compatibility
 pub use types::{BlixardError, Result, BlixardResult, format_errors};
 

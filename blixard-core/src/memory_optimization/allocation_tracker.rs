@@ -187,6 +187,7 @@ impl AllocationReport {
 }
 
 /// Track allocations for a code block
+#[cfg(feature = "allocation-tracking")]
 #[macro_export]
 macro_rules! track_allocations {
     ($name:expr, $block:block) => {{
@@ -197,6 +198,14 @@ macro_rules! track_allocations {
             report.print();
         }
         result
+    }};
+}
+
+#[cfg(not(feature = "allocation-tracking"))]
+#[macro_export]
+macro_rules! track_allocations {
+    ($name:expr, $block:block) => {{
+        $block
     }};
 }
 

@@ -197,8 +197,8 @@ impl<T: Copy, const N: usize> StaticLookup<T, N> {
 macro_rules! const_map {
     ($($key:expr => $value:expr),* $(,)?) => {
         {
-            const ENTRIES: &[_] = &[$(($key, $value)),*];
-            $crate::zero_cost::const_collections::ConstMap::from_unsorted(*ENTRIES)
+            let entries = [$(($key, $value)),*];
+            $crate::zero_cost::const_collections::ConstMap::from_unsorted(entries)
         }
     };
 }
@@ -208,8 +208,8 @@ macro_rules! const_map {
 macro_rules! const_set {
     ($($item:expr),* $(,)?) => {
         {
-            const ITEMS: &[_] = &[$($item),*];
-            $crate::zero_cost::const_collections::ConstSet::from_unsorted(*ITEMS)
+            let items = [$($item),*];
+            $crate::zero_cost::const_collections::ConstSet::from_unsorted(items)
         }
     };
 }
@@ -415,22 +415,22 @@ mod tests {
     #[test]
     fn test_macro_usage() {
         // Test const_map macro
-        const STATUS_MAP: ConstMap<i32, &str, 3> = const_map! {
+        let status_map = const_map! {
             0 => "success",
             1 => "warning", 
             2 => "error",
         };
         
-        assert_eq!(STATUS_MAP.get(0), Some("success"));
-        assert_eq!(STATUS_MAP.get(1), Some("warning"));
-        assert_eq!(STATUS_MAP.get(2), Some("error"));
+        assert_eq!(status_map.get(0), Some("success"));
+        assert_eq!(status_map.get(1), Some("warning"));
+        assert_eq!(status_map.get(2), Some("error"));
 
         // Test const_set macro
-        const PRIORITY_SET: ConstSet<i32, 3> = const_set![1, 2, 3];
+        let priority_set = const_set![1, 2, 3];
         
-        assert!(PRIORITY_SET.contains(1));
-        assert!(PRIORITY_SET.contains(2));
-        assert!(PRIORITY_SET.contains(3));
-        assert!(!PRIORITY_SET.contains(4));
+        assert!(priority_set.contains(1));
+        assert!(priority_set.contains(2));
+        assert!(priority_set.contains(3));
+        assert!(!priority_set.contains(4));
     }
 }

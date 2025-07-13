@@ -20,10 +20,10 @@ pub mod resource_pool_examples;
 #[cfg(test)]
 pub mod retry_migration_example;
 
-pub use builder::{AsyncBuilder, Builder};
+pub use builder::{AsyncBuilder, Builder, HasBuilder};
 // pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitBreakerState, CircuitBreakerStats};
 pub use error_context::ErrorContext;
-pub use factory::{Factory, Registry};
+pub use factory::{Creatable, Factory, Registry};
 // pub use graceful_degradation::{DegradationLevel, DegradationStats, GracefulDegradation, ServiceLevel};
 pub use lifecycle::{
     BackgroundTaskManager, HealthStatus, LifecycleBase, LifecycleManager, LifecycleState,

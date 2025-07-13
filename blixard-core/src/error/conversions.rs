@@ -104,3 +104,154 @@ impl From<uuid::Error> for BlixardError {
         }
     }
 }
+
+// Async/Task error conversions
+impl From<tokio::task::JoinError> for BlixardError {
+    fn from(err: tokio::task::JoinError) -> Self {
+        if err.is_cancelled() {
+            BlixardError::Internal {
+                message: "Task was cancelled".to_string(),
+            }
+        } else if err.is_panic() {
+            BlixardError::Internal {
+                message: "Task panicked".to_string(),
+            }
+        } else {
+            BlixardError::Internal {
+                message: format!("Task join failed: {}", err),
+            }
+        }
+    }
+}
+
+impl From<tokio::time::error::Elapsed> for BlixardError {
+    fn from(_err: tokio::time::error::Elapsed) -> Self {
+        BlixardError::Timeout {
+            operation: "async_operation".to_string(),
+            duration: std::time::Duration::from_secs(0), // Duration not available from Elapsed
+        }
+    }
+}
+
+impl From<tokio::sync::oneshot::error::RecvError> for BlixardError {
+    fn from(err: tokio::sync::oneshot::error::RecvError) -> Self {
+        BlixardError::Internal {
+            message: format!("Channel receive failed: {}", err),
+        }
+    }
+}
+
+impl<T> From<tokio::sync::mpsc::error::SendError<T>> for BlixardError
+where
+    T: std::fmt::Debug,
+{
+    fn from(err: tokio::sync::mpsc::error::SendError<T>) -> Self {
+        BlixardError::Internal {
+            message: format!("Channel send failed: {:?}", err),
+        }
+    }
+}
+
+impl From<tokio::sync::broadcast::error::SendError<String>> for BlixardError {
+    fn from(err: tokio::sync::broadcast::error::SendError<String>) -> Self {
+        BlixardError::Internal {
+            message: format!("Broadcast send failed: {}", err),
+        }
+    }
+}
+
+impl From<tokio::sync::broadcast::error::RecvError> for BlixardError {
+    fn from(err: tokio::sync::broadcast::error::RecvError) -> Self {
+        use tokio::sync::broadcast::error::RecvError;
+        match err {
+            RecvError::Closed => BlixardError::Internal {
+                message: "Broadcast channel closed".to_string(),
+            },
+            RecvError::Lagged(count) => BlixardError::Internal {
+                message: format!("Broadcast channel lagged by {} messages", count),
+            },
+        }
+    }
+}
+
+impl From<tokio::sync::watch::error::SendError<String>> for BlixardError {
+    fn from(err: tokio::sync::watch::error::SendError<String>) -> Self {
+        BlixardError::Internal {
+            message: format!("Watch send failed: {}", err),
+        }
+    }
+}
+
+impl From<tokio::sync::AcquireError> for BlixardError {
+    fn from(err: tokio::sync::AcquireError) -> Self {
+        BlixardError::Internal {
+            message: format!("Semaphore acquire failed: {}", err),
+        }
+    }
+}
+
+// HTTP/Network error conversions
+impl From<reqwest::Error> for BlixardError {
+    fn from(err: reqwest::Error) -> Self {
+        if err.is_timeout() {
+            BlixardError::Timeout {
+                operation: "http_request".to_string(),
+                duration: std::time::Duration::from_secs(30), // Default timeout assumption
+            }
+        } else if err.is_connect() {
+            BlixardError::ConnectionError {
+                address: err.url().map(|u| u.to_string()).unwrap_or_else(|| "unknown".to_string()),
+                details: format!("Connection failed: {}", err),
+            }
+        } else {
+            BlixardError::NetworkError(format!("HTTP request failed: {}", err))
+        }
+    }
+}
+
+impl From<hyper::Error> for BlixardError {
+    fn from(err: hyper::Error) -> Self {
+        if err.is_timeout() {
+            BlixardError::Timeout {
+                operation: "hyper_request".to_string(),
+                duration: std::time::Duration::from_secs(30), // Default timeout assumption
+            }
+        } else if err.is_connect() {
+            BlixardError::ConnectionError {
+                address: "unknown".to_string(),
+                details: format!("Hyper connection failed: {}", err),
+            }
+        } else {
+            BlixardError::NetworkError(format!("Hyper error: {}", err))
+        }
+    }
+}
+
+// Tracing error conversions
+impl From<tracing::dispatcher::SetGlobalDefaultError> for BlixardError {
+    fn from(err: tracing::dispatcher::SetGlobalDefaultError) -> Self {
+        BlixardError::ConfigurationError {
+            component: "tracing".to_string(),
+            message: format!("Failed to set global tracing subscriber: {}", err),
+        }
+    }
+}
+
+// String parsing and format error conversions
+impl From<std::string::FromUtf8Error> for BlixardError {
+    fn from(err: std::string::FromUtf8Error) -> Self {
+        BlixardError::Serialization {
+            operation: "utf8_conversion".to_string(),
+            source: Box::new(err),
+        }
+    }
+}
+
+impl From<std::str::Utf8Error> for BlixardError {
+    fn from(err: std::str::Utf8Error) -> Self {
+        BlixardError::ConfigurationError {
+            component: "utf8_parsing".to_string(),
+            message: format!("Invalid UTF-8 data: {}", err),
+        }
+    }
+}

@@ -9,7 +9,7 @@ use crate::raft_manager::WorkerCapabilities;
 use crate::resource_management::{ClusterResourceManager, OvercommitPolicy};
 use crate::try_into_bytes;
 // Hypervisor type is used for resource admission validation
-use crate::types::{VmConfig, VmState, VmStatus};
+use crate::types::{Hypervisor, VmConfig, VmState, VmStatus};
 use redb::{Database, ReadableTable};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -427,19 +427,17 @@ mod tests {
         // Should admit VMs up to effective capacity
         let vm_config = VmConfig {
             name: "test-vm".to_string(),
+            config_path: "/tmp/test-vm.nix".to_string(),
             vcpus: 15,
             memory: 16000,
-            preemptible: false,
-            priority: 100,
+            tenant_id: "test-tenant".to_string(),
+            ip_address: None,
+            metadata: None,
             anti_affinity: None,
-            networks: vec![],
-            volumes: vec![],
-            nixos_modules: vec![],
-            kernel: None,
-            init_command: None,
-            flake_modules: vec![],
-            hypervisor: Hypervisor::CloudHypervisor,
-            tenant_id: None,
+            priority: 100,
+            preemptible: false,
+            locality_preference: crate::types::LocalityPreference::None,
+            health_check_config: None,
         };
 
         // Should succeed (within overcommit limits)
@@ -518,19 +516,17 @@ mod tests {
         // Test strict admission (no overcommit allowed)
         let vm_config = VmConfig {
             name: "test-vm".to_string(),
+            config_path: "/tmp/test-vm.nix".to_string(),
             vcpus: 5, // More than physical capacity
             memory: 4096,
-            preemptible: false,
-            priority: 100,
+            tenant_id: "test-tenant".to_string(),
+            ip_address: None,
+            metadata: None,
             anti_affinity: None,
-            networks: vec![],
-            volumes: vec![],
-            nixos_modules: vec![],
-            kernel: None,
-            init_command: None,
-            flake_modules: vec![],
-            hypervisor: Hypervisor::CloudHypervisor,
-            tenant_id: None,
+            priority: 100,
+            preemptible: false,
+            locality_preference: crate::types::LocalityPreference::None,
+            health_check_config: None,
         };
 
         // Should fail (exceeds physical capacity in strict mode)

@@ -58,8 +58,11 @@ pub async fn new_connect_with_retry_custom(address: &str) -> BlixardResult<Strin
             multiplier: 2.0,
         },
         jitter: true,
+        jitter_strategy: crate::patterns::retry::JitterStrategy::Proportional,
         max_total_delay: Some(Duration::from_secs(30)),
         is_retryable: |e| matches!(e, BlixardError::ConnectionError { .. }),
+        operation_name: Some("connect_with_retry".to_string()),
+        enable_logging: true,
     };
 
     let addr = address.to_string();

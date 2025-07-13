@@ -238,3 +238,15 @@ where
         duration: timeout,
     })
 }
+
+/// Create a test database with temporary directory
+/// Returns (Database, TempDir) tuple for tests
+pub async fn create_test_database() -> (Arc<redb::Database>, TempDir) {
+    use redb::Database;
+    
+    let temp_dir = TempDir::new().expect("Should be able to create temp dir for tests");
+    let db_path = temp_dir.path().join("test.db");
+    let database = Arc::new(Database::create(&db_path).expect("Should be able to create test database"));
+    
+    (database, temp_dir)
+}

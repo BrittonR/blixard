@@ -31,7 +31,7 @@ pub async fn deploy_vm(vm_name: &str, config_path: &Path) -> BlixardResult<()> {
     let config = read_config_file(config_path).with_vm_context(vm_name, "load configuration")?;
 
     // Validate configuration
-    validate_vm_config(&config).with_vm_context(vm_name, "validate configuration")?;
+    validate_vm_config(&config).await.with_vm_context(vm_name, "validate configuration")?;
 
     // Create VM
     create_vm_internal(vm_name, &config)
@@ -76,8 +76,7 @@ pub async fn start_all_vms(vm_names: &[String]) -> BlixardResult<Vec<String>> {
             Err(e) => {
                 // Convert to VM-specific error and collect
                 let vm_error = BlixardError::Internal {
-                    message: format!("Failed to start VM '{}'", vm_name),
-                    source: Some(Box::new(e)),
+                    message: format!("Failed to start VM '{}': {}", vm_name, e),
                 };
                 collector.add_error(vm_error);
             }
@@ -100,10 +99,9 @@ pub async fn storage_operation(
             .with_storage_context("get")
             .with_context(|| format!("Key: {}", key)),
         StorageOp::Put => {
-            let data = value.ok_or_else(|| BlixardError::InvalidInput {
-                field: "value".to_string(),
-                value: "None".to_string(),
-                reason: "Put operation requires value".to_string(),
+            let data = value.ok_or_else(|| BlixardError::ConfigurationError {
+                component: "storage_operation".to_string(),
+                message: "Put operation requires value".to_string(),
             })?;
 
             put_to_storage(key, data)
@@ -152,10 +150,9 @@ pub async fn replicate_data_to_peers(
 
     // Check if we have enough replicas
     if successful_replicas < min_replicas {
-        return Err(BlixardError::InsufficientReplicas {
-            required: min_replicas,
-            actual: successful_replicas,
-            details: format!("Failed to replicate to {} peers", collector.error_count()),
+        return Err(BlixardError::InsufficientResources {
+            requested: format!("{} replicas", min_replicas),
+            available: format!("{} replicas", successful_replicas),
         });
     }
 
@@ -242,12 +239,10 @@ pub async fn handle_external_api_call(endpoint: &str) -> BlixardResult<String> {
                 })
                 .with_network_context(endpoint, "API request timeout"),
                 ExternalErrorKind::NotFound => Err(BlixardError::NotFound {
-                    resource_type: "API endpoint".to_string(),
-                    identifier: endpoint.to_string(),
+                    resource: format!("API endpoint: {}", endpoint),
                 }),
-                _ => Err(BlixardError::External {
-                    service: "External API".to_string(),
-                    message: e.to_string(),
+                _ => Err(BlixardError::Internal {
+                    message: format!("External API error: {}", e),
                 })
                 .with_network_context(endpoint, "API call failed"),
             }
@@ -293,7 +288,7 @@ pub enum ExternalErrorKind {
     ServerError,
 }
 
-pub trait ExternalError {
+pub trait ExternalError: std::fmt::Display {
     fn kind(&self) -> ExternalErrorKind;
 }
 

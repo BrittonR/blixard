@@ -239,6 +239,7 @@ mod tests {
                 capabilities: WorkerCapabilities {
                     cpu_cores: 4,
                     memory_mb: 8192,
+                    disk_gb: 100,
                     features: vec![],
                 },
                 topology: crate::types::NodeTopology::default(),
@@ -279,6 +280,7 @@ mod tests {
             capabilities: WorkerCapabilities {
                 cpu_cores: 4,
                 memory_mb: 8192,
+                disk_gb: 100,
                 features: vec!["gpu".to_string()],
             },
             topology: crate::types::NodeTopology::default(),

@@ -425,7 +425,7 @@ mod tests {
 
     #[test]
     fn test_const_functions() {
-        const POS: Positive<u32> = Positive::new_unchecked(42);
+        const POS: Positive<u32> = <Positive<u32>>::new_unchecked(42);
         assert_eq!(*POS, 42);
 
         const BOUNDED: BoundedInt<0, 100> = BoundedInt::new_unchecked(50);

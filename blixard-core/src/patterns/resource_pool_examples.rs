@@ -206,11 +206,11 @@ pub async fn demonstrate_resource_pools() -> BlixardResult<()> {
     // Allocate an IP address
     {
         let mut ip_resource = ip_pool.acquire().await?;
-        ip_resource.allocated_to = Some("vm-123".to_string());
+        ip_resource.get_mut()?.allocated_to = Some("vm-123".to_string());
         println!(
             "Allocated IP: {} to {}",
-            ip_resource.address,
-            ip_resource.allocated_to.as_ref().unwrap()
+            ip_resource.get()?.address,
+            ip_resource.get()?.allocated_to.as_ref().unwrap()
         );
     } // IP automatically returned to pool when dropped
 
@@ -230,7 +230,7 @@ pub async fn demonstrate_resource_pools() -> BlixardResult<()> {
     // Use a database connection
     {
         let connection = db_pool.acquire().await?;
-        println!("Got database connection #{}", connection.id);
+        println!("Got database connection #{}", connection.get()?.id);
         // Use connection...
     } // Connection returned to pool
 
@@ -250,13 +250,13 @@ pub async fn demonstrate_resource_pools() -> BlixardResult<()> {
         let pool = worker_pool.clone();
         let handle = tokio::spawn(async move {
             let mut worker = pool.acquire().await?;
-            worker.current_task = Some(format!("task-{}", i));
+            worker.get_mut()?.current_task = Some(format!("task-{}", i));
 
             // Simulate work
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-            worker.tasks_completed += 1;
-            worker.current_task = None;
+            worker.get_mut()?.tasks_completed += 1;
+            worker.get_mut()?.current_task = None;
 
             Ok::<_, BlixardError>(())
         });
@@ -265,7 +265,9 @@ pub async fn demonstrate_resource_pools() -> BlixardResult<()> {
 
     // Wait for all tasks
     for handle in handles {
-        handle.await??;
+        handle.await.map_err(|e| BlixardError::Internal {
+            message: format!("Task join failed: {}", e),
+        })??;
     }
 
     // Print pool statistics
@@ -282,7 +284,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_ip_address_pool() {
+    async fn test_ip_address_pool() -> BlixardResult<()> {
         let factory = Arc::new(IpAddressFactory::new("10.0.0.0", 10).unwrap());
         let config = PoolConfig {
             max_size: 5,
@@ -295,15 +297,17 @@ mod tests {
         let ip1 = pool.acquire().await.unwrap();
         let ip2 = pool.acquire().await.unwrap();
 
-        assert_eq!(ip1.address.to_string(), "10.0.0.1");
-        assert_eq!(ip2.address.to_string(), "10.0.0.2");
+        assert_eq!(ip1.get()?.address.to_string(), "10.0.0.1");
+        assert_eq!(ip2.get()?.address.to_string(), "10.0.0.2");
 
         // Return and reacquire
         drop(ip1);
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
         let ip3 = pool.acquire().await.unwrap();
-        assert_eq!(ip3.address.to_string(), "10.0.0.1"); // Reused
+        assert_eq!(ip3.get()?.address.to_string(), "10.0.0.1"); // Reused
+        
+        Ok(())
     }
 
     #[tokio::test]
