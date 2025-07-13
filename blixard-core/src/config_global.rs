@@ -18,7 +18,10 @@ static CONFIG: OnceCell<Arc<Config>> = OnceCell::new();
 pub fn init(config: Config) -> BlixardResult<()> {
     CONFIG
         .set(Arc::new(config))
-        .map_err(|_| BlixardError::ConfigError("Configuration already initialized".to_string()))
+        .map_err(|_| BlixardError::ConfigurationError {
+            component: "config_global.initialization".to_string(),
+            message: "Configuration already initialized".to_string(),
+        })
 }
 
 /// Get the global configuration instance
@@ -29,9 +32,10 @@ pub fn get() -> BlixardResult<Arc<Config>> {
     CONFIG
         .get()
         .ok_or_else(|| {
-            BlixardError::ConfigError(
-                "Configuration not initialized. Call config_global::init() first".to_string(),
-            )
+            BlixardError::ConfigurationError {
+                component: "config_global.access".to_string(),
+                message: "Configuration not initialized. Call config_global::init() first".to_string(),
+            }
         })
         .map(|config| config.clone())
 }

@@ -44,14 +44,20 @@ impl ConfigWatcher {
                 }
             })
             .map_err(|e| {
-                BlixardError::ConfigError(format!("Failed to create file watcher: {}", e))
+                BlixardError::ConfigurationError {
+                    component: "config_watcher.file_watcher".to_string(),
+                    message: format!("Failed to create file watcher: {}", e),
+                }
             })?;
 
         // Watch the config file
         watcher
             .watch(&config_path, RecursiveMode::NonRecursive)
             .map_err(|e| {
-                BlixardError::ConfigError(format!("Failed to watch config file: {}", e))
+                BlixardError::ConfigurationError {
+                    component: "config_watcher.file_watch".to_string(),
+                    message: format!("Failed to watch config file: {}", e),
+                }
             })?;
 
         // Also watch the parent directory for file moves/renames
