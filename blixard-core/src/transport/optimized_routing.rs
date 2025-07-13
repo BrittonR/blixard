@@ -216,7 +216,7 @@ impl IrohConnection {
             .map_err(|e| BlixardError::NetworkError(format!("Failed to write payload: {}", e)))?;
         
         // Finish writing
-        stream.finish().await
+        stream.finish()
             .map_err(|e| BlixardError::NetworkError(format!("Failed to finish stream: {}", e)))?;
         
         // For now, return empty response - in a real implementation,

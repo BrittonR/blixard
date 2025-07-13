@@ -56,6 +56,8 @@
 pub mod types;
 pub mod constructors;
 pub mod conversions;
+pub mod context;
+pub mod domain;
 
 // Re-export all public types for backward compatibility
 pub use types::{BlixardError, Result, BlixardResult, format_errors};
@@ -64,3 +66,10 @@ pub use types::{BlixardError, Result, BlixardResult, format_errors};
 // These are automatically available when BlixardError is in scope
 pub use constructors::*;
 pub use conversions::*;
+
+// Re-export enhanced error context and domain-specific errors
+pub use context::{
+    ErrorContext, ErrorContextExt, ErrorSeverity, EnhancedBlixardError,
+    RecoveryAction, RecoveryHint, ErrorCategory,
+};
+pub use domain::{ResourceError, SecurityError, NetworkError};

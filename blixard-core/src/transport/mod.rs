@@ -346,6 +346,7 @@
 
 pub mod cluster_operations_adapter;
 pub mod config;
+pub mod http_client_pool;
 pub mod iroh_client;
 pub mod iroh_cluster_service;
 pub mod iroh_health_service;
@@ -358,6 +359,8 @@ pub mod iroh_service_runner;
 pub mod iroh_status_service;
 pub mod iroh_vm_service;
 pub mod metrics;
+pub mod optimized_peer_connector;
+pub mod optimized_routing;
 pub mod raft_transport_adapter;
 pub mod service_builder;
 pub mod service_consolidation;

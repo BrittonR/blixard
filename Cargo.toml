@@ -68,6 +68,7 @@ scopeguard = "1.2"
 dashmap = "6.1"
 rand = "0.8"
 rand_chacha = "0.3"
+url = "2.5"
 
 # Network utilities
 ipnet = { version = "2.9", features = ["serde"] }

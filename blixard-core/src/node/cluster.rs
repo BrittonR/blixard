@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::oneshot;
+use url::Url;
 
 use crate::error::{BlixardError, BlixardResult};
 use crate::p2p_manager::{ConnectionQuality, PeerInfo};
@@ -143,13 +144,16 @@ impl Node {
         bootstrap_url: &str,
     ) -> BlixardResult<crate::iroh_types::BootstrapInfo> {
         tracing::debug!("Fetching bootstrap info from {}", bootstrap_url);
-        let client = reqwest::Client::new();
-        let response = match client
-            .get(bootstrap_url)
-            .timeout(Duration::from_secs(5))
-            .send()
-            .await
-        {
+        
+        // Extract host from URL for connection pooling
+        let url = Url::parse(bootstrap_url).map_err(|e| {
+            BlixardError::NetworkError(format!("Invalid bootstrap URL {}: {}", bootstrap_url, e))
+        })?;
+        let host = url.host_str().unwrap_or("localhost");
+
+        // Use pooled HTTP client for better performance
+        let client = crate::transport::http_client_pool::get_global_client(host).await?;
+        let response = match client.get(bootstrap_url).await {
             Ok(resp) => resp,
             Err(e) => {
                 return Err(BlixardError::NetworkError(format!(

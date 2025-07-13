@@ -398,7 +398,7 @@ impl FuzzerEngine {
 }
 
 /// Statistics about the fuzzing corpus
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct CorpusStats {
     pub total_test_cases: usize,
     pub bug_finding_cases: usize,

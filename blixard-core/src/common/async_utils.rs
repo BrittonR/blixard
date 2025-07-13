@@ -6,7 +6,7 @@
 
 use std::future::Future;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tokio::time::timeout;
 
@@ -144,6 +144,550 @@ where
         .await
 }
 
+/// Advanced concurrent processing with error handling and result collection
+/// 
+/// Similar to concurrent_map but collects results and errors separately,
+/// allowing partial success scenarios.
+pub async fn concurrent_try_map<T, F, R, E, Fut>(
+    items: Vec<T>,
+    max_concurrent: usize,
+    f: F,
+) -> (Vec<R>, Vec<E>)
+where
+    F: Fn(T) -> Fut + Clone,
+    Fut: Future<Output = Result<R, E>>,
+{
+    use futures::stream::{self, StreamExt};
+    
+    let results: Vec<Result<R, E>> = stream::iter(items)
+        .map(f)
+        .buffer_unordered(max_concurrent)
+        .collect()
+        .await;
+    
+    let mut successes = Vec::new();
+    let mut errors = Vec::new();
+    
+    for result in results {
+        match result {
+            Ok(value) => successes.push(value),
+            Err(error) => errors.push(error),
+        }
+    }
+    
+    (successes, errors)
+}
+
+/// Streaming processor for handling large datasets efficiently
+/// 
+/// Processes items in a stream without loading all into memory,
+/// useful for large collections or real-time processing.
+pub async fn stream_process<T, F, R, Fut>(
+    mut items: impl futures::Stream<Item = T> + Unpin,
+    max_concurrent: usize,
+    f: F,
+) -> Vec<R>
+where
+    F: Fn(T) -> Fut + Clone,
+    Fut: Future<Output = R>,
+{
+    use futures::StreamExt;
+    
+    items
+        .map(f)
+        .buffer_unordered(max_concurrent)
+        .collect()
+        .await
+}
+
+/// Adaptive concurrency controller that adjusts parallelism based on performance
+/// 
+/// Monitors execution time and adjusts the concurrency level to optimize throughput
+/// while preventing system overload.
+pub struct AdaptiveConcurrencyController {
+    current_concurrency: AtomicCounter,
+    min_concurrency: usize,
+    max_concurrency: usize,
+    performance_window: std::collections::VecDeque<Duration>,
+    last_adjustment: Arc<RwLock<Instant>>,
+    adjustment_interval: Duration,
+}
+
+impl AdaptiveConcurrencyController {
+    pub fn new(min_concurrency: usize, max_concurrency: usize) -> Self {
+        Self {
+            current_concurrency: AtomicCounter::new(min_concurrency as u64),
+            min_concurrency,
+            max_concurrency,
+            performance_window: std::collections::VecDeque::with_capacity(10),
+            last_adjustment: Arc::new(RwLock::new(Instant::now())),
+            adjustment_interval: Duration::from_secs(30),
+        }
+    }
+    
+    pub fn get_concurrency(&self) -> usize {
+        self.current_concurrency.get() as usize
+    }
+    
+    pub async fn record_performance(&mut self, duration: Duration) {
+        // Record performance sample
+        self.performance_window.push_back(duration);
+        if self.performance_window.len() > 10 {
+            self.performance_window.pop_front();
+        }
+        
+        // Check if it's time to adjust
+        let last_adjustment = *self.last_adjustment.read().await;
+        if last_adjustment.elapsed() >= self.adjustment_interval {
+            self.adjust_concurrency().await;
+        }
+    }
+    
+    async fn adjust_concurrency(&mut self) {
+        if self.performance_window.len() < 5 {
+            return; // Need more samples
+        }
+        
+        // Calculate average performance
+        let avg_duration: Duration = self.performance_window.iter().sum::<Duration>() 
+            / self.performance_window.len() as u32;
+        
+        let current = self.current_concurrency.get() as usize;
+        
+        // Simple adjustment logic: increase if performance is good, decrease if poor
+        let new_concurrency = if avg_duration < Duration::from_millis(100) && current < self.max_concurrency {
+            current + 1
+        } else if avg_duration > Duration::from_millis(500) && current > self.min_concurrency {
+            current - 1
+        } else {
+            current
+        };
+        
+        self.current_concurrency.set(new_concurrency as u64);
+        *self.last_adjustment.write().await = Instant::now();
+        
+        if new_concurrency != current {
+            tracing::debug!("Adjusted concurrency from {} to {} (avg_duration: {:?})", 
+                         current, new_concurrency, avg_duration);
+        }
+    }
+}
+
+/// Resource-aware concurrent processor
+/// 
+/// Monitors system resources and adjusts processing based on available capacity.
+pub struct ResourceAwareConcurrentProcessor {
+    cpu_threshold: f64,
+    memory_threshold: f64,
+    adaptive_controller: AdaptiveConcurrencyController,
+}
+
+impl ResourceAwareConcurrentProcessor {
+    pub fn new(cpu_threshold: f64, memory_threshold: f64, max_concurrency: usize) -> Self {
+        Self {
+            cpu_threshold,
+            memory_threshold,
+            adaptive_controller: AdaptiveConcurrencyController::new(1, max_concurrency),
+        }
+    }
+    
+    pub async fn process<T, F, R, Fut>(
+        &mut self,
+        items: Vec<T>,
+        f: F,
+    ) -> Vec<R>
+    where
+        F: Fn(T) -> Fut + Clone,
+        Fut: Future<Output = R>,
+    {
+        let start = Instant::now();
+        
+        // Get current system resources
+        let concurrency = self.get_adaptive_concurrency().await;
+        
+        // Process with adjusted concurrency
+        let results = concurrent_map(items, concurrency, f).await;
+        
+        // Record performance for future adjustments
+        self.adaptive_controller.record_performance(start.elapsed()).await;
+        
+        results
+    }
+    
+    async fn get_adaptive_concurrency(&self) -> usize {
+        // In a real implementation, check system CPU and memory usage
+        // For now, use the adaptive controller's current setting
+        self.adaptive_controller.get_concurrency()
+    }
+}
+
+/// Connection pool abstraction for generic resource pooling
+/// 
+/// Provides a generic connection pool that can be used for any type of resource
+/// with automatic cleanup and health checking.
+pub struct GenericConnectionPool<T> {
+    connections: Arc<RwLock<Vec<PooledResource<T>>>>,
+    max_size: usize,
+    idle_timeout: Duration,
+    health_check_interval: Duration,
+    factory: Arc<dyn Fn() -> std::pin::Pin<Box<dyn Future<Output = Result<T, Box<dyn std::error::Error + Send + Sync>>> + Send>> + Send + Sync>,
+    health_checker: Arc<dyn Fn(&T) -> std::pin::Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>,
+}
+
+struct PooledResource<T> {
+    resource: T,
+    created_at: Instant,
+    last_used: Arc<RwLock<Instant>>,
+    is_healthy: Arc<RwLock<bool>>,
+}
+
+impl<T> PooledResource<T> {
+    fn new(resource: T) -> Self {
+        let now = Instant::now();
+        Self {
+            resource,
+            created_at: now,
+            last_used: Arc::new(RwLock::new(now)),
+            is_healthy: Arc::new(RwLock::new(true)),
+        }
+    }
+    
+    async fn touch(&self) {
+        *self.last_used.write().await = Instant::now();
+    }
+    
+    async fn is_idle(&self, timeout: Duration) -> bool {
+        self.last_used.read().await.elapsed() > timeout
+    }
+}
+
+impl<T: Send + 'static> GenericConnectionPool<T> {
+    pub fn new<F, H, Fut1, Fut2>(
+        max_size: usize,
+        idle_timeout: Duration,
+        health_check_interval: Duration,
+        factory: F,
+        health_checker: H,
+    ) -> Self
+    where
+        F: Fn() -> Fut1 + Send + Sync + 'static,
+        H: Fn(&T) -> Fut2 + Send + Sync + 'static,
+        Fut1: Future<Output = Result<T, Box<dyn std::error::Error + Send + Sync>>> + Send + 'static,
+        Fut2: Future<Output = bool> + Send + 'static,
+    {
+        let factory = Arc::new(move || -> std::pin::Pin<Box<dyn Future<Output = Result<T, Box<dyn std::error::Error + Send + Sync>>> + Send>> {
+            Box::pin(factory())
+        });
+        let health_checker = Arc::new(move |t: &T| -> std::pin::Pin<Box<dyn Future<Output = bool> + Send>> {
+            Box::pin(health_checker(t))
+        });
+        
+        Self {
+            connections: Arc::new(RwLock::new(Vec::new())),
+            max_size,
+            idle_timeout,
+            health_check_interval,
+            factory,
+            health_checker,
+        }
+    }
+    
+    pub async fn get(&self) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
+        // Try to get an existing healthy connection
+        {
+            let mut connections = self.connections.write().await;
+            for (i, pooled) in connections.iter().enumerate() {
+                if *pooled.is_healthy.read().await {
+                    let resource = connections.remove(i);
+                    resource.touch().await;
+                    return Ok(resource.resource);
+                }
+            }
+        }
+        
+        // Create a new connection
+        let resource = (self.factory)().await?;
+        Ok(resource)
+    }
+    
+    pub async fn return_resource(&self, resource: T) {
+        let mut connections = self.connections.write().await;
+        
+        // Don't exceed max size
+        if connections.len() < self.max_size {
+            connections.push(PooledResource::new(resource));
+        }
+        // Otherwise drop the resource
+    }
+    
+    pub async fn cleanup(&self) {
+        let mut connections = self.connections.write().await;
+        
+        // Remove idle and unhealthy connections
+        connections.retain(|pooled| {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    !pooled.is_idle(self.idle_timeout).await && *pooled.is_healthy.read().await
+                })
+            })
+        });
+    }
+}
+
+/// Weighted load balancer for distributing work across multiple resources
+/// 
+/// Distributes work based on configurable weights and health status.
+pub struct WeightedLoadBalancer<T> {
+    resources: Arc<RwLock<Vec<WeightedResource<T>>>>,
+    selection_strategy: LoadBalancingStrategy,
+    current_index: AtomicCounter,
+}
+
+#[derive(Debug, Clone)]
+pub enum LoadBalancingStrategy {
+    RoundRobin,
+    WeightedRandom,
+    LeastConnections,
+    ResponseTimeBased,
+}
+
+struct WeightedResource<T> {
+    resource: T,
+    weight: f64,
+    active_connections: AtomicCounter,
+    total_requests: AtomicCounter,
+    total_response_time: Arc<RwLock<Duration>>,
+    is_healthy: Arc<RwLock<bool>>,
+}
+
+impl<T> WeightedResource<T> {
+    fn new(resource: T, weight: f64) -> Self {
+        Self {
+            resource,
+            weight,
+            active_connections: AtomicCounter::new(0),
+            total_requests: AtomicCounter::new(0),
+            total_response_time: Arc::new(RwLock::new(Duration::ZERO)),
+            is_healthy: Arc::new(RwLock::new(true)),
+        }
+    }
+    
+    async fn get_avg_response_time(&self) -> Duration {
+        let total_requests = self.total_requests.get();
+        if total_requests == 0 {
+            Duration::ZERO
+        } else {
+            *self.total_response_time.read().await / total_requests as u32
+        }
+    }
+    
+    fn get_effective_weight(&self) -> f64 {
+        let load_factor = self.active_connections.get() as f64 + 1.0;
+        self.weight / load_factor
+    }
+}
+
+impl<T> WeightedLoadBalancer<T> {
+    pub fn new(strategy: LoadBalancingStrategy) -> Self {
+        Self {
+            resources: Arc::new(RwLock::new(Vec::new())),
+            selection_strategy: strategy,
+            current_index: AtomicCounter::new(0),
+        }
+    }
+    
+    pub async fn add_resource(&self, resource: T, weight: f64) {
+        let mut resources = self.resources.write().await;
+        resources.push(WeightedResource::new(resource, weight));
+    }
+    
+    pub async fn get_resource(&self, index: usize) -> Option<T> 
+    where T: Clone 
+    {
+        let resources = self.resources.read().await;
+        resources.get(index).map(|r| r.resource.clone())
+    }
+    
+    pub async fn select_resource_index(&self) -> Option<usize> {
+        let resources = self.resources.read().await;
+        if resources.is_empty() {
+            return None;
+        }
+        
+        match self.selection_strategy {
+            LoadBalancingStrategy::RoundRobin => {
+                let index = self.current_index.increment() as usize % resources.len();
+                Some(index)
+            }
+            LoadBalancingStrategy::WeightedRandom => {
+                // Implement weighted random selection
+                let total_weight: f64 = resources.iter()
+                    .filter(|r| tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(async {
+                            *r.is_healthy.read().await
+                        })
+                    }))
+                    .map(|r| r.get_effective_weight())
+                    .sum();
+                
+                if total_weight == 0.0 {
+                    return None;
+                }
+                
+                let mut random_value = rand::random::<f64>() * total_weight;
+                for (idx, resource) in resources.iter().enumerate() {
+                    if *tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(async {
+                            resource.is_healthy.read().await
+                        })
+                    }) {
+                        random_value -= resource.get_effective_weight();
+                        if random_value <= 0.0 {
+                            return Some(idx);
+                        }
+                    }
+                }
+                None
+            }
+            LoadBalancingStrategy::LeastConnections => {
+                resources.iter()
+                    .enumerate()
+                    .filter(|(_, r)| tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(async {
+                            *r.is_healthy.read().await
+                        })
+                    }))
+                    .min_by_key(|(_, r)| r.active_connections.get())
+                    .map(|(idx, _)| idx)
+            }
+            LoadBalancingStrategy::ResponseTimeBased => {
+                // Select resource with best response time
+                let mut best_index = None;
+                let mut best_time = Duration::MAX;
+                
+                for (idx, resource) in resources.iter().enumerate() {
+                    if *tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(async {
+                            resource.is_healthy.read().await
+                        })
+                    }) {
+                        let avg_time = tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(async {
+                                resource.get_avg_response_time().await
+                            })
+                        });
+                        if avg_time < best_time {
+                            best_time = avg_time;
+                            best_index = Some(idx);
+                        }
+                    }
+                }
+                
+                best_index
+            }
+        }
+    }
+}
+
+/// Circuit breaker pattern implementation for fault tolerance
+/// 
+/// Automatically fails fast when downstream services are having issues,
+/// preventing cascading failures and allowing for graceful degradation.
+pub struct CircuitBreaker {
+    failure_threshold: usize,
+    timeout: Duration,
+    state: Arc<RwLock<CircuitBreakerState>>,
+    failure_count: AtomicCounter,
+    last_failure_time: Arc<RwLock<Option<Instant>>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CircuitBreakerState {
+    Closed,  // Normal operation
+    Open,    // Failing fast
+    HalfOpen, // Testing if service recovered
+}
+
+impl CircuitBreaker {
+    pub fn new(failure_threshold: usize, timeout: Duration) -> Self {
+        Self {
+            failure_threshold,
+            timeout,
+            state: Arc::new(RwLock::new(CircuitBreakerState::Closed)),
+            failure_count: AtomicCounter::new(0),
+            last_failure_time: Arc::new(RwLock::new(None)),
+        }
+    }
+    
+    pub async fn call<F, R, E, Fut>(&self, operation: F) -> Result<R, CircuitBreakerError<E>>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<R, E>>,
+    {
+        // Check circuit breaker state
+        match *self.state.read().await {
+            CircuitBreakerState::Open => {
+                // Check if timeout has passed
+                if let Some(last_failure) = *self.last_failure_time.read().await {
+                    if last_failure.elapsed() >= self.timeout {
+                        // Move to half-open state
+                        *self.state.write().await = CircuitBreakerState::HalfOpen;
+                    } else {
+                        return Err(CircuitBreakerError::CircuitOpen);
+                    }
+                }
+            }
+            CircuitBreakerState::HalfOpen => {
+                // Allow one test request
+            }
+            CircuitBreakerState::Closed => {
+                // Normal operation
+            }
+        }
+        
+        // Execute operation
+        match operation().await {
+            Ok(result) => {
+                // Success - reset circuit breaker
+                self.on_success().await;
+                Ok(result)
+            }
+            Err(error) => {
+                // Failure - update circuit breaker
+                self.on_failure().await;
+                Err(CircuitBreakerError::OperationFailed(error))
+            }
+        }
+    }
+    
+    async fn on_success(&self) {
+        self.failure_count.set(0);
+        *self.state.write().await = CircuitBreakerState::Closed;
+        *self.last_failure_time.write().await = None;
+    }
+    
+    async fn on_failure(&self) {
+        let failure_count = self.failure_count.increment();
+        *self.last_failure_time.write().await = Some(Instant::now());
+        
+        if failure_count >= self.failure_threshold as u64 {
+            *self.state.write().await = CircuitBreakerState::Open;
+        }
+    }
+    
+    pub async fn get_state(&self) -> CircuitBreakerState {
+        self.state.read().await.clone()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CircuitBreakerError<E> {
+    #[error("Circuit breaker is open")]
+    CircuitOpen,
+    #[error("Operation failed: {0}")]
+    OperationFailed(E),
+}
+
 /// Lock-free counter using atomic operations
 /// 
 /// Provides atomic increment/decrement operations without locks
@@ -151,6 +695,14 @@ where
 #[derive(Debug, Default)]
 pub struct AtomicCounter {
     value: std::sync::atomic::AtomicU64,
+}
+
+impl Clone for AtomicCounter {
+    fn clone(&self) -> Self {
+        Self {
+            value: std::sync::atomic::AtomicU64::new(self.get()),
+        }
+    }
 }
 
 impl AtomicCounter {

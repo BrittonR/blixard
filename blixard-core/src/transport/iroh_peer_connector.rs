@@ -47,7 +47,7 @@ struct BufferedMessage {
     attempts: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageType {
     RaftMessage,
     StatusQuery,
@@ -67,7 +67,7 @@ pub struct IrohClient {
 }
 
 impl IrohClient {
-    async fn new(
+    pub(crate) async fn new(
         endpoint: Endpoint,
         node_addr: NodeAddr,
         peer_id: u64,
@@ -197,6 +197,15 @@ impl IrohClient {
     /// Get the endpoint
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
+    }
+}
+
+impl std::fmt::Debug for IrohClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IrohClient")
+            .field("node_addr", &self.node_addr)
+            .field("peer_id", &self.peer_id)
+            .finish()
     }
 }
 

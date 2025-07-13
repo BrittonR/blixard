@@ -236,6 +236,8 @@ pub mod core;
 pub mod event_loop;
 pub mod handlers;
 pub mod messages;
+pub mod optimized_batch_processor;
+pub mod optimized_processing;
 pub mod proposals;
 pub mod snapshot;
 pub mod state_machine;

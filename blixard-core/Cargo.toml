@@ -80,6 +80,7 @@ scopeguard = { workspace = true }
 num_cpus = { workspace = true }
 static_assertions = { workspace = true }
 dashmap = { workspace = true }
+url = { workspace = true }
 
 # Configuration
 toml = { workspace = true }

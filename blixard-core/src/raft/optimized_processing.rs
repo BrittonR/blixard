@@ -14,7 +14,7 @@ use tokio::sync::{Mutex, RwLock};
 use tracing::trace;
 
 /// Message processing statistics
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ProcessingStats {
     pub messages_processed: u64,
     pub bytes_processed: u64,
@@ -172,10 +172,8 @@ impl OptimizedRaftProcessor {
         let buf = buffer.get_buffer(estimated_size);
         
         // Serialize directly into the buffer
-        postcard::to_extend(message, buf)
-            .map_err(|e| BlixardError::Serialization {
-                message: format!("Failed to serialize Raft message: {}", e),
-            })?;
+        let serialized = crate::raft_codec::serialize_message(message)?;
+        buf.extend_from_slice(&serialized);
         
         Ok(buf.clone().freeze())
     }
