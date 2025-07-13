@@ -3,7 +3,7 @@
 //! This module provides a single interface for initializing and managing
 //! observability features including OpenTelemetry metrics and tracing.
 
-use crate::config_v2::ObservabilityConfig;
+use crate::config::ObservabilityConfig;
 use crate::error::BlixardResult;
 use tracing::info;
 
@@ -72,23 +72,23 @@ impl ObservabilityManager {
 /// Create a default observability configuration for development
 pub fn default_dev_observability_config() -> ObservabilityConfig {
     ObservabilityConfig {
-        logging: crate::config_v2::LoggingConfig {
+        logging: crate::config::LoggingConfig {
             level: "info".to_string(),
             format: "pretty".to_string(),
             timestamps: true,
             file: None,
-            rotation: crate::config_v2::LogRotationConfig {
+            rotation: crate::config::LogRotationConfig {
                 enabled: false,
                 max_size_mb: 100,
                 max_files: 5,
             },
         },
-        metrics: crate::config_v2::MetricsConfig {
+        metrics: crate::config::MetricsConfig {
             enabled: false,
             prefix: "blixard".to_string(),
             runtime_metrics: false,
         },
-        tracing: crate::config_v2::TracingConfig {
+        tracing: crate::config::TracingConfig {
             enabled: false,
             otlp_endpoint: None,
             service_name: "blixard".to_string(),

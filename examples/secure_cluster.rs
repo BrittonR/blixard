@@ -1,7 +1,7 @@
 //! Example of running a secure Blixard cluster with TLS and authentication
 
 use blixard_core::{
-    config_v2::{SecurityConfig, TlsConfig, AuthConfig},
+    config::{SecurityConfig, TlsConfig, AuthConfig},
     security::SecurityManager,
     error::BlixardResult,
 };

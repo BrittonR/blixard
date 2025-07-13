@@ -3,7 +3,7 @@
 //! This module provides access to the global configuration instance
 //! and handles configuration initialization.
 
-use crate::config_v2::Config;
+use crate::config::Config;
 use crate::error::{BlixardError, BlixardResult};
 use once_cell::sync::OnceCell;
 use std::sync::Arc;

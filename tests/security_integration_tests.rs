@@ -12,7 +12,7 @@
 mod security_integration_tests {
     use blixard_core::{
         cedar_authz::CedarAuthz,
-        config_v2::{AuthConfig, SecurityConfig, TlsConfig},
+        config::{AuthConfig, SecurityConfig, TlsConfig},
         error::BlixardError,
         security::{SecurityManager, AuthResult, TokenInfo, UserRole},
     };

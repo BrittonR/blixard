@@ -1,6 +1,6 @@
 //! Example demonstrating configuration hot-reload functionality
 
-use blixard_core::config_v2::Config;
+use blixard_core::config::Config;
 use blixard_core::config_watcher::ConfigWatcher;
 use std::path::Path;
 use std::sync::Arc;

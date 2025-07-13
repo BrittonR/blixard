@@ -9,7 +9,7 @@
 
 use crate::cedar_authz::CedarAuthz;
 use crate::common::file_io::{file_exists, read_config_file};
-use crate::config_v2::{AuthConfig, SecurityConfig, TlsConfig};
+use crate::config::{AuthConfig, SecurityConfig, TlsConfig};
 use crate::error::{BlixardError, BlixardResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

@@ -173,7 +173,6 @@
 pub mod anti_affinity;
 pub mod config;
 pub mod config_global;
-pub mod config_v2;
 pub mod config_watcher;
 pub mod error;
 pub mod ip_allocation_service;

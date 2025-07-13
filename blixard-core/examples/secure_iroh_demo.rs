@@ -1,7 +1,7 @@
 //! Demo of secure Iroh services with Cedar authorization
 
 use blixard_core::{
-    config_v2::{AuthConfig, SecurityConfig, TlsConfig},
+    config::{AuthConfig, SecurityConfig, TlsConfig},
     node_shared::SharedNodeState,
     security::{default_dev_security_config, SecurityManager},
     transport::{

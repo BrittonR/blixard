@@ -21,7 +21,7 @@ use crate::{
         TaskRepository,
         VmRepository,
     },
-    config_v2::Config,
+    config::Config,
     error::BlixardResult,
 };
 use std::sync::Arc;

@@ -1,4 +1,4 @@
-use blixard_core::config_v2::Config;
+use blixard_core::config::Config;
 use blixard_core::config_hot_reload::{ConfigWatcher, ReloadableConfig};
 use std::sync::Arc;
 use std::time::Duration;

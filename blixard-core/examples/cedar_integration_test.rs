@@ -1,7 +1,7 @@
 //! Test Cedar integration with SecurityManager
 
 use blixard_core::{
-    config_v2::{AuthConfig, SecurityConfig, TlsConfig},
+    config::{AuthConfig, SecurityConfig, TlsConfig},
     error::BlixardResult,
     security::{default_dev_security_config, SecurityManager},
 };

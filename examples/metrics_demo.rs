@@ -2,7 +2,7 @@
 
 use blixard_core::{
     config_global,
-    config_v2::{Config, ConfigBuilder},
+    config::{Config, ConfigBuilder},
     metrics_otel::{init_prometheus, metrics},
     metrics_server,
 };

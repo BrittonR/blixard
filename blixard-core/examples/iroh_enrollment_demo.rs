@@ -6,7 +6,7 @@
 //! 3. Enroll nodes and verify their permissions
 
 use blixard_core::{
-    config_v2::{AuthConfig, SecurityConfig, TlsConfig},
+    config::{AuthConfig, SecurityConfig, TlsConfig},
     error::BlixardResult,
     node_shared::SharedNodeState,
     security::{default_dev_security_config, SecurityManager},

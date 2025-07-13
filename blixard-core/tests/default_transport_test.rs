@@ -36,7 +36,7 @@ fn test_default_raft_preference_is_iroh() {
 
 #[test]
 fn test_config_includes_iroh_transport() {
-    use blixard_core::config_v2::Config;
+    use blixard_core::config::Config;
 
     // Test that the main Config includes Iroh transport by default
     let config = Config::default();

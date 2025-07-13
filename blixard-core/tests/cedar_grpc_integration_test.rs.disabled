@@ -11,7 +11,7 @@ use blixard_core::{
         CreateVmRequest, ListVmsRequest, GetVmStatusRequest, ClusterStatusRequest
     },
     security::{SecurityManager, Permission},
-    config_v2::{SecurityConfig, AuthConfig, TlsConfig, NodeConfig},
+    config::{SecurityConfig, AuthConfig, TlsConfig, NodeConfig},
     test_helpers::TestNode,
 };
 use std::sync::Arc;

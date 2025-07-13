@@ -7,7 +7,7 @@
 
 use blixard_core::{
     config_global,
-    config_v2::{Config, RaftBatchConfig},
+    config::{Config, RaftBatchConfig},
     node::Node,
     types::{NodeConfig, VmCommand, VmConfig},
 };

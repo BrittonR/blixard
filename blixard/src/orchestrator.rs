@@ -4,7 +4,7 @@ use base64::prelude::*;
 use blixard_core::{
     config_global,
     // tracing_otel, // Temporarily disabled: uses tonic which we're removing
-    config_v2::Config,
+    config::Config,
     error::BlixardResult,
     metrics_otel,
     metrics_server,

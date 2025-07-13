@@ -1,4 +1,4 @@
-use blixard_core::config_v2::{Config, ConfigBuilder};
+use blixard_core::config::{Config, ConfigBuilder};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;

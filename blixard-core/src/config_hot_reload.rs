@@ -10,7 +10,7 @@ use tokio::sync::{mpsc, watch, RwLock};
 use tokio::time;
 use notify::{Watcher, RecursiveMode, Event, EventKind};
 use crate::error::{BlixardError, BlixardResult};
-use crate::config_v2::Config;
+use crate::config::Config;
 use tracing::{info, warn, error};
 
 /// Configuration that can be reloaded at runtime

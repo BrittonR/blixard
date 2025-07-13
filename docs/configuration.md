@@ -210,7 +210,7 @@ If you're migrating from the old environment-based configuration:
 For integration and testing, configuration can be built programmatically:
 
 ```rust
-use blixard_core::config_v2::{Config, ConfigBuilder};
+use blixard_core::config::{Config, ConfigBuilder};
 
 let config = ConfigBuilder::new()
     .node_id(42)

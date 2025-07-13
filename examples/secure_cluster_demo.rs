@@ -8,7 +8,7 @@
 
 use blixard_core::{
     config_global,
-    config_v2::{AuthConfig, BlixardConfig, ObservabilityConfig, SecurityConfig, TlsConfig},
+    config::{AuthConfig, BlixardConfig, ObservabilityConfig, SecurityConfig, TlsConfig},
     node::Node,
     quota_system::{QuotaManager, TenantQuota},
     security::{Permission, SecurityManager},
@@ -55,23 +55,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Configure observability
     let observability_config = ObservabilityConfig {
-        logging: blixard_core::config_v2::LoggingConfig {
+        logging: blixard_core::config::LoggingConfig {
             level: "info".to_string(),
             format: "pretty".to_string(),
             timestamps: true,
             file: None,
-            rotation: blixard_core::config_v2::LogRotationConfig {
+            rotation: blixard_core::config::LogRotationConfig {
                 enabled: false,
                 max_size_mb: 100,
                 max_files: 5,
             },
         },
-        metrics: blixard_core::config_v2::MetricsConfig {
+        metrics: blixard_core::config::MetricsConfig {
             enabled: true,
             prefix: "blixard_secure_demo".to_string(),
             runtime_metrics: true,
         },
-        tracing: blixard_core::config_v2::TracingConfig {
+        tracing: blixard_core::config::TracingConfig {
             enabled: true,
             otlp_endpoint: None,
             service_name: "blixard-secure-demo".to_string(),
@@ -239,15 +239,15 @@ async fn generate_token(
         SecurityManager::new(blixard_core::security::default_dev_security_config()).await?;
 
     // Enable authentication
-    let mut auth_config = blixard_core::config_v2::AuthConfig {
+    let mut auth_config = blixard_core::config::AuthConfig {
         enabled: true,
         method: "token".to_string(),
         token_file: None,
     };
 
     // Create a new security manager with auth enabled
-    let config = blixard_core::config_v2::SecurityConfig {
-        tls: blixard_core::config_v2::TlsConfig {
+    let config = blixard_core::config::SecurityConfig {
+        tls: blixard_core::config::TlsConfig {
             enabled: false,
             cert_file: None,
             key_file: None,

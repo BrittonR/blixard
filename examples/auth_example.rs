@@ -2,7 +2,7 @@
 
 use blixard_core::{
     security::{SecurityManager, Permission, default_dev_security_config},
-    config_v2::{SecurityConfig, AuthConfig, TlsConfig},
+    config::{SecurityConfig, AuthConfig, TlsConfig},
     error::BlixardResult,
 };
 use std::path::PathBuf;

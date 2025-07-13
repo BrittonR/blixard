@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 
 use blixard::orchestrator::OrchestratorConfig;
 use blixard::{BlixardError, BlixardOrchestrator, BlixardResult, NodeConfig};
-use blixard_core::config_v2::{Config, ConfigBuilder};
+use blixard_core::config::{Config, ConfigBuilder};
 use daemonize::Daemonize;
 
 mod client;

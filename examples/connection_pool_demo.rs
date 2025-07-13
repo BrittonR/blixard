@@ -5,7 +5,7 @@
 //! - Supporting multiple concurrent requests per peer
 //! - Automatically cleaning up idle connections
 
-use blixard_core::{config_global, config_v2::BlixardConfig, node::Node, types::NodeConfig};
+use blixard_core::{config_global, config::BlixardConfig, node::Node, types::NodeConfig};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;

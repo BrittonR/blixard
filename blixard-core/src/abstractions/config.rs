@@ -3,7 +3,7 @@
 //! This module provides trait-based abstractions for configuration access,
 //! eliminating global state dependencies and enabling better testing.
 
-use crate::{config_v2::Config, error::BlixardResult};
+use crate::{config::Config, error::BlixardResult};
 use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -45,7 +45,7 @@ impl Default for GlobalConfigProvider {
 #[async_trait]
 impl ConfigProvider for GlobalConfigProvider {
     async fn get(&self) -> BlixardResult<Arc<Config>> {
-        crate::config_v2::try_get()
+        crate::config::try_get()
     }
 
     async fn get_value(&self, path: &str) -> BlixardResult<Option<String>> {
@@ -73,7 +73,7 @@ impl ConfigProvider for GlobalConfigProvider {
     }
 
     async fn subscribe(&self) -> tokio::sync::watch::Receiver<Arc<Config>> {
-        crate::config_v2::subscribe()
+        crate::config::subscribe()
     }
 }
 

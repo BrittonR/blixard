@@ -7,7 +7,7 @@
 //! - Properly shutdown the cluster
 
 use blixard_core::{
-    config_v2::{ConfigBuilder, DiscoveryConfigBuilder},
+    config::{ConfigBuilder, DiscoveryConfigBuilder},
     discovery::{DiscoveryConfig, IrohNodeInfo},
     error::BlixardResult,
     node::Node,

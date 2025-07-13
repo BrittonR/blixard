@@ -3,7 +3,7 @@
 //! This module provides file system watching capabilities to detect
 //! configuration changes and trigger hot-reloads.
 
-use crate::config_v2::{self, Config};
+use crate::config::{self, Config};
 use crate::error::{BlixardError, BlixardResult};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
@@ -80,7 +80,7 @@ impl ConfigWatcher {
                             tracing::info!("Configuration file changed, attempting hot-reload");
 
                             // Attempt to reload configuration
-                            match config_v2::reload(&config_path_clone).await {
+                            match config::reload(&config_path_clone).await {
                                 Ok(()) => {
                                     tracing::info!("Configuration hot-reload successful");
                                     last_reload = now;
@@ -155,7 +155,7 @@ impl ConfigWatcherWithHandlers {
     /// Create a new watcher with handlers
     pub fn new<P: AsRef<Path>>(config_path: P) -> BlixardResult<Self> {
         let watcher = ConfigWatcher::new(config_path)?;
-        let config_rx = config_v2::subscribe();
+        let config_rx = config::subscribe();
 
         Ok(Self {
             watcher,

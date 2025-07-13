@@ -25,7 +25,7 @@ async fn main() -> BlixardResult<()> {
         .init();
 
     // Initialize global configuration with defaults
-    blixard_core::config_global::init(blixard_core::config_v2::Config::default())?;
+    blixard_core::config_global::init(blixard_core::config::Config::default())?;
 
     // Initialize metrics
     blixard_core::metrics_otel::init_noop().map_err(|e| {

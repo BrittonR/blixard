@@ -5,7 +5,7 @@
 use blixard_core::{
     rbac::{RbacManager, Action, ResourceType, ResourcePermissionChecker},
     security::{SecurityManager, Permission},
-    config_v2::{SecurityConfig, AuthConfig, TlsConfig},
+    config::{SecurityConfig, AuthConfig, TlsConfig},
     error::BlixardResult,
 };
 use std::sync::Arc;
