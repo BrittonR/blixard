@@ -64,7 +64,7 @@ async fn check_health(
     let details = if request.include_details {
         Some(HealthDetails {
             vm_count: node.get_vm_count() as usize,
-            active_connections: node.get_active_connection_count() as usize,
+            active_connections: node.get_active_connection_count().await as usize,
             memory_usage_mb: get_memory_usage().await,
             disk_usage_percent: get_disk_usage().await,
         })

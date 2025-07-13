@@ -59,7 +59,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
             };
 
         // Add peer to our peer list with P2P info (only if it doesn't already exist)
-        if self.shared_state.get_peer(node_id).is_none() {
+        if self.shared_state.get_peer(node_id).await.is_none() {
             if p2p_node_id.is_some() || !p2p_addresses.is_empty() {
                 let peer_info = crate::p2p_manager::PeerInfo {
                     node_id: p2p_node_id.clone().unwrap_or_else(|| node_id.to_string()),
@@ -210,12 +210,12 @@ impl ClusterOperations for ClusterOperationsAdapter {
 
                 // Get current cluster information using the authoritative voter list
                 let voters = self.shared_state.get_current_voters().await?;
-                let status = self.shared_state.get_raft_status();
+                let status = self.shared_state.get_raft_status().await;
 
                 // Build peer information from the voter list and our local peer cache
                 let mut node_infos = Vec::new();
                 for voter_id in &voters {
-                    if let Some(peer_info) = self.shared_state.get_peer(*voter_id) {
+                    if let Some(peer_info) = self.shared_state.get_peer(*voter_id).await {
                         node_infos.push(NodeInfo {
                             id: peer_info.node_id.parse::<u64>().unwrap_or(*voter_id),
                             address: peer_info.address.clone(),
@@ -298,7 +298,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
         debug!("Get cluster status request");
 
         // Get Raft status
-        let raft_status = self.shared_state.get_raft_status();
+        let raft_status = self.shared_state.get_raft_status().await;
 
         // Get the authoritative list of voters from Raft
         let voters = self.shared_state.get_current_voters().await?;
@@ -320,7 +320,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
         // Build node information from the voter list
         let mut nodes: Vec<NodeInfo> = Vec::new();
         for voter_id in &voters {
-            if let Some(peer_info) = self.shared_state.get_peer(*voter_id) {
+            if let Some(peer_info) = self.shared_state.get_peer(*voter_id).await {
                 nodes.push(NodeInfo {
                     id: peer_info.node_id.parse::<u64>().unwrap_or(*voter_id),
                     address: peer_info.address.clone(),

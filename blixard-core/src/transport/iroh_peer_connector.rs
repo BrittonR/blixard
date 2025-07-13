@@ -413,7 +413,7 @@ impl IrohPeerConnector {
 
         let result = async {
             // Get peer info and convert to NodeAddr
-            let peer_info = self.get_peer_info(peer_id)?;
+            let peer_info = self.get_peer_info(peer_id).await?;
             let node_addr = self.peer_info_to_node_addr(&peer_info)?;
 
             // Attempt connection
@@ -465,8 +465,8 @@ impl IrohPeerConnector {
     }
 
     /// Get peer info from node state
-    fn get_peer_info(&self, peer_id: u64) -> BlixardResult<PeerInfo> {
-        let peers = self.node.get_peers();
+    async fn get_peer_info(&self, peer_id: u64) -> BlixardResult<PeerInfo> {
+        let peers = self.node.get_peers().await;
         peers
             .into_iter()
             .find(|p| p.node_id.parse::<u64>().unwrap_or(0) == peer_id)
@@ -614,7 +614,7 @@ impl IrohPeerConnector {
             Ok(client.clone())
         } else {
             // Get peer info and convert to NodeAddr
-            let peer_info = self.get_peer_info(peer_id)?;
+            let peer_info = self.get_peer_info(peer_id).await?;
             let node_addr = self.peer_info_to_node_addr(&peer_info)?;
 
             // Connect and return the client

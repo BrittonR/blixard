@@ -80,7 +80,7 @@ impl VmAutoRecovery {
         let _metrics = metrics();
 
         // Check recovery state
-        let (should_attempt, restart_attempts, max_attempts) = {
+        let (_should_attempt, restart_attempts, max_attempts) = {
             let mut states = self.recovery_states.write().await;
             let state = self.get_or_create_recovery_state(&mut states, vm_name);
 

@@ -7,7 +7,7 @@
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::RwLock;
 use tokio::time::timeout;
 
 /// Async-optimized lock guard for quick read operations
@@ -81,7 +81,7 @@ where
         .await
         .map_err(|_| crate::error::BlixardError::Timeout {
             operation: operation_name.to_string(),
-            timeout_secs: duration.as_secs(),
+            duration,
         })
 }
 
@@ -181,6 +181,7 @@ impl AtomicCounter {
 /// 
 /// Provides utilities for working with Optional<Arc<T>> patterns
 /// common in shared state management.
+#[derive(Debug)]
 pub struct OptionalArc<T> {
     inner: Arc<RwLock<Option<Arc<T>>>>,
 }

@@ -5,8 +5,7 @@
 //! - PeerInfo: Peer information for cluster management
 
 use crate::{
-    acquire_lock_unwrap,
-    common::async_utils::{quick_read, quick_read_extract, conditional_update, OptionalArc, AtomicCounter},
+    common::async_utils::{quick_read, quick_read_extract, OptionalArc, AtomicCounter},
     error::{BlixardError, BlixardResult},
     raft::proposals::WorkerCapabilities,
     raft_manager::ConfChangeType,
@@ -15,9 +14,9 @@ use crate::{
 use redb::Database;
 use std::{
     collections::HashMap,
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
-use tokio::sync::{Mutex, RwLock as AsyncRwLock};
+use tokio::sync::RwLock as AsyncRwLock;
 
 // Type aliases for complex types
 type DatabaseHandle = OptionalArc<Database>;
