@@ -235,11 +235,13 @@ mod tests {
         assert_eq!(vm_config.vm_index, 20);
         
         // Check network configuration
-        match &vm_config.networks[0] {
-            vm_types::NetworkConfig::Routed { ip, .. } => {
-                assert_eq!(ip, "10.0.0.20");
-            }
-            _ => panic!("Expected Routed network config"),
+        assert!(
+            matches!(&vm_config.networks[0], vm_types::NetworkConfig::Routed { .. }),
+            "Expected Routed network config, but got: {:?}", &vm_config.networks[0]
+        );
+        
+        if let vm_types::NetworkConfig::Routed { ip, .. } = &vm_config.networks[0] {
+            assert_eq!(ip, "10.0.0.20");
         }
     }
 
@@ -270,11 +272,13 @@ mod tests {
         
         assert!(!vm_config.nixos_modules.is_empty());
         
-        match &vm_config.nixos_modules[0] {
-            vm_types::NixModule::Inline(content) => {
-                assert!(content.contains("abc123"));
-            }
-            _ => panic!("Expected inline Nix module"),
+        assert!(
+            matches!(&vm_config.nixos_modules[0], vm_types::NixModule::Inline(_)),
+            "Expected inline Nix module, but got: {:?}", &vm_config.nixos_modules[0]
+        );
+        
+        if let vm_types::NixModule::Inline(content) = &vm_config.nixos_modules[0] {
+            assert!(content.contains("abc123"));
         }
     }
 }

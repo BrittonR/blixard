@@ -22,7 +22,7 @@ mod tests {
     use crate::types::NodeConfig;
 
     #[tokio::test]
-    async fn test_node_lifecycle() {
+    async fn test_node_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         let config = NodeConfig {
             id: 1,
             data_dir: "/tmp/test".to_string(),
@@ -37,11 +37,13 @@ mod tests {
         let mut node = Node::new(config);
 
         // Start node
-        node.start().await.expect("node should start");
+        node.start().await?;
         assert!(node.is_running().await);
 
         // Stop node
-        node.stop().await.expect("node should stop");
+        node.stop().await?;
         assert!(!node.is_running().await);
+        
+        Ok(())
     }
 }

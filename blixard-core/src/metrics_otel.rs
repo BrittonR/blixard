@@ -617,8 +617,8 @@ pub fn prometheus_metrics() -> String {
 
 /// Update cluster resource metrics from a cluster resource summary
 #[cfg(feature = "observability")]
-pub fn update_cluster_resource_metrics(summary: &crate::vm_scheduler::ClusterResourceSummary) {
-    let metrics = metrics();
+pub fn update_cluster_resource_metrics(summary: &crate::vm_scheduler::ClusterResourceSummary) -> crate::error::BlixardResult<()> {
+    let metrics = safe_metrics()?;
 
     // Update cluster-wide resource metrics
     metrics
@@ -642,16 +642,19 @@ pub fn update_cluster_resource_metrics(summary: &crate::vm_scheduler::ClusterRes
     metrics
         .cluster_disk_gb_used
         .add(summary.used_disk_gb as i64, &[]);
+    Ok(())
 }
 
 /// No-op version when observability is disabled
 #[cfg(not(feature = "observability"))]
-pub fn update_cluster_resource_metrics(_summary: &crate::vm_scheduler::ClusterResourceSummary) {}
+pub fn update_cluster_resource_metrics(_summary: &crate::vm_scheduler::ClusterResourceSummary) -> crate::error::BlixardResult<()> {
+    Ok(())
+}
 
 /// Update node-specific resource metrics
 #[cfg(feature = "observability")]
-pub fn update_node_resource_metrics(node_id: u64, usage: &crate::vm_scheduler::NodeResourceUsage) {
-    let metrics = metrics();
+pub fn update_node_resource_metrics(node_id: u64, usage: &crate::vm_scheduler::NodeResourceUsage) -> crate::error::BlixardResult<()> {
+    let metrics = safe_metrics()?;
     let node_id_attr = attributes::node_id(node_id);
 
     // Update per-node resource availability
@@ -666,12 +669,13 @@ pub fn update_node_resource_metrics(node_id: u64, usage: &crate::vm_scheduler::N
     metrics
         .node_disk_gb_available
         .add(usage.available_disk_gb() as i64, &[disk_attr]);
+    Ok(())
 }
 
 /// Record VM placement attempt
 #[cfg(feature = "observability")]
-pub fn record_vm_placement_attempt(strategy: &str, success: bool, duration_secs: f64) {
-    let metrics = metrics();
+pub fn record_vm_placement_attempt(strategy: &str, success: bool, duration_secs: f64) -> crate::error::BlixardResult<()> {
+    let metrics = safe_metrics()?;
     let strategy_attr = KeyValue::new("strategy", strategy.to_string());
 
     metrics.vm_placement_attempts.add(1, &[strategy_attr]);
@@ -683,12 +687,14 @@ pub fn record_vm_placement_attempt(strategy: &str, success: bool, duration_secs:
     metrics
         .vm_placement_duration
         .record(duration_secs, &[duration_attr]);
+    Ok(())
 }
 
 /// Record VM placement attempt (no-op version)
 #[cfg(not(feature = "observability"))]
-pub fn record_vm_placement_attempt(_strategy: &str, _success: bool, _duration_secs: f64) {
+pub fn record_vm_placement_attempt(_strategy: &str, _success: bool, _duration_secs: f64) -> crate::error::BlixardResult<()> {
     // No-op when observability is disabled
+    Ok(())
 }
 
 /// Record VM scheduling decision with details
@@ -698,8 +704,8 @@ pub fn record_vm_scheduling_decision(
     strategy: &str,
     decision: &crate::vm_scheduler_modules::placement_strategies::PlacementDecision,
     duration: std::time::Duration,
-) {
-    let metrics = metrics();
+) -> crate::error::BlixardResult<()> {
+    let metrics = safe_metrics()?;
     let strategy_attr = KeyValue::new("strategy", strategy.to_string());
     let node_attr = KeyValue::new("target_node", decision.target_node_id.to_string());
 
@@ -723,6 +729,7 @@ pub fn record_vm_scheduling_decision(
                 .add(1, &[preemption_attr.clone()]);
         }
     }
+    Ok(())
 }
 
 /// Record VM scheduling decision with details (no-op version)
@@ -732,14 +739,15 @@ pub fn record_vm_scheduling_decision(
     _strategy: &str,
     _decision: &crate::vm_scheduler_modules::placement_strategies::PlacementDecision,
     _duration: std::time::Duration,
-) {
+) -> crate::error::BlixardResult<()> {
     // No-op when observability is disabled
+    Ok(())
 }
 
 /// Record VM lifecycle operation
 #[cfg(feature = "observability")]
-pub fn record_vm_operation(operation: &str, success: bool) {
-    let metrics = metrics();
+pub fn record_vm_operation(operation: &str, success: bool) -> crate::error::BlixardResult<()> {
+    let metrics = safe_metrics()?;
 
     // Create attributes for each case to avoid cloning
     match operation {
@@ -773,11 +781,19 @@ pub fn record_vm_operation(operation: &str, success: bool) {
         }
         _ => {} // Unknown operation
     }
+    Ok(())
+}
+
+/// Record VM lifecycle operation (no-op version)
+#[cfg(not(feature = "observability"))]
+pub fn record_vm_operation(_operation: &str, _success: bool) -> crate::error::BlixardResult<()> {
+    // No-op when observability is disabled
+    Ok(())
 }
 
 /// Record VM preemption event
-pub fn record_vm_preemption(_vm_name: &str, node_id: u64, priority: u32, preemption_type: &str) {
-    let metrics = metrics();
+pub fn record_vm_preemption(_vm_name: &str, node_id: u64, priority: u32, preemption_type: &str) -> crate::error::BlixardResult<()> {
+    let metrics = safe_metrics()?;
     let attrs = &[
         KeyValue::new("node_id", node_id.to_string()),
         KeyValue::new("priority", priority.to_string()),
@@ -785,11 +801,12 @@ pub fn record_vm_preemption(_vm_name: &str, node_id: u64, priority: u32, preempt
     ];
 
     metrics.vm_preemptions_total.add(1, attrs);
+    Ok(())
 }
 
 /// Record P2P image import operation
-pub fn record_p2p_image_import(artifact_type: &str, success: bool, size_bytes: u64) {
-    let metrics = metrics();
+pub fn record_p2p_image_import(artifact_type: &str, success: bool, size_bytes: u64) -> crate::error::BlixardResult<()> {
+    let metrics = safe_metrics()?;
     let type_attr = KeyValue::new("artifact_type", artifact_type.to_string());
 
     metrics.p2p_image_imports_total.add(1, &[type_attr]);
@@ -800,22 +817,24 @@ pub fn record_p2p_image_import(artifact_type: &str, success: bool, size_bytes: u
         let bytes_attr = KeyValue::new("artifact_type", artifact_type.to_string());
         metrics.p2p_bytes_transferred.add(size_bytes, &[bytes_attr]);
     }
+    Ok(())
 }
 
 /// Record P2P image download operation
-pub fn record_p2p_image_download(_image_id: &str, success: bool, duration_secs: f64) {
-    let metrics = metrics();
+pub fn record_p2p_image_download(_image_id: &str, success: bool, duration_secs: f64) -> crate::error::BlixardResult<()> {
+    let metrics = safe_metrics()?;
 
     metrics.p2p_image_downloads_total.add(1, &[]);
     if !success {
         metrics.p2p_image_downloads_failed.add(1, &[]);
     }
     metrics.p2p_transfer_duration.record(duration_secs, &[]);
+    Ok(())
 }
 
 /// Record P2P chunk transfer
-pub fn record_p2p_chunk_transfer(chunk_size: u64, was_deduplicated: bool) {
-    let metrics = metrics();
+pub fn record_p2p_chunk_transfer(chunk_size: u64, was_deduplicated: bool) -> crate::error::BlixardResult<()> {
+    let metrics = safe_metrics()?;
 
     if was_deduplicated {
         metrics.p2p_chunks_deduplicated.add(1, &[]);
@@ -823,11 +842,12 @@ pub fn record_p2p_chunk_transfer(chunk_size: u64, was_deduplicated: bool) {
         metrics.p2p_chunks_transferred.add(1, &[]);
         metrics.p2p_bytes_transferred.add(chunk_size, &[]);
     }
+    Ok(())
 }
 
 /// Record P2P image verification
-pub fn record_p2p_verification(success: bool, verification_type: &str) {
-    let metrics = metrics();
+pub fn record_p2p_verification(success: bool, verification_type: &str) -> crate::error::BlixardResult<()> {
+    let metrics = safe_metrics()?;
     let type_attr = KeyValue::new("verification_type", verification_type.to_string());
 
     if success {
@@ -835,11 +855,12 @@ pub fn record_p2p_verification(success: bool, verification_type: &str) {
     } else {
         metrics.p2p_verification_failed.add(1, &[type_attr]);
     }
+    Ok(())
 }
 
 /// Record P2P cache access
-pub fn record_p2p_cache_access(hit: bool, cache_type: &str) {
-    let metrics = metrics();
+pub fn record_p2p_cache_access(hit: bool, cache_type: &str) -> crate::error::BlixardResult<()> {
+    let metrics = safe_metrics()?;
     let type_attr = KeyValue::new("cache_type", cache_type.to_string());
 
     if hit {
@@ -847,15 +868,16 @@ pub fn record_p2p_cache_access(hit: bool, cache_type: &str) {
     } else {
         metrics.p2p_cache_misses.add(1, &[type_attr]);
     }
+    Ok(())
 }
 
 /// Start tracking a P2P transfer
-pub fn start_p2p_transfer() -> P2pTransferGuard {
-    let metrics = metrics();
+pub fn start_p2p_transfer() -> crate::error::BlixardResult<P2pTransferGuard> {
+    let metrics = safe_metrics()?;
     metrics.p2p_active_transfers.add(1, &[]);
-    P2pTransferGuard {
+    Ok(P2pTransferGuard {
         start: std::time::Instant::now(),
-    }
+    })
 }
 
 /// Guard for tracking P2P transfer duration
@@ -865,10 +887,11 @@ pub struct P2pTransferGuard {
 
 impl Drop for P2pTransferGuard {
     fn drop(&mut self) {
-        let metrics = metrics();
-        metrics.p2p_active_transfers.add(-1, &[]);
-        let duration = self.start.elapsed().as_secs_f64();
-        metrics.p2p_transfer_duration.record(duration, &[]);
+        if let Ok(metrics) = safe_metrics() {
+            metrics.p2p_active_transfers.add(-1, &[]);
+            let duration = self.start.elapsed().as_secs_f64();
+            metrics.p2p_transfer_duration.record(duration, &[]);
+        }
     }
 }
 
@@ -885,17 +908,7 @@ pub fn init_noop() -> Result<&'static Metrics, Box<dyn std::error::Error>> {
     })
 }
 
-/// Get the global metrics instance (may panic - use try_metrics() for safety)
-/// 
-/// # Panics
-/// This function will panic if metrics are not initialized. Use `try_metrics()` for a non-panicking alternative.
-pub fn metrics() -> &'static Metrics {
-    METRICS
-        .get()
-        .unwrap_or_else(|| {
-            panic!("Metrics not initialized. Call init_prometheus() or init_noop() first.")
-        })
-}
+// Removed: panicking metrics() function - use safe_metrics() instead
 
 /// Get the global metrics instance safely
 pub fn safe_metrics() -> crate::error::BlixardResult<&'static Metrics> {
@@ -1057,18 +1070,19 @@ pub fn get_p2p_transfer_stats() -> P2pTransferStats {
 }
 
 /// Record connection pool statistics
-pub fn record_connection_pool_stats(total: usize, active: usize, idle: usize) {
-    let metrics = metrics();
+pub fn record_connection_pool_stats(total: usize, active: usize, idle: usize) -> crate::error::BlixardResult<()> {
+    let metrics = safe_metrics()?;
 
     // Update gauges with absolute values
     metrics.connection_pool_total.add(total as i64, &[]);
     metrics.connection_pool_active.add(active as i64, &[]);
     metrics.connection_pool_idle.add(idle as i64, &[]);
+    Ok(())
 }
 
 /// Record connection pool event
-pub fn record_connection_pool_event(event: ConnectionPoolEvent) {
-    let metrics = metrics();
+pub fn record_connection_pool_event(event: ConnectionPoolEvent) -> crate::error::BlixardResult<()> {
+    let metrics = safe_metrics()?;
 
     match event {
         ConnectionPoolEvent::Created => {
@@ -1081,6 +1095,7 @@ pub fn record_connection_pool_event(event: ConnectionPoolEvent) {
             metrics.connection_pool_evicted.add(1, &[]);
         }
     }
+    Ok(())
 }
 
 /// Connection pool events
@@ -1089,6 +1104,74 @@ pub enum ConnectionPoolEvent {
     Created,
     Reused,
     Evicted,
+}
+
+/// Record P2P image import operation (no-op version)
+#[cfg(not(feature = "observability"))]
+pub fn record_p2p_image_import(_artifact_type: &str, _success: bool, _size_bytes: u64) -> crate::error::BlixardResult<()> {
+    Ok(())
+}
+
+/// Record P2P image download operation (no-op version)
+#[cfg(not(feature = "observability"))]
+pub fn record_p2p_image_download(_image_id: &str, _success: bool, _duration_secs: f64) -> crate::error::BlixardResult<()> {
+    Ok(())
+}
+
+/// Record P2P chunk transfer (no-op version)
+#[cfg(not(feature = "observability"))]
+pub fn record_p2p_chunk_transfer(_chunk_size: u64, _was_deduplicated: bool) -> crate::error::BlixardResult<()> {
+    Ok(())
+}
+
+/// Record P2P image verification (no-op version)
+#[cfg(not(feature = "observability"))]
+pub fn record_p2p_verification(_success: bool, _verification_type: &str) -> crate::error::BlixardResult<()> {
+    Ok(())
+}
+
+/// Record P2P cache access (no-op version)
+#[cfg(not(feature = "observability"))]
+pub fn record_p2p_cache_access(_hit: bool, _cache_type: &str) -> crate::error::BlixardResult<()> {
+    Ok(())
+}
+
+/// Start tracking a P2P transfer (no-op version)
+#[cfg(not(feature = "observability"))]
+pub fn start_p2p_transfer() -> crate::error::BlixardResult<P2pTransferGuard> {
+    Ok(P2pTransferGuard {
+        start: std::time::Instant::now(),
+    })
+}
+
+/// Record connection pool statistics (no-op version)
+#[cfg(not(feature = "observability"))]
+pub fn record_connection_pool_stats(_total: usize, _active: usize, _idle: usize) -> crate::error::BlixardResult<()> {
+    Ok(())
+}
+
+/// Record connection pool event (no-op version)
+#[cfg(not(feature = "observability"))]
+pub fn record_connection_pool_event(_event: ConnectionPoolEvent) -> crate::error::BlixardResult<()> {
+    Ok(())
+}
+
+/// Record VM preemption event (no-op version)
+#[cfg(not(feature = "observability"))]
+pub fn record_vm_preemption(_vm_name: &str, _node_id: u64, _priority: u32, _preemption_type: &str) -> crate::error::BlixardResult<()> {
+    Ok(())
+}
+
+/// Record VM recovery attempt (no-op version)
+#[cfg(not(feature = "observability"))]
+pub fn record_vm_recovery_attempt(_vm_name: &str, _recovery_type: &str) -> crate::error::BlixardResult<()> {
+    Ok(())
+}
+
+/// Record remediation action (no-op version)
+#[cfg(not(feature = "observability"))]
+pub fn record_remediation_action(_issue_type: &str, _action: &str) -> crate::error::BlixardResult<()> {
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1120,30 +1203,30 @@ mod tests {
         let _ = init_noop();
 
         // Test P2P import metrics
-        record_p2p_image_import("microvm", true, 1024 * 1024);
-        record_p2p_image_import("container", false, 0);
+        let _ = record_p2p_image_import("microvm", true, 1024 * 1024);
+        let _ = record_p2p_image_import("container", false, 0);
 
         // Test P2P download metrics
-        record_p2p_image_download("test-image-123", true, 2.5);
-        record_p2p_image_download("test-image-456", false, 0.1);
+        let _ = record_p2p_image_download("test-image-123", true, 2.5);
+        let _ = record_p2p_image_download("test-image-456", false, 0.1);
 
         // Test chunk transfer metrics
-        record_p2p_chunk_transfer(4096, false);
-        record_p2p_chunk_transfer(4096, true);
+        let _ = record_p2p_chunk_transfer(4096, false);
+        let _ = record_p2p_chunk_transfer(4096, true);
 
         // Test verification metrics
-        record_p2p_verification(true, "nar_hash");
-        record_p2p_verification(false, "chunk_hash");
+        let _ = record_p2p_verification(true, "nar_hash");
+        let _ = record_p2p_verification(false, "chunk_hash");
 
         // Test cache metrics
-        record_p2p_cache_access(true, "chunk");
-        record_p2p_cache_access(false, "image");
+        let _ = record_p2p_cache_access(true, "chunk");
+        let _ = record_p2p_cache_access(false, "image");
     }
 }
 
 /// Record VM recovery attempt
-pub fn record_vm_recovery_attempt(vm_name: &str, recovery_type: &str) {
-    let metrics = metrics();
+pub fn record_vm_recovery_attempt(vm_name: &str, recovery_type: &str) -> crate::error::BlixardResult<()> {
+    let metrics = safe_metrics()?;
     let attrs = &[
         KeyValue::new("vm_name", vm_name.to_string()),
         KeyValue::new("type", recovery_type.to_string()),
@@ -1151,11 +1234,12 @@ pub fn record_vm_recovery_attempt(vm_name: &str, recovery_type: &str) {
 
     // Use existing VM operation metrics as proxy
     metrics.vm_create_total.add(1, attrs);
+    Ok(())
 }
 
 /// Record remediation action
-pub fn record_remediation_action(issue_type: &str, action: &str) {
-    let metrics = metrics();
+pub fn record_remediation_action(issue_type: &str, action: &str) -> crate::error::BlixardResult<()> {
+    let metrics = safe_metrics()?;
     let attrs = &[
         KeyValue::new("issue_type", issue_type.to_string()),
         KeyValue::new("action", action.to_string()),
@@ -1164,6 +1248,7 @@ pub fn record_remediation_action(issue_type: &str, action: &str) {
     // Use a general counter for remediation actions
     // In a real implementation, we'd add a specific metric for this
     metrics.grpc_requests_total.add(1, attrs);
+    Ok(())
 }
 
 /// Records resource utilization metrics
@@ -1176,8 +1261,8 @@ pub fn record_resource_utilization(
     overcommit_ratio_cpu: f64,
     overcommit_ratio_memory: f64,
     overcommit_ratio_disk: f64,
-) {
-    let metrics = metrics();
+) -> crate::error::BlixardResult<()> {
+    let metrics = safe_metrics()?;
     let attrs = &[KeyValue::new("node_id", node_id.to_string())];
 
     // Record actual resource usage as histograms for better analysis
@@ -1202,6 +1287,7 @@ pub fn record_resource_utilization(
 
     // Note: In production, we'd add specific metrics for resource utilization
     // This is a simplified implementation reusing existing metrics
+    Ok(())
 }
 
 /// Records resource utilization metrics (no-op version)
@@ -1214,6 +1300,7 @@ pub fn record_resource_utilization(
     _overcommit_ratio_cpu: f64,
     _overcommit_ratio_memory: f64,
     _overcommit_ratio_disk: f64,
-) {
+) -> crate::error::BlixardResult<()> {
     // No-op when observability is disabled
+    Ok(())
 }

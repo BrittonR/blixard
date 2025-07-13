@@ -129,7 +129,7 @@ tera = "1.19"
 
 # P2P networking
 iroh = "0.90"
-iroh-blobs = "0.90"
+iroh-blobs = "0.91"
 
 # Test utilities
 proptest = "1.4"
@@ -202,5 +202,3 @@ panic = "abort"
 [profile.dev]
 debug = true
 
-[patch.crates-io]
-iroh-blobs = { git = "https://github.com/n0-computer/iroh-blobs", branch = "Frando/gc-protect" }

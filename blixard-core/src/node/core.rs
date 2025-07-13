@@ -315,10 +315,18 @@ impl Node {
         let peers = shared.get_peers().await;
         let peer_list: Vec<(u64, String)> = peers
             .into_iter()
-            .map(|p| {
-                // Parse node_id string to u64 - use 0 as fallback
-                let id = p.node_id.parse::<u64>().unwrap_or(0);
-                (id, p.address)
+            .filter_map(|p| {
+                // Parse node_id string to u64 - skip invalid peers
+                match p.node_id.parse::<u64>() {
+                    Ok(id) => Some((id, p.address)),
+                    Err(e) => {
+                        tracing::warn!(
+                            "Skipping peer with invalid node ID '{}': {}",
+                            p.node_id, e
+                        );
+                        None
+                    }
+                }
             })
             .collect();
         let shared_weak = Arc::downgrade(&shared);

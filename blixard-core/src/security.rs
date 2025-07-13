@@ -592,18 +592,13 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_security_manager_creation() {
+    async fn test_security_manager_creation() -> BlixardResult<()> {
         let config = default_dev_security_config();
-        let security_manager = SecurityManager::new(config)
-            .await
-            .expect("Failed to create security manager with dev config");
+        let security_manager = SecurityManager::new(config).await?;
 
         // Iroh handles transport security via QUIC/TLS - no separate TLS config needed
         // Verify that authentication is properly disabled in dev config
-        let auth_result = security_manager
-            .authenticate_token("any-token")
-            .await
-            .expect("Token authentication should not fail with dev config");
+        let auth_result = security_manager.authenticate_token("any-token").await?;
         assert!(auth_result.authenticated);
         assert_eq!(auth_result.user, Some("anonymous".to_string()));
         assert_eq!(auth_result.auth_method, "disabled");
@@ -617,20 +612,19 @@ mod tests {
         ];
 
         for token in test_tokens {
-            let result = security_manager
-                .authenticate_token(token)
-                .await
-                .expect("Authentication should not fail when disabled");
+            let result = security_manager.authenticate_token(token).await?;
             assert!(
                 result.authenticated,
                 "Token '{}' should be accepted when auth is disabled",
                 token
             );
         }
+        
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_token_authentication() {
+    async fn test_token_authentication() -> BlixardResult<()> {
         let config = SecurityConfig {
             tls: TlsConfig {
                 enabled: false,
@@ -646,66 +640,46 @@ mod tests {
             },
         };
 
-        let mut security_manager = SecurityManager::new(config)
-            .await
-            .expect("Failed to create security manager with auth enabled");
+        let mut security_manager = SecurityManager::new(config).await?;
 
         // Generate a token
         let token = security_manager
             .generate_token("test-user", Some(std::time::Duration::from_secs(3600)))
-            .await
-            .expect("Failed to generate token for test user");
+            .await?;
 
         // Authenticate with the token
-        let auth_result = security_manager
-            .authenticate_token(&token)
-            .await
-            .expect("Failed to authenticate valid token");
+        let auth_result = security_manager.authenticate_token(&token).await?;
         assert!(auth_result.authenticated);
-        assert_eq!(
-            auth_result
-                .user
-                .expect("Authenticated user should have a name"),
-            "test-user"
-        );
+        
+        // Test user extraction with proper assertion
+        assert!(matches!(auth_result.user, Some(ref user) if user == "test-user"));
 
         // Test invalid token
-        let invalid_result = security_manager
-            .authenticate_token("invalid-token")
-            .await
-            .expect("Authentication check should not fail, even for invalid tokens");
+        let invalid_result = security_manager.authenticate_token("invalid-token").await?;
         assert!(!invalid_result.authenticated);
+        
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_secrets_management() {
+    async fn test_secrets_management() -> BlixardResult<()> {
         let config = default_dev_security_config();
-        let mut security_manager = SecurityManager::new(config)
-            .await
-            .expect("Failed to create security manager for secrets test");
+        let mut security_manager = SecurityManager::new(config).await?;
 
         // Store a secret
-        security_manager
-            .store_secret("test-key", "secret-value")
-            .await
-            .expect("Failed to store secret");
+        security_manager.store_secret("test-key", "secret-value").await?;
 
         // Retrieve the secret
-        let retrieved = security_manager
-            .get_secret("test-key")
-            .await
-            .expect("Failed to retrieve stored secret");
-        assert_eq!(
-            retrieved.expect("Retrieved secret should not be None"),
-            "secret-value"
-        );
+        let retrieved = security_manager.get_secret("test-key").await?;
+        
+        // Test secret value with proper assertion
+        assert!(matches!(retrieved, Some(ref value) if value == "secret-value"));
 
         // Non-existent secret
-        let missing = security_manager
-            .get_secret("missing-key")
-            .await
-            .expect("Getting missing secret should not fail");
+        let missing = security_manager.get_secret("missing-key").await?;
         assert!(missing.is_none());
+        
+        Ok(())
     }
 
     #[test]
