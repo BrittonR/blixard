@@ -77,35 +77,94 @@ impl VmAutoRecovery {
     /// Trigger recovery for a failed VM
     pub async fn trigger_recovery(&self, vm_name: &str, vm_config: &VmConfig) -> BlixardResult<()> {
         #[cfg(feature = "observability")]
-        let metrics = metrics();
+        let _metrics = metrics();
 
         // Check recovery state
-        let mut states = self.recovery_states.write().await;
-        let state = states
+        let (should_attempt, restart_attempts, max_attempts) = {
+            let mut states = self.recovery_states.write().await;
+            let state = self.get_or_create_recovery_state(&mut states, vm_name);
+
+            // Check if recovery is exhausted
+            if let Err(e) = self.check_recovery_exhausted(state, vm_name) {
+                return Err(e);
+            }
+
+            // Check backoff period
+            if self.is_in_backoff_period(state, vm_name)? {
+                return Ok(());
+            }
+
+            // Update recovery attempt
+            state.restart_attempts += 1;
+            state.last_attempt = Instant::now();
+            
+            (true, state.restart_attempts, self.policy.max_restart_attempts)
+        };
+
+        info!(
+            "Attempting recovery for VM '{}' (attempt {}/{})",
+            vm_name, restart_attempts, max_attempts
+        );
+
+        // Try local restart first
+        let restart_result = self.attempt_local_restart(vm_name).await;
+
+        match restart_result {
+            Ok(()) => {
+                let mut states = self.recovery_states.write().await;
+                self.handle_restart_success(vm_name, &mut states).await
+            }
+            Err(e) => {
+                self.handle_restart_failure(vm_name, vm_config, e).await
+            }
+        }
+    }
+
+    /// Get or create recovery state for a VM
+    fn get_or_create_recovery_state<'a>(
+        &self,
+        states: &'a mut HashMap<String, VmRecoveryState>,
+        vm_name: &str,
+    ) -> &'a mut VmRecoveryState {
+        states
             .entry(vm_name.to_string())
             .or_insert_with(|| VmRecoveryState {
                 restart_attempts: 0,
                 last_attempt: Instant::now() - self.policy.restart_delay, // Allow immediate first attempt
                 current_delay: self.policy.restart_delay,
                 exhausted: false,
-            });
+            })
+    }
 
-        // Check if recovery is exhausted
+    /// Check if recovery is exhausted for a VM
+    fn check_recovery_exhausted(
+        &self,
+        state: &VmRecoveryState,
+        vm_name: &str,
+    ) -> BlixardResult<()> {
         if state.exhausted {
             warn!(
                 "Recovery exhausted for VM '{}' - manual intervention required",
                 vm_name
             );
-            return Err(BlixardError::VmOperationFailed {
+            Err(BlixardError::VmOperationFailed {
                 operation: "auto_recovery".to_string(),
                 details: format!(
                     "Recovery exhausted after {} attempts",
                     self.policy.max_restart_attempts
                 ),
-            });
+            })
+        } else {
+            Ok(())
         }
+    }
 
-        // Check backoff period
+    /// Check if VM is in backoff period
+    fn is_in_backoff_period(
+        &self,
+        state: &VmRecoveryState,
+        vm_name: &str,
+    ) -> BlixardResult<bool> {
         let elapsed = state.last_attempt.elapsed();
         if elapsed < state.current_delay {
             let remaining = state.current_delay - elapsed;
@@ -114,85 +173,115 @@ impl VmAutoRecovery {
                 vm_name,
                 remaining.as_secs()
             );
-            return Ok(());
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Handle successful restart
+    async fn handle_restart_success(
+        &self,
+        vm_name: &str,
+        states: &mut HashMap<String, VmRecoveryState>,
+    ) -> BlixardResult<()> {
+        info!("Successfully restarted VM '{}'", vm_name);
+        
+        #[cfg(feature = "observability")]
+        {
+            let metrics = metrics();
+            metrics.vm_recovery_success.add(
+                1,
+                &[
+                    attributes::vm_name(vm_name),
+                    attributes::recovery_type("restart"),
+                ],
+            );
+        }
+        
+        // Reset recovery state on success
+        states.remove(vm_name);
+        Ok(())
+    }
+
+    /// Handle restart failure
+    async fn handle_restart_failure(
+        &self,
+        vm_name: &str,
+        vm_config: &VmConfig,
+        error: BlixardError,
+    ) -> BlixardResult<()> {
+        // Re-acquire lock to access state
+        let mut states = self.recovery_states.write().await;
+        let state = states.get_mut(vm_name).unwrap(); // Safe: we just created/accessed it
+        warn!("Failed to restart VM '{}': {}", vm_name, error);
+        
+        #[cfg(feature = "observability")]
+        {
+            let metrics = metrics();
+            metrics.vm_recovery_failed.add(
+                1,
+                &[
+                    attributes::vm_name(vm_name),
+                    attributes::recovery_type("restart"),
+                    attributes::error(true),
+                ],
+            );
         }
 
-        // Attempt recovery
-        state.restart_attempts += 1;
-        state.last_attempt = Instant::now();
+        // Check if we've exhausted restart attempts
+        if state.restart_attempts >= self.policy.max_restart_attempts {
+            drop(states); // Release lock before potentially long operation
+            return self.handle_restart_exhausted(vm_name, vm_config).await;
+        }
+
+        // Update backoff delay
+        self.update_backoff_delay(state);
 
         info!(
-            "Attempting recovery for VM '{}' (attempt {}/{})",
-            vm_name, state.restart_attempts, self.policy.max_restart_attempts
+            "VM '{}' recovery failed - next attempt in {} seconds",
+            vm_name,
+            state.current_delay.as_secs()
         );
 
-        // Try local restart first
-        let restart_result = self.attempt_local_restart(vm_name).await;
+        Err(error)
+    }
 
-        match restart_result {
-            Ok(()) => {
-                info!("Successfully restarted VM '{}'", vm_name);
-                #[cfg(feature = "observability")]
-                metrics.vm_recovery_success.add(
-                    1,
-                    &[
-                        attributes::vm_name(vm_name),
-                        attributes::recovery_type("restart"),
-                    ],
-                );
-                // Reset recovery state on success
-                states.remove(vm_name);
-                Ok(())
+    /// Handle exhausted restart attempts
+    async fn handle_restart_exhausted(
+        &self,
+        vm_name: &str,
+        vm_config: &VmConfig,
+    ) -> BlixardResult<()> {
+        if self.policy.enable_migration {
+            info!(
+                "Local restart attempts exhausted for VM '{}', attempting migration",
+                vm_name
+            );
+            self.attempt_migration(vm_name, vm_config).await
+        } else {
+            // Mark as exhausted
+            let mut states = self.recovery_states.write().await;
+            if let Some(state) = states.get_mut(vm_name) {
+                state.exhausted = true;
             }
-            Err(e) => {
-                warn!("Failed to restart VM '{}': {}", vm_name, e);
-                #[cfg(feature = "observability")]
-                metrics.vm_recovery_failed.add(
-                    1,
-                    &[
-                        attributes::vm_name(vm_name),
-                        attributes::recovery_type("restart"),
-                        attributes::error(true),
-                    ],
-                );
-
-                // Check if we should try migration
-                if state.restart_attempts >= self.policy.max_restart_attempts {
-                    if self.policy.enable_migration {
-                        info!(
-                            "Local restart attempts exhausted for VM '{}', attempting migration",
-                            vm_name
-                        );
-                        drop(states); // Release lock before migration
-                        return self.attempt_migration(vm_name, vm_config).await;
-                    } else {
-                        state.exhausted = true;
-                        error!("Recovery exhausted for VM '{}' - no more attempts", vm_name);
-                        return Err(BlixardError::VmOperationFailed {
-                            operation: "auto_recovery".to_string(),
-                            details: format!(
-                                "All {} restart attempts failed",
-                                self.policy.max_restart_attempts
-                            ),
-                        });
-                    }
-                }
-
-                // Update backoff delay
-                state.current_delay = Duration::from_secs_f64(
-                    (state.current_delay.as_secs_f64() * self.policy.backoff_multiplier)
-                        .min(self.policy.max_backoff_delay.as_secs_f64()),
-                );
-
-                info!(
-                    "VM '{}' recovery failed - next attempt in {} seconds",
-                    vm_name,
-                    state.current_delay.as_secs()
-                );
-
-                Err(e)
-            }
+            error!("Recovery exhausted for VM '{}' - no more attempts", vm_name);
+            Err(BlixardError::VmOperationFailed {
+                operation: "auto_recovery".to_string(),
+                details: format!(
+                    "All {} restart attempts failed",
+                    self.policy.max_restart_attempts
+                ),
+            })
         }
+    }
+
+    /// Update backoff delay with exponential backoff
+    fn update_backoff_delay(&self, state: &mut VmRecoveryState) {
+        state.current_delay = Duration::from_secs_f64(
+            (state.current_delay.as_secs_f64() * self.policy.backoff_multiplier)
+                .min(self.policy.max_backoff_delay.as_secs_f64()),
+        );
     }
 
     /// Attempt to restart the VM on the local node

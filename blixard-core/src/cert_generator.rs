@@ -7,6 +7,7 @@
 //! - Certificate signing and verification
 
 use crate::error::{BlixardError, BlixardResult};
+use crate::common::error_context::SecurityContext;
 use chrono::Duration;
 use rcgen::{
     BasicConstraints, Certificate, CertificateParams, DistinguishedName, DnType,
@@ -171,23 +172,19 @@ impl CertGenerator {
         params.not_after = params.not_before
             + Duration::days(self.config.validity_days)
                 .to_std()
-                .map_err(|e| BlixardError::Security {
-                    message: format!("Invalid validity period: {}", e),
-                })?;
+                .cert_context("set validity period")?;
 
         // Generate key pair
         let key_pair = self.generate_key_pair()?;
         params.key_pair = Some(key_pair);
 
         // Generate certificate
-        let cert = Certificate::from_params(params).map_err(|e| BlixardError::Security {
-            message: format!("Failed to generate CA certificate: {}", e),
-        })?;
+        let cert = Certificate::from_params(params)
+            .cert_context("generate CA certificate")?;
 
         let bundle = CertificateBundle {
-            cert_pem: cert.serialize_pem().map_err(|e| BlixardError::Security {
-                message: format!("Failed to serialize certificate: {}", e),
-            })?,
+            cert_pem: cert.serialize_pem()
+                .cert_context("serialize certificate")?,
             key_pem: cert.serialize_private_key_pem(),
             serial_number: self.get_serial_number(&cert),
             fingerprint: self.calculate_fingerprint(&cert)?,

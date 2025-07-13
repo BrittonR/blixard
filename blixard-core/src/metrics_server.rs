@@ -21,65 +21,81 @@ async fn handle_request(
     shared_state: Arc<SharedNodeState>,
 ) -> Result<Response<Body>, Infallible> {
     let response = match req.uri().path() {
-        "/metrics" => {
-            #[cfg(feature = "observability")]
-            let metrics = prometheus_metrics();
-            #[cfg(not(feature = "observability"))]
-            let metrics = "# Observability features disabled\n";
+        "/metrics" => handle_metrics_endpoint(),
+        "/health" => handle_health_endpoint(),
+        "/bootstrap" => handle_bootstrap_endpoint(shared_state).await,
+        "/" => handle_root_endpoint(),
+        _ => handle_not_found(),
+    };
 
-            Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", "text/plain; version=0.0.4")
-                .body(Body::from(metrics))
-                .unwrap_or_else(|_| {
-                    Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(Body::from("Failed to build response"))
-                        .expect("Failed to build error response")
-                })
-        }
-        "/health" => Response::builder()
-            .status(StatusCode::OK)
-            .body(Body::from("OK\n"))
-            .unwrap_or_else(|_| {
-                Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Body::from("Failed to build response"))
-                    .expect("Failed to build error response")
-            }),
-        "/bootstrap" => {
-            // Get P2P information from shared state
-            match get_bootstrap_info(&shared_state).await {
-                Ok(info) => match serde_json::to_string(&info) {
-                    Ok(json) => Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", "application/json")
-                        .body(Body::from(json))
-                        .unwrap_or_else(|_| {
-                            Response::builder()
-                                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                .body(Body::from("Failed to build response"))
-                                .expect("Failed to build error response")
-                        }),
-                    Err(e) => Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(Body::from(format!(
-                            "Failed to serialize bootstrap info: {}",
-                            e
-                        )))
-                        .expect("Failed to build error response"),
-                },
-                Err(e) => Response::builder()
-                    .status(StatusCode::SERVICE_UNAVAILABLE)
-                    .body(Body::from(format!("Bootstrap info not available: {}", e)))
-                    .expect("Failed to build error response"),
-            }
-        }
-        "/" => Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "text/html")
-            .body(Body::from(
-                r#"<html>
+    Ok(response)
+}
+
+/// Build a response or return internal server error
+fn build_response(
+    status: StatusCode,
+    content_type: Option<&str>,
+    body: String,
+) -> Response<Body> {
+    let mut builder = Response::builder().status(status);
+    
+    if let Some(ct) = content_type {
+        builder = builder.header("Content-Type", ct);
+    }
+    
+    builder.body(Body::from(body)).unwrap_or_else(|_| {
+        Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(Body::from("Failed to build response"))
+            .expect("Failed to build error response")
+    })
+}
+
+/// Handle /metrics endpoint
+fn handle_metrics_endpoint() -> Response<Body> {
+    #[cfg(feature = "observability")]
+    let metrics = prometheus_metrics();
+    #[cfg(not(feature = "observability"))]
+    let metrics = "# Observability features disabled\n";
+
+    build_response(
+        StatusCode::OK,
+        Some("text/plain; version=0.0.4"),
+        metrics,
+    )
+}
+
+/// Handle /health endpoint
+fn handle_health_endpoint() -> Response<Body> {
+    build_response(StatusCode::OK, None, "OK\n".to_string())
+}
+
+/// Handle /bootstrap endpoint
+async fn handle_bootstrap_endpoint(shared_state: Arc<SharedNodeState>) -> Response<Body> {
+    match get_bootstrap_info(&shared_state).await {
+        Ok(info) => match serde_json::to_string(&info) {
+            Ok(json) => build_response(
+                StatusCode::OK,
+                Some("application/json"),
+                json,
+            ),
+            Err(e) => build_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                None,
+                format!("Failed to serialize bootstrap info: {}", e),
+            ),
+        },
+        Err(e) => build_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            None,
+            format!("Bootstrap info not available: {}", e),
+        ),
+    }
+}
+
+/// Handle root endpoint
+fn handle_root_endpoint() -> Response<Body> {
+    const INDEX_HTML: &str = r#"<html>
 <head><title>Blixard Metrics</title></head>
 <body>
 <h1>Blixard Metrics Server</h1>
@@ -90,26 +106,22 @@ async fn handle_request(
 <li><a href="/bootstrap">/bootstrap</a> - P2P bootstrap information</li>
 </ul>
 </body>
-</html>"#,
-            ))
-            .unwrap_or_else(|_| {
-                Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Body::from("Failed to build response"))
-                    .expect("Failed to build error response")
-            }),
-        _ => Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Body::from("404 Not Found\n"))
-            .unwrap_or_else(|_| {
-                Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Body::from("Failed to build response"))
-                    .expect("Failed to build error response")
-            }),
-    };
+</html>"#;
 
-    Ok(response)
+    build_response(
+        StatusCode::OK,
+        Some("text/html"),
+        INDEX_HTML.to_string(),
+    )
+}
+
+/// Handle 404 Not Found
+fn handle_not_found() -> Response<Body> {
+    build_response(
+        StatusCode::NOT_FOUND,
+        None,
+        "404 Not Found\n".to_string(),
+    )
 }
 
 /// Get bootstrap information from shared state

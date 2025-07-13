@@ -5,6 +5,7 @@
 
 pub mod async_utils;
 pub mod error_context;
+pub mod error_macros;
 pub mod file_io;
 // Temporarily disabled due to tonic dependencies
 // pub mod conversions;
