@@ -24,6 +24,14 @@ use crate::transport::iroh_protocol::{
     generate_request_id, read_message, write_message, MessageType as ProtocolMessageType,
 };
 
+/// Metrics for Iroh Raft transport
+#[derive(Debug, Clone)]
+pub struct IrohRaftMetrics {
+    pub active_connections: usize,
+    pub messages_sent: u64,
+    pub messages_received: u64,
+}
+
 #[cfg(feature = "observability")]
 lazy_static::lazy_static! {
     static ref RAFT_MESSAGES_SENT: opentelemetry::metrics::Counter<u64> = {
@@ -554,6 +562,28 @@ impl IrohRaftTransport {
                 attributes::MESSAGE_TYPE.string(format!("{:?}", msg_type)),
             ],
         );
+    }
+
+    /// Get transport metrics
+    pub async fn get_metrics(&self) -> IrohRaftMetrics {
+        let connections = self.connections.read().await;
+        let active_connections = connections.len();
+        
+        let messages_sent = {
+            let sent = self.messages_sent.lock().await;
+            sent.values().sum()
+        };
+        
+        let messages_received = {
+            let received = self.messages_received.lock().await;
+            received.values().sum()
+        };
+        
+        IrohRaftMetrics {
+            active_connections,
+            messages_sent,
+            messages_received,
+        }
     }
 
     /// Shutdown the transport

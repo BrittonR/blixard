@@ -10,7 +10,9 @@ use tokio::sync::mpsc;
 use crate::error::BlixardResult;
 use crate::node_shared::SharedNodeState;
 use crate::transport::config::TransportConfig;
-use crate::transport::iroh_raft_transport::IrohRaftTransport;
+use crate::transport::iroh_raft_transport::{IrohRaftTransport, IrohRaftMetrics};
+use iroh::{Endpoint, SecretKey};
+use rand;
 
 /// Unified Raft transport using Iroh P2P
 #[derive(Clone)]
@@ -25,20 +27,41 @@ impl RaftTransport {
     /// Create a new Raft transport using Iroh
     pub async fn new(
         node: Arc<SharedNodeState>,
-        _raft_rx_tx: mpsc::UnboundedSender<(u64, Message)>,
+        raft_rx_tx: mpsc::UnboundedSender<(u64, Message)>,
         _transport_config: &TransportConfig,
     ) -> BlixardResult<Self> {
-        // Get Iroh endpoint from node (stub implementation)
-        let _endpoint_str =
-            node.get_iroh_endpoint()
-                .ok_or_else(|| crate::error::BlixardError::NotInitialized {
-                    component: "Iroh endpoint".to_string(),
-                })?;
+        // Create Iroh endpoint for Raft communication
+        let secret_key = SecretKey::generate(rand::thread_rng());
+        
+        // Use Raft-specific ALPN
+        let raft_alpn = b"blixard-raft".to_vec();
+        
+        let endpoint = Endpoint::builder()
+            .secret_key(secret_key)
+            .alpns(vec![raft_alpn])
+            .bind()
+            .await
+            .map_err(|e| crate::error::BlixardError::Internal {
+                message: format!("Failed to create Raft endpoint: {}", e),
+            })?;
 
-        // TODO: Replace with actual Iroh endpoint and node ID when available
-        // For now, return a placeholder error since we need proper Iroh integration
-        Err(crate::error::BlixardError::NotImplemented {
-            feature: "Iroh transport adapter".to_string(),
+        let local_node_id = endpoint.node_id();
+        tracing::info!("Created Raft transport with Iroh node ID: {}", local_node_id);
+        
+        // Create the IrohRaftTransport
+        let iroh_transport = Arc::new(IrohRaftTransport::new(
+            node,
+            endpoint.clone(),
+            local_node_id,
+            raft_rx_tx,
+        ));
+        
+        // Start the transport to handle connections
+        iroh_transport.start().await?;
+        
+        Ok(Self {
+            iroh: iroh_transport,
+            endpoint: Arc::new(endpoint),
         })
     }
 
@@ -53,14 +76,9 @@ impl RaftTransport {
     }
 
     /// Get transport metrics
-    pub async fn get_metrics(&self) -> RaftTransportMetrics {
-        // TODO: Get metrics from IrohRaftTransport
-        RaftTransportMetrics {
-            transport_type: "iroh".to_string(),
-            connections: 0,
-            messages_sent: 0,
-            messages_received: 0,
-        }
+    pub async fn get_metrics(&self) -> IrohRaftMetrics {
+        // Get actual metrics from IrohRaftTransport
+        self.iroh.get_metrics().await
     }
 
     /// Shutdown the transport
@@ -74,14 +92,6 @@ impl RaftTransport {
     }
 }
 
-/// Metrics for Raft transport
-#[derive(Debug, Clone)]
-pub struct RaftTransportMetrics {
-    pub transport_type: String,
-    pub connections: usize,
-    pub messages_sent: u64,
-    pub messages_received: u64,
-}
 
 #[cfg(test)]
 mod tests {
