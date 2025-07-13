@@ -53,6 +53,49 @@ impl std::fmt::Display for VmId {
     }
 }
 
+// From/Into conversions for VmId
+impl From<uuid::Uuid> for VmId {
+    fn from(uuid: uuid::Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl From<VmId> for uuid::Uuid {
+    fn from(vm_id: VmId) -> Self {
+        vm_id.0
+    }
+}
+
+impl From<VmId> for String {
+    fn from(vm_id: VmId) -> Self {
+        vm_id.0.to_string()
+    }
+}
+
+impl std::str::FromStr for VmId {
+    type Err = uuid::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(uuid::Uuid::parse_str(s)?))
+    }
+}
+
+impl TryFrom<String> for VmId {
+    type Error = uuid::Error;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+impl TryFrom<&str> for VmId {
+    type Error = uuid::Error;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
 /// Node topology information for multi-datacenter awareness
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct NodeTopology {
@@ -170,6 +213,95 @@ pub enum VmStatus {
     Failed,
 }
 
+// From/Into conversions for VmStatus
+impl std::fmt::Display for VmStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let status_str = match self {
+            VmStatus::Creating => "creating",
+            VmStatus::Starting => "starting",
+            VmStatus::Running => "running",
+            VmStatus::Stopping => "stopping",
+            VmStatus::Stopped => "stopped",
+            VmStatus::Failed => "failed",
+        };
+        write!(f, "{}", status_str)
+    }
+}
+
+impl From<VmStatus> for String {
+    fn from(status: VmStatus) -> Self {
+        status.to_string()
+    }
+}
+
+impl std::str::FromStr for VmStatus {
+    type Err = crate::error::BlixardError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "creating" => Ok(VmStatus::Creating),
+            "starting" => Ok(VmStatus::Starting),
+            "running" => Ok(VmStatus::Running),
+            "stopping" => Ok(VmStatus::Stopping),
+            "stopped" => Ok(VmStatus::Stopped),
+            "failed" => Ok(VmStatus::Failed),
+            _ => Err(crate::error::BlixardError::InvalidInput {
+                field: "vm_status".to_string(),
+                message: format!("Invalid VM status '{}'. Valid values: creating, starting, running, stopping, stopped, failed", s),
+            }),
+        }
+    }
+}
+
+impl TryFrom<String> for VmStatus {
+    type Error = crate::error::BlixardError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+impl TryFrom<&str> for VmStatus {
+    type Error = crate::error::BlixardError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+// Protocol compatibility conversions
+impl From<VmStatus> for i32 {
+    fn from(status: VmStatus) -> Self {
+        match status {
+            VmStatus::Creating => 1,
+            VmStatus::Starting => 2,
+            VmStatus::Running => 3,
+            VmStatus::Stopping => 4,
+            VmStatus::Stopped => 5,
+            VmStatus::Failed => 6,
+        }
+    }
+}
+
+impl TryFrom<i32> for VmStatus {
+    type Error = crate::error::BlixardError;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(VmStatus::Creating),
+            2 => Ok(VmStatus::Starting),
+            3 => Ok(VmStatus::Running),
+            4 => Ok(VmStatus::Stopping),
+            5 => Ok(VmStatus::Stopped),
+            6 => Ok(VmStatus::Failed),
+            _ => Err(crate::error::BlixardError::InvalidInput {
+                field: "vm_status".to_string(),
+                message: format!("Invalid VM status code {}. Valid codes: 1-6", value),
+            }),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NodeState {
     Uninitialized,
@@ -178,6 +310,62 @@ pub enum NodeState {
     Active,
     LeavingCluster,
     Error,
+}
+
+// From/Into conversions for NodeState
+impl std::fmt::Display for NodeState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state_str = match self {
+            NodeState::Uninitialized => "uninitialized",
+            NodeState::Initialized => "initialized",
+            NodeState::JoiningCluster => "joining_cluster",
+            NodeState::Active => "active",
+            NodeState::LeavingCluster => "leaving_cluster",
+            NodeState::Error => "error",
+        };
+        write!(f, "{}", state_str)
+    }
+}
+
+impl From<NodeState> for String {
+    fn from(state: NodeState) -> Self {
+        state.to_string()
+    }
+}
+
+impl std::str::FromStr for NodeState {
+    type Err = crate::error::BlixardError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "uninitialized" => Ok(NodeState::Uninitialized),
+            "initialized" => Ok(NodeState::Initialized),
+            "joining_cluster" | "joining-cluster" => Ok(NodeState::JoiningCluster),
+            "active" => Ok(NodeState::Active),
+            "leaving_cluster" | "leaving-cluster" => Ok(NodeState::LeavingCluster),
+            "error" => Ok(NodeState::Error),
+            _ => Err(crate::error::BlixardError::InvalidInput {
+                field: "node_state".to_string(),
+                message: format!("Invalid node state '{}'. Valid values: uninitialized, initialized, joining_cluster, active, leaving_cluster, error", s),
+            }),
+        }
+    }
+}
+
+impl TryFrom<String> for NodeState {
+    type Error = crate::error::BlixardError;
+
+    fn try_from(s: String) -> Result<Self, <Self as TryFrom<String>>::Error> {
+        s.parse()
+    }
+}
+
+impl TryFrom<&str> for NodeState {
+    type Error = crate::error::BlixardError;
+
+    fn try_from(s: &str) -> Result<Self, <Self as TryFrom<&str>>::Error> {
+        s.parse()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -238,6 +426,174 @@ impl Default for NodeConfig {
             vm_backend: "mock".to_string(),
             transport_config: None,
             topology: NodeTopology::default(),
+        }
+    }
+}
+
+// NodeId type with conversions
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct NodeId(pub u64);
+
+impl NodeId {
+    pub fn new(id: u64) -> Self {
+        Self(id)
+    }
+
+    pub fn as_u64(&self) -> u64 {
+        self.0
+    }
+}
+
+impl std::fmt::Display for NodeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<u64> for NodeId {
+    fn from(id: u64) -> Self {
+        Self(id)
+    }
+}
+
+impl From<NodeId> for u64 {
+    fn from(node_id: NodeId) -> Self {
+        node_id.0
+    }
+}
+
+impl From<NodeId> for String {
+    fn from(node_id: NodeId) -> Self {
+        node_id.0.to_string()
+    }
+}
+
+impl std::str::FromStr for NodeId {
+    type Err = crate::error::BlixardError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse::<u64>()
+            .map(Self)
+            .map_err(|e| crate::error::BlixardError::InvalidInput {
+                field: "node_id".to_string(),
+                message: format!("Invalid node ID '{}': {}", s, e),
+            })
+    }
+}
+
+impl TryFrom<String> for NodeId {
+    type Error = crate::error::BlixardError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+impl TryFrom<&str> for NodeId {
+    type Error = crate::error::BlixardError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+// SocketAddr parsing helpers
+pub trait SocketAddrExt {
+    fn try_from_string(s: String) -> Result<SocketAddr, crate::error::BlixardError>;
+    fn try_from_str(s: &str) -> Result<SocketAddr, crate::error::BlixardError>;
+}
+
+impl SocketAddrExt for SocketAddr {
+    fn try_from_string(s: String) -> Result<SocketAddr, crate::error::BlixardError> {
+        s.parse().map_err(|e| crate::error::BlixardError::InvalidInput {
+            field: "socket_address".to_string(),
+            message: format!("Invalid socket address '{}': {}", s, e),
+        })
+    }
+
+    fn try_from_str(s: &str) -> Result<SocketAddr, crate::error::BlixardError> {
+        s.parse().map_err(|e| crate::error::BlixardError::InvalidInput {
+            field: "socket_address".to_string(),
+            message: format!("Invalid socket address '{}': {}", s, e),
+        })
+    }
+}
+
+// Metadata conversion helpers
+pub mod metadata {
+    use std::collections::HashMap;
+
+    /// Convert a vector of string pairs to a HashMap
+    pub fn from_string_pairs(pairs: Vec<(String, String)>) -> HashMap<String, String> {
+        pairs.into_iter().collect()
+    }
+
+    /// Convert a vector of str pairs to a HashMap with owned strings
+    pub fn from_str_pairs(pairs: Vec<(&str, &str)>) -> HashMap<String, String> {
+        pairs.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    /// Convert key-value pairs from any iterator to HashMap
+    pub fn from_pairs<K, V>(pairs: impl IntoIterator<Item = (K, V)>) -> HashMap<String, String>
+    where
+        K: Into<String>,
+        V: Into<String>,
+    {
+        pairs.into_iter().map(|(k, v)| (k.into(), v.into())).collect()
+    }
+}
+
+// Option to Result helpers
+pub trait OptionExt<T> {
+    fn ok_or_invalid_input(self, field: &str, message: &str) -> Result<T, crate::error::BlixardError>;
+    fn ok_or_not_found(self, resource: &str) -> Result<T, crate::error::BlixardError>;
+}
+
+impl<T> OptionExt<T> for Option<T> {
+    fn ok_or_invalid_input(self, field: &str, message: &str) -> Result<T, crate::error::BlixardError> {
+        self.ok_or_else(|| crate::error::BlixardError::InvalidInput {
+            field: field.to_string(),
+            message: message.to_string(),
+        })
+    }
+
+    fn ok_or_not_found(self, resource: &str) -> Result<T, crate::error::BlixardError> {
+        self.ok_or_else(|| crate::error::BlixardError::NotFound {
+            resource: resource.to_string(),
+        })
+    }
+}
+
+/// Hypervisor types supported by the system
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Hypervisor {
+    CloudHypervisor,
+    Firecracker,
+    Qemu,
+}
+
+impl std::fmt::Display for Hypervisor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Hypervisor::CloudHypervisor => write!(f, "cloud-hypervisor"),
+            Hypervisor::Firecracker => write!(f, "firecracker"),
+            Hypervisor::Qemu => write!(f, "qemu"),
+        }
+    }
+}
+
+impl std::str::FromStr for Hypervisor {
+    type Err = crate::error::BlixardError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "cloud-hypervisor" | "cloudhypervisor" => Ok(Hypervisor::CloudHypervisor),
+            "firecracker" => Ok(Hypervisor::Firecracker),
+            "qemu" => Ok(Hypervisor::Qemu),
+            _ => Err(crate::error::BlixardError::InvalidInput {
+                field: "hypervisor".to_string(),
+                message: format!("Invalid hypervisor type: {}. Valid options: cloud-hypervisor, firecracker, qemu", s),
+            }),
         }
     }
 }

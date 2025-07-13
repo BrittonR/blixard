@@ -602,6 +602,113 @@ impl From<VmState> for i32 {
     }
 }
 
+// Additional conversions for iroh types
+
+// NodeInfo conversions
+impl NodeInfo {
+    pub fn new(id: u64, address: String, p2p_node_id: String) -> Self {
+        Self {
+            id,
+            address,
+            state: NodeState::NodeStateUnknown as i32,
+            p2p_node_id,
+            p2p_addresses: Vec::new(),
+            p2p_relay_url: String::new(),
+        }
+    }
+}
+
+// VmInfo conversions
+impl VmInfo {
+    pub fn new(name: String, node_id: u64) -> Self {
+        Self {
+            name,
+            state: VmState::VmStateUnknown as i32,
+            node_id,
+            vcpus: 0,
+            memory_mb: 0,
+            ip_address: String::new(),
+        }
+    }
+}
+
+// Convert from core VmStatus to iroh VmState
+impl From<crate::types::VmStatus> for VmState {
+    fn from(status: crate::types::VmStatus) -> Self {
+        match status {
+            crate::types::VmStatus::Creating => VmState::VmStateCreated,
+            crate::types::VmStatus::Starting => VmState::VmStateStarting,
+            crate::types::VmStatus::Running => VmState::VmStateRunning,
+            crate::types::VmStatus::Stopping => VmState::VmStateStopping,
+            crate::types::VmStatus::Stopped => VmState::VmStateStopped,
+            crate::types::VmStatus::Failed => VmState::VmStateFailed,
+        }
+    }
+}
+
+// Convert from iroh VmState to core VmStatus
+impl TryFrom<VmState> for crate::types::VmStatus {
+    type Error = crate::error::BlixardError;
+
+    fn try_from(state: VmState) -> Result<Self, Self::Error> {
+        match state {
+            VmState::VmStateCreated => Ok(crate::types::VmStatus::Creating),
+            VmState::VmStateStarting => Ok(crate::types::VmStatus::Starting),
+            VmState::VmStateRunning => Ok(crate::types::VmStatus::Running),
+            VmState::VmStateStopping => Ok(crate::types::VmStatus::Stopping),
+            VmState::VmStateStopped => Ok(crate::types::VmStatus::Stopped),
+            VmState::VmStateFailed => Ok(crate::types::VmStatus::Failed),
+            VmState::VmStateUnknown => Err(crate::error::BlixardError::InvalidInput {
+                field: "vm_state".to_string(),
+                message: "Cannot convert unknown VM state".to_string(),
+            }),
+        }
+    }
+}
+
+// Convert from core NodeState to iroh NodeState
+impl From<crate::types::NodeState> for NodeState {
+    fn from(state: crate::types::NodeState) -> Self {
+        match state {
+            crate::types::NodeState::Uninitialized => NodeState::NodeStateUnknown,
+            crate::types::NodeState::Initialized => NodeState::NodeStateFollower,
+            crate::types::NodeState::JoiningCluster => NodeState::NodeStateCandidate,
+            crate::types::NodeState::Active => NodeState::NodeStateLeader,
+            crate::types::NodeState::LeavingCluster => NodeState::NodeStateFollower,
+            crate::types::NodeState::Error => NodeState::NodeStateUnknown,
+        }
+    }
+}
+
+// String display for VmState
+impl std::fmt::Display for VmState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state_str = match self {
+            VmState::VmStateUnknown => "unknown",
+            VmState::VmStateCreated => "created",
+            VmState::VmStateStarting => "starting",
+            VmState::VmStateRunning => "running",
+            VmState::VmStateStopping => "stopping",
+            VmState::VmStateStopped => "stopped",
+            VmState::VmStateFailed => "failed",
+        };
+        write!(f, "{}", state_str)
+    }
+}
+
+// String display for NodeState
+impl std::fmt::Display for NodeState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state_str = match self {
+            NodeState::NodeStateUnknown => "unknown",
+            NodeState::NodeStateFollower => "follower",
+            NodeState::NodeStateCandidate => "candidate",
+            NodeState::NodeStateLeader => "leader",
+        };
+        write!(f, "{}", state_str)
+    }
+}
+
 // P2P VM image sharing types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShareVmImageRequest {

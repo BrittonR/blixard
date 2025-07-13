@@ -750,3 +750,97 @@ impl BlixardError {
         }
     }
 }
+
+// Additional From implementations for common error types
+impl From<std::net::AddrParseError> for BlixardError {
+    fn from(err: std::net::AddrParseError) -> Self {
+        BlixardError::InvalidInput {
+            field: "address".to_string(),
+            message: format!("Invalid network address: {}", err),
+        }
+    }
+}
+
+impl From<std::num::ParseIntError> for BlixardError {
+    fn from(err: std::num::ParseIntError) -> Self {
+        BlixardError::InvalidInput {
+            field: "number".to_string(),
+            message: format!("Invalid number format: {}", err),
+        }
+    }
+}
+
+impl From<uuid::Error> for BlixardError {
+    fn from(err: uuid::Error) -> Self {
+        BlixardError::InvalidInput {
+            field: "uuid".to_string(),
+            message: format!("Invalid UUID format: {}", err),
+        }
+    }
+}
+
+// Convert various error types to BlixardError with context
+impl BlixardError {
+    /// Convert any error implementing std::error::Error to BlixardError
+    pub fn from_other<E: std::error::Error + Send + Sync + 'static>(
+        operation: &str,
+        source: E,
+    ) -> Self {
+        BlixardError::Internal {
+            message: format!("{}: {}", operation, source),
+        }
+    }
+
+    /// Create a connection error from any error
+    pub fn connection_error<E: std::fmt::Display>(address: &str, source: E) -> Self {
+        BlixardError::ConnectionError {
+            address: address.to_string(),
+            details: source.to_string(),
+        }
+    }
+
+    /// Create a timeout error with duration
+    pub fn timeout_error(operation: &str, duration: std::time::Duration) -> Self {
+        BlixardError::Timeout {
+            operation: operation.to_string(),
+            duration,
+        }
+    }
+
+    /// Create a resource exhausted error
+    pub fn resource_exhausted(resource: &str) -> Self {
+        BlixardError::ResourceExhausted {
+            resource: resource.to_string(),
+        }
+    }
+
+    /// Create a not found error
+    pub fn not_found(resource: &str) -> Self {
+        BlixardError::NotFound {
+            resource: resource.to_string(),
+        }
+    }
+
+    /// Create an already exists error
+    pub fn already_exists(resource: &str) -> Self {
+        BlixardError::AlreadyExists {
+            resource: resource.to_string(),
+        }
+    }
+
+    /// Create an invalid input error
+    pub fn invalid_input(field: &str, message: &str) -> Self {
+        BlixardError::InvalidInput {
+            field: field.to_string(),
+            message: message.to_string(),
+        }
+    }
+
+    /// Create a validation error
+    pub fn validation_error(field: &str, message: &str) -> Self {
+        BlixardError::Validation {
+            field: field.to_string(),
+            message: message.to_string(),
+        }
+    }
+}

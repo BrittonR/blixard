@@ -373,7 +373,7 @@ impl LifecycleManager for RecoveryCoordinator {
 mod tests {
     use super::*;
     use crate::abstractions::time::MockClock;
-    use crate::types::Hypervisor;
+    use blixard_vm::Hypervisor;
     use crate::vm_auto_recovery::RecoveryPolicy;
     use std::time::{Duration, SystemTime};
     use tempfile::TempDir;

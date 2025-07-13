@@ -8,6 +8,7 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::raft_manager::WorkerCapabilities;
 use crate::resource_management::{ClusterResourceManager, OvercommitPolicy};
 use crate::try_into_bytes;
+use crate::types::Hypervisor;
 use crate::types::{VmConfig, VmState, VmStatus};
 use redb::{Database, ReadableTable};
 use std::sync::Arc;
@@ -437,7 +438,7 @@ mod tests {
             kernel: None,
             init_command: None,
             flake_modules: vec![],
-            hypervisor: crate::types::Hypervisor::CloudHypervisor,
+            hypervisor: Hypervisor::CloudHypervisor,
             tenant_id: None,
         };
 
@@ -528,7 +529,7 @@ mod tests {
             kernel: None,
             init_command: None,
             flake_modules: vec![],
-            hypervisor: crate::types::Hypervisor::CloudHypervisor,
+            hypervisor: Hypervisor::CloudHypervisor,
             tenant_id: None,
         };
 

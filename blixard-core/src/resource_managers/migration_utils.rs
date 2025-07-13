@@ -10,7 +10,7 @@ use crate::resource_manager::{
     ResourceManager, ResourceType,
 };
 use crate::resource_managers::{create_standard_composite_manager, DefaultResourceManagerFactory};
-use crate::resource_quotas::{QuotaViolation, ResourceRequest, TenantId, TenantQuota};
+use crate::resource_quotas::{QuotaViolation, ResourceRequest, TenantId, TenantQuota, VmResourceLimits};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
