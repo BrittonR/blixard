@@ -72,12 +72,14 @@ impl MdnsDiscoveryProvider {
 
     /// Create service info for advertising our node
     fn create_service_info(&self) -> BlixardResult<ServiceInfo> {
-        let node_id = self.our_node_id.ok_or(BlixardError::Configuration {
+        let node_id = self.our_node_id.ok_or(BlixardError::ConfigurationError {
+            component: "mdns_discovery.node_id".to_string(),
             message: "Node ID not set for mDNS advertisement".to_string(),
         })?;
 
         if self.our_addresses.is_empty() {
-            return Err(BlixardError::Configuration {
+            return Err(BlixardError::ConfigurationError {
+                component: "mdns_discovery.addresses".to_string(),
                 message: "No addresses configured for mDNS advertisement".to_string(),
             });
         }
@@ -89,7 +91,8 @@ impl MdnsDiscoveryProvider {
         // Expected format: _service._protocol.local
         let parts: Vec<&str> = self.service_name.split('.').collect();
         if parts.len() < 2 {
-            return Err(BlixardError::Configuration {
+            return Err(BlixardError::ConfigurationError {
+                component: "mdns_discovery.service_name".to_string(),
                 message: format!("Invalid mDNS service name: {}", self.service_name),
             });
         }

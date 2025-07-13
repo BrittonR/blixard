@@ -148,13 +148,22 @@ async fn watch_config_file(
         if let Ok(event) = res {
             let _ = tx.blocking_send(event);
         }
-    }).map_err(|e| BlixardError::ConfigError(format!("Failed to create file watcher: {}", e)))?;
+    }).map_err(|e| BlixardError::ConfigurationError {
+        component: "config_hot_reload.file_watcher".to_string(),
+        message: format!("Failed to create file watcher: {}", e),
+    })?;
     
     // Watch the config file
     let watch_path = config_path.parent()
-        .ok_or_else(|| BlixardError::ConfigError("Invalid config path".to_string()))?;
+        .ok_or_else(|| BlixardError::ConfigurationError {
+            component: "config_hot_reload.config_path".to_string(),
+            message: "Invalid config path".to_string(),
+        })?;
     watcher.watch(watch_path, RecursiveMode::NonRecursive)
-        .map_err(|e| BlixardError::ConfigError(format!("Failed to watch config file: {}", e)))?;
+        .map_err(|e| BlixardError::ConfigurationError {
+            component: "config_hot_reload.file_watch".to_string(),
+            message: format!("Failed to watch config file: {}", e),
+        })?;
     
     info!("Watching configuration file: {:?}", config_path);
     
@@ -312,7 +321,10 @@ fn update_log_level(level: &str) -> BlixardResult<()> {
     use tracing_subscriber::{reload, EnvFilter};
     
     let filter = EnvFilter::try_new(level)
-        .map_err(|e| BlixardError::ConfigError(format!("Invalid log level '{}': {}", level, e)))?;
+        .map_err(|e| BlixardError::ConfigurationError {
+            component: "config_hot_reload.log_level".to_string(),
+            message: format!("Invalid log level '{}': {}", level, e),
+        })?;
     
     // This would need to be integrated with the actual tracing subscriber setup
     // For now, just log the change

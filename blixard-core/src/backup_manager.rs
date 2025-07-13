@@ -181,9 +181,9 @@ impl BackupStorage for LocalBackupStorage {
         write_binary_file_with_context(&backup_path, data, &format!("backup {}", backup_id))
             .await
             .map_err(|e| match e {
-                BlixardError::ConfigError(msg) => BlixardError::Storage {
+                BlixardError::ConfigurationError { component: _, message } => BlixardError::Storage {
                     operation: format!("write backup {}", backup_id),
-                    source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, msg)),
+                    source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, message)),
                 },
                 other => other,
             })?;
@@ -193,9 +193,9 @@ impl BackupStorage for LocalBackupStorage {
         write_config_file(&metadata_path, metadata, "backup metadata", true)
             .await
             .map_err(|e| match e {
-                BlixardError::ConfigError(msg) => BlixardError::Storage {
+                BlixardError::ConfigurationError { component: _, message } => BlixardError::Storage {
                     operation: format!("write backup metadata {}", backup_id),
-                    source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, msg)),
+                    source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, message)),
                 },
                 other => other,
             })?;
@@ -209,9 +209,9 @@ impl BackupStorage for LocalBackupStorage {
         let data = read_binary_file_with_context(&backup_path, &format!("backup {}", backup_id))
             .await
             .map_err(|e| match e {
-                BlixardError::ConfigError(msg) => BlixardError::Storage {
+                BlixardError::ConfigurationError { component: _, message } => BlixardError::Storage {
                     operation: format!("read backup {}", backup_id),
-                    source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, msg)),
+                    source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, message)),
                 },
                 other => other,
             })?;
@@ -221,9 +221,9 @@ impl BackupStorage for LocalBackupStorage {
         let metadata: BackupMetadata = read_config_file(&metadata_path, "backup metadata")
             .await
             .map_err(|e| match e {
-                BlixardError::ConfigError(msg) => BlixardError::Storage {
+                BlixardError::ConfigurationError { component: _, message } => BlixardError::Storage {
                     operation: format!("read backup metadata {}", backup_id),
-                    source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, msg)),
+                    source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, message)),
                 },
                 other => other,
             })?;
