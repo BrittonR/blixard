@@ -492,126 +492,146 @@ impl VmManager {
         let span = tracing::span!(tracing::Level::INFO, "vm.process_command",);
         let _enter = span.enter();
 
-        #[cfg(feature = "observability")]
-        let metrics = metrics();
-
         // All state persistence has already been handled by the RaftStateMachine
         // before this command was forwarded to us. We only execute the actual VM operation.
         match command {
-            VmCommand::Create { config, node_id } => {
-                // Temporarily disabled: tracing_otel uses tonic
-                // tracing_otel::add_attributes(&[
-                //     ("vm.name", &config.name),
-                //     ("vm.operation", &"create"),
-                //     ("node.id", &node_id),
-                // ]);
+            VmCommand::Create { config, node_id } => self.handle_create_command(config, node_id).await,
+            VmCommand::Start { name } => self.handle_start_command(name).await,
+            VmCommand::Stop { name } => self.handle_stop_command(name).await,
+            VmCommand::Delete { name } => self.handle_delete_command(name).await,
+            VmCommand::UpdateStatus { name, status } => self.handle_update_status_command(name, status).await,
+            VmCommand::Migrate { task } => self.handle_migrate_command(task).await,
+        }
+    }
 
-                #[cfg(feature = "observability")]
-                let _timer = Timer::with_attributes(
-                    metrics.vm_create_duration.clone(),
-                    vec![
-                        attributes::vm_name(&config.name),
-                        attributes::node_id(node_id),
-                        attributes::operation("backend_create"),
-                    ],
-                );
+    /// Handle VM creation command with observability
+    async fn handle_create_command(&self, config: VmConfig, node_id: u64) -> BlixardResult<()> {
+        #[cfg(feature = "observability")]
+        let metrics = metrics();
+        
+        #[cfg(feature = "observability")]
+        let _timer = Timer::with_attributes(
+            metrics.vm_create_duration.clone(),
+            vec![
+                attributes::vm_name(&config.name),
+                attributes::node_id(node_id),
+                attributes::operation("backend_create"),
+            ],
+        );
 
-                let result = self.backend.create_vm(&config, node_id).await;
+        let result = self.backend.create_vm(&config, node_id).await;
 
-                if result.is_ok() {
-                    #[cfg(feature = "observability")]
-                    metrics.vm_total.add(1, &[]);
-                    // Monitor VM status after creation attempt
-                    self.monitor_vm_status_after_operation(&config.name).await;
-                } else {
-                    #[cfg(feature = "observability")]
-                    metrics
-                        .vm_create_failed
-                        .add(1, &[attributes::vm_name(&config.name)]);
-                }
+        if result.is_ok() {
+            #[cfg(feature = "observability")]
+            metrics.vm_total.add(1, &[]);
+            // Monitor VM status after creation attempt
+            self.monitor_vm_status_after_operation(&config.name).await;
+        } else {
+            #[cfg(feature = "observability")]
+            metrics
+                .vm_create_failed
+                .add(1, &[attributes::vm_name(&config.name)]);
+        }
 
-                result
+        result
+    }
+
+    /// Handle VM start command with observability
+    async fn handle_start_command(&self, name: String) -> BlixardResult<()> {
+        #[cfg(feature = "observability")]
+        let metrics = metrics();
+        
+        let result = self.backend.start_vm(&name).await;
+
+        if result.is_ok() {
+            #[cfg(feature = "observability")]
+            metrics.vm_running.add(1, &[]);
+            // Monitor VM status after start attempt
+            self.monitor_vm_status_after_operation(&name).await;
+        }
+
+        result
+    }
+
+    /// Handle VM stop command with observability
+    async fn handle_stop_command(&self, name: String) -> BlixardResult<()> {
+        #[cfg(feature = "observability")]
+        let metrics = metrics();
+        
+        let result = self.backend.stop_vm(&name).await;
+
+        if result.is_ok() {
+            #[cfg(feature = "observability")]
+            metrics.vm_running.add(-1, &[]);
+            // Monitor VM status after stop attempt
+            self.monitor_vm_status_after_operation(&name).await;
+        }
+
+        result
+    }
+
+    /// Handle VM delete command with observability
+    async fn handle_delete_command(&self, name: String) -> BlixardResult<()> {
+        #[cfg(feature = "observability")]
+        let metrics = metrics();
+        
+        let result = self.backend.delete_vm(&name).await;
+
+        if result.is_ok() {
+            #[cfg(feature = "observability")]
+            metrics.vm_total.add(-1, &[]);
+        }
+
+        result
+    }
+
+    /// Handle VM status update command
+    async fn handle_update_status_command(&self, name: String, status: VmStatus) -> BlixardResult<()> {
+        self.backend.update_vm_status(&name, status).await
+    }
+
+    /// Handle VM migration command with source/target logic
+    async fn handle_migrate_command(&self, task: crate::types::VmMigrationTask) -> BlixardResult<()> {
+        let node_id = self.node_state.get_id();
+
+        // Handle migration based on whether we're source or target
+        if task.source_node_id == node_id {
+            // We're the source node - initiate migration
+            tracing::info!(
+                "Starting migration of VM '{}' from node {} to node {}",
+                task.vm_name,
+                node_id,
+                task.target_node_id
+            );
+
+            // For now, we'll do a simple stop-and-start migration
+            // In the future, this could be enhanced with live migration
+            if !task.live_migration {
+                // Stop the VM on this node
+                self.backend.stop_vm(&task.vm_name).await?;
             }
-            VmCommand::Start { name } => {
-                let result = self.backend.start_vm(&name).await;
 
-                if result.is_ok() {
-                    #[cfg(feature = "observability")]
-                    metrics.vm_running.add(1, &[]);
-                    // Monitor VM status after start attempt
-                    self.monitor_vm_status_after_operation(&name).await;
-                }
+            // The actual VM will be started on the target node
+            self.backend
+                .migrate_vm(&task.vm_name, task.target_node_id, task.live_migration)
+                .await
+        } else if task.target_node_id == node_id {
+            // We're the target node - prepare to receive the VM
+            tracing::info!(
+                "Preparing to receive VM '{}' from node {} to node {}",
+                task.vm_name,
+                task.source_node_id,
+                node_id
+            );
 
-                result
-            }
-            VmCommand::Stop { name } => {
-                let result = self.backend.stop_vm(&name).await;
-
-                if result.is_ok() {
-                    #[cfg(feature = "observability")]
-                    metrics.vm_running.add(-1, &[]);
-                    // Monitor VM status after stop attempt
-                    self.monitor_vm_status_after_operation(&name).await;
-                }
-
-                result
-            }
-            VmCommand::Delete { name } => {
-                let result = self.backend.delete_vm(&name).await;
-
-                if result.is_ok() {
-                    #[cfg(feature = "observability")]
-                    metrics.vm_total.add(-1, &[]);
-                }
-
-                result
-            }
-            VmCommand::UpdateStatus { name, status } => {
-                self.backend.update_vm_status(&name, status).await
-            }
-            VmCommand::Migrate { task } => {
-                let node_id = self.node_state.get_id();
-
-                // Handle migration based on whether we're source or target
-                if task.source_node_id == node_id {
-                    // We're the source node - initiate migration
-                    tracing::info!(
-                        "Starting migration of VM '{}' from node {} to node {}",
-                        task.vm_name,
-                        node_id,
-                        task.target_node_id
-                    );
-
-                    // For now, we'll do a simple stop-and-start migration
-                    // In the future, this could be enhanced with live migration
-                    if !task.live_migration {
-                        // Stop the VM on this node
-                        self.backend.stop_vm(&task.vm_name).await?;
-                    }
-
-                    // The actual VM will be started on the target node
-                    self.backend
-                        .migrate_vm(&task.vm_name, task.target_node_id, task.live_migration)
-                        .await
-                } else if task.target_node_id == node_id {
-                    // We're the target node - prepare to receive the VM
-                    tracing::info!(
-                        "Preparing to receive VM '{}' from node {} to node {}",
-                        task.vm_name,
-                        task.source_node_id,
-                        node_id
-                    );
-
-                    // For now, just acknowledge - the VM will be started when we get a Start command
-                    // In a real implementation, this would set up resources for the incoming VM
-                    Ok(())
-                } else {
-                    // We're neither source nor target - shouldn't happen
-                    tracing::warn!("Received migration command for VM '{}' but we're neither source ({}) nor target ({})", 
-                        task.vm_name, task.source_node_id, task.target_node_id);
-                    Ok(())
-                }
-            }
+            // For now, just acknowledge - the VM will be started when we get a Start command
+            // In a real implementation, this would set up resources for the incoming VM
+            Ok(())
+        } else {
+            // We're neither source nor target - shouldn't happen
+            tracing::warn!("Received migration command for VM '{}' but we're neither source ({}) nor target ({})", 
+                task.vm_name, task.source_node_id, task.target_node_id);
+            Ok(())
         }
     }
 
