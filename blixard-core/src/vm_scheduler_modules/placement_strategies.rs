@@ -494,6 +494,13 @@ impl super::VmScheduler {
         // Sort by cost
         node_costs.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
+        // Safety check: ensure we have costs calculated
+        if node_costs.is_empty() {
+            return Err(BlixardError::SchedulingError {
+                message: "Failed to calculate costs for any candidate nodes".to_string(),
+            });
+        }
+
         let cheapest_cost = node_costs[0].1;
         let max_allowed_cost = cheapest_cost * (1.0 + max_cost_increase / 100.0);
 
