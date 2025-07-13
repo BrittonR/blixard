@@ -723,3 +723,30 @@ impl From<serde_json::Error> for BlixardError {
         BlixardError::JsonError(Box::new(err))
     }
 }
+
+/// Helper functions for common error scenarios
+impl BlixardError {
+    /// Create an internal error for lock poisoning scenarios
+    /// 
+    /// This helper provides a consistent error message for lock poisoning
+    /// without requiring Send/Sync bounds on the poison error.
+    pub fn lock_poisoned_internal(resource: &str) -> Self {
+        BlixardError::Internal {
+            message: format!("Lock poisoned: {}", resource),
+        }
+    }
+
+    /// Create an error for unavailable services or components
+    pub fn service_unavailable(service: &str) -> Self {
+        BlixardError::NotInitialized {
+            component: service.to_string(),
+        }
+    }
+
+    /// Create an error for invalid configuration values
+    pub fn invalid_config<T: std::fmt::Display>(field: &str, value: T, reason: &str) -> Self {
+        BlixardError::InvalidConfiguration {
+            message: format!("Invalid {} '{}': {}", field, value, reason),
+        }
+    }
+}

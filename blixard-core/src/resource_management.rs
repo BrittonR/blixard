@@ -459,7 +459,7 @@ mod tests {
 
         // Test successful allocation
         assert!(state.can_allocate(4, 8192, 50));
-        state.allocate(4, 8192, 50).unwrap();
+        state.allocate(4, 8192, 50).expect("Resource allocation should succeed in test");
 
         // Check available resources
         let (cpu, memory, disk) = state.available_resources();

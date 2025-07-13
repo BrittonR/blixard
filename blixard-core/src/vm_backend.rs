@@ -934,9 +934,7 @@ impl VmBackend for MockVmBackend {
             let mut states = self
                 .simulated_states
                 .write()
-                .map_err(|_| BlixardError::Internal {
-                    message: "Mock VM backend lock poisoned".to_string(),
-                })?;
+                .map_err(|_| BlixardError::lock_poisoned_internal("Mock VM backend"))?;
             states.insert(
                 config.name.clone(),
                 (crate::types::VmStatus::Creating, std::time::Instant::now()),
@@ -957,9 +955,7 @@ impl VmBackend for MockVmBackend {
             let mut states = self
                 .simulated_states
                 .write()
-                .map_err(|_| BlixardError::Internal {
-                    message: "Mock VM backend lock poisoned".to_string(),
-                })?;
+                .map_err(|_| BlixardError::lock_poisoned_internal("Mock VM backend"))?;
             states.insert(
                 name.to_string(),
                 (crate::types::VmStatus::Running, std::time::Instant::now()),
@@ -980,9 +976,7 @@ impl VmBackend for MockVmBackend {
             let mut states = self
                 .simulated_states
                 .write()
-                .map_err(|_| BlixardError::Internal {
-                    message: "Mock VM backend lock poisoned".to_string(),
-                })?;
+                .map_err(|_| BlixardError::lock_poisoned_internal("Mock VM backend"))?;
             states.insert(
                 name.to_string(),
                 (crate::types::VmStatus::Stopped, std::time::Instant::now()),
@@ -1008,9 +1002,7 @@ impl VmBackend for MockVmBackend {
             let states = self
                 .simulated_states
                 .read()
-                .map_err(|_| BlixardError::Internal {
-                    message: "Mock VM backend lock poisoned".to_string(),
-                })?;
+                .map_err(|_| BlixardError::lock_poisoned_internal("Mock VM backend"))?;
             if let Some((status, created_at)) = states.get(name) {
                 let elapsed = created_at.elapsed();
 
@@ -1212,9 +1204,9 @@ mod tests {
     #[tokio::test]
     async fn test_mock_backend_creation() {
         let registry = VmBackendRegistry::default();
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("Failed to create temporary directory for test");
         let db_path = temp_dir.path().join("test.db");
-        let database = Arc::new(redb::Database::create(db_path).unwrap());
+        let database = Arc::new(redb::Database::create(db_path).expect("Failed to create test database"));
 
         let config_dir = temp_dir.path().join("config");
         let data_dir = temp_dir.path().join("data");
@@ -1246,9 +1238,9 @@ mod tests {
     #[test]
     fn test_unknown_backend_error() {
         let registry = VmBackendRegistry::default();
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("Failed to create temporary directory for test");
         let db_path = temp_dir.path().join("test.db");
-        let database = Arc::new(redb::Database::create(db_path).unwrap());
+        let database = Arc::new(redb::Database::create(db_path).expect("Failed to create test database"));
 
         let result = registry.create_backend("unknown", PathBuf::new(), PathBuf::new(), database);
 
