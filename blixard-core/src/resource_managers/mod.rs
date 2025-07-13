@@ -129,8 +129,8 @@ impl ResourceManagerFactory for DefaultResourceManagerFactory {
     ) -> BlixardResult<()> {
         // Basic validation
         if &config.resource_type != resource_type {
-            return Err(BlixardError::InvalidInput {
-                field: "resource_type".to_string(),
+            return Err(BlixardError::ConfigurationError {
+                component: "resource_manager.resource_type".to_string(),
                 message: format!(
                     "Config resource type {:?} doesn't match requested type {:?}",
                     config.resource_type, resource_type
@@ -141,16 +141,16 @@ impl ResourceManagerFactory for DefaultResourceManagerFactory {
         match resource_type {
             ResourceType::Memory => {
                 if config.limits.hard_limit == 0 {
-                    return Err(BlixardError::InvalidInput {
-                        field: "hard_limit".to_string(),
+                    return Err(BlixardError::ConfigurationError {
+                        component: "resource_manager.memory.hard_limit".to_string(),
                         message: "Memory hard limit must be greater than 0".to_string(),
                     });
                 }
             }
             ResourceType::Cpu => {
                 if config.limits.hard_limit == 0 {
-                    return Err(BlixardError::InvalidInput {
-                        field: "hard_limit".to_string(),
+                    return Err(BlixardError::ConfigurationError {
+                        component: "resource_manager.cpu.hard_limit".to_string(),
                         message: "CPU core count must be greater than 0".to_string(),
                     });
                 }
@@ -164,15 +164,15 @@ impl ResourceManagerFactory for DefaultResourceManagerFactory {
 
         // Common validation
         if config.limits.soft_limit > config.limits.hard_limit {
-            return Err(BlixardError::InvalidInput {
-                field: "soft_limit".to_string(),
+            return Err(BlixardError::ConfigurationError {
+                component: "resource_manager.limits.soft_limit".to_string(),
                 message: "Soft limit cannot exceed hard limit".to_string(),
             });
         }
 
         if config.limits.overcommit_ratio < 1.0 {
-            return Err(BlixardError::InvalidInput {
-                field: "overcommit_ratio".to_string(),
+            return Err(BlixardError::ConfigurationError {
+                component: "resource_manager.limits.overcommit_ratio".to_string(),
                 message: "Overcommit ratio must be at least 1.0".to_string(),
             });
         }

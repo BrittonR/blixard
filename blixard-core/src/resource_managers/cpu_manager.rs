@@ -584,8 +584,8 @@ impl ResourceManager for CpuResourceManager {
 
         // Validate the request
         if request.resource_type != ResourceType::Cpu {
-            return Err(BlixardError::InvalidInput {
-                field: "resource_type".to_string(),
+            return Err(BlixardError::ConfigurationError {
+                component: "cpu_manager.allocation.resource_type".to_string(),
                 message: "CPU manager can only handle CPU resources".to_string(),
             });
         }
@@ -886,8 +886,8 @@ impl ResourceManager for CpuResourceManager {
 
     async fn update_limits(&self, limits: ResourceLimits) -> BlixardResult<()> {
         if limits.resource_type != ResourceType::Cpu {
-            return Err(BlixardError::InvalidInput {
-                field: "resource_type".to_string(),
+            return Err(BlixardError::ConfigurationError {
+                component: "cpu_manager.limits.resource_type".to_string(),
                 message: "Limits must be for CPU resource type".to_string(),
             });
         }
@@ -913,15 +913,15 @@ impl ResourceManager for CpuResourceManager {
 
     async fn validate_config(&self, config: &ResourceManagerConfig) -> BlixardResult<()> {
         if config.resource_type != ResourceType::Cpu {
-            return Err(BlixardError::InvalidInput {
-                field: "resource_type".to_string(),
+            return Err(BlixardError::ConfigurationError {
+                component: "cpu_manager.config.resource_type".to_string(),
                 message: "Configuration must be for CPU resource type".to_string(),
             });
         }
 
         if config.limits.hard_limit == 0 {
-            return Err(BlixardError::InvalidInput {
-                field: "hard_limit".to_string(),
+            return Err(BlixardError::ConfigurationError {
+                component: "cpu_manager.config.hard_limit".to_string(),
                 message: "Hard limit must be greater than 0".to_string(),
             });
         }

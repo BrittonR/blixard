@@ -127,8 +127,8 @@ impl MemoryResourceManager {
     ) -> BlixardResult<()> {
         // Check resource type
         if request.resource_type != ResourceType::Memory {
-            return Err(BlixardError::InvalidInput {
-                field: "resource_type".to_string(),
+            return Err(BlixardError::ConfigurationError {
+                component: "memory_manager.allocation.resource_type".to_string(),
                 message: "Memory manager can only handle memory resources".to_string(),
             });
         }
@@ -585,8 +585,8 @@ impl ResourceManager for MemoryResourceManager {
 
     async fn update_limits(&self, limits: ResourceLimits) -> BlixardResult<()> {
         if limits.resource_type != ResourceType::Memory {
-            return Err(BlixardError::InvalidInput {
-                field: "resource_type".to_string(),
+            return Err(BlixardError::ConfigurationError {
+                component: "memory_manager.limits.resource_type".to_string(),
                 message: "Limits must be for memory resource type".to_string(),
             });
         }
@@ -613,29 +613,29 @@ impl ResourceManager for MemoryResourceManager {
 
     async fn validate_config(&self, config: &ResourceManagerConfig) -> BlixardResult<()> {
         if config.resource_type != ResourceType::Memory {
-            return Err(BlixardError::InvalidInput {
-                field: "resource_type".to_string(),
+            return Err(BlixardError::ConfigurationError {
+                component: "memory_manager.config.resource_type".to_string(),
                 message: "Configuration must be for memory resource type".to_string(),
             });
         }
 
         if config.limits.hard_limit == 0 {
-            return Err(BlixardError::InvalidInput {
-                field: "hard_limit".to_string(),
+            return Err(BlixardError::ConfigurationError {
+                component: "memory_manager.config.hard_limit".to_string(),
                 message: "Hard limit must be greater than 0".to_string(),
             });
         }
 
         if config.limits.soft_limit > config.limits.hard_limit {
-            return Err(BlixardError::InvalidInput {
-                field: "soft_limit".to_string(),
+            return Err(BlixardError::ConfigurationError {
+                component: "memory_manager.config.soft_limit".to_string(),
                 message: "Soft limit cannot exceed hard limit".to_string(),
             });
         }
 
         if config.limits.overcommit_ratio < 1.0 {
-            return Err(BlixardError::InvalidInput {
-                field: "overcommit_ratio".to_string(),
+            return Err(BlixardError::ConfigurationError {
+                component: "memory_manager.config.overcommit_ratio".to_string(),
                 message: "Overcommit ratio must be at least 1.0".to_string(),
             });
         }
