@@ -134,10 +134,10 @@ impl MockConfigProvider {
                 config.cluster.peer.max_connections = value.parse().unwrap_or(100)
             }
             _ => {
-                return Err(crate::error::BlixardError::ConfigError(format!(
-                    "Unknown config path: {}",
-                    path
-                )))
+                return Err(crate::error::BlixardError::configuration(
+                    "abstractions.config.path",
+                    format!("Unknown config path: {}", path)
+                ))
             }
         }
 

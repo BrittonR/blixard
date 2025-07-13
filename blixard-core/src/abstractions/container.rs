@@ -183,8 +183,9 @@ impl ServiceContainerBuilder {
     /// Build production container
     pub fn build_production(self) -> crate::error::BlixardResult<ServiceContainer> {
         let database = self.database.ok_or_else(|| {
-            crate::error::BlixardError::ConfigError(
-                "Database required for production container".to_string(),
+            crate::error::BlixardError::configuration(
+                "abstractions.container.database",
+                "Database required for production container"
             )
         })?;
 

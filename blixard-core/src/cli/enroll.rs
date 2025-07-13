@@ -143,9 +143,10 @@ impl EnrollCommand {
         // Get or create node ID
         let node_id = if let Some(id_str) = node_id {
             NodeId::from_string(&id_str)
-                .map_err(|e| BlixardError::Configuration {
-                    message: format!("Invalid node ID: {}", e),
-                })?
+                .map_err(|e| BlixardError::configuration(
+                    "enroll.node_id",
+                    format!("Invalid node ID: {}", e)
+                ))?
         } else {
             // Get this node's ID from Iroh endpoint
             get_local_node_id().await?
@@ -201,9 +202,10 @@ impl EnrollCommand {
         }
         
         if cert_attrs.is_empty() {
-            return Err(BlixardError::Configuration {
-                message: "No certificate attributes provided".into(),
-            });
+            return Err(BlixardError::configuration(
+                "enroll.cert_attributes",
+                "No certificate attributes provided"
+            ));
         }
         
         // Get node ID

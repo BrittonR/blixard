@@ -658,10 +658,10 @@ impl TryFrom<VmState> for crate::types::VmStatus {
             VmState::VmStateStopping => Ok(crate::types::VmStatus::Stopping),
             VmState::VmStateStopped => Ok(crate::types::VmStatus::Stopped),
             VmState::VmStateFailed => Ok(crate::types::VmStatus::Failed),
-            VmState::VmStateUnknown => Err(crate::error::BlixardError::InvalidInput {
-                field: "vm_state".to_string(),
-                message: "Cannot convert unknown VM state".to_string(),
-            }),
+            VmState::VmStateUnknown => Err(crate::error::BlixardError::configuration(
+                "vm_state.conversion",
+                "Cannot convert unknown VM state"
+            )),
         }
     }
 }

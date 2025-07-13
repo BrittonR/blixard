@@ -311,8 +311,8 @@ impl AuthManager {
         let tokens: HashMap<String, TokenInfo> = read_config_file(token_file, "tokens")
             .await
             .map_err(|e| match e {
-                BlixardError::ConfigError(msg) => BlixardError::Security {
-                    message: format!("Failed to load token file: {}", msg),
+                BlixardError::ConfigurationError { message, .. } => BlixardError::Security {
+                    message: format!("Failed to load token file: {}", message),
                 },
                 other => other,
             })?;

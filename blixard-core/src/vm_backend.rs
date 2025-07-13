@@ -980,11 +980,14 @@ impl VmBackendRegistry {
         database: Arc<Database>,
     ) -> BlixardResult<Arc<dyn VmBackend>> {
         let factory = self.factories.get(backend_type).ok_or_else(|| {
-            BlixardError::ConfigError(format!(
-                "Unknown VM backend type: '{}'. Available backends: {:?}",
-                backend_type,
-                self.list_available_backends()
-            ))
+            BlixardError::configuration(
+                "vm_backend.type",
+                format!(
+                    "Unknown VM backend type: '{}'. Available backends: {:?}",
+                    backend_type,
+                    self.list_available_backends()
+                )
+            )
         })?;
 
         factory.create_backend(config_dir, data_dir, database)

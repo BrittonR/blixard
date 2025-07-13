@@ -314,10 +314,10 @@ async fn handle_migrate_vm(
     // Implement VM migration logic
     // Parse target_node from string to u64
     let target_node_id = request.target_node.parse::<u64>().map_err(|_| {
-        crate::error::BlixardError::InvalidInput {
-            field: "target_node".to_string(),
-            message: "Must be a valid node ID".to_string(),
-        }
+        crate::error::BlixardError::configuration(
+            "vm_migration.target_node",
+            "Must be a valid node ID"
+        )
     })?;
     node.migrate_vm(&request.vm_name, target_node_id).await?;
 

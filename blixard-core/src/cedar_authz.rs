@@ -68,13 +68,19 @@ impl CedarAuthz {
         for (path, policy_text) in cedar_files {
             // Parse policies from text
             let parsed_policies = PolicySet::from_str(&policy_text).map_err(|e| {
-                BlixardError::ConfigError(format!("Failed to parse policy file {:?}: {}", path, e))
+                BlixardError::configuration(
+                    "cedar_authz.policy_parsing",
+                    format!("Failed to parse policy file {:?}: {}", path, e)
+                )
             })?;
 
             // Add policies to set
             for policy in parsed_policies.policies() {
                 policy_set.add(policy.clone()).map_err(|e| {
-                    BlixardError::ConfigError(format!("Failed to add policy: {}", e))
+                    BlixardError::configuration(
+                        "cedar_authz.policy_set",
+                        format!("Failed to add policy: {}", e)
+                    )
                 })?;
             }
 

@@ -261,9 +261,10 @@ impl IdentityEnrollmentManager {
         cert_attributes: HashMap<String, String>,
     ) -> BlixardResult<EnrollmentResult> {
         let config = self.cert_config.as_ref()
-            .ok_or_else(|| BlixardError::Configuration {
-                message: "Certificate enrollment not configured".to_string(),
-            })?;
+            .ok_or_else(|| BlixardError::configuration(
+                "iroh_identity_enrollment.cert_config",
+                "Certificate enrollment not configured"
+            ))?;
         
         // Find matching role mappings
         let mut matched_roles = Vec::new();
