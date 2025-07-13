@@ -528,7 +528,10 @@ impl RaftStateMachine {
                     vm_ip_table.get(allocation_result.allocation.vm_id.to_string().as_str())?
                 {
                     bincode::deserialize::<Vec<std::net::IpAddr>>(data.value())
-                        .unwrap_or_else(|_| Vec::new())
+                        .unwrap_or_else(|e| {
+                            warn!("Failed to deserialize VM IP addresses, using empty list: {}", e);
+                            Vec::new()
+                        })
                 } else {
                     Vec::new()
                 };
@@ -569,7 +572,10 @@ impl RaftStateMachine {
         let mapping_table = write_txn.open_table(VM_IP_MAPPING_TABLE)?;
         let vm_ips = if let Some(data) = mapping_table.get(vm_id.to_string().as_str())? {
             let value = data.value().to_vec();
-            bincode::deserialize::<Vec<std::net::IpAddr>>(&value).unwrap_or_else(|_| Vec::new())
+            bincode::deserialize::<Vec<std::net::IpAddr>>(&value).unwrap_or_else(|e| {
+                warn!("Failed to deserialize VM IP addresses for release, using empty list: {}", e);
+                Vec::new()
+            })
         } else {
             Vec::new()
         };

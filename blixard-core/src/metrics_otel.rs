@@ -880,14 +880,30 @@ pub fn init_noop() -> Result<&'static Metrics, Box<dyn std::error::Error>> {
     METRICS
         .set(metrics)
         .map_err(|_| "Metrics already initialized")?;
-    Ok(METRICS.get().expect("Metrics was just initialized"))
+    METRICS.get().ok_or_else(|| {
+        "Metrics initialization failed: unable to access metrics after setting".into()
+    })
 }
 
-/// Get the global metrics instance
+/// Get the global metrics instance (may panic - use try_metrics() for safety)
+/// 
+/// # Panics
+/// This function will panic if metrics are not initialized. Use `try_metrics()` for a non-panicking alternative.
 pub fn metrics() -> &'static Metrics {
     METRICS
         .get()
-        .expect("Metrics not initialized. Call init_prometheus() or init_noop() first.")
+        .unwrap_or_else(|| {
+            panic!("Metrics not initialized. Call init_prometheus() or init_noop() first.")
+        })
+}
+
+/// Get the global metrics instance safely
+pub fn safe_metrics() -> crate::error::BlixardResult<&'static Metrics> {
+    METRICS
+        .get()
+        .ok_or_else(|| crate::error::BlixardError::NotInitialized {
+            component: "metrics".to_string(),
+        })
 }
 
 /// Try to get the global metrics instance, returning None if not initialized
