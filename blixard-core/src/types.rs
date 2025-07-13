@@ -1,7 +1,9 @@
 use crate::anti_affinity::AntiAffinityRules;
 use crate::vm_health_types::VmHealthCheckConfig;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex, RwLock};
 use uuid::Uuid;
 
 /// Unique identifier for a VM
@@ -597,3 +599,87 @@ impl std::str::FromStr for Hypervisor {
         }
     }
 }
+
+// =============================================================================
+// Type Aliases for Common Complex Types
+// =============================================================================
+
+/// Binary data for serialization, network protocols, and file operations
+/// 
+/// Used extensively throughout the codebase for:
+/// - Raft message serialization/deserialization
+/// - File I/O operations
+/// - Network protocol buffers
+/// - Cryptographic operations
+/// - Image and blob storage
+pub type BinaryData = Vec<u8>;
+
+/// String-to-string metadata and configuration maps
+/// 
+/// Common usage patterns:
+/// - VM metadata and labels
+/// - Configuration key-value pairs
+/// - Audit log context information
+/// - Service discovery attributes
+pub type Metadata = HashMap<String, String>;
+
+/// Map keyed by node IDs for cluster-wide state tracking
+/// 
+/// Used for:
+/// - Raft next_index and match_index tracking
+/// - Node health and status monitoring
+/// - Test cluster management
+/// - Peer connection state
+pub type NodeMap<T> = HashMap<NodeId, T>;
+
+/// Shared concurrent map for name-based resource lookups (VMs, configs, etc.)
+/// 
+/// Commonly used for:
+/// - VM state management
+/// - Configuration storage
+/// - Resource name resolution
+/// - Service registration
+pub type SharedResourceMap<T> = Arc<RwLock<HashMap<String, T>>>;
+
+/// Shared concurrent map for node ID-based lookups (peers, node states)
+/// 
+/// Used for:
+/// - Peer connection management
+/// - Node state tracking
+/// - Cluster membership
+/// - Health monitoring
+pub type SharedNodeMap<T> = Arc<RwLock<HashMap<NodeId, T>>>;
+
+/// Shared concurrent map for arbitrary key-value mappings
+/// 
+/// Generic shared map for any concurrent access patterns requiring
+/// multiple readers or exclusive writers
+pub type SharedMap<K, V> = Arc<RwLock<HashMap<K, V>>>;
+
+/// Synchronized map for mutex-protected concurrent access
+/// 
+/// Used in contexts requiring exclusive access for all operations:
+/// - Raft consensus data structures
+/// - Test utilities and simulation state
+/// - Byzantine failure testing
+pub type SyncMap<K, V> = Arc<Mutex<HashMap<K, V>>>;
+
+// =============================================================================
+// Specialized Domain Type Aliases
+// =============================================================================
+
+/// Raft log entry index for consensus operations
+/// 
+/// Represents the position of an entry in the Raft log, used for:
+/// - Log replication tracking
+/// - Snapshot coordination
+/// - Recovery operations
+pub type LogIndex = u64;
+
+/// Raft term number for leader election
+/// 
+/// Monotonically increasing term identifier used for:
+/// - Leader election cycles
+/// - Log entry versioning
+/// - Split-brain prevention
+pub type Term = u64;
