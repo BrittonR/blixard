@@ -13,7 +13,8 @@ pub async fn create_converged_cluster(size: usize) -> BlixardResult<TestCluster>
         cluster.add_node().await?;
     }
 
-    // TODO: Add convergence waiting logic if needed
+    // TODO: Add convergence waiting logic - should wait for all nodes to join cluster
+    // and reach stable Raft state (leader election complete, log replication working)
 
     Ok(cluster)
 }
@@ -21,7 +22,8 @@ pub async fn create_converged_cluster(size: usize) -> BlixardResult<TestCluster>
 /// Helper to find the current leader in a cluster
 #[cfg(feature = "test-helpers")]
 pub async fn find_leader(cluster: &TestCluster) -> Option<u64> {
-    // TODO: Implement leader detection by accessing node.node.lock().await and checking Raft state
+    // TODO: Implement proper leader detection by accessing node.node.lock().await 
+    // and checking Raft state (node.raft_state() == raft::StateRole::Leader)
     // For now, return the first node as a placeholder
     cluster.nodes().keys().next().copied()
 }
@@ -56,7 +58,8 @@ pub async fn wait_for_new_leader(
 #[cfg(feature = "test-helpers")]
 pub async fn verify_all_applied(nodes: &[TestNode], _expected_index: u64) -> bool {
     for _node in nodes {
-        // TODO: Implement proper applied index checking
+        // TODO: Implement proper applied index checking - verify that Raft log entries
+        // have been applied to the state machine (applied_index >= expected_index)
         // For now, always return true as a placeholder
     }
 
