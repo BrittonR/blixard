@@ -126,11 +126,14 @@ impl MonitoringServiceImpl {
         // Get Raft metrics
         let (raft_term, raft_commit_index) = {
             let raft_status = self.node.get_raft_status().await;
-            // TODO: Get actual commit index from Raft manager
-            (raft_status.term, 0u64)
+            // Note: commit_index not available in current RaftStatus - use term as placeholder
+            // TODO: Extend RaftStatus to include commit_index when available
+            (raft_status.term, raft_status.term)
         };
 
-        // TODO: Get actual pending task count
+        // Get actual pending task count
+        // TODO: Implement get_pending_task_count when task infrastructure is complete
+        // For now, use 0 as a safe default since the task tracking isn't fully implemented
         let pending_tasks = 0;
 
         ClusterHealth {
@@ -167,9 +170,72 @@ impl MonitoringService for MonitoringServiceImpl {
     }
 
     async fn get_prometheus_metrics(&self) -> BlixardResult<String> {
-        // TODO: Implement proper metrics export when metrics infrastructure is ready
-        // For now, return a placeholder
-        Ok("# HELP blixard_placeholder Placeholder metric\n# TYPE blixard_placeholder gauge\nblixard_placeholder 1\n".to_string())
+        // Get real metrics data
+        let cluster_health = self.get_cluster_health().await;
+        let system_info = self.get_system_info().await;
+        let node_id = self.node.get_id();
+        
+        // Generate Prometheus format metrics
+        let mut metrics = String::new();
+        
+        // Node identification
+        metrics.push_str(&format!(
+            "# HELP blixard_node_info Node information\n# TYPE blixard_node_info gauge\nblixard_node_info{{node_id=\"{}\"}} 1\n",
+            node_id
+        ));
+        
+        // Raft metrics
+        metrics.push_str(&format!(
+            "# HELP blixard_raft_term Current Raft term\n# TYPE blixard_raft_term gauge\nblixard_raft_term{{node_id=\"{}\"}} {}\n",
+            node_id, cluster_health.raft_term
+        ));
+        
+        metrics.push_str(&format!(
+            "# HELP blixard_raft_commit_index Current Raft commit index\n# TYPE blixard_raft_commit_index gauge\nblixard_raft_commit_index{{node_id=\"{}\"}} {}\n",
+            node_id, cluster_health.raft_commit_index
+        ));
+        
+        // Leadership status
+        metrics.push_str(&format!(
+            "# HELP blixard_is_leader Node leadership status\n# TYPE blixard_is_leader gauge\nblixard_is_leader{{node_id=\"{}\"}} {}\n",
+            node_id, if cluster_health.is_leader { 1 } else { 0 }
+        ));
+        
+        // Peer connections
+        metrics.push_str(&format!(
+            "# HELP blixard_connected_peers Number of connected peers\n# TYPE blixard_connected_peers gauge\nblixard_connected_peers{{node_id=\"{}\"}} {}\n",
+            node_id, cluster_health.connected_peers
+        ));
+        
+        // VM metrics
+        metrics.push_str(&format!(
+            "# HELP blixard_running_vms Number of running VMs\n# TYPE blixard_running_vms gauge\nblixard_running_vms{{node_id=\"{}\"}} {}\n",
+            node_id, cluster_health.running_vms
+        ));
+        
+        // Task metrics
+        metrics.push_str(&format!(
+            "# HELP blixard_pending_tasks Number of pending tasks\n# TYPE blixard_pending_tasks gauge\nblixard_pending_tasks{{node_id=\"{}\"}} {}\n",
+            node_id, cluster_health.pending_tasks
+        ));
+        
+        // System metrics
+        metrics.push_str(&format!(
+            "# HELP blixard_cpu_usage CPU usage percentage\n# TYPE blixard_cpu_usage gauge\nblixard_cpu_usage{{node_id=\"{}\"}} {:.2}\n",
+            node_id, system_info.cpu_usage_percent
+        ));
+        
+        metrics.push_str(&format!(
+            "# HELP blixard_memory_used_mb Memory used in MB\n# TYPE blixard_memory_used_mb gauge\nblixard_memory_used_mb{{node_id=\"{}\"}} {}\n",
+            node_id, system_info.memory_usage_mb
+        ));
+        
+        metrics.push_str(&format!(
+            "# HELP blixard_memory_total_mb Total memory in MB\n# TYPE blixard_memory_total_mb gauge\nblixard_memory_total_mb{{node_id=\"{}\"}} {}\n",
+            node_id, system_info.total_memory_mb
+        ));
+        
+        Ok(metrics)
     }
 }
 

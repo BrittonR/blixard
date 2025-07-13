@@ -81,7 +81,16 @@ impl StatusService for StatusServiceImpl {
                 // Peer - get address from peers list
                 let peer_addr = peers
                     .iter()
-                    .find(|p| p.node_id.parse::<u64>().unwrap_or(0) == node_id)
+                    .find(|p| {
+                        // Safely parse node_id without defaulting to 0 which could cause collisions
+                        match p.node_id.parse::<u64>() {
+                            Ok(parsed_id) => parsed_id == node_id,
+                            Err(_) => {
+                                tracing::warn!("Invalid node_id format in peer list: {}", p.node_id);
+                                false
+                            }
+                        }
+                    })
                     .map(|p| p.address.clone())
                     .unwrap_or_else(|| format!("unknown-{}", node_id));
 
