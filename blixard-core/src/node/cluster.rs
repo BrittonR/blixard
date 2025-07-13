@@ -122,7 +122,10 @@ impl Node {
         } else {
             // Parse as socket address and construct HTTP URL
             let addr: SocketAddr = join_addr.parse().map_err(|e| {
-                BlixardError::ConfigError(format!("Invalid join address '{}': {}", join_addr, e))
+                BlixardError::ConfigurationError {
+                    component: "cluster".to_string(),
+                    message: format!("Invalid join address '{}': {}", join_addr, e),
+                }
             })?;
 
             // Get metrics port offset from config
@@ -190,7 +193,10 @@ impl Node {
         let p2p_node_id = bootstrap_info
             .p2p_node_id
             .parse::<iroh::NodeId>()
-            .map_err(|e| BlixardError::ConfigError(format!("Invalid P2P node ID: {}", e)))?;
+            .map_err(|e| BlixardError::ConfigurationError {
+                component: "p2p".to_string(),
+                message: format!("Invalid P2P node ID: {}", e),
+            })?;
 
         // Create NodeAddr with the bootstrap info
         let mut node_addr = iroh::NodeAddr::new(p2p_node_id);
