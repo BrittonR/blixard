@@ -345,9 +345,8 @@ mod tests {
             result.with_context(|| "Failed to read configuration file".to_string());
 
         assert!(blixard_result.is_err());
-        if let Err(BlixardError::Internal { message, source }) = blixard_result {
-            assert_eq!(message, "Failed to read configuration file");
-            assert!(source.is_some());
+        if let Err(BlixardError::Internal { message }) = blixard_result {
+            assert!(message.contains("Failed to read configuration file"));
         } else {
             panic!("Expected Internal error");
         }
@@ -379,11 +378,9 @@ mod tests {
         // Add some errors
         collector.add_result(Err::<i32, _>(BlixardError::Internal {
             message: "Error 1".to_string(),
-            source: None,
         }));
         collector.add_result(Err::<i32, _>(BlixardError::Internal {
             message: "Error 2".to_string(),
-            source: None,
         }));
 
         assert!(collector.has_errors());

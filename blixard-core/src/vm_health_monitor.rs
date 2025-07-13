@@ -432,11 +432,11 @@ mod tests {
         assert_eq!(monitor.name(), "VmHealthMonitor");
 
         // Start should succeed
-        monitor.start().await.unwrap();
+        monitor.start().unwrap();
         assert!(monitor.is_running());
 
         // Starting again should log a warning but not fail
-        monitor.start().await.unwrap();
+        monitor.start().unwrap();
         assert!(monitor.is_running());
 
         // Stop should succeed
@@ -503,7 +503,7 @@ mod tests {
         let mut monitor = VmHealthMonitor::with_config(node_state, vm_manager, health_config);
 
         // Test that custom configuration is used
-        monitor.start().await.unwrap();
+        monitor.start().unwrap();
         assert!(monitor.is_running());
 
         monitor.stop().await.unwrap();

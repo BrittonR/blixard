@@ -381,7 +381,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_service_builder_basic() {
-        let node = Arc::new(SharedNodeState::new());
+        let node = Arc::new(SharedNodeState::new_default());
 
         let service = ServiceBuilder::new("test-service", node)
             .simple_method("multiply", |req: TestRequest| async move {

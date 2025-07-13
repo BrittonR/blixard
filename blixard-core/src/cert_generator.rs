@@ -550,7 +550,7 @@ mod tests {
         assert!(cert.subject().to_string().contains("O=Blixard Cluster"));
 
         // Verify key usage includes certificate signing
-        if let Some(key_usage) = cert.key_usage() {
+        if let Ok(Some(key_usage)) = cert.key_usage() {
             assert!(key_usage.key_cert_sign());
             assert!(key_usage.crl_sign());
         }
@@ -613,14 +613,14 @@ mod tests {
             .contains("CN=node1.blixard.local"));
 
         // Verify Subject Alternative Names
-        if let Some(san_ext) = cert.subject_alternative_name() {
+        if let Ok(Some(san_ext)) = cert.subject_alternative_name() {
             let san_names: Vec<_> = san_ext.value.general_names.iter().collect();
             assert!(!san_names.is_empty());
             // Should contain both DNS name and IP address
         }
 
         // Verify key usage for server authentication
-        if let Some(key_usage) = cert.key_usage() {
+        if let Ok(Some(key_usage)) = cert.key_usage() {
             assert!(key_usage.digital_signature());
             assert!(key_usage.key_agreement());
         }

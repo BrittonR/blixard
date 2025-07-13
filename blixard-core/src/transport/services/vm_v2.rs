@@ -380,7 +380,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_vm_service_creation() {
-        let node = Arc::new(SharedNodeState::new());
+        let node = Arc::new(SharedNodeState::new_default());
         let handler = create_vm_service(node);
 
         assert_eq!(handler.service_name(), "vm");
@@ -400,7 +400,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_vm_request() {
-        let node = Arc::new(SharedNodeState::new());
+        let node = Arc::new(SharedNodeState::new_default());
         let request = CreateVmRequest {
             name: "test-vm".to_string(),
             config_path: None,
@@ -421,7 +421,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_vm_list_request() {
-        let node = Arc::new(SharedNodeState::new());
+        let node = Arc::new(SharedNodeState::new_default());
         let request = VmListRequest {
             filter: None,
             include_stopped: true,

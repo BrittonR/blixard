@@ -155,7 +155,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_health_service_creation() {
-        let node = Arc::new(SharedNodeState::new());
+        let node = Arc::new(SharedNodeState::new_default());
         let handler = create_health_service(node);
 
         assert_eq!(handler.service_name(), "health");
@@ -167,7 +167,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_health_check_basic() {
-        let node = Arc::new(SharedNodeState::new());
+        let node = Arc::new(SharedNodeState::new_default());
         let request = HealthRequest {
             include_details: false,
         };
@@ -179,7 +179,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_health_check_with_details() {
-        let node = Arc::new(SharedNodeState::new());
+        let node = Arc::new(SharedNodeState::new_default());
         let request = HealthRequest {
             include_details: true,
         };
@@ -195,7 +195,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_legacy_compatibility() {
-        let node = Arc::new(SharedNodeState::new());
+        let node = Arc::new(SharedNodeState::new_default());
         let service = HealthServiceV2::new(node);
 
         let request = HealthCheckRequest {
