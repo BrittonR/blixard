@@ -20,10 +20,10 @@ pub async fn read_text_file_with_context<P: AsRef<Path>>(
         .await
         .map_err(|e| BlixardError::IoError(Box::new(e)))
         .map_err(|e| match &e {
-            BlixardError::IoError(io_err) => BlixardError::ConfigError(format!(
-                "Failed to read {}: {} (path: {:?})",
-                context, io_err, path
-            )),
+            BlixardError::IoError(io_err) => BlixardError::ConfigurationError {
+                component: "file_io".to_string(),
+                message: format!("Failed to read {}: {} (path: {:?})", context, io_err, path),
+            },
             _ => e,
         })
 }
@@ -40,10 +40,10 @@ pub async fn read_binary_file_with_context<P: AsRef<Path>>(
         .await
         .map_err(|e| BlixardError::IoError(Box::new(e)))
         .map_err(|e| match &e {
-            BlixardError::IoError(io_err) => BlixardError::ConfigError(format!(
-                "Failed to read {}: {} (path: {:?})",
-                context, io_err, path
-            )),
+            BlixardError::IoError(io_err) => BlixardError::ConfigurationError {
+                component: "file_io".to_string(),
+                message: format!("Failed to read {}: {} (path: {:?})", context, io_err, path),
+            },
             _ => e,
         })
 }
@@ -66,13 +66,22 @@ where
 
     match extension {
         "json" => serde_json::from_str(&content).map_err(|e| {
-            BlixardError::ConfigError(format!("Failed to parse JSON {}: {}", file_type, e))
+            BlixardError::ConfigurationError {
+                component: "json_parser".to_string(),
+                message: format!("Failed to parse JSON {}: {}", file_type, e),
+            }
         }),
         "toml" => toml::from_str(&content).map_err(|e| {
-            BlixardError::ConfigError(format!("Failed to parse TOML {}: {}", file_type, e))
+            BlixardError::ConfigurationError {
+                component: "toml_parser".to_string(),
+                message: format!("Failed to parse TOML {}: {}", file_type, e),
+            }
         }),
         "yaml" | "yml" => serde_yaml::from_str(&content).map_err(|e| {
-            BlixardError::ConfigError(format!("Failed to parse YAML {}: {}", file_type, e))
+            BlixardError::ConfigurationError {
+                component: "yaml_parser".to_string(),
+                message: format!("Failed to parse YAML {}: {}", file_type, e),
+            }
         }),
         _ => {
             // Try to auto-detect format
@@ -83,10 +92,10 @@ where
             } else if let Ok(parsed) = serde_yaml::from_str(&content) {
                 Ok(parsed)
             } else {
-                Err(BlixardError::ConfigError(format!(
-                    "Unable to parse {} - unknown format",
-                    file_type
-                )))
+                Err(BlixardError::ConfigurationError {
+                    component: "format_detection".to_string(),
+                    message: format!("Unable to parse {} - unknown format", file_type),
+                })
             }
         }
     }
@@ -104,15 +113,18 @@ pub async fn write_text_file_with_context<P: AsRef<Path>>(
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await.map_err(|e| {
-            BlixardError::ConfigError(format!("Failed to create directory for {}: {}", context, e))
+            BlixardError::ConfigurationError {
+                component: "directory_creation".to_string(),
+                message: format!("Failed to create directory for {}: {}", context, e),
+            }
         })?;
     }
 
     tokio::fs::write(path, content).await.map_err(|e| {
-        BlixardError::ConfigError(format!(
-            "Failed to write {}: {} (path: {:?})",
-            context, e, path
-        ))
+        BlixardError::ConfigurationError {
+            component: "file_write".to_string(),
+            message: format!("Failed to write {}: {} (path: {:?})", context, e, path),
+        }
     })
 }
 
@@ -128,15 +140,18 @@ pub async fn write_binary_file_with_context<P: AsRef<Path>>(
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await.map_err(|e| {
-            BlixardError::ConfigError(format!("Failed to create directory for {}: {}", context, e))
+            BlixardError::ConfigurationError {
+                component: "directory_creation".to_string(),
+                message: format!("Failed to create directory for {}: {}", context, e),
+            }
         })?;
     }
 
     tokio::fs::write(path, content).await.map_err(|e| {
-        BlixardError::ConfigError(format!(
-            "Failed to write {}: {} (path: {:?})",
-            context, e, path
-        ))
+        BlixardError::ConfigurationError {
+            component: "file_write".to_string(),
+            message: format!("Failed to write {}: {} (path: {:?})", context, e, path),
+        }
     })
 }
 
@@ -166,7 +181,10 @@ where
             serde_json::to_string(data)
         }
         .map_err(|e| {
-            BlixardError::ConfigError(format!("Failed to serialize JSON {}: {}", file_type, e))
+            BlixardError::ConfigurationError {
+                component: "json_serializer".to_string(),
+                message: format!("Failed to serialize JSON {}: {}", file_type, e),
+            }
         })?,
         "toml" => if pretty {
             toml::to_string_pretty(data)
@@ -174,16 +192,22 @@ where
             toml::to_string(data)
         }
         .map_err(|e| {
-            BlixardError::ConfigError(format!("Failed to serialize TOML {}: {}", file_type, e))
+            BlixardError::ConfigurationError {
+                component: "toml_serializer".to_string(),
+                message: format!("Failed to serialize TOML {}: {}", file_type, e),
+            }
         })?,
         "yaml" | "yml" => serde_yaml::to_string(data).map_err(|e| {
-            BlixardError::ConfigError(format!("Failed to serialize YAML {}: {}", file_type, e))
+            BlixardError::ConfigurationError {
+                component: "yaml_serializer".to_string(),
+                message: format!("Failed to serialize YAML {}: {}", file_type, e),
+            }
         })?,
         _ => {
-            return Err(BlixardError::ConfigError(format!(
-                "Unsupported configuration format: {}",
-                extension
-            )));
+            return Err(BlixardError::ConfigurationError {
+                component: "format_support".to_string(),
+                message: format!("Unsupported configuration format: {}", extension),
+            });
         }
     };
 
@@ -201,7 +225,10 @@ pub async fn ensure_directory<P: AsRef<Path>>(path: P) -> BlixardResult<()> {
 
     if !file_exists(path).await {
         tokio::fs::create_dir_all(path).await.map_err(|e| {
-            BlixardError::ConfigError(format!("Failed to create directory {:?}: {}", path, e))
+            BlixardError::ConfigurationError {
+                component: "directory_creation".to_string(),
+                message: format!("Failed to create directory {:?}: {}", path, e),
+            }
         })?;
     }
 
@@ -215,18 +242,18 @@ pub async fn read_directory_with_context<P: AsRef<Path>>(
 ) -> BlixardResult<Vec<std::path::PathBuf>> {
     let path = path.as_ref();
     let mut entries = tokio::fs::read_dir(path).await.map_err(|e| {
-        BlixardError::ConfigError(format!(
-            "Failed to read {} directory {:?}: {}",
-            context, path, e
-        ))
+        BlixardError::ConfigurationError {
+            component: "directory_read".to_string(),
+            message: format!("Failed to read {} directory {:?}: {}", context, path, e),
+        }
     })?;
 
     let mut paths = Vec::new();
     while let Some(entry) = entries.next_entry().await.map_err(|e| {
-        BlixardError::ConfigError(format!(
-            "Failed to read directory entry in {}: {}",
-            context, e
-        ))
+        BlixardError::ConfigurationError {
+            component: "directory_read".to_string(),
+            message: format!("Failed to read directory entry in {}: {}", context, e),
+        }
     })? {
         paths.push(entry.path());
     }
@@ -354,8 +381,8 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            BlixardError::ConfigError(msg) => {
-                assert!(msg.contains("Failed to read test"));
+            BlixardError::ConfigurationError { component: _, message } => {
+                assert!(message.contains("Failed to read test"));
             }
             _ => panic!("Expected ConfigError"),
         }

@@ -278,12 +278,26 @@ impl BufferGuard {
         }
     }
     
-    pub fn get_mut(&mut self) -> &mut Vec<u8> {
-        self.buffer.as_mut().unwrap()
+    pub fn get_mut(&mut self) -> Option<&mut Vec<u8>> {
+        self.buffer.as_mut()
     }
     
-    pub fn get(&self) -> &Vec<u8> {
-        self.buffer.as_ref().unwrap()
+    pub fn get(&self) -> Option<&Vec<u8>> {
+        self.buffer.as_ref()
+    }
+    
+    /// Get mutable buffer reference, returning error if buffer is not available
+    pub fn try_get_mut(&mut self) -> crate::error::BlixardResult<&mut Vec<u8>> {
+        self.buffer.as_mut().ok_or_else(|| crate::error::BlixardError::Internal {
+            message: "Buffer is not available (possibly after drop)".to_string(),
+        })
+    }
+    
+    /// Get buffer reference, returning error if buffer is not available
+    pub fn try_get(&self) -> crate::error::BlixardResult<&Vec<u8>> {
+        self.buffer.as_ref().ok_or_else(|| crate::error::BlixardError::Internal {
+            message: "Buffer is not available (possibly after drop)".to_string(),
+        })
     }
 }
 

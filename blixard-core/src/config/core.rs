@@ -104,7 +104,10 @@ impl Config {
     pub fn from_file<P: AsRef<Path>>(path: P) -> BlixardResult<Self> {
         // Use blocking read since this is called from sync context
         let runtime = tokio::runtime::Handle::try_current()
-            .map_err(|_| BlixardError::ConfigError("No tokio runtime available".to_string()))?;
+            .map_err(|_| BlixardError::ConfigurationError {
+                component: "runtime".to_string(),
+                message: "No tokio runtime available".to_string(),
+            })?;
 
         let config = runtime.block_on(async { Self::from_file_async(path).await })?;
 
@@ -191,40 +194,44 @@ impl Config {
     pub fn validate(&self) -> BlixardResult<()> {
         // Validate bind address
         if self.node.bind_address.is_empty() {
-            return Err(BlixardError::ConfigError(
-                "Bind address cannot be empty".to_string(),
-            ));
+            return Err(BlixardError::ConfigurationError {
+                component: "node.bind_address".to_string(),
+                message: "Bind address cannot be empty".to_string(),
+            });
         }
 
         // Validate data directory
         if self.node.data_dir.as_os_str().is_empty() {
-            return Err(BlixardError::ConfigError(
-                "Data directory cannot be empty".to_string(),
-            ));
+            return Err(BlixardError::ConfigurationError {
+                component: "node.data_dir".to_string(),
+                message: "Data directory cannot be empty".to_string(),
+            });
         }
 
         // Validate Raft configuration
         if self.cluster.raft.heartbeat_tick >= self.cluster.raft.election_tick {
-            return Err(BlixardError::ConfigError(
-                "Heartbeat tick must be less than election tick".to_string(),
-            ));
+            return Err(BlixardError::ConfigurationError {
+                component: "cluster.raft".to_string(),
+                message: "Heartbeat tick must be less than election tick".to_string(),
+            });
         }
 
         // Validate resource limits
         if self.vm.scheduler.overcommit_ratio < 1.0 {
-            return Err(BlixardError::ConfigError(
-                "Overcommit ratio must be >= 1.0".to_string(),
-            ));
+            return Err(BlixardError::ConfigurationError {
+                component: "vm.scheduler.overcommit_ratio".to_string(),
+                message: "Overcommit ratio must be >= 1.0".to_string(),
+            });
         }
 
         // Validate log level
         match self.observability.logging.level.as_str() {
             "trace" | "debug" | "info" | "warn" | "error" => {}
             _ => {
-                return Err(BlixardError::ConfigError(format!(
-                    "Invalid log level: {}",
-                    self.observability.logging.level
-                )))
+                return Err(BlixardError::ConfigurationError {
+                    component: "observability.logging.level".to_string(),
+                    message: format!("Invalid log level: {}", self.observability.logging.level),
+                })
             }
         }
 
@@ -232,9 +239,10 @@ impl Config {
         if self.security.tls.enabled {
             // If TLS is enabled, certificate and key files should be specified
             if self.security.tls.cert_file.is_none() || self.security.tls.key_file.is_none() {
-                return Err(BlixardError::ConfigError(
-                    "TLS enabled but cert_file or key_file not specified".to_string(),
-                ));
+                return Err(BlixardError::ConfigurationError {
+                    component: "security.tls".to_string(),
+                    message: "TLS enabled but cert_file or key_file not specified".to_string(),
+                });
             }
         }
 
@@ -243,10 +251,10 @@ impl Config {
             match self.security.auth.method.as_str() {
                 "token" | "mtls" => {}
                 _ => {
-                    return Err(BlixardError::ConfigError(format!(
-                        "Invalid authentication method: {}",
-                        self.security.auth.method
-                    )))
+                    return Err(BlixardError::ConfigurationError {
+                        component: "security.auth.method".to_string(),
+                        message: format!("Invalid authentication method: {}", self.security.auth.method),
+                    })
                 }
             }
 
@@ -259,46 +267,50 @@ impl Config {
 
         // Validate discovery configuration
         if self.network.discovery.refresh_interval == 0 {
-            return Err(BlixardError::ConfigError(
-                "Discovery refresh interval must be greater than 0".to_string(),
-            ));
+            return Err(BlixardError::ConfigurationError {
+                component: "network.discovery.refresh_interval".to_string(),
+                message: "Discovery refresh interval must be greater than 0".to_string(),
+            });
         }
 
         if self.network.discovery.node_stale_timeout == 0 {
-            return Err(BlixardError::ConfigError(
-                "Discovery node stale timeout must be greater than 0".to_string(),
-            ));
+            return Err(BlixardError::ConfigurationError {
+                component: "network.discovery.node_stale_timeout".to_string(),
+                message: "Discovery node stale timeout must be greater than 0".to_string(),
+            });
         }
 
         // Validate static node entries
         for (i, node) in self.network.discovery.static_nodes.seeds.iter().enumerate() {
             if node.node_id.is_empty() {
-                return Err(BlixardError::ConfigError(format!(
-                    "Static node {} has empty node_id",
-                    i
-                )));
+                return Err(BlixardError::ConfigurationError {
+                    component: "network.discovery.static_nodes".to_string(),
+                    message: format!("Static node {} has empty node_id", i),
+                });
             }
             if node.addresses.is_empty() {
-                return Err(BlixardError::ConfigError(format!(
-                    "Static node {} has no addresses",
-                    i
-                )));
+                return Err(BlixardError::ConfigurationError {
+                    component: "network.discovery.static_nodes".to_string(),
+                    message: format!("Static node {} has no addresses", i),
+                });
             }
         }
 
         // Validate DNS configuration
         if self.network.discovery.enable_dns && self.network.discovery.dns.domains.is_empty() {
-            return Err(BlixardError::ConfigError(
-                "DNS discovery enabled but no domains configured".to_string(),
-            ));
+            return Err(BlixardError::ConfigurationError {
+                component: "network.discovery.dns".to_string(),
+                message: "DNS discovery enabled but no domains configured".to_string(),
+            });
         }
 
         // Validate mDNS configuration
         if self.network.discovery.enable_mdns && self.network.discovery.mdns.service_name.is_empty()
         {
-            return Err(BlixardError::ConfigError(
-                "mDNS discovery enabled but service name is empty".to_string(),
-            ));
+            return Err(BlixardError::ConfigurationError {
+                component: "network.discovery.mdns".to_string(),
+                message: "mDNS discovery enabled but service name is empty".to_string(),
+            });
         }
 
         Ok(())
@@ -338,12 +350,18 @@ pub fn init<P: AsRef<Path>>(config_path: P) -> BlixardResult<()> {
     let (tx, _rx) = watch::channel(config_arc.clone());
     CONFIG_WATCHER
         .set(tx)
-        .map_err(|_| BlixardError::ConfigError("Configuration already initialized".to_string()))?;
+        .map_err(|_| BlixardError::ConfigurationError {
+            component: "watcher".to_string(),
+            message: "Configuration already initialized".to_string(),
+        })?;
 
     // Set global config
     CONFIG
         .set(Arc::new(RwLock::new((*config_arc).clone())))
-        .map_err(|_| BlixardError::ConfigError("Configuration already initialized".to_string()))?;
+        .map_err(|_| BlixardError::ConfigurationError {
+            component: "global_config".to_string(),
+            message: "Configuration already initialized".to_string(),
+        })?;
 
     Ok(())
 }
@@ -372,14 +390,16 @@ pub fn try_get() -> BlixardResult<Arc<Config>> {
             .read()
             .map(|guard| Arc::new(guard.clone()))
             .map_err(|_| {
-                BlixardError::ConfigError(
-                    "Failed to read configuration (lock poisoned)".to_string(),
-                )
+                BlixardError::ConfigurationError {
+                    component: "lock".to_string(),
+                    message: "Failed to read configuration (lock poisoned)".to_string(),
+                }
             })
     } else {
-        Err(BlixardError::ConfigError(
-            "Configuration not initialized".to_string(),
-        ))
+        Err(BlixardError::ConfigurationError {
+            component: "initialization".to_string(),
+            message: "Configuration not initialized".to_string(),
+        })
     }
 }
 
