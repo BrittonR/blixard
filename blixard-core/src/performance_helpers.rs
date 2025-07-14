@@ -290,6 +290,10 @@ impl<T> ObjectPool<T> {
 }
 
 /// RAII wrapper that returns objects to pool on drop
+/// 
+/// This wrapper ensures safe access to pooled objects by using an invariant:
+/// the object is always present during the lifetime of PooledObject, and is
+/// only moved out during Drop to return it to the pool.
 pub struct PooledObject<'a, T> {
     object: Option<T>,
     pool: &'a parking_lot::Mutex<Vec<T>>,
@@ -307,12 +311,17 @@ impl<'a, T> PooledObject<'a, T> {
 
 impl<'a, T> Drop for PooledObject<'a, T> {
     fn drop(&mut self) {
+        // The object should always be present during the lifetime of PooledObject
+        // It's only taken during drop to return to the pool
         if let Some(object) = self.object.take() {
             let mut pool = self.pool.lock();
             // Limit pool size to prevent unbounded growth
             if pool.len() < 32 {
                 pool.push(object);
             }
+        } else {
+            // This should never happen with proper usage
+            tracing::warn!("PooledObject dropped with no object - possible double-drop or memory corruption");
         }
     }
 }
@@ -321,21 +330,37 @@ impl<'a, T> std::ops::Deref for PooledObject<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        // This should never fail in normal usage, but we provide a safer implementation
-        self.object.as_ref().unwrap_or_else(|| {
-            // This is a programming error - log and panic with more context
-            panic!("PooledObject accessed after being taken - this indicates a bug in the object pool implementation")
-        })
+        // The object should always be present during the PooledObject's lifetime
+        // This panic should never happen with correct usage
+        match self.object.as_ref() {
+            Some(obj) => obj,
+            None => {
+                // Log detailed error information for debugging
+                tracing::error!(
+                    "PooledObject dereferenced when object is None. This indicates memory corruption or improper usage."
+                );
+                // Use a more descriptive error message instead of generic panic
+                panic!("Object pool corruption: attempted to access object that has been returned to pool or corrupted")
+            }
+        }
     }
 }
 
 impl<'a, T> std::ops::DerefMut for PooledObject<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        // This should never fail in normal usage, but we provide a safer implementation
-        self.object.as_mut().unwrap_or_else(|| {
-            // This is a programming error - log and panic with more context
-            panic!("PooledObject accessed after being taken - this indicates a bug in the object pool implementation")
-        })
+        // The object should always be present during the PooledObject's lifetime  
+        // This panic should never happen with correct usage
+        match self.object.as_mut() {
+            Some(obj) => obj,
+            None => {
+                // Log detailed error information for debugging
+                tracing::error!(
+                    "PooledObject mutably dereferenced when object is None. This indicates memory corruption or improper usage."
+                );
+                // Use a more descriptive error message instead of generic panic
+                panic!("Object pool corruption: attempted to mutably access object that has been returned to pool or corrupted")
+            }
+        }
     }
 }
 

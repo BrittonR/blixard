@@ -245,12 +245,11 @@ mod tests {
         ).await.unwrap();
         
         assert_eq!(proposal.id.len(), 16); // UUID size
-        match proposal.data {
-            ProposalData::UpdateVmStatus { vm_name, status, .. } => {
-                assert_eq!(vm_name, "test-vm");
-                assert_eq!(status, VmStatus::Running);
-            }
-            _ => panic!("Wrong proposal type"),
+        if let ProposalData::UpdateVmStatus { vm_name, status, .. } = proposal.data {
+            assert_eq!(vm_name, "test-vm");
+            assert_eq!(status, VmStatus::Running);
+        } else {
+            assert!(false, "Expected UpdateVmStatus proposal, got: {:?}", proposal.data);
         }
     }
     
