@@ -9,12 +9,13 @@ use blixard_core::{
         iroh_protocol::{
             deserialize_payload, read_message, serialize_payload, write_message, RpcRequest,
         },
-        iroh_vm_service::{VmOperationRequest, VmRequest},
+        iroh_vm_service::VmRequest,
+        services::vm::VmOperationRequest,
         secure_iroh_protocol_handler::SecureIrohServiceBuilder,
     },
 };
 use bytes::Bytes;
-use iroh::{protocol::Router, Endpoint, NodeId};
+use iroh::{protocol::Router, Endpoint};
 use std::sync::Arc;
 use tracing::{error, info};
 
@@ -91,10 +92,9 @@ async fn run_secure_server(
     let endpoint = Endpoint::builder().discovery_n0().bind().await?;
 
     let node_id = endpoint.node_id();
-    let addr = endpoint.node_addr().await?;
-
-    println!("Server listening at: {}", addr);
+    // Node address is available as a watcher, but for the demo we'll just print the node ID
     println!("Server node ID: {}", node_id);
+    println!("Server starting on endpoint...");
 
     // Create a mock shared node state (normally this would be real)
     // For demo, we'll skip this and just show the structure
@@ -105,10 +105,9 @@ async fn run_secure_server(
         .build();
 
     // Create router with secure handler
-    let router = Router::builder(endpoint)
+    let _router = Router::builder(endpoint)
         .accept(ALPN.to_vec(), Arc::new(handler))
-        .spawn()
-        .await?;
+        .spawn();
 
     // Keep server running
     tokio::signal::ctrl_c().await?;
@@ -172,6 +171,7 @@ async fn test_authorized_access(_endpoint: &Endpoint) {
 
 async fn test_time_based_access(_endpoint: &Endpoint) {
     // Test Cedar's time-based policies
+    use chrono::Timelike;
     let hour = chrono::Utc::now().hour();
 
     if hour >= 22 || hour <= 6 {
@@ -200,7 +200,6 @@ fn create_vm_request() -> RpcRequest {
     let payload = serialize_payload(&request).unwrap();
 
     RpcRequest {
-        request_id: 1,
         service: "vm".to_string(),
         method: "vm_operation".to_string(),
         payload,

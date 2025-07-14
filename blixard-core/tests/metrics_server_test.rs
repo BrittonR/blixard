@@ -3,9 +3,11 @@
 use blixard_core::{
     config_global,
     config::ConfigBuilder,
-    metrics_otel::{init_prometheus, metrics},
+    metrics_otel::{init_prometheus, prometheus_metrics, safe_metrics},
     metrics_server,
+    node_shared::SharedNodeState,
 };
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -25,13 +27,28 @@ async fn test_metrics_server_basic() -> Result<(), Box<dyn std::error::Error>> {
     let _ = init_prometheus();
 
     // Add some test metrics
-    metrics().raft_proposals_total.add(5, &[]);
-    metrics().grpc_requests_total.add(10, &[]);
-    metrics().vm_total.add(3, &[]);
+    if let Ok(metrics) = safe_metrics() {
+        metrics.raft_proposals_total.add(5, &[]);
+        metrics.grpc_requests_total.add(10, &[]);
+        metrics.vm_total.add(3, &[]);
+    }
 
+    // Create a SharedNodeState for the metrics server
+    let node_config = blixard_core::types::NodeConfig {
+        id: 99,
+        data_dir: "./metrics-test-data".to_string(),
+        bind_addr: "127.0.0.1:9999".parse()?,
+        join_addr: None,
+        use_tailscale: false,
+        vm_backend: "mock".to_string(),
+        transport_config: None,
+        topology: blixard_core::types::NodeTopology::default(),
+    };
+    let shared_state = Arc::new(SharedNodeState::new(node_config));
+    
     // Start metrics server
     let metrics_addr = "127.0.0.1:0".parse()?; // Use port 0 for auto-assignment
-    let handle = metrics_server::spawn_metrics_server(metrics_addr);
+    let handle = metrics_server::spawn_metrics_server(metrics_addr, shared_state);
 
     // Give server time to start
     sleep(Duration::from_millis(100)).await;
@@ -49,14 +66,15 @@ async fn test_metrics_server_basic() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test]
 fn test_prometheus_metrics_format() {
-    use blixard_core::metrics_otel::prometheus_metrics;
 
     // Initialize metrics if not already done
     let _ = init_prometheus();
 
     // Add some metrics
-    metrics().raft_proposals_total.add(10, &[]);
-    metrics().raft_proposals_failed.add(2, &[]);
+    if let Ok(metrics) = safe_metrics() {
+        metrics.raft_proposals_total.add(10, &[]);
+        metrics.raft_proposals_failed.add(2, &[]);
+    }
 
     // Get prometheus output
     let output = prometheus_metrics();

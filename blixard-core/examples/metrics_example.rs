@@ -5,7 +5,7 @@
 //! - Use metrics in application code
 //! - Export metrics for monitoring
 
-use blixard_core::metrics_otel::{self, attributes, metrics, Timer};
+use blixard_core::metrics_otel::{self, attributes, safe_metrics, Timer};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     metrics_otel::init_prometheus()?;
 
     // Get metrics instance
-    let metrics = metrics();
+    let metrics = safe_metrics()?;
 
     // Simulate some operations
     println!("Simulating Raft operations...");
@@ -149,7 +149,7 @@ struct RaftNode {
 
 impl RaftNode {
     async fn propose(&self, data: &[u8]) -> Result<(), String> {
-        let metrics = metrics();
+        let metrics = safe_metrics().map_err(|e| format!("Failed to get metrics: {}", e))?;
         let attrs = vec![
             attributes::node_id(self.id),
             attributes::operation("propose"),

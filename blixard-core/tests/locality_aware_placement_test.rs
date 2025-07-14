@@ -217,7 +217,7 @@ async fn test_spread_across_failure_domains_strategy() {
                     };
                     vm_table
                         .insert(
-                            &vm_state.name,
+                            vm_state.name.as_str(),
                             bincode::serialize(&vm_state).unwrap().as_slice(),
                         )
                         .unwrap();

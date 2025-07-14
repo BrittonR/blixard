@@ -3,12 +3,12 @@
 //! This example demonstrates that the IrohRaftTransport works correctly
 //! with the actual Raft consensus mechanism.
 
-#![cfg(feature = "test-helpers")]
-
+#[cfg(feature = "test-helpers")]
 use blixard_core::{error::BlixardResult, test_helpers::TestCluster};
+#[cfg(feature = "test-helpers")]
 use std::time::Duration;
-use tokio::time::sleep;
 
+#[cfg(feature = "test-helpers")]
 #[tokio::main]
 async fn main() -> BlixardResult<()> {
     println!("=== Iroh Raft Integration Test ===\n");
@@ -21,7 +21,7 @@ async fn main() -> BlixardResult<()> {
     // Note: Currently TestCluster doesn't support custom transport configuration
     // This test validates that Raft consensus works correctly regardless of transport
     println!("📊 Creating 3-node cluster...");
-    let cluster = TestCluster::builder().with_nodes(3).build().await?;
+    let cluster = TestCluster::with_size(3).await?;
 
     println!("✓ Created cluster with {} nodes", cluster.nodes().len());
 
@@ -39,12 +39,11 @@ async fn main() -> BlixardResult<()> {
     // Check initial cluster state
     println!("\n📊 Initial cluster state:");
     for (node_id, node) in cluster.nodes().iter() {
-        if let Ok(status) = node.shared_state.get_raft_status().await {
-            println!(
-                "  Node {}: Leader={}, Term={}, State={}",
-                node_id, status.is_leader, status.term, status.state
-            );
-        }
+        let status = node.shared_state.get_raft_status().await;
+        println!(
+            "  Node {}: Leader={}, Term={}, State={}",
+            node_id, status.is_leader, status.term, status.state
+        );
     }
 
     // Test Raft consensus by checking distributed state
@@ -53,9 +52,8 @@ async fn main() -> BlixardResult<()> {
     // Verify all nodes see the same leader
     let mut leader_views = vec![];
     for (node_id, node) in cluster.nodes().iter() {
-        if let Ok(status) = node.shared_state.get_raft_status().await {
-            leader_views.push((*node_id, status.leader_id));
-        }
+        let status = node.shared_state.get_raft_status().await;
+        leader_views.push((*node_id, status.leader_id));
     }
 
     println!("\n🔍 Leader views from each node:");
@@ -82,10 +80,9 @@ async fn main() -> BlixardResult<()> {
     println!("\n📊 Checking Raft terms:");
     let mut terms = vec![];
     for (node_id, node) in cluster.nodes().iter() {
-        if let Ok(status) = node.shared_state.get_raft_status().await {
-            terms.push((*node_id, status.term));
-            println!("  Node {} is at term {}", node_id, status.term);
-        }
+        let status = node.shared_state.get_raft_status().await;
+        terms.push((*node_id, status.term));
+        println!("  Node {} is at term {}", node_id, status.term);
     }
 
     // All nodes should be at the same term

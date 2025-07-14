@@ -12,7 +12,7 @@ use blixard_core::{
 };
 use std::path::PathBuf;
 use tempfile::TempDir;
-use tracing::{error, info};
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> BlixardResult<()> {
@@ -40,16 +40,16 @@ async fn main() -> BlixardResult<()> {
 
     // Step 4: Create a VM configuration using the Nix image
     info!("\n4. Creating VM from Nix image...");
-    let vm_config = create_vm_config_from_nix(image_id);
+    let vm_config = create_vm_config_from_nix(image_id.clone());
 
     // Submit VM creation command
-    node.send_vm_command(VmCommand::Create(vm_config.clone()))
+    node.send_vm_command(VmCommand::Create { config: vm_config.clone(), node_id: 1 })
         .await?;
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     // Step 5: Start the VM
     info!("\n5. Starting VM...");
-    node.send_vm_command(VmCommand::Start(vm_config.name.clone()))
+    node.send_vm_command(VmCommand::Start { name: vm_config.name.clone() })
         .await?;
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
@@ -71,10 +71,10 @@ async fn main() -> BlixardResult<()> {
 
     // Cleanup
     info!("\n8. Cleaning up...");
-    node.send_vm_command(VmCommand::Stop(vm_config.name.clone()))
+    node.send_vm_command(VmCommand::Stop { name: vm_config.name.clone() })
         .await?;
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-    node.send_vm_command(VmCommand::Delete(vm_config.name))
+    node.send_vm_command(VmCommand::Delete { name: vm_config.name })
         .await?;
 
     node.stop().await?;
@@ -113,6 +113,7 @@ async fn create_node_with_p2p(data_dir: &std::path::Path) -> BlixardResult<Node>
         use_tailscale: false,
         vm_backend: "microvm".to_string(), // Use microvm backend
         transport_config: Some(TransportConfig::default()), // Iroh by default
+        topology: Default::default(), // Use default topology
     };
 
     let mut node = Node::new(config);
@@ -145,7 +146,7 @@ async fn import_nix_image(
     metadata.insert("nixpkgs_rev".to_string(), "nixos-23.11".to_string());
 
     let response = service
-        .import_microvm("demo-microvm", system_path, kernel_path, metadata)
+        .import_microvm("demo-microvm", system_path, kernel_path.map(|p| p.as_path()), metadata)
         .await?;
 
     info!("Import stats:");

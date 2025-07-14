@@ -216,3 +216,11 @@ harness = false
 [[example]]
 name = "discovery_demo"
 required-features = []
+
+[[example]]
+name = "vopr_demo"
+required-features = ["vopr"]
+
+[[example]]
+name = "failpoint_demo"
+required-features = ["failpoints"]

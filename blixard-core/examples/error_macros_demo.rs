@@ -5,11 +5,10 @@
 
 use blixard_core::{
     error::{BlixardError, BlixardResult},
-    storage_err, internal_err, serialization_err, io_err, db_err,
+    storage_err, internal_err, serialization_err, io_err,
     types::{VmState, VmStatus},
 };
 use redb::{Database, TableDefinition};
-use std::path::Path;
 
 const VM_STATE_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vm_states");
 
@@ -34,9 +33,7 @@ pub async fn save_vm_state_before(
         })?;
 
     // Verbose serialization
-    let data = bincode::serialize(state).map_err(|e| BlixardError::SerializationError(
-        format!("Failed to serialize VM state: {}", e)
-    ))?;
+    let data = bincode::serialize(state).map_err(|e| BlixardError::SerializationError(Box::new(e)))?;
 
     // Verbose insert
     table
@@ -73,10 +70,7 @@ pub async fn save_vm_state_after(
     )?;
 
     // Clean serialization
-    let data = serialization_err!(
-        bincode::serialize(state),
-        "Failed to serialize VM state: {}"
-    )?;
+    let data = serialization_err!(bincode::serialize(state))?;
 
     // Clean insert
     storage_err!(
@@ -94,8 +88,15 @@ pub async fn save_vm_state_after(
 
 /// More examples of macro usage
 pub async fn macro_examples() -> BlixardResult<()> {
+    // Create a test file first
+    let test_config = r#"
+[test]
+value = "example"
+"#;
+    std::fs::write("/tmp/test_config.toml", test_config)?;
+    
     // IO error handling
-    let contents = io_err!(std::fs::read_to_string("/tmp/config.toml"))?;
+    let contents = io_err!(std::fs::read_to_string("/tmp/test_config.toml"))?;
 
     // Internal error with formatting
     let parsed = internal_err!(
@@ -110,15 +111,17 @@ pub async fn macro_examples() -> BlixardResult<()> {
     )?;
 
     // Serialization error
+    let vm_config = blixard_core::types::VmConfig::default();
     let vm_state = VmState {
         name: "test-vm".to_string(),
+        config: vm_config,
         status: VmStatus::Running,
         node_id: 1,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
     };
     
-    let serialized = serialization_err!(
+    let serialized = internal_err!(
         serde_json::to_string(&vm_state),
         "Failed to serialize VM state to JSON: {}"
     )?;
@@ -147,8 +150,11 @@ async fn main() -> BlixardResult<()> {
     let database = storage_err!(Database::create(&db_path), "create test database")?;
 
     // Create test VM state
+    let mut vm_config = blixard_core::types::VmConfig::default();
+    vm_config.name = "demo-vm".to_string();
     let vm_state = VmState {
         name: "demo-vm".to_string(),
+        config: vm_config,
         status: VmStatus::Running,
         node_id: 1,
         created_at: chrono::Utc::now(),

@@ -44,7 +44,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(EntityUid::from_str("Action::\"read\"")?),
         Some(EntityUid::from_str("Document::\"public-doc\"")?),
         Context::empty(),
-    );
+        None,
+    )?;
 
     let response1 = authorizer.is_authorized(&request1, &policy_set, &entities);
     println!(
@@ -62,7 +63,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(EntityUid::from_str("Action::\"read\"")?),
         Some(EntityUid::from_str("Document::\"public-doc\"")?),
         Context::empty(),
-    );
+        None,
+    )?;
 
     let response2 = authorizer.is_authorized(&request2, &policy_set, &entities);
     println!(
@@ -80,7 +82,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(EntityUid::from_str("Action::\"write\"")?),
         Some(EntityUid::from_str("Document::\"public-doc\"")?),
         Context::empty(),
-    );
+        None,
+    )?;
 
     let response3 = authorizer.is_authorized(&request3, &policy_set, &entities);
     println!(
@@ -98,7 +101,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(EntityUid::from_str("Action::\"read\"")?),
         Some(EntityUid::from_str("Document::\"public-doc\"")?),
         Context::empty(),
-    );
+        None,
+    )?;
 
     let response4 = authorizer.is_authorized(&request4, &policy_set, &entities);
     println!(
@@ -143,7 +147,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(EntityUid::from_str("Action::\"access\"")?),
         Some(EntityUid::from_str("Resource::\"data\"")?),
         context,
-    );
+        None,
+    )?;
 
     let response5 = authorizer.is_authorized(&request5, &context_policy_set, &entities);
     println!(
@@ -172,7 +177,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(EntityUid::from_str("Action::\"access\"")?),
         Some(EntityUid::from_str("Resource::\"data\"")?),
         context,
-    );
+        None,
+    )?;
 
     let response6 = authorizer.is_authorized(&request6, &context_policy_set, &entities);
     println!(

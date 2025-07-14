@@ -5,7 +5,8 @@
 //! 2. Enabling P2P networking
 //! 3. Viewing P2P status and transfers
 
-use blixard::tui::app::{App, AppTab};
+use blixard::tui::state::App;
+use blixard::tui::types::ui::AppTab;
 use blixard::tui::Event;
 use blixard::BlixardResult;
 use crossterm::{
@@ -31,7 +32,7 @@ async fn main() -> BlixardResult<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Create app and switch to P2P tab
-    let mut app = App::new().await?;
+    let mut app = App::new();
     app.switch_tab(AppTab::P2P);
 
     // Create event channel
@@ -60,13 +61,13 @@ async fn main() -> BlixardResult<()> {
     // Main loop
     loop {
         // Draw UI
-        terminal.draw(|f| blixard::tui::ui::render(f, &app))?;
+        terminal.draw(|f| blixard::tui::ui::render(f, &mut app))?;
 
         // Handle events
         if let Ok(event) = rx.try_recv() {
             app.handle_event(event).await?;
 
-            if app.should_quit {
+            if app.ui_state.should_quit {
                 break;
             }
         }

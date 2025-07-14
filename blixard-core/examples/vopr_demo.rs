@@ -4,7 +4,6 @@
 //! Blixard's distributed consensus system.
 
 use blixard_core::vopr::{Vopr, VoprConfig};
-use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -64,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 failure.operations.len()
             );
 
-            if let Some(ref minimal) = failure.minimal_reproducer {
+            if let Some(minimal) = &failure.minimal_reproducer {
                 println!("Minimized to: {} operations", minimal.len());
             }
 

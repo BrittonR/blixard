@@ -103,6 +103,7 @@ path = "../examples/tui_p2p_demo.rs"
 [[example]]
 name = "raft_batch_demo"
 path = "../examples/raft_batch_demo.rs"
+required-features = ["test-helpers"]
 
 [[example]]
 name = "raft_batch_simple_demo"

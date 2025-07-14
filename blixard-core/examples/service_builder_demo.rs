@@ -7,10 +7,10 @@
 
 /// BEFORE: Traditional service implementation (109 lines for basic health service)
 mod traditional_service_example {
-    use crate::{
+    use blixard_core::{
         error::BlixardResult,
         iroh_types::{HealthCheckRequest, HealthCheckResponse},
-        metrics_otel::{attributes, metrics, Timer},
+        metrics_otel::{attributes, safe_metrics, Timer},
         node_shared::SharedNodeState,
         transport::iroh_service::IrohService,
     };
@@ -65,7 +65,7 @@ mod traditional_service_example {
 
         pub async fn handle_request(&self, /* params */) -> BlixardResult<()> {
             // TODO: Implement proper protocol handling
-            Err(crate::error::BlixardError::NotImplemented {
+            Err(blixard_core::error::BlixardError::NotImplemented {
                 feature: "Iroh health protocol handler".to_string(),
             })
         }
@@ -84,7 +84,7 @@ mod traditional_service_example {
 
         async fn handle_call(&self, method: &str, payload: Bytes) -> BlixardResult<Bytes> {
             // Metrics boilerplate repeated in EVERY service
-            let metrics = metrics();
+            let metrics = safe_metrics()?;
             let _timer = Timer::with_attributes(
                 metrics.grpc_request_duration.clone(),
                 vec![
@@ -98,12 +98,12 @@ mod traditional_service_example {
             match method {
                 "check" => {
                     let request: HealthCheckRequest =
-                        crate::transport::iroh_protocol::deserialize_payload(&payload)?;
+                        blixard_core::transport::iroh_protocol::deserialize_payload(&payload)?;
                     debug!("Handling health check: {:?}", request);
                     let response = self.handle_health_check(request).await?;
-                    crate::transport::iroh_protocol::serialize_payload(&response)
+                    blixard_core::transport::iroh_protocol::serialize_payload(&response)
                 }
-                _ => Err(crate::error::BlixardError::NotImplemented {
+                _ => Err(blixard_core::error::BlixardError::NotImplemented {
                     feature: format!("Method {} on health service", method),
                 }),
             }
@@ -115,7 +115,7 @@ mod traditional_service_example {
 
 /// AFTER: ServiceBuilder implementation (30 lines for equivalent functionality)
 mod service_builder_example {
-    use crate::{
+    use blixard_core::{
         error::BlixardResult,
         node_shared::SharedNodeState,
         transport::service_builder::{ServiceBuilder, ServiceProtocolHandler},
@@ -244,7 +244,7 @@ pub mod analysis {
 #[cfg(test)]
 mod comparison_tests {
     use super::*;
-    use crate::node_shared::SharedNodeState;
+    use blixard_core::node_shared::SharedNodeState;
     use std::sync::Arc;
 
     #[tokio::test]

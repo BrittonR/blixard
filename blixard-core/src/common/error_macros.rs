@@ -82,10 +82,8 @@ macro_rules! io_err {
 /// Convert an error to SerializationError
 #[macro_export]
 macro_rules! serialization_err {
-    ($result:expr, $($arg:tt)*) => {
-        $result.map_err(|e| $crate::error::BlixardError::SerializationError(
-            format!($($arg)*, e)
-        ))
+    ($result:expr) => {
+        $result.map_err(|e| $crate::error::BlixardError::SerializationError(Box::new(e)))
     };
 }
 

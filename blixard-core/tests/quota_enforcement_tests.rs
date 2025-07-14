@@ -9,7 +9,7 @@
 use blixard_core::{
     quota_manager::QuotaManager,
     resource_quotas::*,
-    storage::{RedbRaftStorage, Storage},
+    storage::RedbRaftStorage,
 };
 use redb::Database;
 use std::sync::Arc;

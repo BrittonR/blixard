@@ -4,9 +4,9 @@
 //! distributed system failures in production-like scenarios.
 
 use blixard_core::{
-    error::{BlixardError, BlixardResult},
+    error::BlixardResult,
+    failpoints,
     fail_point,
-    failpoints::{self, scenarios},
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -129,7 +129,7 @@ fn demo_probabilistic_failures() -> Result<(), Box<dyn std::error::Error>> {
 
     // 30% failure rate
     #[cfg(feature = "failpoints")]
-    scenarios::fail_with_probability("storage::commit_transaction", 0.3);
+    fail::cfg("storage::commit_transaction", "30%return")?;
 
     let mut successes = 0;
     let mut failures = 0;
@@ -150,7 +150,7 @@ fn demo_probabilistic_failures() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     #[cfg(feature = "failpoints")]
-    scenarios::disable("storage::commit_transaction");
+    fail::cfg("storage::commit_transaction", "off")?;
 
     Ok(())
 }
@@ -217,7 +217,9 @@ fn demo_production_debugging() -> Result<(), Box<dyn std::error::Error>> {
     // Clean up
     std::env::remove_var("FAILPOINTS");
     #[cfg(feature = "failpoints")]
-    scenarios::disable_all();
+    fail::cfg("storage::write", "off")?;
+    fail::cfg("storage::read", "off")?;
+    fail::cfg("network::send_message", "off")?;
 
     Ok(())
 }

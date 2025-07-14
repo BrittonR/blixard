@@ -122,8 +122,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = receiver_task.await;
     let _ = health_task.await;
 
-    transport1.shutdown().await?;
-    transport2.shutdown().await?;
+    // Unwrap from Arc to call shutdown (which consumes self)
+    if let Ok(transport1_inner) = Arc::try_unwrap(transport1) {
+        transport1_inner.shutdown().await?;
+    }
+    if let Ok(transport2_inner) = Arc::try_unwrap(transport2) {
+        transport2_inner.shutdown().await?;
+    }
 
     println!("\n=== All tests completed! ===");
     println!("The ALPN configuration is working correctly with IrohTransportV2.");

@@ -39,7 +39,7 @@ async fn test_token_based_enrollment() -> BlixardResult<()> {
         .await?;
 
     // Simulate a node enrolling
-    let node_id = NodeId::new(&[1u8; 32]);
+    let node_id = NodeId::from_bytes(&[1u8; 32]).unwrap();
     let result = manager
         .enroll_with_token(node_id, &token.token_id, &token.secret)
         .await?;
@@ -54,7 +54,7 @@ async fn test_token_based_enrollment() -> BlixardResult<()> {
     assert_eq!(user, Some("test-operator".to_string()));
 
     // Try to use token again (should fail for single-use)
-    let node_id2 = NodeId::new(&[2u8; 32]);
+    let node_id2 = NodeId::from_bytes(&[2u8; 32]).unwrap();
     let result2 = manager
         .enroll_with_token(node_id2, &token.token_id, &token.secret)
         .await;
@@ -84,7 +84,7 @@ async fn test_multi_use_token_enrollment() -> BlixardResult<()> {
 
     // Enroll 3 nodes successfully
     for i in 0..3 {
-        let node_id = NodeId::new(&[i as u8; 32]);
+        let node_id = NodeId::from_bytes(&[i as u8; 32]).unwrap();
         let result = manager
             .enroll_with_token(node_id, &token.token_id, &token.secret)
             .await?;
@@ -94,7 +94,7 @@ async fn test_multi_use_token_enrollment() -> BlixardResult<()> {
     }
 
     // 4th enrollment should fail
-    let node_id4 = NodeId::new(&[4u8; 32]);
+    let node_id4 = NodeId::from_bytes(&[4u8; 32]).unwrap();
     let result4 = manager
         .enroll_with_token(node_id4, &token.token_id, &token.secret)
         .await;
@@ -142,7 +142,7 @@ async fn test_certificate_based_enrollment() -> BlixardResult<()> {
     let manager = IdentityEnrollmentManager::new(registry.clone(), Some(cert_config), None);
 
     // Test 1: Operations team member
-    let node_id1 = NodeId::new(&[10u8; 32]);
+    let node_id1 = NodeId::from_bytes(&[10u8; 32]).unwrap();
     let mut cert_attrs1 = HashMap::new();
     cert_attrs1.insert("CN".to_string(), "alice.ops.example.com".to_string());
     cert_attrs1.insert("OU".to_string(), "Operations".to_string());
@@ -159,7 +159,7 @@ async fn test_certificate_based_enrollment() -> BlixardResult<()> {
     assert_eq!(result1.tenant_id, "ops-tenant");
 
     // Test 2: Engineering team member
-    let node_id2 = NodeId::new(&[20u8; 32]);
+    let node_id2 = NodeId::from_bytes(&[20u8; 32]).unwrap();
     let mut cert_attrs2 = HashMap::new();
     cert_attrs2.insert("CN".to_string(), "bob@example.com".to_string());
     cert_attrs2.insert("OU".to_string(), "Engineering".to_string());
@@ -175,7 +175,7 @@ async fn test_certificate_based_enrollment() -> BlixardResult<()> {
     assert_eq!(result2.tenant_id, "default");
 
     // Test 3: No matching patterns
-    let node_id3 = NodeId::new(&[30u8; 32]);
+    let node_id3 = NodeId::from_bytes(&[30u8; 32]).unwrap();
     let mut cert_attrs3 = HashMap::new();
     cert_attrs3.insert("CN".to_string(), "external.contractor.com".to_string());
     cert_attrs3.insert("O".to_string(), "Contractor Inc".to_string());
@@ -270,7 +270,7 @@ async fn test_token_expiration() -> BlixardResult<()> {
     tokio::time::sleep(Duration::from_millis(150)).await;
 
     // Try to use expired token
-    let node_id = NodeId::new(&[99u8; 32]);
+    let node_id = NodeId::from_bytes(&[99u8; 32]).unwrap();
     let result = manager
         .enroll_with_token(node_id, &token.token_id, &token.secret)
         .await;
@@ -306,7 +306,7 @@ async fn test_concurrent_enrollment() -> BlixardResult<()> {
         let secret = token.secret.clone();
 
         let handle = tokio::spawn(async move {
-            let node_id = NodeId::new(&[i as u8; 32]);
+            let node_id = NodeId::from_bytes(&[i as u8; 32]).unwrap();
             manager_clone
                 .enroll_with_token(node_id, &token_id, &secret)
                 .await

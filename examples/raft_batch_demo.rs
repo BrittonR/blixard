@@ -6,14 +6,10 @@
 //! - Improving overall cluster performance
 
 use blixard_core::{
-    config_global,
-    config::{Config, RaftBatchConfig},
-    node::Node,
-    types::{NodeConfig, VmCommand, VmConfig},
+    test_helpers::{TestNode, TestCluster},
+    types::{VmCommand, VmConfig},
 };
-use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tempfile::TempDir;
 use tracing::info;
 
 #[tokio::main]
@@ -28,67 +24,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     info!("Starting Raft batch processing demo");
+    info!("Note: In production, batch processing is configured via blixard.toml");
+    info!("This demo shows the performance characteristics of batch processing\n");
 
-    // Create temporary directory for node data
-    let temp_dir = TempDir::new()?;
-
-    // Test with batching disabled first
-    info!("\n=== Test 1: Batching Disabled ===");
-    let mut config = Config::default();
-    config.cluster.raft.batch_processing.enabled = false;
-    config_global::set(Arc::new(config));
-
-    let disabled_time = run_test(temp_dir.path().join("disabled")).await?;
-
-    // Test with batching enabled
-    info!("\n=== Test 2: Batching Enabled ===");
-    let mut config = Config::default();
-    config.cluster.raft.batch_processing = RaftBatchConfig {
-        enabled: true,
-        max_batch_size: 50,
-        batch_timeout_ms: 5,
-        max_batch_bytes: 512 * 1024, // 512KB
-    };
-    config_global::set(Arc::new(config));
-
-    let enabled_time = run_test(temp_dir.path().join("enabled")).await?;
-
-    // Compare results
-    info!("\n=== Results ===");
-    info!("Without batching: {:?}", disabled_time);
-    info!("With batching: {:?}", enabled_time);
-
-    let improvement = ((disabled_time.as_secs_f64() - enabled_time.as_secs_f64())
-        / disabled_time.as_secs_f64())
-        * 100.0;
-
-    if improvement > 0.0 {
-        info!("Performance improvement: {:.1}%", improvement);
-    } else {
-        info!("Performance difference: {:.1}%", improvement.abs());
-    }
-
-    info!("\nBatch processing demo completed!");
-    Ok(())
-}
-
-async fn run_test(data_dir: std::path::PathBuf) -> Result<Duration, Box<dyn std::error::Error>> {
-    // Create a single node cluster
-    let node_config = NodeConfig {
-        id: 1,
-        bind_address: "127.0.0.1:0".to_string(), // Random port
-        data_dir: data_dir.to_string_lossy().to_string(),
-        bootstrap: true,
-        transport_config: None,
-    };
-
-    let mut node = Node::new(node_config);
-    node.initialize().await?;
-    let node_shared = node.shared();
-
+    // Create a test cluster with single node
+    let mut cluster = TestCluster::new();
+    let node_id = cluster.add_node().await?;
+    
+    // Get the test node
+    let test_node = cluster.nodes().get(&node_id).unwrap();
+    
     // Start the node
-    let node_arc = Arc::new(node);
-    let node_handle = node_arc.clone().start();
+    test_node.start().await?;
+    
+    // Get shared state for command submission
+    let shared_state = test_node.shared_state().await;
 
     // Wait for node to be ready
     tokio::time::sleep(Duration::from_secs(2)).await;
@@ -97,10 +47,12 @@ async fn run_test(data_dir: std::path::PathBuf) -> Result<Duration, Box<dyn std:
     let num_vms = 100;
     let start = Instant::now();
 
+    info!("Creating {} VMs to demonstrate batch processing...", num_vms);
+
     // Submit many VM creation requests rapidly
     let mut handles = vec![];
     for i in 0..num_vms {
-        let shared = node_shared.clone();
+        let shared = shared_state.clone();
         let handle = tokio::spawn(async move {
             let vm_config = VmConfig {
                 name: format!("test-vm-{}", i),
@@ -123,7 +75,8 @@ async fn run_test(data_dir: std::path::PathBuf) -> Result<Duration, Box<dyn std:
             };
 
             // Submit proposal through shared state
-            shared.send_vm_command(command).await
+            let command_str = format!("{:?}", command);
+            shared.send_vm_command(&format!("test-vm-{}", i), command_str).await
         });
         handles.push(handle);
     }
@@ -135,12 +88,17 @@ async fn run_test(data_dir: std::path::PathBuf) -> Result<Duration, Box<dyn std:
 
     let elapsed = start.elapsed();
 
+    info!("\n=== Results ===");
     info!("Created {} VMs in {:?}", num_vms, elapsed);
     info!("Average time per VM: {:?}", elapsed / num_vms);
+    info!("\nWith batch processing enabled (default), multiple proposals are");
+    info!("grouped together for more efficient Raft consensus processing.");
+    info!("\nTo disable batching, set cluster.raft.batch_processing.enabled = false");
+    info!("in your blixard.toml configuration file.");
 
     // Shutdown
-    node_arc.stop().await?;
-    let _ = tokio::time::timeout(Duration::from_secs(5), node_handle).await;
+    cluster.shutdown().await;
 
-    Ok(elapsed)
+    info!("\nBatch processing demo completed!");
+    Ok(())
 }
