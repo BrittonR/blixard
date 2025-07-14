@@ -345,22 +345,12 @@ mod tests {
                 );
 
             // Test that all handlers were created successfully
-            assert!(!std::ptr::eq(
-                tick_handler.as_ref() as *const _,
-                std::ptr::null()
-            ));
-            assert!(!std::ptr::eq(
-                proposal_handler.as_ref() as *const _,
-                std::ptr::null()
-            ));
-            assert!(!std::ptr::eq(
-                message_handler.as_ref() as *const _,
-                std::ptr::null()
-            ));
-            assert!(!std::ptr::eq(
-                conf_change_handler.as_ref() as *const _,
-                std::ptr::null()
-            ));
+            // Box::new always creates a valid pointer, so we just verify they exist
+            // by checking that we can access them as trait objects
+            let _: &dyn TickHandler = tick_handler.as_ref();
+            let _: &dyn ProposalHandler = proposal_handler.as_ref();
+            let _: &dyn MessageHandler = message_handler.as_ref();
+            let _: &dyn ConfChangeHandler = conf_change_handler.as_ref();
         }
     }
 }

@@ -392,12 +392,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_retry_with_backoff() {
-        let mut attempt_count = 0;
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let attempt_count = AtomicU32::new(0);
 
         let operation = || {
-            attempt_count += 1;
+            let count = attempt_count.fetch_add(1, Ordering::SeqCst) + 1;
             async move {
-                if attempt_count < 3 {
+                if count < 3 {
                     Err(BlixardError::Internal {
                         message: "Temporary failure".to_string(),
                     })
@@ -417,7 +418,7 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "Success");
-        assert_eq!(attempt_count, 3);
+        assert_eq!(attempt_count.load(Ordering::SeqCst), 3);
     }
 
     #[test]

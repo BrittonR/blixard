@@ -90,9 +90,13 @@ pub mod units {
     use super::*;
 
     // Define unit types
+    #[derive(Debug, Clone, Copy)]
     pub struct Meters;
+    #[derive(Debug, Clone, Copy)]
     pub struct Feet;
+    #[derive(Debug, Clone, Copy)]
     pub struct Celsius;
+    #[derive(Debug, Clone, Copy)]
     pub struct Fahrenheit;
     #[derive(Debug, Clone, Copy)]
     pub struct Bytes;
@@ -399,10 +403,10 @@ mod tests {
         let distance2 = Measurement::<f64, Meters>::new(50.0);
 
         // Can add measurements of the same unit
-        let total = distance1 + distance2;
+        let total = distance1.clone() + distance2;
         assert_eq!(*total.value(), 150.0);
 
-        // Convert between units
+        // Convert between units  
         let in_feet = distance1.to_feet();
         assert!((in_feet.value() - 328.084).abs() < 0.001);
 

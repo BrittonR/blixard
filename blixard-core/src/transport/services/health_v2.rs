@@ -201,7 +201,7 @@ mod tests {
         let request = HealthCheckRequest {};
 
         let response = service.handle_health_check(request).await.unwrap();
-        assert_eq!(response.status, "healthy".to_string());
+        assert_eq!(response.status, Some("healthy".to_string()));
         assert!(response.vm_count.is_some());
         assert!(response.memory_usage_mb.is_some());
     }

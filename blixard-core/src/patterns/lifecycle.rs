@@ -408,6 +408,8 @@ impl Default for LifecycleCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
     use tokio::time::{sleep, Duration};
 
     // Mock manager for testing
@@ -542,17 +544,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_wait_for_state() {
-        let mut manager = MockManager::new_success();
+        let manager = Arc::new(Mutex::new(MockManager::new_success()));
+        let manager_clone = Arc::clone(&manager);
 
         // Start manager in background
-        let manager_ref = &mut manager;
         tokio::spawn(async move {
             sleep(Duration::from_millis(50)).await;
-            manager_ref.start().await.unwrap();
+            manager_clone.lock().await.start().await.unwrap();
         });
 
         // Wait for running state
         let result = manager
+            .lock()
+            .await
             .wait_for_state(LifecycleState::Running, Duration::from_millis(100))
             .await;
 

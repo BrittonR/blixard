@@ -493,13 +493,19 @@ mod tests {
     };
 
     /// Helper function to parse certificate and validate basic structure
-    fn parse_certificate_pem(cert_pem: &str) -> crate::error::BlixardResult<X509Certificate> {
+    /// Since x509_parser::X509Certificate contains references to the input data,
+    /// we use Box::leak to create a 'static lifetime for testing purposes
+    fn parse_certificate_pem(cert_pem: &str) -> crate::error::BlixardResult<X509Certificate<'static>> {
         let cert_der = pem::parse(cert_pem)
             .map_err(|e| crate::error::BlixardError::Security {
                 message: format!("Failed to parse PEM certificate: {}", e),
             })?;
         
-        let (_, cert) = parse_x509_certificate(&cert_der.contents)
+        // Convert to owned data and leak it to get 'static lifetime
+        // This is acceptable for tests as they're short-lived
+        let cert_bytes = Box::leak(cert_der.into_contents().into_boxed_slice());
+        
+        let (_, cert) = parse_x509_certificate(cert_bytes)
             .map_err(|e| crate::error::BlixardError::Security {
                 message: format!("Failed to parse X.509 certificate: {}", e),
             })?;

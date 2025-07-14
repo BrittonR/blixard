@@ -409,11 +409,11 @@ mod tests {
 
     #[test]
     fn test_const_set_subset() {
-        const SET1: ConstSet<i32, 3> = ConstSet::from_unsorted([1, 2, 3]);
-        const SET2: ConstSet<i32, 5> = ConstSet::from_unsorted([1, 2, 3, 4, 5]);
+        let set1: ConstSet<i32, 3> = ConstSet::from_unsorted([1, 2, 3]);
+        let set2: ConstSet<i32, 5> = ConstSet::from_unsorted([1, 2, 3, 4, 5]);
         
-        assert!(SET1.is_subset_of(&SET2));
-        assert!(!SET2.is_subset_of(&SET1));
+        assert!(set1.is_subset_of(&set2));
+        assert!(!set2.is_subset_of(&set1));
     }
 
     #[test]

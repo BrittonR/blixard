@@ -450,18 +450,18 @@ mod tests {
     validated_struct!(
         #[derive(Debug)]
         pub struct ServerConfig {
-            pub port: u16 = |&p| p > 1000 && p < 65536,
+            pub port: u16 = |&p| p > 1000 && p <= 65535,
             pub max_connections: u32 = |&c| c > 0 && c <= 10000,
         }
     );
 
     #[test]
     fn test_validated_struct() {
-        const CONFIG: ServerConfig = ServerConfig::new(8080, 1000);
-        assert_eq!(CONFIG.port, 8080);
-        assert_eq!(CONFIG.max_connections, 1000);
+        let config = ServerConfig::new(8080, 1000);
+        assert_eq!(config.port, 8080);
+        assert_eq!(config.max_connections, 1000);
 
-        // This would fail to compile:
+        // This would fail to compile if used in const context:
         // const INVALID: ServerConfig = ServerConfig::new(0, 20000);
     }
 }

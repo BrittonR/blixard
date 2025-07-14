@@ -369,6 +369,7 @@ mod tests {
             p2p_node_id: None,
             p2p_addresses: vec![],
             p2p_relay_url: None,
+            is_connected: true,
         };
 
         state_manager.add_peer(2, peer_info.clone()).await.unwrap();
