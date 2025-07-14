@@ -85,7 +85,7 @@ pub async fn new_connect_with_retry_builder(address: &str) -> BlixardResult<Stri
             multiplier: 2.0,
         })
         .jitter(true)
-        .is_retryable(|e| !matches!(e, BlixardError::ValidationError { .. }))
+        .is_retryable(|e| !matches!(e, BlixardError::ConfigurationError { .. }))
         .operation(move || {
             let addr = addr.clone();
             Box::pin(async move {

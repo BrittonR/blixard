@@ -371,7 +371,7 @@ mod tests {
     fn test_vm_state_machine() {
         use vm_lifecycle::*;
 
-        let vm = Vm::new("test-vm".to_string(), VmConfig::default());
+        let vm = Vm::new("test-vm".to_string(), crate::types::VmConfig::default());
         assert_eq!(vm.state_name(), "Created");
 
         let vm = vm.configure();
