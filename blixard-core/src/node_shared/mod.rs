@@ -41,7 +41,6 @@ pub struct RaftStatus {
 ///
 /// This contains all the shared state that multiple components need to access,
 /// including cluster membership, database handle, configuration, etc.
-#[derive(Debug)]
 pub struct SharedNodeState {
     /// Node configuration
     pub config: NodeConfig,
@@ -69,6 +68,9 @@ pub struct SharedNodeState {
 
     /// Peer connector for managing P2P connections
     peer_connector: Arc<Mutex<Option<Arc<crate::transport::iroh_peer_connector::IrohPeerConnector>>>>,
+    
+    /// VM backend for managing virtual machines
+    vm_manager: Arc<Mutex<Option<Arc<dyn crate::vm_backend::VmBackend>>>>,
 }
 
 impl SharedNodeState {
@@ -84,6 +86,7 @@ impl SharedNodeState {
             iroh_endpoint: Arc::new(Mutex::new(None)),
             iroh_node_addr: Arc::new(Mutex::new(None)),
             peer_connector: Arc::new(Mutex::new(None)),
+            vm_manager: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -226,53 +229,119 @@ impl SharedNodeState {
         self.get_cluster_member(node_id).await
     }
 
-    // VM-related stub methods
-    pub async fn create_vm(&self, _config: crate::types::VmConfig) -> BlixardResult<String> {
-        Err(BlixardError::NotImplemented {
-            feature: "create_vm in SharedNodeState".to_string(),
-        })
+    // VM-related methods
+    pub async fn create_vm(&self, config: crate::types::VmConfig) -> BlixardResult<String> {
+        match self.get_vm_manager().await {
+            Some(vm_manager) => {
+                // Create VM on this node
+                vm_manager.create_vm(&config, self.node_id()).await?;
+                Ok(config.name.clone())
+            },
+            None => Err(BlixardError::NotImplemented {
+                feature: "VM manager not initialized".to_string(),
+            }),
+        }
     }
 
-    pub async fn start_vm(&self, _vm_name: &str) -> BlixardResult<()> {
-        Err(BlixardError::NotImplemented {
-            feature: "start_vm in SharedNodeState".to_string(),
-        })
+    pub async fn start_vm(&self, vm_name: &str) -> BlixardResult<()> {
+        match self.get_vm_manager().await {
+            Some(vm_manager) => vm_manager.start_vm(vm_name).await,
+            None => Err(BlixardError::NotImplemented {
+                feature: "VM manager not initialized".to_string(),
+            }),
+        }
     }
 
-    pub async fn stop_vm(&self, _vm_name: &str) -> BlixardResult<()> {
-        Err(BlixardError::NotImplemented {
-            feature: "stop_vm in SharedNodeState".to_string(),
-        })
+    pub async fn stop_vm(&self, vm_name: &str) -> BlixardResult<()> {
+        match self.get_vm_manager().await {
+            Some(vm_manager) => vm_manager.stop_vm(vm_name).await,
+            None => Err(BlixardError::NotImplemented {
+                feature: "VM manager not initialized".to_string(),
+            }),
+        }
     }
 
-    pub async fn delete_vm(&self, _vm_name: &str) -> BlixardResult<()> {
-        Err(BlixardError::NotImplemented {
-            feature: "delete_vm in SharedNodeState".to_string(),
-        })
+    pub async fn delete_vm(&self, vm_name: &str) -> BlixardResult<()> {
+        match self.get_vm_manager().await {
+            Some(vm_manager) => vm_manager.delete_vm(vm_name).await,
+            None => Err(BlixardError::NotImplemented {
+                feature: "VM manager not initialized".to_string(),
+            }),
+        }
     }
 
     pub async fn list_vms(&self) -> BlixardResult<Vec<crate::types::VmState>> {
-        Err(BlixardError::NotImplemented {
-            feature: "list_vms in SharedNodeState".to_string(),
-        })
+        match self.get_vm_manager().await {
+            Some(vm_manager) => {
+                let vms = vm_manager.list_vms().await?;
+                Ok(vms.into_iter().map(|(config, status)| crate::types::VmState {
+                    name: config.name.clone(),
+                    config,
+                    status,
+                    node_id: self.node_id(),
+                    created_at: chrono::Utc::now(),
+                    updated_at: chrono::Utc::now(),
+                }).collect())
+            },
+            None => Err(BlixardError::NotImplemented {
+                feature: "VM manager not initialized".to_string(),
+            }),
+        }
     }
 
-    pub async fn get_vm_info(&self, _vm_name: &str) -> BlixardResult<crate::types::VmState> {
-        Err(BlixardError::NotImplemented {
-            feature: "get_vm_info in SharedNodeState".to_string(),
-        })
+    pub async fn get_vm_info(&self, vm_name: &str) -> BlixardResult<crate::types::VmState> {
+        match self.get_vm_manager().await {
+            Some(vm_manager) => {
+                let vms = vm_manager.list_vms().await?;
+                vms.into_iter()
+                    .find(|(config, _)| config.name == vm_name)
+                    .map(|(config, status)| crate::types::VmState {
+                        name: config.name.clone(),
+                        config,
+                        status,
+                        node_id: self.node_id(),
+                        created_at: chrono::Utc::now(),
+                        updated_at: chrono::Utc::now(),
+                    })
+                    .ok_or_else(|| BlixardError::NotFound {
+                        resource: format!("VM: {}", vm_name),
+                    })
+            },
+            None => Err(BlixardError::NotImplemented {
+                feature: "VM manager not initialized".to_string(),
+            }),
+        }
     }
 
-    pub async fn get_vm_status(&self, _vm_name: &str) -> BlixardResult<String> {
-        Err(BlixardError::NotImplemented {
-            feature: "get_vm_status in SharedNodeState".to_string(),
-        })
+    pub async fn get_vm_status(&self, vm_name: &str) -> BlixardResult<String> {
+        match self.get_vm_manager().await {
+            Some(vm_manager) => {
+                let status = vm_manager.get_vm_status(vm_name).await?;
+                match status {
+                    Some(s) => Ok(format!("{:?}", s)),
+                    None => Err(BlixardError::NotFound {
+                        resource: format!("VM: {}", vm_name),
+                    }),
+                }
+            },
+            None => Err(BlixardError::NotImplemented {
+                feature: "VM manager not initialized".to_string(),
+            }),
+        }
     }
 
-    pub async fn get_vm_ip(&self, _vm_name: &str) -> BlixardResult<String> {
-        Err(BlixardError::NotImplemented {
-            feature: "get_vm_ip in SharedNodeState".to_string(),
-        })
+    pub async fn get_vm_ip(&self, vm_name: &str) -> BlixardResult<String> {
+        match self.get_vm_manager().await {
+            Some(vm_manager) => {
+                let ip = vm_manager.get_vm_ip(vm_name).await?;
+                ip.ok_or_else(|| BlixardError::NotFound {
+                    resource: format!("VM IP: {}", vm_name),
+                })
+            },
+            None => Err(BlixardError::NotImplemented {
+                feature: "VM manager not initialized".to_string(),
+            }),
+        }
     }
 
     pub async fn migrate_vm(&self, _vm_name: &str, _target_node: u64) -> BlixardResult<()> {
@@ -286,8 +355,8 @@ impl SharedNodeState {
         None // TODO: Implement manager storage
     }
 
-    pub fn get_vm_manager(&self) -> Option<Arc<dyn crate::vm_backend::VmBackend>> {
-        None // TODO: Implement manager storage
+    pub async fn get_vm_manager(&self) -> Option<Arc<dyn crate::vm_backend::VmBackend>> {
+        self.vm_manager.lock().await.clone()
     }
 
     pub fn get_peer_connector(
@@ -491,8 +560,8 @@ impl SharedNodeState {
     }
 
     // More lifecycle and management methods
-    pub fn set_vm_manager(&self, _vm_manager: Arc<dyn crate::vm_backend::VmBackend>) {
-        // TODO: Store VM manager reference
+    pub async fn set_vm_manager(&self, vm_manager: Arc<dyn crate::vm_backend::VmBackend>) {
+        *self.vm_manager.lock().await = Some(vm_manager);
     }
 
     pub fn set_quota_manager(&self, _quota_manager: Arc<crate::quota_manager::QuotaManager>) {
@@ -596,6 +665,16 @@ impl SharedNodeState {
 impl Default for SharedNodeState {
     fn default() -> Self {
         Self::new_default()
+    }
+}
+
+impl std::fmt::Debug for SharedNodeState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SharedNodeState")
+            .field("node_id", &self.config.id)
+            .field("is_initialized", &self.is_initialized())
+            .field("is_leader", &self.is_leader())
+            .finish()
     }
 }
 

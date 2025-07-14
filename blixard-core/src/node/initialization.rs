@@ -129,7 +129,7 @@ impl Node {
         let vm_backend = self.create_vm_backend(&registry, db.clone())?;
 
         // Store VM backend in shared state
-        self.shared.set_vm_manager(vm_backend.clone());
+        self.shared.set_vm_manager(vm_backend.clone()).await;
 
         // Initialize VM manager
         let vm_manager = Arc::new(VmManager::new(db.clone(), vm_backend, self.shared.clone()));

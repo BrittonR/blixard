@@ -222,14 +222,13 @@ pub async fn start_iroh_services(
     shared_state: Arc<SharedNodeState>,
     bind_addr: SocketAddr,
 ) -> BlixardResult<JoinHandle<()>> {
-    // Get the Iroh endpoint from P2P manager
-    let endpoint = if let Some(p2p_manager) = shared_state.get_p2p_manager() {
-        let (endpoint, _node_id) = p2p_manager.get_endpoint();
+    // Get the Iroh endpoint directly from SharedNodeState
+    let endpoint = if let Some(endpoint) = shared_state.get_iroh_endpoint().await {
         endpoint
     } else {
-        // This shouldn't happen - P2P manager should always be available when starting services
+        // This shouldn't happen - Iroh endpoint should always be available when starting services
         return Err(BlixardError::Internal {
-            message: "P2P manager not available when starting Iroh services".to_string(),
+            message: "Iroh endpoint not available when starting Iroh services".to_string(),
         });
     };
 

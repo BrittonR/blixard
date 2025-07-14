@@ -465,7 +465,10 @@ async fn main() -> BlixardResult<()> {
     let filter = tracing_subscriber::EnvFilter::from_default_env().add_directive(
         "blixard=info"
             .parse()
-            .map_err(|e| BlixardError::ConfigError(format!("Invalid log directive: {}", e)))?,
+            .map_err(|e| BlixardError::ConfigurationError {
+                component: "cli".to_string(),
+                message: format!("Invalid log directive: {}", e),
+            })?,
     );
 
     tracing_subscriber::fmt().with_env_filter(filter).init();
@@ -500,10 +503,13 @@ async fn main() -> BlixardResult<()> {
                     if !peer_addrs.is_empty() {
                         // Validate that it's a valid socket address
                         let _: SocketAddr = peer_addrs[0].parse().map_err(|e| {
-                            BlixardError::ConfigError(format!(
-                                "Invalid peer address '{}': {}",
-                                peer_addrs[0], e
-                            ))
+                            BlixardError::ConfigurationError {
+                                component: "cli".to_string(),
+                                message: format!(
+                                    "Invalid peer address '{}': {}",
+                                    peer_addrs[0], e
+                                ),
+                            }
                         })?;
                         Some(peer_addrs[0].to_string())
                     } else {
@@ -531,7 +537,10 @@ async fn main() -> BlixardResult<()> {
                 }
 
                 builder.build().map_err(|e| {
-                    BlixardError::ConfigError(format!("Failed to build config: {}", e))
+                    BlixardError::ConfigurationError {
+                        component: "cli".to_string(),
+                        message: format!("Failed to build config: {}", e),
+                    }
                 })?
             };
 
@@ -543,10 +552,13 @@ async fn main() -> BlixardResult<()> {
 
             // Convert to old NodeConfig for compatibility
             let bind_address: SocketAddr = config.node.bind_address.parse().map_err(|e| {
-                BlixardError::ConfigError(format!(
-                    "Invalid bind address '{}': {}",
-                    config.node.bind_address, e
-                ))
+                BlixardError::ConfigurationError {
+                    component: "cli".to_string(),
+                    message: format!(
+                        "Invalid bind address '{}': {}",
+                        config.node.bind_address, e
+                    ),
+                }
             })?;
 
             let node_config = NodeConfig {
@@ -1615,22 +1627,37 @@ async fn handle_ip_pool_command(command: IpPoolCommands) -> BlixardResult<()> {
         } => {
             // Parse subnet
             let subnet_net = ipnet::IpNet::from_str(&subnet)
-                .map_err(|e| BlixardError::ConfigError(format!("Invalid subnet: {}", e)))?;
+                .map_err(|e| BlixardError::ConfigurationError {
+                    component: "ip-pool".to_string(),
+                    message: format!("Invalid subnet: {}", e),
+                })?;
             
             // Parse IPs
             let gateway_ip = IpAddr::from_str(&gateway)
-                .map_err(|e| BlixardError::ConfigError(format!("Invalid gateway IP: {}", e)))?;
+                .map_err(|e| BlixardError::ConfigurationError {
+                    component: "ip-pool".to_string(),
+                    message: format!("Invalid gateway IP: {}", e),
+                })?;
             let start_addr = IpAddr::from_str(&start_ip)
-                .map_err(|e| BlixardError::ConfigError(format!("Invalid start IP: {}", e)))?;
+                .map_err(|e| BlixardError::ConfigurationError {
+                    component: "ip-pool".to_string(),
+                    message: format!("Invalid start IP: {}", e),
+                })?;
             let end_addr = IpAddr::from_str(&end_ip)
-                .map_err(|e| BlixardError::ConfigError(format!("Invalid end IP: {}", e)))?;
+                .map_err(|e| BlixardError::ConfigurationError {
+                    component: "ip-pool".to_string(),
+                    message: format!("Invalid end IP: {}", e),
+                })?;
             
             // Parse DNS servers
             let dns_servers: Vec<IpAddr> = dns
                 .split(',')
                 .map(|s| IpAddr::from_str(s.trim()))
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| BlixardError::ConfigError(format!("Invalid DNS server: {}", e)))?;
+                .map_err(|e| BlixardError::ConfigurationError {
+                    component: "ip-pool".to_string(),
+                    message: format!("Invalid DNS server: {}", e),
+                })?;
             
             // Create pool config
             let pool_id = IpPoolId(rand::random());

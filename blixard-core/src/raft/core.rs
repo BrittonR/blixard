@@ -545,18 +545,9 @@ impl RaftManager {
             .process_committed_entries(&mut ready, &mut node)
             .await?;
 
-        // Advance the Raft node
+        // Advance the Raft node (this handles applied index updates internally)
         self.advance_raft_node(&mut node, ready, last_applied_index)
             .await?;
-
-        // Update applied index
-        if last_applied_index > 0 {
-            node.advance_apply_to(last_applied_index);
-            info!(
-                self.logger,
-                "[RAFT-READY] Advanced applied index to {}", last_applied_index
-            );
-        }
 
         // Check and trigger log compaction if needed
         self.snapshot_manager

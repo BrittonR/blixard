@@ -111,7 +111,7 @@ impl MonitoringServiceImpl {
         let connected_peers = self.node.get_peers().await.len() as u32;
 
         // Get VM count
-        let running_vms = if let Some(vm_manager) = self.node.get_vm_manager() {
+        let running_vms = if let Some(vm_manager) = self.node.get_vm_manager().await {
             vm_manager
                 .list_vms()
                 .await

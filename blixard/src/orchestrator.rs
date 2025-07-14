@@ -193,7 +193,7 @@ impl BlixardOrchestrator {
 
     /// Get the VM backend for direct access to VM operations
     pub async fn vm_backend(&self) -> Option<Arc<dyn VmBackend>> {
-        self.node.shared().get_vm_manager()
+        self.node.shared().get_vm_manager().await
     }
 
     /// Get the bind address of the gRPC server

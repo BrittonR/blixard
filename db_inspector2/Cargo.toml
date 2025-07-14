@@ -1,0 +1,9 @@
+[package]
+name = "db_inspector2"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+redb = "2.1.3"

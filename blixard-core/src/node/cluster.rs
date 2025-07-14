@@ -471,17 +471,17 @@ impl Node {
         _p2p_addresses: &[String],
         _p2p_relay_url: &Option<String>,
     ) -> BlixardResult<()> {
-        // Now connect via P2P
-        if let Some(p2p_manager) = self.shared.get_p2p_manager() {
+        // Now connect via P2P using Iroh endpoint directly
+        if let Some(endpoint) = self.shared.get_iroh_endpoint().await {
             tracing::info!("Connecting to leader via P2P at {}", node_addr.node_id);
-            p2p_manager
-                .connect_p2p_peer(bootstrap_info.node_id, node_addr)
-                .await?;
-
+            
+            // TODO: Implement P2P peer connection using endpoint directly
+            // For now, we'll proceed with creating the transport client
+            
             // Create P2P client and send join request
-            let (endpoint, _our_node_id) = p2p_manager.get_endpoint();
+            let endpoint_arc = Arc::new(endpoint);
             let transport_client = crate::transport::iroh_client::IrohClusterServiceClient::new(
-                Arc::new(endpoint),
+                endpoint_arc,
                 node_addr.clone(),
             );
 
@@ -541,7 +541,7 @@ impl Node {
             }
         } else {
             Err(BlixardError::Internal {
-                message: "P2P manager not available".to_string(),
+                message: "Iroh endpoint not available for P2P cluster join".to_string(),
             })
         }
     }
@@ -621,15 +621,21 @@ impl Node {
         let timeout = Duration::from_secs(30);
 
         while start.elapsed() < timeout {
-            if self.shared.is_initialized() {
-                tracing::info!("Raft is ready");
+            // Check if core Raft dependencies are ready (not full node initialization)
+            let has_database = self.shared.get_database().await.is_some();
+            let has_endpoint = self.shared.get_iroh_endpoint().await.is_some();
+            
+            if has_database && has_endpoint {
+                tracing::info!("Raft dependencies are ready (database and P2P endpoint available)");
                 return Ok(());
             }
+            
+            tracing::debug!("Waiting for Raft dependencies - database: {}, endpoint: {}", has_database, has_endpoint);
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
 
         Err(BlixardError::Internal {
-            message: "Timeout waiting for Raft to initialize".to_string(),
+            message: "Timeout waiting for Raft dependencies (database and P2P endpoint) to initialize".to_string(),
         })
     }
 
