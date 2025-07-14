@@ -15,7 +15,7 @@ use crate::{
     vm_auto_recovery::{RecoveryPolicy, VmAutoRecovery},
     vm_backend::VmManager,
     vm_health_config::{
-        HealthCheckSchedulerConfig, HealthStateManagerConfig, RecoveryCoordinatorConfig, VmHealthMonitorConfig,
+        HealthCheckSchedulerConfig, RecoveryCoordinatorConfig, VmHealthMonitorConfig,
         VmHealthMonitorDependencies,
     },
     vm_health_recovery_coordinator::RecoveryCoordinator,

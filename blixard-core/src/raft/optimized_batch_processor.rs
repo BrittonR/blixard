@@ -321,6 +321,7 @@ impl BatchPerformanceMetrics {
         best_size.clamp(config.min_batch_size, config.max_batch_size)
     }
     
+    #[allow(dead_code)]
     fn get_avg_processing_time(&self) -> Duration {
         if self.processing_times.is_empty() {
             Duration::from_millis(10)

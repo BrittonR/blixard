@@ -16,7 +16,7 @@ use crate::{
     error::{BlixardError, BlixardResult},
     patterns::LifecycleManager,
     vm_health_config::{HealthStateManagerConfig, VmHealthMonitorDependencies},
-    vm_health_types::{HealthCheck, HealthCheckPriority, VmHealthCheckConfig, VmHealthStatus},
+    vm_health_types::{HealthCheck, VmHealthCheckConfig, VmHealthStatus},
 };
 
 /// Component responsible for managing VM health state

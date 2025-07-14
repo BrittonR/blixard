@@ -465,7 +465,7 @@ impl Node {
     /// Execute HTTP bootstrap join process
     async fn execute_http_bootstrap_join(
         &self,
-        bootstrap_info: &crate::iroh_types::BootstrapInfo,
+        _bootstrap_info: &crate::iroh_types::BootstrapInfo,
         node_addr: &iroh::NodeAddr,
         _p2p_node_id: &Option<String>,
         _p2p_addresses: &[String],

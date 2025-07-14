@@ -41,7 +41,7 @@ pub struct IpAddressFactory {
 
 impl IpAddressFactory {
     pub fn new(subnet: &str, max_hosts: u32) -> BlixardResult<Self> {
-        let subnet_base: Ipv4Addr = subnet.parse().map_err(|_| BlixardError::InvalidInput {
+        let subnet_base: Ipv4Addr = subnet.parse().map_err(|_| BlixardError::ValidationError {
             field: "subnet".to_string(),
             message: format!("Invalid IPv4 address: {}", subnet),
         })?;

@@ -674,7 +674,7 @@ mod tests {
         // Non-circuit-breaking errors shouldn't open circuit
         for _ in 0..5 {
             let result = breaker.call_async(|| async {
-                Err::<i32, _>(BlixardError::InvalidInput {
+                Err::<i32, _>(BlixardError::ValidationError {
                     field: "test".to_string(),
                     message: "validation error".to_string(),
                 })
