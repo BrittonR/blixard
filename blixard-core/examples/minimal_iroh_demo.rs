@@ -79,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create Iroh endpoints
     println!("Creating Iroh endpoints...");
     let server_endpoint = iroh::Endpoint::builder()
-        .alpn(b"blixard/rpc/1".to_vec())
+        .alpns(vec![b"blixard/rpc/1".to_vec()])
         .bind()
         .await?;
 
@@ -92,10 +92,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let server_task = tokio::spawn(async move {
         println!("🔄 Server waiting for connections...");
 
-        while let Ok(mut connection) = server_endpoint_clone.accept().await {
-            println!("📥 New connection from: {:?}", connection.remote_node_id());
+        while let Some(connecting) = server_endpoint_clone.accept().await {
+            println!("📥 New connection from: {:?}", connecting.remote_address());
 
             tokio::spawn(async move {
+                let connection = connecting.await.unwrap();
                 while let Ok((mut send, mut recv)) = connection.accept_bi().await {
                     // Read header
                     let mut header_bytes = vec![0u8; 24];
@@ -147,7 +148,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create client
     println!("\nCreating client endpoint...");
     let client_endpoint = iroh::Endpoint::builder()
-        .alpn(b"blixard/rpc/1".to_vec())
+        .alpns(vec![b"blixard/rpc/1".to_vec()])
         .bind()
         .await?;
     println!("✅ Client endpoint created");

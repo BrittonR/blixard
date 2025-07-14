@@ -172,8 +172,8 @@ impl BlixardError {
 
     /// Create an invalid input error
     pub fn invalid_input(field: &str, message: &str) -> Self {
-        BlixardError::InvalidInput {
-            field: field.to_string(),
+        BlixardError::ConfigurationError {
+            component: field.to_string(),
             message: message.to_string(),
         }
     }

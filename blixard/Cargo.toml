@@ -80,9 +80,6 @@ path = "src/main.rs"
 name = "metrics_demo"
 path = "../examples/metrics_demo.rs"
 
-[[example]]
-name = "grpc_with_auth"
-path = "../examples/grpc_with_auth.rs"
 
 [[example]]
 name = "secure_cluster_demo"
