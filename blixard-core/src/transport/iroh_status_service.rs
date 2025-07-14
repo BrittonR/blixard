@@ -94,7 +94,7 @@ impl IrohService for IrohStatusService {
                 let response = GetRaftStatusResponse {
                     is_leader: proto_response.is_leader,
                     node_id: proto_response.node_id,
-                    leader_id: proto_response.leader_id.unwrap_or(0),
+                    leader_id: proto_response.leader_id.unwrap_or(u64::MAX), // Use MAX to indicate no leader
                     term: proto_response.term,
                     state: proto_response.state,
                 };

@@ -550,7 +550,15 @@ impl OptimizedPeerConnector {
         let peers = self.node.get_peers().await;
         peers
             .into_iter()
-            .find(|p| p.node_id.parse::<u64>().unwrap_or(0) == peer_id)
+            .find(|p| {
+                match p.node_id.parse::<u64>() {
+                    Ok(parsed_id) => parsed_id == peer_id,
+                    Err(e) => {
+                        tracing::warn!("Invalid node ID format '{}': {}", p.node_id, e);
+                        false
+                    }
+                }
+            })
             .ok_or_else(|| BlixardError::NotFound {
                 resource: format!("Peer {}", peer_id),
             })

@@ -117,6 +117,13 @@ pub enum BlixardError {
     #[error("VM operation '{operation}' failed: {details}")]
     VmOperationFailed { operation: String, details: String },
 
+    #[error("VM '{vm_name}' operation '{operation}' failed: {message}")]
+    VmOperationError {
+        operation: String,
+        vm_name: String,
+        message: String,
+    },
+
     #[error("Scheduling error: {message}")]
     SchedulingError { message: String },
 

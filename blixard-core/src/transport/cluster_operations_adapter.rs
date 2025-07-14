@@ -366,7 +366,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
         // Sort by ID for consistent ordering
         nodes.sort_by_key(|n| n.id);
 
-        let leader_id = raft_status.leader_id.unwrap_or(0);
+        let leader_id = raft_status.leader_id.unwrap_or(u64::MAX); // Use MAX to indicate no leader
         let term = raft_status.term;
 
         Ok((leader_id, nodes, term))

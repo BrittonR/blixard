@@ -626,9 +626,14 @@ async fn handle_incoming_connection(
     let peer_id = peers
         .iter()
         .find(|p| p.node_id == remote_node_id.to_string())
-        .map(|p| p.node_id.parse::<u64>().unwrap_or(0))
+        .and_then(|p| {
+            p.node_id.parse::<u64>().map_err(|e| {
+                tracing::warn!("Failed to parse peer node ID '{}': {}", p.node_id, e);
+                e
+            }).ok()
+        })
         .ok_or_else(|| {
-            BlixardError::ClusterError(format!("Unknown Iroh node: {}", remote_node_id))
+            BlixardError::ClusterError(format!("Unknown or invalid Iroh node: {}", remote_node_id))
         })?;
 
     // Accept streams

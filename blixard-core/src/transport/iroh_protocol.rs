@@ -251,7 +251,7 @@ mod tests {
         let header = MessageHeader::new(MessageType::Request, 1234, request_id);
 
         let bytes = header.to_bytes();
-        let decoded = MessageHeader::from_bytes(&bytes).unwrap();
+        let decoded = MessageHeader::from_bytes(&bytes).expect("Valid header should decode successfully");
 
         assert_eq!(decoded.version, PROTOCOL_VERSION);
         assert_eq!(decoded.msg_type, MessageType::Request);
@@ -261,9 +261,9 @@ mod tests {
 
     #[test]
     fn test_message_type_conversion() {
-        assert_eq!(MessageType::try_from(1).unwrap(), MessageType::Request);
-        assert_eq!(MessageType::try_from(2).unwrap(), MessageType::Response);
-        assert_eq!(MessageType::try_from(3).unwrap(), MessageType::Error);
+        assert_eq!(MessageType::try_from(1).expect("Valid message type"), MessageType::Request);
+        assert_eq!(MessageType::try_from(2).expect("Valid message type"), MessageType::Response);
+        assert_eq!(MessageType::try_from(3).expect("Valid message type"), MessageType::Error);
         assert!(MessageType::try_from(99).is_err());
     }
 
@@ -280,8 +280,8 @@ mod tests {
             name: "test".to_string(),
         };
 
-        let bytes = serialize_payload(&data).unwrap();
-        let decoded: TestData = deserialize_payload(&bytes).unwrap();
+        let bytes = serialize_payload(&data).expect("Serialization should succeed");
+        let decoded: TestData = deserialize_payload(&bytes).expect("Deserialization should succeed");
 
         assert_eq!(decoded, data);
     }

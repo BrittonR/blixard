@@ -45,7 +45,7 @@ impl StatusService for StatusServiceImpl {
         // Get Raft status to determine leadership and term
         let raft_status = self.node.get_raft_status().await;
 
-        let leader_id = raft_status.leader_id.unwrap_or(0);
+        let leader_id = raft_status.leader_id.unwrap_or(u64::MAX); // Use MAX to indicate no leader
         let term = raft_status.term;
 
         // Get all configured node IDs from peers

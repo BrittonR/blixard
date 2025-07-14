@@ -759,8 +759,9 @@ async fn handle_vm_logs(vm_name: &str, follow: bool, lines: u32) -> BlixardResul
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("journalctl failed: {}", stderr);
-            std::process::exit(1);
+            return Err(BlixardError::Internal {
+                message: format!("journalctl failed: {}", stderr),
+            });
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -810,13 +811,19 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
                         println!("VM ID: {}", resp.vm_id);
                         println!("Message: {}", resp.message);
                     } else {
-                        eprintln!("Failed to create VM '{}': {}", name, resp.message);
-                        std::process::exit(1);
+                        return Err(BlixardError::VmOperationError {
+                            operation: "create".to_string(),
+                            vm_name: name.clone(),
+                            message: resp.message,
+                        });
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error creating VM '{}': {}", name, e);
-                    std::process::exit(1);
+                    return Err(BlixardError::VmOperationError {
+                        operation: "create".to_string(),
+                        vm_name: name.clone(),
+                        message: e.to_string(),
+                    });
                 }
             }
         }
@@ -829,13 +836,19 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
                         println!("Successfully started VM '{}'", name);
                         println!("Message: {}", resp.message);
                     } else {
-                        eprintln!("Failed to start VM '{}': {}", name, resp.message);
-                        std::process::exit(1);
+                        return Err(BlixardError::VmOperationError {
+                            operation: "start".to_string(),
+                            vm_name: name.clone(),
+                            message: resp.message,
+                        });
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error starting VM '{}': {}", name, e);
-                    std::process::exit(1);
+                    return Err(BlixardError::VmOperationError {
+                        operation: "start".to_string(),
+                        vm_name: name.clone(),
+                        message: e.to_string(),
+                    });
                 }
             }
         }
@@ -848,13 +861,19 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
                         println!("Successfully stopped VM '{}'", name);
                         println!("Message: {}", resp.message);
                     } else {
-                        eprintln!("Failed to stop VM '{}': {}", name, resp.message);
-                        std::process::exit(1);
+                        return Err(BlixardError::VmOperationError {
+                            operation: "stop".to_string(),
+                            vm_name: name.clone(),
+                            message: resp.message,
+                        });
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error stopping VM '{}': {}", name, e);
-                    std::process::exit(1);
+                    return Err(BlixardError::VmOperationError {
+                        operation: "stop".to_string(),
+                        vm_name: name.clone(),
+                        message: e.to_string(),
+                    });
                 }
             }
         }
@@ -867,13 +886,19 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
                         println!("Successfully deleted VM '{}'", name);
                         println!("Message: {}", resp.message);
                     } else {
-                        eprintln!("Failed to delete VM '{}': {}", name, resp.message);
-                        std::process::exit(1);
+                        return Err(BlixardError::VmOperationError {
+                            operation: "delete".to_string(),
+                            vm_name: name.clone(),
+                            message: resp.message,
+                        });
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error deleting VM '{}': {}", name, e);
-                    std::process::exit(1);
+                    return Err(BlixardError::VmOperationError {
+                        operation: "delete".to_string(),
+                        vm_name: name.clone(),
+                        message: e.to_string(),
+                    });
                 }
             }
         }
@@ -886,8 +911,9 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
                         let vm = match resp.vm_info {
                             Some(vm) => vm,
                             None => {
-                                eprintln!("Error: VM info not found in response");
-                                std::process::exit(1);
+                                return Err(BlixardError::Internal {
+                                    message: "VM info not found in response".to_string(),
+                                });
                             }
                         };
                         println!("VM '{}' Status:", name);
@@ -907,8 +933,11 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error getting VM '{}' status: {}", name, e);
-                    std::process::exit(1);
+                    return Err(BlixardError::VmOperationError {
+                        operation: "status".to_string(),
+                        vm_name: name.clone(),
+                        message: e.to_string(),
+                    });
                 }
             }
         }
@@ -936,8 +965,11 @@ async fn handle_vm_command(command: VmCommands) -> BlixardResult<()> {
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error listing VMs: {}", e);
-                    std::process::exit(1);
+                    return Err(BlixardError::VmOperationError {
+                        operation: "list".to_string(),
+                        vm_name: "all".to_string(),
+                        message: e.to_string(),
+                    });
                 }
             }
         }
@@ -1003,8 +1035,11 @@ async fn handle_vm_health_command(
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error getting health status for VM '{}': {}", name, e);
-                    std::process::exit(1);
+                    return Err(BlixardError::VmOperationError {
+                        operation: "get_health_status".to_string(),
+                        vm_name: name.clone(),
+                        message: e.to_string(),
+                    });
                 }
             }
         }
@@ -1020,8 +1055,10 @@ async fn handle_vm_health_command(
             let health_check_type = match parse_health_check_type(&check_type, &config) {
                 Ok(t) => t,
                 Err(e) => {
-                    eprintln!("Invalid health check configuration: {}", e);
-                    std::process::exit(1);
+                    return Err(BlixardError::ConfigurationError {
+                        component: "health_check".to_string(),
+                        message: format!("Invalid health check configuration: {}", e),
+                    });
                 }
             };
 
@@ -1048,13 +1085,19 @@ async fn handle_vm_health_command(
                             check_name, vm_name
                         );
                     } else {
-                        eprintln!("Failed to add health check: {}", response.message);
-                        std::process::exit(1);
+                        return Err(BlixardError::VmOperationError {
+                            operation: "add_health_check".to_string(),
+                            vm_name: vm_name.clone(),
+                            message: response.message,
+                        });
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error adding health check: {}", e);
-                    std::process::exit(1);
+                    return Err(BlixardError::VmOperationError {
+                        operation: "add_health_check".to_string(),
+                        vm_name: vm_name.clone(),
+                        message: e.to_string(),
+                    });
                 }
             }
         }
@@ -1082,8 +1125,11 @@ async fn handle_vm_health_command(
                 }
             }
             Err(e) => {
-                eprintln!("Error listing health checks: {}", e);
-                std::process::exit(1);
+                return Err(BlixardError::VmOperationError {
+                    operation: "list_health_checks".to_string(),
+                    vm_name: name.clone(),
+                    message: e.to_string(),
+                });
             }
         },
         VmHealthCommands::Remove {
@@ -1101,13 +1147,19 @@ async fn handle_vm_health_command(
                             check_name, vm_name
                         );
                     } else {
-                        eprintln!("Failed to remove health check: {}", response.message);
-                        std::process::exit(1);
+                        return Err(BlixardError::VmOperationError {
+                            operation: "remove_health_check".to_string(),
+                            vm_name: vm_name.clone(),
+                            message: response.message,
+                        });
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error removing health check: {}", e);
-                    std::process::exit(1);
+                    return Err(BlixardError::VmOperationError {
+                        operation: "remove_health_check".to_string(),
+                        vm_name: vm_name.clone(),
+                        message: e.to_string(),
+                    });
                 }
             }
         }
@@ -1124,13 +1176,19 @@ async fn handle_vm_health_command(
                             action, name
                         );
                     } else {
-                        eprintln!("Failed to toggle health monitoring: {}", response.message);
-                        std::process::exit(1);
+                        return Err(BlixardError::VmOperationError {
+                            operation: "toggle_health_monitoring".to_string(),
+                            vm_name: name.clone(),
+                            message: response.message,
+                        });
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error toggling health monitoring: {}", e);
-                    std::process::exit(1);
+                    return Err(BlixardError::VmOperationError {
+                        operation: "toggle_health_monitoring".to_string(),
+                        vm_name: name.clone(),
+                        message: e.to_string(),
+                    });
                 }
             }
         }
@@ -1171,13 +1229,19 @@ async fn handle_vm_health_command(
                         println!("  Backoff Multiplier: {}", backoff_multiplier);
                         println!("  Max Backoff Delay: {}s", max_backoff_delay_secs);
                     } else {
-                        eprintln!("Failed to configure recovery policy: {}", response.message);
-                        std::process::exit(1);
+                        return Err(BlixardError::VmOperationError {
+                            operation: "configure_recovery_policy".to_string(),
+                            vm_name: name.clone(),
+                            message: response.message,
+                        });
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error configuring recovery policy: {}", e);
-                    std::process::exit(1);
+                    return Err(BlixardError::VmOperationError {
+                        operation: "configure_recovery_policy".to_string(),
+                        vm_name: name.clone(),
+                        message: e.to_string(),
+                    });
                 }
             }
         }
@@ -1303,20 +1367,23 @@ async fn handle_vm_health_command(
     _command: VmHealthCommands,
     _client: &mut crate::client::UnifiedClient,
 ) -> BlixardResult<()> {
-    eprintln!("VM health commands are not available in simulation mode");
-    std::process::exit(1);
+    Err(BlixardError::NotImplemented {
+        feature: "VM health commands in simulation mode".to_string(),
+    })
 }
 
 #[cfg(madsim)]
 async fn handle_vm_logs(_vm_name: &str, _follow: bool, _lines: u32) -> BlixardResult<()> {
-    eprintln!("VM logs are not available in simulation mode");
-    std::process::exit(1);
+    Err(BlixardError::NotImplemented {
+        feature: "VM logs in simulation mode".to_string(),
+    })
 }
 
 #[cfg(madsim)]
 async fn handle_vm_command(_command: VmCommands) -> BlixardResult<()> {
-    eprintln!("VM commands are not available in simulation mode");
-    std::process::exit(1);
+    Err(BlixardError::NotImplemented {
+        feature: "VM commands in simulation mode".to_string(),
+    })
 }
 
 #[cfg(not(madsim))]
@@ -1338,22 +1405,25 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
             let (node_id, bind_address) = if peer.contains('@') {
                 let parts: Vec<&str> = peer.split('@').collect();
                 if parts.len() != 2 {
-                    eprintln!(
-                        "Invalid peer format. Expected 'nodeID@address' but got '{}'",
-                        peer
-                    );
-                    std::process::exit(1);
+                    return Err(BlixardError::ConfigurationError {
+                        component: "cluster_join".to_string(),
+                        message: format!("Invalid peer format. Expected 'nodeID@address' but got '{}'", peer),
+                    });
                 }
 
                 let id = match parts[0].parse::<u64>() {
                     Ok(0) => {
-                        eprintln!("Invalid node ID: must be greater than 0");
-                        std::process::exit(1);
+                        return Err(BlixardError::ConfigurationError {
+                            component: "cluster_join".to_string(),
+                            message: "Invalid node ID: must be greater than 0".to_string(),
+                        });
                     }
                     Ok(id) => id,
                     Err(e) => {
-                        eprintln!("Failed to parse node ID '{}': {}", parts[0], e);
-                        std::process::exit(1);
+                        return Err(BlixardError::ConfigurationError {
+                            component: "cluster_join".to_string(),
+                            message: format!("Failed to parse node ID '{}': {}", parts[0], e),
+                        });
                     }
                 };
                 (id, parts[1].to_string())
@@ -1376,13 +1446,11 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
                         println!("Successfully joined cluster through peer: {}", peer);
                         println!("Message: {}", resp.message);
                     } else {
-                        eprintln!("Failed to join cluster: {}", resp.message);
-                        std::process::exit(1);
+                        return Err(BlixardError::ClusterError(format!("Failed to join cluster: {}", resp.message)));
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error joining cluster: {}", e);
-                    std::process::exit(1);
+                    return Err(BlixardError::ClusterError(format!("Error joining cluster: {}", e)));
                 }
             }
         }
@@ -1407,13 +1475,11 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
                         println!("Successfully left the cluster");
                         println!("Message: {}", resp.message);
                     } else {
-                        eprintln!("Failed to leave cluster: {}", resp.message);
-                        std::process::exit(1);
+                        return Err(BlixardError::ClusterError(format!("Failed to leave cluster: {}", resp.message)));
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error leaving cluster: {}", e);
-                    std::process::exit(1);
+                    return Err(BlixardError::ClusterError(format!("Error leaving cluster: {}", e)));
                 }
             }
         }
@@ -1451,8 +1517,7 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error getting cluster status: {}", e);
-                    std::process::exit(1);
+                    return Err(BlixardError::ClusterError(format!("Error getting cluster status: {}", e)));
                 }
             }
         }
@@ -1589,8 +1654,9 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
 
 #[cfg(madsim)]
 async fn handle_cluster_command(_command: ClusterCommands) -> BlixardResult<()> {
-    eprintln!("Cluster commands are not available in simulation mode");
-    std::process::exit(1);
+    Err(BlixardError::NotImplemented {
+        feature: "Cluster commands in simulation mode".to_string(),
+    })
 }
 
 #[cfg(not(madsim))]
@@ -1757,8 +1823,9 @@ fn command_addr(command: &IpPoolCommands) -> String {
 
 #[cfg(madsim)]
 async fn handle_ip_pool_command(_command: IpPoolCommands) -> BlixardResult<()> {
-    eprintln!("IP pool commands are not available in simulation mode");
-    std::process::exit(1);
+    Err(BlixardError::NotImplemented {
+        feature: "IP pool commands in simulation mode".to_string(),
+    })
 }
 
 async fn handle_reset_command(
@@ -1998,8 +2065,10 @@ async fn handle_security_command(command: SecurityCommands) -> BlixardResult<()>
                 .collect();
 
             if node_names.is_empty() {
-                eprintln!("Error: No node names provided");
-                std::process::exit(1);
+                return Err(BlixardError::ConfigurationError {
+                    component: "security_gen_certs".to_string(),
+                    message: "No node names provided".to_string(),
+                });
             }
 
             // Parse client names
@@ -2016,8 +2085,10 @@ async fn handle_security_command(command: SecurityCommands) -> BlixardResult<()>
                 "ecdsa-p256" => KeyAlgorithm::EcdsaP256,
                 "ecdsa-p384" => KeyAlgorithm::EcdsaP384,
                 _ => {
-                    eprintln!("Error: Invalid key algorithm '{}'. Valid options: rsa2048, rsa4096, ecdsa-p256, ecdsa-p384", key_algorithm);
-                    std::process::exit(1);
+                    return Err(BlixardError::ConfigurationError {
+                        component: "security_gen_certs".to_string(),
+                        message: format!("Invalid key algorithm '{}'. Valid options: rsa2048, rsa4096, ecdsa-p256, ecdsa-p384", key_algorithm),
+                    });
                 }
             };
 
@@ -2066,8 +2137,9 @@ async fn handle_security_command(command: SecurityCommands) -> BlixardResult<()>
                     println!("require_client_cert = true  # For mTLS");
                 }
                 Err(e) => {
-                    eprintln!("❌ Failed to generate certificates: {}", e);
-                    std::process::exit(1);
+                    return Err(BlixardError::Security {
+                        message: format!("Failed to generate certificates: {}", e),
+                    });
                 }
             }
         }
@@ -2096,8 +2168,10 @@ async fn handle_security_command(command: SecurityCommands) -> BlixardResult<()>
                     "metrics-read" => parsed_permissions.push("MetricsRead"),
                     "admin" => parsed_permissions.push("Admin"),
                     _ => {
-                        eprintln!("Error: Invalid permission '{}'. Valid options: cluster-read, cluster-write, vm-read, vm-write, task-read, task-write, metrics-read, admin", perm);
-                        std::process::exit(1);
+                        return Err(BlixardError::ConfigurationError {
+                            component: "security_gen_token".to_string(),
+                            message: format!("Invalid permission '{}'. Valid options: cluster-read, cluster-write, vm-read, vm-write, task-read, task-write, metrics-read, admin", perm),
+                        });
                     }
                 }
             }
@@ -2117,18 +2191,21 @@ async fn handle_security_command(command: SecurityCommands) -> BlixardResult<()>
 
 #[cfg(madsim)]
 async fn handle_security_command(_command: SecurityCommands) -> BlixardResult<()> {
-    eprintln!("Security commands are not available in simulation mode");
-    std::process::exit(1);
+    Err(BlixardError::NotImplemented {
+        feature: "Security commands in simulation mode".to_string(),
+    })
 }
 
 #[cfg(madsim)]
 async fn handle_modern_tui_command() -> BlixardResult<()> {
-    eprintln!("Modern TUI is not available in simulation mode");
-    std::process::exit(1);
+    Err(BlixardError::NotImplemented {
+        feature: "Modern TUI in simulation mode".to_string(),
+    })
 }
 
 #[cfg(madsim)]
 async fn handle_tui_command() -> BlixardResult<()> {
-    eprintln!("TUI is not available in simulation mode");
-    std::process::exit(1);
+    Err(BlixardError::NotImplemented {
+        feature: "TUI in simulation mode".to_string(),
+    })
 }
