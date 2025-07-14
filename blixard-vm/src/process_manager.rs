@@ -375,13 +375,19 @@ impl VmProcessManager {
         let user_name = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
         let service_path = format!("/home/{}/.config/systemd/user/{}", user_name, service_name);
         let user_home = std::env::var("HOME").map_err(|e| {
-            BlixardError::ConfigError(format!("Failed to get HOME directory: {}", e))
+            BlixardError::ConfigurationError {
+                component: "vm".to_string(),
+                message: format!("Failed to get HOME directory: {}", e),
+            }
         })?;
 
         // Read template
         let template_path = PathBuf::from("blixard-vm/templates/vm.service.template");
         let template = fs::read_to_string(&template_path).await.map_err(|e| {
-            BlixardError::ConfigError(format!("Failed to read service template: {}", e))
+            BlixardError::ConfigurationError {
+                component: "vm".to_string(),
+                message: format!("Failed to read service template: {}", e),
+            }
         })?;
 
         // Replace template variables
@@ -401,7 +407,10 @@ impl VmProcessManager {
         // Ensure user systemd directory exists
         std::fs::create_dir_all(&format!("/home/{}/.config/systemd/user", user_name)).map_err(
             |e| {
-                BlixardError::ConfigError(format!("Failed to create user systemd directory: {}", e))
+                BlixardError::ConfigurationError {
+                    component: "vm".to_string(),
+                    message: format!("Failed to create user systemd directory: {}", e),
+                }
             },
         )?;
 

@@ -95,15 +95,15 @@ impl ConsoleReader {
 
         // Compile regex patterns
         let healthy_regex = regex::Regex::new(healthy_pattern).map_err(|e| {
-            BlixardError::InvalidInput {
-                field: "healthy_pattern".to_string(),
+            BlixardError::ConfigurationError {
+                component: "healthy_pattern".to_string(),
                 message: format!("Invalid regex: {}", e),
             }
         })?;
 
         let unhealthy_regex = if let Some(pattern) = unhealthy_pattern {
-            Some(regex::Regex::new(pattern).map_err(|e| BlixardError::InvalidInput {
-                field: "unhealthy_pattern".to_string(),
+            Some(regex::Regex::new(pattern).map_err(|e| BlixardError::ConfigurationError {
+                component: "unhealthy_pattern".to_string(),
                 message: format!("Invalid regex: {}", e),
             })?)
         } else {

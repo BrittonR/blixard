@@ -244,7 +244,8 @@ impl BlixardOrchestrator {
         let registry_path = data_dir.join(format!("node-{}-registry.json", node_id));
 
         let registry_path_str = registry_path.to_str()
-            .ok_or_else(|| blixard_core::error::BlixardError::InvalidConfiguration {
+            .ok_or_else(|| blixard_core::error::BlixardError::ConfigurationError {
+                component: "orchestrator".to_string(),
                 message: format!("Registry path contains invalid Unicode characters: {}", registry_path.display()),
             })?;
         crate::node_discovery::save_node_registry(registry_path_str, &entry).await?;
