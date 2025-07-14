@@ -1,7 +1,8 @@
+#![cfg(feature = "test-helpers")]
+
 mod common;
 
 use blixard_core::{
-    error::BlixardResult,
     raft::proposals::WorkerCapabilities,
     test_helpers::{TestDatabaseFactory, TestVmFactory, TestWorkerFactory},
     types::{NodeTopology, VmConfig, VmStatus},

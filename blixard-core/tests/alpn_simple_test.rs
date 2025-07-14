@@ -49,8 +49,8 @@ async fn test_iroh_endpoint_with_alpn() {
     info!("Endpoint 2 ID: {}", node_id2);
 
     // Get socket addresses
-    let addrs1: Vec<_> = endpoint1.bound_sockets().collect();
-    let addrs2: Vec<_> = endpoint2.bound_sockets().collect();
+    let addrs1: Vec<_> = endpoint1.bound_sockets().into_iter().collect();
+    let addrs2: Vec<_> = endpoint2.bound_sockets().into_iter().collect();
 
     info!("Endpoint 1 addresses: {:?}", addrs1);
     info!("Endpoint 2 addresses: {:?}", addrs2);
@@ -67,7 +67,7 @@ async fn test_iroh_endpoint_with_alpn() {
                 Ok(conn) => {
                     info!("Accepted connection with ALPN: {:?}", conn.alpn());
                     // Verify ALPN matches
-                    assert_eq!(conn.alpn(), BLIXARD_ALPN);
+                    assert_eq!(conn.alpn(), Some(BLIXARD_ALPN.to_vec()));
                     true
                 }
                 Err(e) => {
@@ -88,7 +88,7 @@ async fn test_iroh_endpoint_with_alpn() {
     match endpoint1.connect(node_addr2, BLIXARD_ALPN).await {
         Ok(conn) => {
             info!("Connection established successfully!");
-            assert_eq!(conn.alpn(), BLIXARD_ALPN);
+            assert_eq!(conn.alpn(), Some(BLIXARD_ALPN.to_vec()));
 
             // Wait for acceptor to verify
             if let Ok(accepted) = timeout(Duration::from_secs(1), acceptor).await {
@@ -133,7 +133,7 @@ async fn test_alpn_mismatch_detection() {
         .expect("Failed to create endpoint");
 
     let node_id = endpoint.node_id();
-    let addrs: Vec<_> = endpoint.bound_sockets().collect();
+    let addrs: Vec<_> = endpoint.bound_sockets().into_iter().collect();
     let node_addr = NodeAddr::new(node_id).with_direct_addresses(addrs);
 
     // Try to connect with wrong ALPN

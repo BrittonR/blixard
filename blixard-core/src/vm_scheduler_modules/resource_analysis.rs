@@ -61,9 +61,36 @@ pub struct ClusterResourceSummary {
     pub used_memory_mb: u64,
     pub total_disk_gb: u64,
     pub used_disk_gb: u64,
+    pub total_running_vms: u32,
     pub average_cpu_utilization: f64,
     pub average_memory_utilization: f64,
     pub average_disk_utilization: f64,
+    pub nodes: Vec<NodeResourceUsage>,
+}
+
+impl ClusterResourceSummary {
+    /// Calculate utilization percentages for CPU, memory, and disk
+    pub fn utilization_percentages(&self) -> (f64, f64, f64) {
+        let cpu_util = if self.total_vcpus > 0 {
+            (self.used_vcpus as f64 / self.total_vcpus as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        let memory_util = if self.total_memory_mb > 0 {
+            (self.used_memory_mb as f64 / self.total_memory_mb as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        let disk_util = if self.total_disk_gb > 0 {
+            (self.used_disk_gb as f64 / self.total_disk_gb as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        (cpu_util, memory_util, disk_util)
+    }
 }
 
 /// Intermediate state for scheduling operations

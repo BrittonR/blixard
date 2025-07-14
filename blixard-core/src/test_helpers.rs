@@ -22,6 +22,167 @@ pub mod timing {
     pub use crate::test_helpers_modules::timing_helpers::*;
 }
 
+// Test factory utilities
+use crate::raft::proposals::WorkerCapabilities;
+use crate::raft_storage::{VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE};
+use crate::types::{VmStatus, VmState};
+use redb::Database;
+
+/// Test database factory
+pub struct TestDatabaseFactory;
+
+impl TestDatabaseFactory {
+    /// Create a new test database
+    pub fn create() -> BlixardResult<(Arc<Database>, TempDir)> {
+        let temp_dir = TempDir::new().map_err(|e| BlixardError::Storage {
+            operation: "create temp dir".to_string(),
+            source: Box::new(e),
+        })?;
+        let db_path = temp_dir.path().join("test.db");
+        let database = Database::create(&db_path).map_err(|e| BlixardError::Storage {
+            operation: "create database".to_string(),
+            source: Box::new(e),
+        })?;
+        Ok((Arc::new(database), temp_dir))
+    }
+}
+
+/// Test worker factory
+pub struct TestWorkerFactory;
+
+impl TestWorkerFactory {
+    /// Register a worker in the database
+    pub fn register_worker(
+        database: &Arc<Database>,
+        node_id: u64,
+        capabilities: WorkerCapabilities,
+        is_online: bool,
+    ) -> BlixardResult<()> {
+        let write_txn = database.begin_write().map_err(|e| BlixardError::Storage {
+            operation: "begin write transaction".to_string(),
+            source: Box::new(e),
+        })?;
+
+        // Add worker capabilities
+        {
+            let mut worker_table = write_txn.open_table(WORKER_TABLE).map_err(|e| BlixardError::Storage {
+                operation: "open worker table".to_string(),
+                source: Box::new(e),
+            })?;
+            
+            let node_id_bytes = node_id.to_be_bytes();
+            let capabilities_data = bincode::serialize(&capabilities).map_err(|e| BlixardError::Serialization {
+                operation: "serialize worker capabilities".to_string(),
+                source: Box::new(e),
+            })?;
+            
+            worker_table.insert(&node_id_bytes[..], capabilities_data.as_slice()).map_err(|e| BlixardError::Storage {
+                operation: "insert worker capabilities".to_string(),
+                source: Box::new(e),
+            })?;
+        }
+
+        // Add worker status
+        {
+            let mut status_table = write_txn.open_table(WORKER_STATUS_TABLE).map_err(|e| BlixardError::Storage {
+                operation: "open worker status table".to_string(),
+                source: Box::new(e),
+            })?;
+            
+            let node_id_bytes = node_id.to_be_bytes();
+            let status = if is_online {
+                crate::raft::proposals::WorkerStatus::Online
+            } else {
+                crate::raft::proposals::WorkerStatus::Offline
+            };
+            let status_data = bincode::serialize(&status).map_err(|e| BlixardError::Serialization {
+                operation: "serialize worker status".to_string(),
+                source: Box::new(e),
+            })?;
+            
+            status_table.insert(&node_id_bytes[..], status_data.as_slice()).map_err(|e| BlixardError::Storage {
+                operation: "insert worker status".to_string(),
+                source: Box::new(e),
+            })?;
+        }
+
+        write_txn.commit().map_err(|e| BlixardError::Storage {
+            operation: "commit transaction".to_string(),
+            source: Box::new(e),
+        })?;
+
+        Ok(())
+    }
+}
+
+/// Test VM factory
+pub struct TestVmFactory;
+
+impl TestVmFactory {
+    /// Add a VM to the database
+    pub fn add_vm_to_database(
+        database: &Arc<Database>,
+        vm_name: &str,
+        node_id: u64,
+        vcpus: u32,
+        memory: u32,
+        status: VmStatus,
+    ) -> BlixardResult<()> {
+        let write_txn = database.begin_write().map_err(|e| BlixardError::Storage {
+            operation: "begin write transaction".to_string(),
+            source: Box::new(e),
+        })?;
+
+        {
+            let mut vm_table = write_txn.open_table(VM_STATE_TABLE).map_err(|e| BlixardError::Storage {
+                operation: "open VM state table".to_string(),
+                source: Box::new(e),
+            })?;
+            
+            let vm_config = crate::types::VmConfig {
+                name: vm_name.to_string(),
+                config_path: "/tmp/test.nix".to_string(),
+                vcpus,
+                memory,
+                tenant_id: "test".to_string(),
+                ip_address: None,
+                metadata: None,
+                anti_affinity: None,
+                priority: 500,
+                preemptible: true,
+                locality_preference: Default::default(),
+                health_check_config: None,
+            };
+            
+            let vm_state = VmState {
+                name: vm_name.to_string(),
+                config: vm_config,
+                status,
+                node_id,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            };
+            
+            let vm_data = bincode::serialize(&vm_state).map_err(|e| BlixardError::Serialization {
+                operation: "serialize VM state".to_string(),
+                source: Box::new(e),
+            })?;
+            
+            vm_table.insert(vm_name, vm_data.as_slice()).map_err(|e| BlixardError::Storage {
+                operation: "insert VM state".to_string(),
+                source: Box::new(e),
+            })?;
+        }
+
+        write_txn.commit().map_err(|e| BlixardError::Storage {
+            operation: "commit transaction".to_string(),
+            source: Box::new(e),
+        })?;
+
+        Ok(())
+    }
+}
+
 /// Test-specific node wrapper
 pub struct TestNode {
     pub id: u64,

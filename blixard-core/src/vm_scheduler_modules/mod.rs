@@ -120,9 +120,11 @@ impl VmScheduler {
                 used_memory_mb: 0,
                 total_disk_gb: 0,
                 used_disk_gb: 0,
+                total_running_vms: 0,
                 average_cpu_utilization: 0.0,
                 average_memory_utilization: 0.0,
                 average_disk_utilization: 0.0,
+                nodes: Vec::new(),
             });
         }
 
@@ -137,6 +139,8 @@ impl VmScheduler {
 
         let total_disk_gb = node_usage.iter().map(|n| n.capabilities.disk_gb).sum();
         let used_disk_gb = node_usage.iter().map(|n| n.used_disk_gb).sum();
+
+        let total_running_vms = node_usage.iter().map(|n| n.running_vms).sum();
 
         let avg_cpu_util = if total_vcpus > 0 {
             (used_vcpus as f64 / total_vcpus as f64) * 100.0
@@ -165,9 +169,11 @@ impl VmScheduler {
             used_memory_mb,
             total_disk_gb,
             used_disk_gb,
+            total_running_vms,
             average_cpu_utilization: avg_cpu_util,
             average_memory_utilization: avg_mem_util,
             average_disk_utilization: avg_disk_util,
+            nodes: node_usage,
         })
     }
 }
