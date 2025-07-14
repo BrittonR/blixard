@@ -173,7 +173,7 @@ mod tests {
         };
 
         let response = check_health(node, request).await.unwrap();
-        assert_eq!(response.status, "healthy");
+        assert_eq!(response.status, "healthy".to_string());
         assert!(response.details.is_none());
     }
 
@@ -185,7 +185,7 @@ mod tests {
         };
 
         let response = check_health(node, request).await.unwrap();
-        assert_eq!(response.status, "healthy");
+        assert_eq!(response.status, "healthy".to_string());
         assert!(response.details.is_some());
 
         let details = response.details.unwrap();
@@ -198,12 +198,10 @@ mod tests {
         let node = Arc::new(SharedNodeState::new_default());
         let service = HealthServiceV2::new(node);
 
-        let request = HealthCheckRequest {
-            include_details: Some(true),
-        };
+        let request = HealthCheckRequest {};
 
         let response = service.handle_health_check(request).await.unwrap();
-        assert_eq!(response.status, "healthy");
+        assert_eq!(response.status, "healthy".to_string());
         assert!(response.vm_count.is_some());
         assert!(response.memory_usage_mb.is_some());
     }

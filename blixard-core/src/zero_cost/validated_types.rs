@@ -376,20 +376,24 @@ mod tests {
 
     #[test]
     fn test_positive() {
-        let p1 = Positive::new(42u32).unwrap();
-        let p2 = Positive::new(8u32).unwrap();
+        let p1: Positive<u32> = Positive::new(42u32).unwrap();
+        let p2: Positive<u32> = Positive::new(8u32).unwrap();
 
         assert_eq!(*p1, 42);
 
-        let sum = p1.saturating_add(p2);
+        let sum = Positive::<u32>::saturating_add(p1, p2);
         assert_eq!(*sum, 50);
 
-        let diff = p1.checked_sub(p2).unwrap();
+        let p1: Positive<u32> = Positive::new(42u32).unwrap();
+        let p2: Positive<u32> = Positive::new(8u32).unwrap();
+        let diff = Positive::<u32>::checked_sub(p1, p2).unwrap();
         assert_eq!(*diff, 34);
 
-        assert!(p2.checked_sub(p1).is_none());
+        let p1: Positive<u32> = Positive::new(42u32).unwrap();
+        let p2: Positive<u32> = Positive::new(8u32).unwrap();
+        assert!(Positive::<u32>::checked_sub(p2, p1).is_none());
 
-        assert!(Positive::new(0u32).is_err());
+        assert!(Positive::<u32>::new(0u32).is_err());
     }
 
     #[test]

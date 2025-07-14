@@ -1135,6 +1135,7 @@ impl NixImageStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::abstractions::command::TokioCommandExecutor;
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -1146,9 +1147,15 @@ mod tests {
                 .unwrap(),
         );
 
-        let store = NixImageStore::new(1, p2p_manager, temp_dir.path(), None)
-            .await
-            .unwrap();
+        let store = NixImageStore::new(
+            1,
+            p2p_manager,
+            temp_dir.path(),
+            None,
+            Arc::new(TokioCommandExecutor::new()),
+        )
+        .await
+        .unwrap();
 
         assert!(temp_dir.path().join("nix-image-cache").exists());
     }
@@ -1163,9 +1170,15 @@ mod tests {
                 .unwrap(),
         );
 
-        let store = NixImageStore::new(1, p2p_manager, temp_dir.path(), None)
-            .await
-            .unwrap();
+        let store = NixImageStore::new(
+            1,
+            p2p_manager,
+            temp_dir.path(),
+            None,
+            Arc::new(TokioCommandExecutor::new()),
+        )
+        .await
+        .unwrap();
 
         // Create some test chunks
         let chunks = vec![

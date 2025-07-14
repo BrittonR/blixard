@@ -80,6 +80,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
                     p2p_node_id: p2p_node_id.clone(),
                     p2p_addresses: p2p_addresses.clone(),
                     p2p_relay_url: p2p_relay_url.clone(),
+                    is_connected: false,
                 };
                 self.shared_state.add_peer_with_p2p(node_id, peer_info).await;
             } else {
@@ -98,6 +99,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
                     p2p_node_id: None,
                     p2p_addresses: Vec::new(),
                     p2p_relay_url: None,
+                    is_connected: false,
                 };
                 self.shared_state.add_peer(node_id, peer_info).await;
             }
@@ -122,6 +124,7 @@ impl ClusterOperations for ClusterOperationsAdapter {
                     p2p_node_id: p2p_node_id.clone(),
                     p2p_addresses: p2p_addresses.clone(),
                     p2p_relay_url: p2p_relay_url.clone(),
+                    is_connected: false,
                 };
                 self.shared_state.add_peer_with_p2p(node_id, peer_info).await;
             }

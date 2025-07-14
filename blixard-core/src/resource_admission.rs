@@ -401,19 +401,21 @@ mod tests {
 
         // Register a node with 10 CPUs, 16GB RAM
         let write_txn = database.begin_write().unwrap();
-        let mut worker_table = write_txn
-            .open_table(crate::raft_storage::WORKER_TABLE)
-            .unwrap();
-        let capabilities = WorkerCapabilities {
-            cpu_cores: 10,
-            memory_mb: 16384,
-            disk_gb: 100,
-            features: vec!["microvm".to_string()],
-        };
-        let node_data = bincode::serialize(&("127.0.0.1:7001", capabilities)).unwrap();
-        worker_table
-            .insert(&1u64.to_le_bytes(), node_data.as_slice())
-            .unwrap();
+        {
+            let mut worker_table = write_txn
+                .open_table(crate::raft_storage::WORKER_TABLE)
+                .unwrap();
+            let capabilities = WorkerCapabilities {
+                cpu_cores: 10,
+                memory_mb: 16384,
+                disk_gb: 100,
+                features: vec!["microvm".to_string()],
+            };
+            let node_data = bincode::serialize(&("127.0.0.1:7001", capabilities)).unwrap();
+            worker_table
+                .insert(1u64.to_le_bytes().as_slice(), node_data.as_slice())
+                .unwrap();
+        } // worker_table dropped here
         write_txn.commit().unwrap();
 
         // Sync state
@@ -436,7 +438,7 @@ mod tests {
             anti_affinity: None,
             priority: 100,
             preemptible: false,
-            locality_preference: crate::types::LocalityPreference::None,
+            locality_preference: crate::types::LocalityPreference::default(),
             health_check_config: None,
         };
 
@@ -495,19 +497,21 @@ mod tests {
 
         // Register a node with 4 CPUs, 8GB RAM
         let write_txn = database.begin_write().unwrap();
-        let mut worker_table = write_txn
-            .open_table(crate::raft_storage::WORKER_TABLE)
-            .unwrap();
-        let capabilities = WorkerCapabilities {
-            cpu_cores: 4,
-            memory_mb: 8192,
-            disk_gb: 100,
-            features: vec!["microvm".to_string()],
-        };
-        let node_data = bincode::serialize(&("127.0.0.1:7001", capabilities)).unwrap();
-        worker_table
-            .insert(&1u64.to_le_bytes(), node_data.as_slice())
-            .unwrap();
+        {
+            let mut worker_table = write_txn
+                .open_table(crate::raft_storage::WORKER_TABLE)
+                .unwrap();
+            let capabilities = WorkerCapabilities {
+                cpu_cores: 4,
+                memory_mb: 8192,
+                disk_gb: 100,
+                features: vec!["microvm".to_string()],
+            };
+            let node_data = bincode::serialize(&("127.0.0.1:7001", capabilities)).unwrap();
+            worker_table
+                .insert(1u64.to_le_bytes().as_slice(), node_data.as_slice())
+                .unwrap();
+        } // worker_table dropped here
         write_txn.commit().unwrap();
 
         // Sync state
@@ -525,7 +529,7 @@ mod tests {
             anti_affinity: None,
             priority: 100,
             preemptible: false,
-            locality_preference: crate::types::LocalityPreference::None,
+            locality_preference: crate::types::LocalityPreference::default(),
             health_check_config: None,
         };
 

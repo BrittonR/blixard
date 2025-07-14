@@ -250,6 +250,7 @@ mod tests {
                 capabilities: WorkerCapabilities {
                     cpu_cores: 2,
                     memory_mb: 4096,
+                    disk_gb: 100,
                     features: vec![],
                 },
                 topology: crate::types::NodeTopology::default(),

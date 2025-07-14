@@ -274,21 +274,29 @@ async fn test_preemption_execution() {
     let scheduler = VmScheduler::new(db);
 
     let candidates = vec![
-        blixard_core::vm_scheduler::PreemptionCandidate {
+        blixard_core::vm_scheduler_modules::placement_strategies::PreemptionCandidate {
             vm_name: "vm1".to_string(),
             node_id: 1,
             priority: 100,
-            vcpus: 2,
-            memory: 4096,
-            preemptible: true,
+            resources_freed: blixard_core::vm_scheduler_modules::resource_analysis::VmResourceRequirements {
+                vcpus: 2,
+                memory_mb: 4096,
+                disk_gb: 0,
+                required_features: Vec::new(),
+            },
+            preemption_cost: 1.0,
         },
-        blixard_core::vm_scheduler::PreemptionCandidate {
+        blixard_core::vm_scheduler_modules::placement_strategies::PreemptionCandidate {
             vm_name: "vm2".to_string(),
             node_id: 1,
             priority: 200,
-            vcpus: 2,
-            memory: 4096,
-            preemptible: true,
+            resources_freed: blixard_core::vm_scheduler_modules::resource_analysis::VmResourceRequirements {
+                vcpus: 2,
+                memory_mb: 4096,
+                disk_gb: 0,
+                required_features: Vec::new(),
+            },
+            preemption_cost: 1.0,
         },
     ];
 

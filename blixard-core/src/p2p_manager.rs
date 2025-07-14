@@ -36,6 +36,8 @@ pub struct PeerInfo {
     pub p2p_addresses: Vec<String>,
     /// P2P relay URL for NAT traversal
     pub p2p_relay_url: Option<String>,
+    /// Connection status
+    pub is_connected: bool,
 }
 
 /// Resource information
@@ -258,6 +260,7 @@ impl P2pManager {
             p2p_node_id: None,
             p2p_addresses: Vec::new(),
             p2p_relay_url: None,
+            is_connected: true,
         };
 
         self.peers
@@ -302,6 +305,7 @@ impl P2pManager {
                 .map(|addr| addr.to_string())
                 .collect(),
             p2p_relay_url: peer_addr.relay_url().map(|url| url.to_string()),
+            is_connected: true,
         };
 
         self.peers

@@ -380,9 +380,9 @@ mod tests {
         let registry = Arc::new(NodeIdentityRegistry::new());
 
         // Register a test user
-        let test_node_id = NodeId::new(&[1; 32]);
+        let test_node_id = NodeId::from_bytes(&[1; 32]).unwrap();
         registry
-            .register_user(
+            .register_node(
                 test_node_id,
                 "test-user".to_string(),
                 vec!["operator".to_string()],

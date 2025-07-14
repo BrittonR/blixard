@@ -268,8 +268,8 @@ mod tests {
     fn test_simple_vm_config() {
         let config = SimpleVmConfig::new("test", 2, 1024, 50, 3).unwrap();
         assert_eq!(config.name.as_str(), "test");
-        assert_eq!(*config.vcpus.get(), 2);
-        assert_eq!(*config.memory_mb.get(), 1024);
+        assert_eq!(config.vcpus.get(), 2);
+        assert_eq!(config.memory_mb.get(), 1024);
     }
 
     #[test]

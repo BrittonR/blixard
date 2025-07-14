@@ -43,8 +43,7 @@ impl IpAddressFactory {
     pub fn new(subnet: &str, max_hosts: u32) -> BlixardResult<Self> {
         let subnet_base: Ipv4Addr = subnet.parse().map_err(|_| BlixardError::InvalidInput {
             field: "subnet".to_string(),
-            value: subnet.to_string(),
-            reason: "Invalid IPv4 address".to_string(),
+            message: format!("Invalid IPv4 address: {}", subnet),
         })?;
 
         Ok(Self {
@@ -62,8 +61,7 @@ impl ResourceFactory<IpAddressResource> for IpAddressFactory {
 
         if host_num >= self.max_hosts {
             return Err(BlixardError::ResourceExhausted {
-                resource_type: "IP addresses".to_string(),
-                details: format!("All {} addresses allocated", self.max_hosts),
+                resource: format!("IP addresses - All {} addresses allocated", self.max_hosts),
             });
         }
 

@@ -416,7 +416,7 @@ mod tests {
 
         let node_state = Arc::new(SharedNodeState::new(config));
         let database = Arc::new(redb::Database::create(temp_dir.path().join("test.db")).unwrap());
-        node_state.set_database(database.clone()).await;
+        node_state.set_database(Some(database.clone())).await;
 
         let vm_backend = Arc::new(crate::vm_backend::MockVmBackend::new(database.clone()));
         let vm_manager = Arc::new(crate::vm_backend::VmManager::new(
@@ -432,22 +432,22 @@ mod tests {
         assert_eq!(monitor.name(), "VmHealthMonitor");
 
         // Start should succeed
-        monitor.start().unwrap();
+        monitor.start();
         assert!(monitor.is_running());
 
         // Starting again should log a warning but not fail
-        monitor.start().unwrap();
+        monitor.start();
         assert!(monitor.is_running());
 
         // Stop should succeed
-        monitor.stop().await.unwrap();
+        monitor.stop();
         assert!(!monitor.is_running());
 
         // Restart should work
         monitor.restart().await.unwrap();
         assert!(monitor.is_running());
 
-        monitor.stop().await.unwrap();
+        monitor.stop();
     }
 
     #[tokio::test]
@@ -466,7 +466,7 @@ mod tests {
 
         let node_state = Arc::new(SharedNodeState::new(node_config));
         let database = Arc::new(redb::Database::create(temp_dir.path().join("test.db")).unwrap());
-        node_state.set_database(database.clone()).await;
+        node_state.set_database(Some(database.clone())).await;
 
         let vm_backend = Arc::new(crate::vm_backend::MockVmBackend::new(database.clone()));
         let vm_manager = Arc::new(crate::vm_backend::VmManager::new(
@@ -485,7 +485,7 @@ mod tests {
                 enable_detailed_checks: false,
             },
             state_manager: HealthStateManagerConfig {
-                max_state_age: Duration::from_hours(2),
+                max_state_age: Duration::from_secs(2 * 60 * 60),
                 cleanup_interval: Duration::from_millis(200),
                 max_results_per_vm: 20,
                 enable_persistence: false,
@@ -503,10 +503,10 @@ mod tests {
         let mut monitor = VmHealthMonitor::with_config(node_state, vm_manager, health_config);
 
         // Test that custom configuration is used
-        monitor.start().unwrap();
+        monitor.start();
         assert!(monitor.is_running());
 
-        monitor.stop().await.unwrap();
+        monitor.stop();
         assert!(!monitor.is_running());
     }
 }

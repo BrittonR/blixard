@@ -357,7 +357,7 @@ mod tests {
 
         let node_state = Arc::new(crate::node_shared::SharedNodeState::new(config));
         let database = Arc::new(redb::Database::create(temp_dir.path().join("test.db")).unwrap());
-        node_state.set_database(database.clone()).await;
+        node_state.set_database(Some(database.clone())).await;
 
         let vm_backend = Arc::new(crate::vm_backend::MockVmBackend::new(database.clone()));
         let vm_manager = Arc::new(crate::vm_backend::VmManager::new(
@@ -371,7 +371,7 @@ mod tests {
         let deps = VmHealthMonitorDependencies::with_clock(node_state, vm_manager, clock);
 
         let state_config = HealthStateManagerConfig {
-            max_state_age: Duration::from_hours(1),
+            max_state_age: Duration::from_secs(60 * 60),
             cleanup_interval: Duration::from_millis(100),
             max_results_per_vm: 10,
             enable_persistence: false,
@@ -390,14 +390,15 @@ mod tests {
         // Test health check management
         let health_check = HealthCheck {
             name: "tcp-check".to_string(),
-            check_type: HealthCheckType::TcpConnect {
-                host: "localhost".to_string(),
-                port: 8080,
-                timeout_ms: 5000,
+            check_type: HealthCheckType::Tcp {
+                address: "localhost:8080".to_string(),
+                timeout_secs: 10,
             },
-            interval_secs: 30,
-            timeout_secs: 10,
-            retries: 3,
+            weight: 1.0,
+            critical: true,
+            priority: HealthCheckPriority::Quick,
+            recovery_escalation: None,
+            failure_threshold: 3,
         };
 
         manager

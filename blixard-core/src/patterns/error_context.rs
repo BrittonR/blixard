@@ -400,7 +400,6 @@ mod tests {
                 if attempt_count < 3 {
                     Err(BlixardError::Internal {
                         message: "Temporary failure".to_string(),
-                        source: None,
                     })
                 } else {
                     Ok("Success")

@@ -204,8 +204,7 @@ pub fn validate_cluster_config(config: &ClusterConfig) -> BlixardResult<()> {
     if config.replication_factor > config.nodes.len() {
         return Err(BlixardError::InvalidInput {
             field: "replication_factor".to_string(),
-            value: config.replication_factor.to_string(),
-            reason: format!("Cannot exceed node count ({})", config.nodes.len()),
+            message: format!("Cannot exceed node count ({}), got {}", config.nodes.len(), config.replication_factor),
         })
         .with_config_context("cluster.replication_factor");
     }

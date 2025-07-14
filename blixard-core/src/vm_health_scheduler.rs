@@ -488,7 +488,7 @@ mod tests {
 
         let node_state = Arc::new(crate::node_shared::SharedNodeState::new(config));
         let database = Arc::new(redb::Database::create(temp_dir.path().join("test.db")).unwrap());
-        node_state.set_database(database.clone()).await;
+        node_state.set_database(Some(database.clone())).await;
 
         let vm_backend = Arc::new(crate::vm_backend::MockVmBackend::new(database.clone()));
         let vm_manager = Arc::new(crate::vm_backend::VmManager::new(

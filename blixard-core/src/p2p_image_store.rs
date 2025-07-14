@@ -328,7 +328,7 @@ mod tests {
     #[tokio::test]
     async fn test_image_store_creation() {
         let temp_dir = TempDir::new().unwrap();
-        let store = P2pImageStore::new(1, temp_dir.path()).await.unwrap();
+        let store = P2pImageStore::with_default_filesystem(1, temp_dir.path()).await.unwrap();
 
         // Check cache directory was created
         assert!(temp_dir.path().join("image-cache").exists());
@@ -337,9 +337,9 @@ mod tests {
     #[tokio::test]
     async fn test_cache_stats() {
         let temp_dir = TempDir::new().unwrap();
-        let store = P2pImageStore::new(1, temp_dir.path()).await.unwrap();
+        let store = P2pImageStore::with_default_filesystem(1, temp_dir.path()).await.unwrap();
 
-        let stats = store.get_cache_stats().unwrap();
+        let stats = store.get_cache_stats().await.unwrap();
         assert_eq!(stats.image_count, 0);
         assert_eq!(stats.total_size, 0);
     }

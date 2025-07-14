@@ -331,15 +331,20 @@ mod tests {
     async fn test_mock_state_manager() {
         let config = NodeConfig {
             id: 1,
-            address: "127.0.0.1:7001".to_string(),
+            bind_addr: "127.0.0.1:7001".parse().unwrap(),
             data_dir: "/tmp/test".to_string(),
+            join_addr: None,
+            use_tailscale: false,
+            vm_backend: "mock".to_string(),
+            transport_config: None,
+            topology: Default::default(),
         };
 
         let state_manager = MockStateManager::new(config.clone());
 
         // Test config management
         assert_eq!(state_manager.get_node_id().await, 1);
-        assert_eq!(state_manager.get_config().await.address, "127.0.0.1:7001");
+        assert_eq!(state_manager.get_config().await.bind_addr.to_string(), "127.0.0.1:7001");
 
         // Test lifecycle management
         assert!(!state_manager.is_running().await);
@@ -350,11 +355,20 @@ mod tests {
 
         // Test peer management
         let peer_info = PeerInfo {
-            id: 2,
+            node_id: "2".to_string(),
             address: "127.0.0.1:7002".to_string(),
-            is_connected: true,
+            last_seen: chrono::Utc::now(),
+            capabilities: vec![],
+            shared_resources: std::collections::HashMap::new(),
+            connection_quality: crate::p2p_manager::ConnectionQuality {
+                latency_ms: 10,
+                bandwidth_mbps: 100.0,
+                packet_loss: 0.0,
+                reliability_score: 1.0,
+            },
             p2p_node_id: None,
             p2p_addresses: vec![],
+            p2p_relay_url: None,
         };
 
         state_manager.add_peer(2, peer_info.clone()).await.unwrap();

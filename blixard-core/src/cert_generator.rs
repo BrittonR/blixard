@@ -551,8 +551,8 @@ mod tests {
 
         // Verify key usage includes certificate signing
         if let Ok(Some(key_usage)) = cert.key_usage() {
-            assert!(key_usage.key_cert_sign());
-            assert!(key_usage.crl_sign());
+            assert!(key_usage.value.key_cert_sign());
+            assert!(key_usage.value.crl_sign());
         }
 
         // Verify validity period
@@ -621,14 +621,14 @@ mod tests {
 
         // Verify key usage for server authentication
         if let Ok(Some(key_usage)) = cert.key_usage() {
-            assert!(key_usage.digital_signature());
-            assert!(key_usage.key_agreement());
+            assert!(key_usage.value.digital_signature());
+            assert!(key_usage.value.key_agreement());
         }
 
         // Verify extended key usage includes server auth
-        if let Some(ext_key_usage) = cert.extended_key_usage() {
-            assert!(ext_key_usage.server_auth);
-            assert!(ext_key_usage.client_auth); // For mTLS
+        if let Ok(Some(ext_key_usage)) = cert.extended_key_usage() {
+            assert!(ext_key_usage.value.server_auth);
+            assert!(ext_key_usage.value.client_auth); // For mTLS
         }
     }
 
@@ -673,9 +673,9 @@ mod tests {
             .contains("CN=admin@blixard.local"));
 
         // Verify extended key usage includes client auth only
-        if let Some(ext_key_usage) = cert.extended_key_usage() {
-            assert!(ext_key_usage.client_auth);
-            assert!(!ext_key_usage.server_auth); // Should not have server auth
+        if let Ok(Some(ext_key_usage)) = cert.extended_key_usage() {
+            assert!(ext_key_usage.value.client_auth);
+            assert!(!ext_key_usage.value.server_auth); // Should not have server auth
         }
     }
 
@@ -811,8 +811,8 @@ mod tests {
             assert!(cert.subject().to_string().contains(&format!("CN={}", name)));
 
             // Verify has server auth capability
-            if let Some(ext_key_usage) = cert.extended_key_usage() {
-                assert!(ext_key_usage.server_auth);
+            if let Ok(Some(ext_key_usage)) = cert.extended_key_usage() {
+                assert!(ext_key_usage.value.server_auth);
             }
         }
 
@@ -823,8 +823,8 @@ mod tests {
             assert!(cert.subject().to_string().contains(&format!("CN={}", name)));
 
             // Verify has client auth capability
-            if let Some(ext_key_usage) = cert.extended_key_usage() {
-                assert!(ext_key_usage.client_auth);
+            if let Ok(Some(ext_key_usage)) = cert.extended_key_usage() {
+                assert!(ext_key_usage.value.client_auth);
             }
         }
 
@@ -894,7 +894,7 @@ mod tests {
         let cert = parse_certificate_pem(&server_bundle.cert_pem).unwrap();
 
         // Verify SAN extension exists
-        assert!(cert.subject_alternative_name().is_some());
+        assert!(cert.subject_alternative_name().is_ok());
     }
 
     #[tokio::test]

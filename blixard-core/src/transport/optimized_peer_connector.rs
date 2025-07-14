@@ -879,8 +879,8 @@ mod tests {
     #[tokio::test]
     async fn test_enhanced_connection_info() {
         // Mock client creation
-        let endpoint = iroh::Endpoint::builder().build().unwrap();
-        let node_addr = NodeAddr::new(iroh::NodeId::new([1u8; 32]));
+        let endpoint = iroh::Endpoint::builder().bind().await.unwrap();
+        let node_addr = NodeAddr::new(iroh::NodeId::from_bytes(&[1u8; 32]).unwrap());
         
         // This would normally create a real client, but for testing we'll skip
         // let client = IrohClient::new(endpoint, node_addr, 1, None).await.unwrap();

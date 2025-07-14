@@ -74,6 +74,7 @@ impl Node {
                     p2p_node_id: Some(bootstrap_info.p2p_node_id.clone()),
                     p2p_addresses: vec![],
                     p2p_relay_url: None,
+                    is_connected: false,
                 };
                 self.shared
                     .add_peer_with_p2p(bootstrap_info.node_id, peer_info).await;
@@ -271,6 +272,7 @@ impl Node {
                         p2p_node_id: Some(node_info.node_id.to_string()),
                         p2p_addresses: node_info.addresses.iter().map(|a| a.to_string()).collect(),
                         p2p_relay_url: None,
+                        is_connected: false,
                     };
                     self.shared.add_peer_with_p2p(leader_node_id, peer_info).await;
 
@@ -405,6 +407,7 @@ impl Node {
                     p2p_node_id: Some(peer_info.p2p_node_id.clone()),
                     p2p_addresses: vec![],
                     p2p_relay_url: None,
+                    is_connected: false,
                 };
                 self.shared.add_peer_with_p2p(peer_info.id, p2p_peer_info).await;
 

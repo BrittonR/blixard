@@ -391,6 +391,10 @@ mod tests {
             (1, "gpu"),
             (2, "high_memory"),
             (4, "nvme"),
+            (5, "basic"), // Dummy entries to fill array
+            (6, "basic"),
+            (7, "basic"),
+            (3, "basic"), // Fill remaining slot
         ]);
         
         assert_eq!(capabilities.get(0), Some("basic"));

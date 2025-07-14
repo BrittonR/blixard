@@ -433,9 +433,11 @@ mod tests {
         // Write data
         {
             let txn = DatabaseTransaction::begin_write(&db, "insert test").unwrap();
-            let mut table = txn.open_table(TEST_TABLE).unwrap();
-            txn.insert_serialized(&mut table, "key1", &test_data)
-                .unwrap();
+            {
+                let mut table = txn.open_table(TEST_TABLE).unwrap();
+                txn.insert_serialized(&mut table, "key1", &test_data)
+                    .unwrap();
+            } // table dropped here
             txn.commit().unwrap();
         }
 
@@ -456,52 +458,56 @@ mod tests {
         // Insert initial data
         {
             let txn = DatabaseTransaction::begin_write(&db, "initial data").unwrap();
-            let mut table = txn.open_table(TEST_TABLE).unwrap();
-            txn.insert_serialized(
-                &mut table,
-                "key1",
-                &TestData {
-                    id: 1,
-                    name: "one".to_string(),
-                },
-            )
-            .unwrap();
-            txn.insert_serialized(
-                &mut table,
-                "key2",
-                &TestData {
-                    id: 2,
-                    name: "two".to_string(),
-                },
-            )
-            .unwrap();
+            {
+                let mut table = txn.open_table(TEST_TABLE).unwrap();
+                txn.insert_serialized(
+                    &mut table,
+                    "key1",
+                    &TestData {
+                        id: 1,
+                        name: "one".to_string(),
+                    },
+                )
+                .unwrap();
+                txn.insert_serialized(
+                    &mut table,
+                    "key2",
+                    &TestData {
+                        id: 2,
+                        name: "two".to_string(),
+                    },
+                )
+                .unwrap();
+            } // table dropped here
             txn.commit().unwrap();
         }
 
         // Clear and restore with new data
         {
             let txn = DatabaseTransaction::begin_write(&db, "clear and restore").unwrap();
-            let mut table = txn.open_table(TEST_TABLE).unwrap();
+            {
+                let mut table = txn.open_table(TEST_TABLE).unwrap();
 
-            let new_data = vec![
-                (
-                    "key3",
-                    TestData {
-                        id: 3,
-                        name: "three".to_string(),
-                    },
-                ),
-                (
-                    "key4",
-                    TestData {
-                        id: 4,
-                        name: "four".to_string(),
-                    },
-                ),
-            ];
+                let new_data = vec![
+                    (
+                        "key3",
+                        TestData {
+                            id: 3,
+                            name: "three".to_string(),
+                        },
+                    ),
+                    (
+                        "key4",
+                        TestData {
+                            id: 4,
+                            name: "four".to_string(),
+                        },
+                    ),
+                ];
 
-            txn.clear_and_restore_serialized(&mut table, new_data)
-                .unwrap();
+                txn.clear_and_restore_serialized(&mut table, new_data)
+                    .unwrap();
+            } // table dropped here
             txn.commit().unwrap();
         }
 

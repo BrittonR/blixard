@@ -387,8 +387,8 @@ mod tests {
         provider.set_our_node_info(
             node_id,
             vec![
-                SocketAddr::from_str("127.0.0.1:8080").unwrap(),
-                SocketAddr::from_str("[::1]:8080").unwrap(),
+                "127.0.0.1:8080".parse().unwrap(),
+                "[::1]:8080".parse().unwrap(),
             ],
         );
 

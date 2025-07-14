@@ -20,8 +20,8 @@ mod traditional_patterns {
 
     #[derive(Serialize, Deserialize, Clone)]
     pub struct VmState {
-        name: String,
-        status: String,
+        pub name: String,
+        pub status: String,
     }
 
     /// Traditional pattern - LOTS of boilerplate (repeated 25+ times in codebase)
@@ -188,8 +188,8 @@ mod wrapper_patterns {
 
     #[derive(Serialize, Deserialize, Clone)]
     pub struct VmState {
-        name: String,
-        status: String,
+        pub name: String,
+        pub status: String,
     }
 
     /// DatabaseTransaction pattern - NO boilerplate!
@@ -459,6 +459,11 @@ mod comparison_tests {
             status: "running".to_string(),
         };
 
+        let wrapper_test_state = wrapper_patterns::VmState {
+            name: "test-vm-2".to_string(),
+            status: "running".to_string(),
+        };
+
         // Both approaches should provide identical functionality
         // Traditional approach: ~50 lines per operation
         traditional_patterns::traditional_insert_vm_state(&database, "test-vm", &test_state)
@@ -471,11 +476,11 @@ mod comparison_tests {
                 .unwrap();
 
         // Wrapper approach: ~6 lines per operation
-        wrapper_patterns::wrapper_insert_vm_state(&database, "test-vm-2", &test_state)
+        wrapper_patterns::wrapper_insert_vm_state(&database, "test-vm-2".to_string(), wrapper_test_state.clone())
             .await
             .unwrap();
 
-        let wrapper_result = wrapper_patterns::wrapper_get_vm_state(&database, "test-vm-2")
+        let wrapper_result = wrapper_patterns::wrapper_get_vm_state(&database, "test-vm-2".to_string())
             .await
             .unwrap();
 

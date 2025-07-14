@@ -394,7 +394,7 @@ mod tests {
 
         let node_state = Arc::new(crate::node_shared::SharedNodeState::new(config));
         let database = Arc::new(redb::Database::create(temp_dir.path().join("test.db")).unwrap());
-        node_state.set_database(database.clone()).await;
+        node_state.set_database(Some(database.clone())).await;
 
         let vm_backend = Arc::new(crate::vm_backend::MockVmBackend::new(database.clone()));
         let vm_manager = Arc::new(crate::vm_backend::VmManager::new(
@@ -434,19 +434,10 @@ mod tests {
         // Test recovery triggering
         let vm_config = VmConfig {
             name: "test-vm".to_string(),
+            config_path: "/tmp/test.nix".to_string(),
             vcpus: 2,
             memory: 1024,
-            preemptible: false,
-            priority: 100,
-            anti_affinity: None,
-            networks: vec![],
-            volumes: vec![],
-            nixos_modules: vec![],
-            kernel: None,
-            init_command: None,
-            flake_modules: vec![],
-            hypervisor: Hypervisor::CloudHypervisor,
-            tenant_id: None,
+            ..Default::default()
         };
 
         coordinator
