@@ -137,7 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🎓 Certificate-Based Enrollment Examples\n");
 
     // Simulate ops team member
-    let ops_node = NodeId::new(&[1u8; 32]);
+    let ops_node = NodeId::from_bytes(&[1u8; 32]).unwrap();
     let mut ops_cert = HashMap::new();
     ops_cert.insert("CN".to_string(), "alice.ops.blixard.io".to_string());
     ops_cert.insert("OU".to_string(), "Operations".to_string());
@@ -159,7 +159,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Simulate developer
-    let dev_node = NodeId::new(&[2u8; 32]);
+    let dev_node = NodeId::from_bytes(&[2u8; 32]).unwrap();
     let mut dev_cert = HashMap::new();
     dev_cert.insert("CN".to_string(), "bob@blixard.io".to_string());
     dev_cert.insert("OU".to_string(), "Development".to_string());
@@ -183,7 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Demo 3: Test token enrollment
     println!("🎟️ Token-Based Enrollment Example\n");
 
-    let test_node = NodeId::new(&[3u8; 32]);
+    let test_node = NodeId::from_bytes(&[3u8; 32]).unwrap();
     match enrollment_manager
         .enroll_with_token(test_node, &worker_token.token_id, &worker_token.secret)
         .await
@@ -230,7 +230,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     // Test ops node authorization
-    if let Some(user) = identity_registry.get_user_for_node(ops_node).await {
+    if let Some((user, _roles, _tenant)) = identity_registry.get_user_identity(&ops_node).await {
         println!("Testing ops node ({}) permissions:", user);
 
         // Simulate authorization checks
@@ -251,7 +251,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Test developer node authorization
-    if let Some(user) = identity_registry.get_user_for_node(dev_node).await {
+    if let Some((user, _roles, _tenant)) = identity_registry.get_user_identity(&dev_node).await {
         println!("Testing developer node ({}) permissions:", user);
 
         let actions = vec![

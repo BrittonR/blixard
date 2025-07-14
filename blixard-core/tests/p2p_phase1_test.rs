@@ -57,7 +57,7 @@ async fn test_p2p_blob_operations() -> BlixardResult<()> {
     tokio::fs::write(&test_file, test_data).await?;
 
     // Share the file
-    let hash = p2p_manager.share_data(&test_file, "test-blob").await?;
+    let hash = p2p_manager.share_data(test_data.to_vec(), "test-blob").await?;
 
     // Download using the hash (should get it from local store)
     let downloaded = p2p_manager.download_data(&hash).await?;
@@ -73,15 +73,15 @@ async fn test_p2p_document_sync() -> BlixardResult<()> {
     let temp_dir = tempfile::tempdir()?;
 
     // Create transport directly to test document operations
-    let transport = Arc::new(IrohTransportV2::new(1).await?);
+    let transport = Arc::new(IrohTransportV2::new(1, temp_dir.path()).await?);
 
     // Test various document types
     transport
-        .create_or_join_doc(DocumentType::ClusterConfig)
+        .create_or_join_doc(DocumentType::ClusterConfig, true)
         .await?;
-    transport.create_or_join_doc(DocumentType::Metadata).await?;
+    transport.create_or_join_doc(DocumentType::Metadata, true).await?;
     transport
-        .create_or_join_doc(DocumentType::NodeState)
+        .create_or_join_doc(DocumentType::NodeState, true)
         .await?;
 
     // Write state to different documents

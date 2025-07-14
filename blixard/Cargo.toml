@@ -30,6 +30,7 @@ tracing-subscriber = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true }
+futures = { workspace = true }
 
 # gRPC client
 tonic = { workspace = true }

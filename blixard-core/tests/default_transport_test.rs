@@ -1,37 +1,16 @@
 //! Test that Iroh is the default transport
 
-use blixard_core::transport::config::{RaftTransportPreference, TransportConfig};
+use blixard_core::transport::config::TransportConfig;
 
 #[test]
 fn test_default_transport_is_iroh() {
-    // Test that TransportConfig defaults to Iroh
+    // Test that TransportConfig defaults to Iroh values
     let default_transport = TransportConfig::default();
 
-    match default_transport {
-        _ => {
-            // This is expected - Iroh is the default
-        }
-        _ => panic!(
-            "Expected default transport to be Iroh, but got {:?}",
-            default_transport
-        ),
-    }
-}
-
-#[test]
-fn test_default_raft_preference_is_iroh() {
-    // Test that RaftTransportPreference defaults to AlwaysIroh
-    let default_pref = RaftTransportPreference::default();
-
-    match default_pref {
-        RaftTransportPreference::AlwaysIroh => {
-            // This is expected
-        }
-        _ => panic!(
-            "Expected default Raft preference to be AlwaysIroh, but got {:?}",
-            default_pref
-        ),
-    }
+    // Verify it has expected Iroh relay
+    assert_eq!(default_transport.home_relay, "https://relay.iroh.network");
+    assert_eq!(default_transport.discovery_port, 0); // Auto-select
+    assert!(default_transport.alpn_protocols.is_empty());
 }
 
 #[test]
@@ -47,15 +26,10 @@ fn test_config_includes_iroh_transport() {
     );
 
     if let Some(transport) = config.transport {
-        match transport {
-            _ => {
-                // This is expected
-            }
-            _ => panic!(
-                "Expected Config to have Iroh transport by default, but got {:?}",
-                transport
-            ),
-        }
+        // Verify it has Iroh configuration
+        assert_eq!(transport.home_relay, "https://relay.iroh.network");
+        assert_eq!(transport.discovery_port, 0);
+        assert!(transport.alpn_protocols.is_empty());
     }
 }
 
@@ -68,7 +42,7 @@ mod transport_config_tests {
     fn test_iroh_config_defaults() {
         let config = IrohConfig::default();
 
-        assert!(config.enabled);
+        // IrohConfig is just a type alias for TransportConfig, so test the same fields
         assert_eq!(config.home_relay, "https://relay.iroh.network");
         assert_eq!(config.discovery_port, 0); // Auto-select
         assert!(config.alpn_protocols.is_empty());
@@ -82,18 +56,16 @@ mod transport_config_tests {
         // Serialize to TOML
         let toml_str = toml::to_string(&transport).expect("Should serialize to TOML");
 
-        // Should contain mode = "iroh"
-        assert!(toml_str.contains("mode = \"iroh\""));
+        // Should contain the expected relay
+        assert!(toml_str.contains("https://relay.iroh.network"));
 
         // Deserialize back
         let deserialized: TransportConfig =
             toml::from_str(&toml_str).expect("Should deserialize from TOML");
 
-        match deserialized {
-            _ => {
-                // Good, still Iroh
-            }
-            _ => panic!("Deserialized transport should be Iroh"),
-        }
+        // Verify the deserialized config has the same values
+        assert_eq!(deserialized.home_relay, transport.home_relay);
+        assert_eq!(deserialized.discovery_port, transport.discovery_port);
+        assert_eq!(deserialized.alpn_protocols, transport.alpn_protocols);
     }
 }

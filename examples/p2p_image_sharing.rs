@@ -7,7 +7,7 @@
 //! 4. Download the image on the second node
 
 use blixard_core::p2p_image_store::P2pImageStore;
-use std::path::Path;
+use futures::StreamExt;
 use tempfile::TempDir;
 use tokio::time::{sleep, Duration};
 use tracing::info;
@@ -23,23 +23,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting P2P image sharing example");
 
-    // Create image stores for both nodes
+    // Create image stores for both nodes using default filesystem
     info!("Creating image store for node 1");
-    let store1 = P2pImageStore::new(1, node1_dir.path()).await?;
+    let store1 = P2pImageStore::with_default_filesystem(1, node1_dir.path()).await?;
 
     info!("Creating image store for node 2");
-    let store2 = P2pImageStore::new(2, node2_dir.path()).await?;
+    let store2 = P2pImageStore::with_default_filesystem(2, node2_dir.path()).await?;
 
-    // Get the address and ticket from node 1
+    // Get the address from node 1 for P2P communication
     let node1_addr = store1.get_node_addr().await?;
-    let images_ticket = store1.get_images_ticket().await?;
-
     info!("Node 1 address: {}", node1_addr.node_id);
-    info!("Images document ticket: {}", images_ticket);
 
-    // Node 2 joins the images document
-    info!("Node 2 joining images document from node 1");
-    store2.join_images_from_ticket(&images_ticket).await?;
+    // In this example, both nodes share the same P2P network
+    // In a real scenario, node 2 would connect to node 1's address
 
     // Create a dummy image file for testing
     let test_image_path = node1_dir.path().join("test-vm.img");
@@ -88,8 +84,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Check cache stats
-    let stats1 = store1.get_cache_stats()?;
-    let stats2 = store2.get_cache_stats()?;
+    let stats1 = store1.get_cache_stats().await?;
+    let stats2 = store2.get_cache_stats().await?;
 
     info!(
         "Node 1 cache: {} images, {} bytes",
@@ -126,7 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Wait for the new image announcement
     tokio::select! {
-        Some(new_image) = futures::StreamExt::next(&mut image_stream) => {
+        Some(new_image) = image_stream.next() => {
             info!("📢 Node 2 received new image announcement: {} v{}", new_image.name, new_image.version);
         }
         _ = sleep(Duration::from_secs(5)) => {

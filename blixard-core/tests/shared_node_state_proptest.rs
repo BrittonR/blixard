@@ -1,11 +1,13 @@
 use blixard_core::node_shared::{RaftStatus, SharedNodeState};
 use blixard_core::raft_manager::{ResourceRequirements, TaskSpec};
 use blixard_core::types::{NodeConfig, NodeTopology};
+use blixard_core::p2p_manager::{PeerInfo, ConnectionQuality};
 use proptest::prelude::*;
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
+use chrono::Utc;
 
 // Arbitrary implementations for test types
 fn arb_socket_addr() -> impl Strategy<Value = SocketAddr> {
@@ -67,6 +69,26 @@ enum ConcurrentOperation {
     GetClusterStatus,
 }
 
+fn arb_peer_info() -> impl Strategy<Value = PeerInfo> {
+    ("\\w+", "\\w+:[0-9]+").prop_map(|(node_id, address)| PeerInfo {
+        node_id,
+        address,
+        last_seen: Utc::now(),
+        capabilities: vec![],
+        shared_resources: HashMap::new(),
+        connection_quality: ConnectionQuality {
+            latency_ms: 10,
+            bandwidth_mbps: 100.0,
+            packet_loss: 0.0,
+            reliability_score: 1.0,
+        },
+        p2p_node_id: None,
+        p2p_addresses: vec![],
+        p2p_relay_url: None,
+        is_connected: false,
+    })
+}
+
 fn arb_concurrent_operation() -> impl Strategy<Value = ConcurrentOperation> {
     prop_oneof![
         any::<bool>().prop_map(ConcurrentOperation::SetRunning),
@@ -103,22 +125,39 @@ proptest! {
                 let handle = tokio::spawn(async move {
                     match op {
                         ConcurrentOperation::SetRunning(running) => {
-                            state_clone.set_running(running).await;
+                            state_clone.set_running(running);
                         }
                         ConcurrentOperation::SetInitialized(initialized) => {
-                            state_clone.set_initialized(initialized).await;
+                            state_clone.set_initialized(initialized);
                         }
                         ConcurrentOperation::UpdateRaftStatus(status) => {
-                            state_clone.update_raft_status(status).await;
+                            state_clone.update_raft_status(status);
                         }
                         ConcurrentOperation::AddPeer(id, addr) => {
-                            let _ = state_clone.add_peer(id, addr).await;
+                            let peer_info = PeerInfo {
+                                node_id: id.to_string(),
+                                address: addr,
+                                last_seen: Utc::now(),
+                                capabilities: vec![],
+                                shared_resources: HashMap::new(),
+                                connection_quality: ConnectionQuality {
+                                    latency_ms: 10,
+                                    bandwidth_mbps: 100.0,
+                                    packet_loss: 0.0,
+                                    reliability_score: 1.0,
+                                },
+                                p2p_node_id: None,
+                                p2p_addresses: vec![],
+                                p2p_relay_url: None,
+                                is_connected: false,
+                            };
+                            state_clone.add_peer(id, peer_info).await;
                         }
                         ConcurrentOperation::RemovePeer(id) => {
-                            let _ = state_clone.remove_peer(id).await;
+                            state_clone.remove_peer(id).await;
                         }
                         ConcurrentOperation::UpdatePeerConnection(id, connected) => {
-                            let _ = state_clone.update_peer_connection(id, connected).await;
+                            state_clone.update_peer_connection(id, connected.to_string());
                         }
                         ConcurrentOperation::GetPeers => {
                             let _ = state_clone.get_peers().await;
@@ -127,17 +166,17 @@ proptest! {
                             let _ = state_clone.get_raft_status().await;
                         }
                         ConcurrentOperation::IsRunning => {
-                            let _ = state_clone.is_running().await;
+                            let _ = state_clone.is_running();
                         }
                         ConcurrentOperation::IsInitialized => {
-                            let _ = state_clone.is_initialized().await;
+                            let _ = state_clone.is_initialized();
                         }
                         ConcurrentOperation::IsLeader => {
-                            let _ = state_clone.is_leader().await;
+                            let _ = state_clone.is_leader();
                         }
                         ConcurrentOperation::GetClusterStatus => {
                             // Need to be initialized for this to work
-                            state_clone.set_initialized(true).await;
+                            state_clone.set_initialized(true);
                             let _ = state_clone.get_cluster_status().await;
                         }
                     }
@@ -152,11 +191,11 @@ proptest! {
 
             // Verify state is consistent
             assert_eq!(state.get_id(), config.id);
-            assert_eq!(state.get_bind_addr(), &config.bind_addr);
+            assert_eq!(state.get_bind_addr(), config.bind_addr.to_string());
 
             // Peers should not have duplicates
             let peers = state.get_peers().await;
-            let peer_ids: HashSet<u64> = peers.iter().map(|p| p.id).collect();
+            let peer_ids: HashSet<u64> = peers.iter().map(|p| p.node_id.parse::<u64>().unwrap_or(0)).collect();
             assert_eq!(peer_ids.len(), peers.len(), "Peer IDs should be unique");
         });
     }
@@ -177,9 +216,9 @@ proptest! {
             for should_set in &set_operations {
                 if *should_set {
                     let (tx, _rx) = oneshot::channel();
-                    state.set_shutdown_tx(tx).await;
+                    state.set_shutdown_tx(tx);
                 } else {
-                    let _ = state.take_shutdown_tx().await;
+                    let _ = state.take_shutdown_tx();
                 }
             }
 
@@ -187,7 +226,7 @@ proptest! {
             for should_set in &set_operations {
                 if *should_set {
                     let (tx, _rx) = mpsc::unbounded_channel();
-                    state.set_raft_proposal_tx(tx).await;
+                    state.set_raft_proposal_tx(tx);
                 }
             }
 
@@ -195,7 +234,7 @@ proptest! {
             for should_set in &set_operations {
                 if *should_set {
                     let (tx, _rx) = mpsc::unbounded_channel();
-                    state.set_raft_message_tx(tx).await;
+                    state.set_raft_message_tx(tx);
                 }
             }
 
@@ -203,8 +242,8 @@ proptest! {
             state.shutdown_components().await;
 
             // Verify shutdown clears everything
-            assert!(state.take_shutdown_tx().await.is_none());
-            assert!(!state.is_running().await);
+            assert!(state.take_shutdown_tx().is_none());
+            assert!(!state.is_running());
         });
     }
 }
@@ -229,27 +268,38 @@ proptest! {
 
             for (id, addr, should_add) in peer_ops {
                 if should_add {
-                    let result = state.add_peer(id, addr.clone()).await;
+                    let peer_info = PeerInfo {
+                        node_id: id.to_string(),
+                        address: addr.clone(),
+                        last_seen: Utc::now(),
+                        capabilities: vec![],
+                        shared_resources: HashMap::new(),
+                        connection_quality: ConnectionQuality {
+                            latency_ms: 10,
+                            bandwidth_mbps: 100.0,
+                            packet_loss: 0.0,
+                            reliability_score: 1.0,
+                        },
+                        p2p_node_id: None,
+                        p2p_addresses: vec![],
+                        p2p_relay_url: None,
+                        is_connected: false,
+                    };
                     if !expected_peers.contains(&id) {
-                        assert!(result.is_ok());
+                        state.add_peer(id, peer_info).await;
                         expected_peers.insert(id);
-                    } else {
-                        assert!(result.is_err()); // Should fail if peer already exists
                     }
                 } else {
-                    let result = state.remove_peer(id).await;
                     if expected_peers.contains(&id) {
-                        assert!(result.is_ok());
+                        state.remove_peer(id).await;
                         expected_peers.remove(&id);
-                    } else {
-                        assert!(result.is_err()); // Should fail if peer doesn't exist
                     }
                 }
             }
 
             // Verify final state matches expected
             let actual_peers = state.get_peers().await;
-            let actual_ids: HashSet<u64> = actual_peers.iter().map(|p| p.id).collect();
+            let actual_ids: HashSet<u64> = actual_peers.iter().map(|p| p.node_id.parse::<u64>().unwrap_or(0)).collect();
             assert_eq!(actual_ids, expected_peers);
         });
     }
@@ -268,14 +318,31 @@ proptest! {
             let state = Arc::new(SharedNodeState::new(config));
 
             // Add a peer first
-            state.add_peer(peer_id, "test:1234".to_string()).await.unwrap();
+            let peer_info = PeerInfo {
+                node_id: peer_id.to_string(),
+                address: "test:1234".to_string(),
+                last_seen: Utc::now(),
+                capabilities: vec![],
+                shared_resources: HashMap::new(),
+                connection_quality: ConnectionQuality {
+                    latency_ms: 10,
+                    bandwidth_mbps: 100.0,
+                    packet_loss: 0.0,
+                    reliability_score: 1.0,
+                },
+                p2p_node_id: None,
+                p2p_addresses: vec![],
+                p2p_relay_url: None,
+                is_connected: false,
+            };
+            state.add_peer(peer_id, peer_info).await;
 
             // Concurrent connection status updates
             let mut handles = Vec::new();
             for is_connected in concurrent_updates {
                 let state_clone = Arc::clone(&state);
                 let handle = tokio::spawn(async move {
-                    let _ = state_clone.update_peer_connection(peer_id, is_connected).await;
+                    state_clone.update_peer_connection(peer_id, is_connected.to_string());
                 });
                 handles.push(handle);
             }
@@ -289,7 +356,7 @@ proptest! {
             let peer = state.get_peer(peer_id).await;
             assert!(peer.is_some());
             let peer = peer.unwrap();
-            assert_eq!(peer.id, peer_id);
+            assert_eq!(peer.node_id.parse::<u64>().unwrap_or(0), peer_id);
             assert_eq!(peer.address, "test:1234");
         });
     }
@@ -311,7 +378,7 @@ proptest! {
             for status in status_updates.clone() {
                 let state_clone = Arc::clone(&state);
                 let handle = tokio::spawn(async move {
-                    state_clone.update_raft_status(status).await;
+                    state_clone.update_raft_status(status);
                 });
                 handles.push(handle);
             }
@@ -322,12 +389,12 @@ proptest! {
             }
 
             // Final status should be one of the applied statuses
-            let final_status = state.get_raft_status().await.unwrap();
+            let final_status = state.get_raft_status().await;
             let valid_statuses: Vec<u64> = status_updates.iter().map(|s| s.node_id).collect();
             assert!(valid_statuses.contains(&final_status.node_id));
 
             // is_leader should match the status
-            assert_eq!(state.is_leader().await, final_status.is_leader);
+            assert_eq!(state.is_leader(), final_status.is_leader);
         });
     }
 }
@@ -351,7 +418,7 @@ proptest! {
                     // Create a database with unique name
                     let db_path = temp_dir.path().join(format!("test{}.db", i));
                     let db = Arc::new(redb::Database::create(db_path).unwrap());
-                    state.set_database(db.clone()).await;
+                    state.set_database(Some(db.clone())).await;
 
                     // Verify it's set
                     let retrieved = state.get_database().await;
@@ -360,7 +427,7 @@ proptest! {
                     // Important: drop the retrieved Arc to avoid holding references
                     drop(retrieved);
                 } else {
-                    state.clear_database().await;
+                    state.set_database(None).await;
 
                     // Verify it's cleared
                     let retrieved = state.get_database().await;
@@ -388,7 +455,7 @@ proptest! {
             let state = SharedNodeState::new(config.clone());
 
             // Must be initialized to get cluster status
-            state.set_initialized(true).await;
+            state.set_initialized(true);
 
             // Create a temporary database
             let temp_dir = tempfile::tempdir().unwrap();
@@ -403,15 +470,32 @@ proptest! {
             storage.initialize_single_node(config.id).unwrap();
 
             // Set the database
-            state.set_database(db).await;
+            state.set_database(Some(db)).await;
 
             // Add peers
             for (i, peer_id) in peer_ids.iter().enumerate() {
-                let _ = state.add_peer(*peer_id, format!("peer{}:1234", i)).await;
+                let peer_info = PeerInfo {
+                    node_id: peer_id.to_string(),
+                    address: format!("peer{}:1234", i),
+                    last_seen: Utc::now(),
+                    capabilities: vec![],
+                    shared_resources: HashMap::new(),
+                    connection_quality: ConnectionQuality {
+                        latency_ms: 10,
+                        bandwidth_mbps: 100.0,
+                        packet_loss: 0.0,
+                        reliability_score: 1.0,
+                    },
+                    p2p_node_id: None,
+                    p2p_addresses: vec![],
+                    p2p_relay_url: None,
+                    is_connected: false,
+                };
+                state.add_peer(*peer_id, peer_info).await;
             }
 
             // Update raft status
-            state.update_raft_status(raft_status.clone()).await;
+            state.update_raft_status(raft_status.clone());
 
             // Get cluster status
             let result = state.get_cluster_status().await;
@@ -449,7 +533,7 @@ proptest! {
             let state = SharedNodeState::new(config);
 
             // Don't initialize state
-            state.set_initialized(false).await;
+            state.set_initialized(false);
 
             // Task submission should fail
             let task = TaskSpec {
@@ -492,7 +576,7 @@ proptest! {
             let temp_dir = tempfile::tempdir().unwrap();
             let db_path = temp_dir.path().join("test.db");
             let db = Arc::new(redb::Database::create(db_path).unwrap());
-            state.set_database(db).await;
+            state.set_database(Some(db)).await;
 
             // Concurrent task status queries (should handle missing tasks gracefully)
             let mut handles = Vec::new();

@@ -8,15 +8,14 @@
 
 use blixard_core::{
     config_global,
-    config::{AuthConfig, BlixardConfig, ObservabilityConfig, SecurityConfig, TlsConfig},
+    config::{Config, AuthConfig, ObservabilityConfig, SecurityConfig, TlsConfig},
     node::Node,
     quota_system::{QuotaManager, TenantQuota},
-    security::{Permission, SecurityManager},
+    security::SecurityManager,
     types::NodeConfig,
 };
-use std::sync::Arc;
 use tempfile::TempDir;
-use tracing::{error, info};
+use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -81,20 +80,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Create a global configuration
-    let config = BlixardConfig {
+    let config = Config {
         security: security_config.clone(),
         observability: observability_config,
         ..Default::default()
     };
-    config_global::set(config);
+    config_global::init(config)?;
 
     // Create node configuration
     let node_config = NodeConfig {
         id: 1,
-        bind_address: "127.0.0.1:7001".to_string(),
+        bind_addr: "127.0.0.1:7001".parse()?,
         data_dir: data_dir.clone(),
-        bootstrap: true,
-        transport_config: None,
+        vm_backend: "mock".to_string(),
+        ..Default::default()
     };
 
     // Create and initialize the node
@@ -102,30 +101,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     node.initialize().await?;
 
     // Get the shared state
-    let shared_state = node.shared();
+    let _shared_state = node.shared();
 
-    // Get security manager and generate tokens
-    let security_manager = shared_state
-        .get_security_manager()
-        .await
-        .expect("Security manager should be initialized");
+    // Create security manager directly (since shared state doesn't provide it)
+    let security_manager = SecurityManager::new(security_config.clone()).await?;
 
     // Generate tokens for different users
     info!("Generating authentication tokens...");
 
     // Admin token with full permissions
-    let admin_token = generate_token(&security_manager, "admin", vec![Permission::Admin]).await?;
+    let admin_token = generate_token(&security_manager, "admin").await?;
     info!("Admin token generated");
 
     // Operator token with VM management permissions
     let operator_token = generate_token(
         &security_manager,
         "operator",
-        vec![
-            Permission::VmRead,
-            Permission::VmWrite,
-            Permission::ClusterRead,
-        ],
     )
     .await?;
     info!("Operator token generated");
@@ -134,45 +125,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewer_token = generate_token(
         &security_manager,
         "viewer",
-        vec![
-            Permission::VmRead,
-            Permission::ClusterRead,
-            Permission::MetricsRead,
-        ],
     )
     .await?;
     info!("Viewer token generated");
 
     // Set up quotas for different tenants
-    if let Some(quota_manager) = shared_state.get_quota_manager().await {
-        info!("Setting up tenant quotas...");
+    let quota_manager = QuotaManager::new();
+    info!("Setting up tenant quotas...");
 
-        // Free tier quota
-        let free_quota = TenantQuota {
-            tenant_id: "free-tier".to_string(),
-            max_vms: 2,
-            max_vcpus: 4,
-            max_memory: 4096, // 4GB
-            max_disk: 20,     // 20GB
-            max_tasks: 10,
-            enabled: true,
-        };
-        quota_manager.set_quota(free_quota).await?;
-        info!("Free tier quota configured");
+    // Free tier quota
+    let free_quota = TenantQuota {
+        tenant_id: "free-tier".to_string(),
+        max_vms: 2,
+        max_vcpus: 4,
+        max_memory: 4096, // 4GB
+        max_disk: 20,     // 20GB
+        max_tasks: 10,
+        enabled: true,
+    };
+    quota_manager.set_quota(free_quota).await?;
+    info!("Free tier quota configured");
 
-        // Premium tier quota
-        let premium_quota = TenantQuota {
-            tenant_id: "premium-tier".to_string(),
-            max_vms: 10,
-            max_vcpus: 40,
-            max_memory: 65536, // 64GB
-            max_disk: 500,     // 500GB
-            max_tasks: 100,
-            enabled: true,
-        };
-        quota_manager.set_quota(premium_quota).await?;
-        info!("Premium tier quota configured");
-    }
+    // Premium tier quota
+    let premium_quota = TenantQuota {
+        tenant_id: "premium-tier".to_string(),
+        max_vms: 10,
+        max_vcpus: 40,
+        max_memory: 65536, // 64GB
+        max_disk: 500,     // 500GB
+        max_tasks: 100,
+        enabled: true,
+    };
+    quota_manager.set_quota(premium_quota).await?;
+    info!("Premium tier quota configured");
 
     // Demonstrate authentication
     info!("\nDemonstrating authentication...");
@@ -191,33 +176,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => info!("Invalid token rejected: {}", e),
     }
 
-    // Demonstrate permission checks
-    info!("\nDemonstrating permission checks...");
-
-    // Admin can do everything
-    let admin_can_write = security_manager
-        .check_permission("admin", &Permission::VmWrite)
-        .await?;
-    info!("Admin can write VMs: {}", admin_can_write);
-
-    // Operator can manage VMs
-    let operator_can_write = security_manager
-        .check_permission("operator", &Permission::VmWrite)
-        .await?;
-    info!("Operator can write VMs: {}", operator_can_write);
-
-    // Viewer cannot write
-    let viewer_can_write = security_manager
-        .check_permission("viewer", &Permission::VmWrite)
-        .await?;
-    info!("Viewer can write VMs: {}", viewer_can_write);
-
-    // Check observability status
-    if let Some(observability) = shared_state.get_observability_manager().await {
-        info!("\nObservability status:");
-        info!("  Metrics enabled: {}", observability.metrics_enabled());
-        info!("  Tracing enabled: {}", observability.tracing_enabled());
+    // Demonstrate Cedar authorization (simplified example)
+    info!("\nDemonstrating Cedar authorization...");
+    
+    // Example Cedar authorization check for VM creation
+    let mut context = std::collections::HashMap::new();
+    context.insert("tenant".to_string(), serde_json::Value::String("free-tier".to_string()));
+    
+    match security_manager.check_permission_cedar(
+        "admin", 
+        "vm_create", 
+        &SecurityManager::build_resource_uid("Vm", "test-vm"),
+        context.clone()
+    ).await {
+        Ok(allowed) => info!("Admin can create VMs: {}", allowed),
+        Err(e) => info!("Cedar authorization check failed (expected): {}", e),
     }
+
+    // Check quota usage
+    let free_tier_usage = quota_manager.get_usage("free-tier").await;
+    info!("Free tier current usage: {:?}", free_tier_usage);
+    
+    let premium_tier_usage = quota_manager.get_usage("premium-tier").await;
+    info!("Premium tier current usage: {:?}", premium_tier_usage);
 
     info!("\nSecure cluster demo completed successfully!");
     info!("\nGenerated tokens:");
@@ -230,16 +211,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn generate_token(
-    security_manager: &SecurityManager,
+    _security_manager: &SecurityManager,
     user: &str,
-    permissions: Vec<Permission>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     // Clone the security manager and make it mutable for token generation
-    let mut security_manager_clone =
+    let _security_manager_clone =
         SecurityManager::new(blixard_core::security::default_dev_security_config()).await?;
 
     // Enable authentication
-    let mut auth_config = blixard_core::config::AuthConfig {
+    let auth_config = blixard_core::config::AuthConfig {
         enabled: true,
         method: "token".to_string(),
         token_file: None,
@@ -263,7 +243,6 @@ async fn generate_token(
     let token = auth_manager
         .generate_token(
             user,
-            permissions,
             Some(std::time::Duration::from_secs(3600)),
         )
         .await?;

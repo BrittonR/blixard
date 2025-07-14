@@ -8,7 +8,7 @@
 
 use blixard_core::error::BlixardResult;
 use blixard_core::node_shared::SharedNodeState;
-use blixard_core::transport::config::{IrohConfig, MigrationStrategy, TransportConfig};
+use blixard_core::transport::config::{IrohConfig, TransportConfig};
 use blixard_core::transport::iroh_health_service::IrohHealthService;
 use blixard_core::transport::iroh_service::{IrohRpcClient, IrohRpcServer};
 use blixard_core::transport::iroh_status_service::IrohStatusService;
@@ -73,6 +73,7 @@ async fn create_cluster_nodes(
             },
             use_tailscale: false,
             transport_config: Some(IrohConfig::default()),
+            topology: blixard_core::types::NodeTopology::default(),
         };
 
         let node = Arc::new(SharedNodeState::new(config));

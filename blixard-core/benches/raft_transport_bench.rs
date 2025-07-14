@@ -11,9 +11,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
 use blixard_core::node_shared::SharedNodeState;
-use blixard_core::transport::config::{
-    GrpcConfig, IrohConfig, RaftTransportPreference, TransportConfig,
-};
+use blixard_core::transport::config::TransportConfig;
 use blixard_core::transport::raft_transport_adapter::RaftTransport;
 use blixard_core::types::NodeConfig;
 
@@ -143,7 +141,7 @@ impl BenchmarkScenario {
 
 /// Benchmark transport setup
 async fn setup_transport(
-    transport_type: &str,
+    _transport_type: &str, // Always uses Iroh now, but keeping parameter for compatibility
 ) -> (
     Arc<SharedNodeState>,
     RaftTransport,
@@ -152,11 +150,13 @@ async fn setup_transport(
     // Create node configuration
     let config = NodeConfig {
         id: 1,
-        bind_address: "127.0.0.1:7001".to_string(),
-        data_dir: std::env::temp_dir().join(format!("blixard-bench-{}", uuid::Uuid::new_v4())),
+        bind_addr: "127.0.0.1:7001".parse().unwrap(),
+        data_dir: std::env::temp_dir().join(format!("blixard-bench-{}", uuid::Uuid::new_v4())).to_string_lossy().to_string(),
         vm_backend: "test".to_string(),
-        join_address: None,
-        bootstrap: true,
+        join_addr: None,
+        use_tailscale: false,
+        transport_config: None,
+        topology: blixard_core::types::NodeTopology::default(),
     };
 
     let node = Arc::new(SharedNodeState::new(config));
@@ -164,12 +164,8 @@ async fn setup_transport(
     // Create channel for receiving messages
     let (tx, rx) = mpsc::unbounded_channel();
 
-    // Create transport config
-    let transport_config = match transport_type {
-        "grpc" => TransportConfig::Grpc(GrpcConfig::default()),
-        "iroh" => TransportConfig::Iroh(IrohConfig::default()),
-        _ => panic!("Unknown transport type"),
-    };
+    // Create transport config (now only Iroh is supported)
+    let transport_config = TransportConfig::default();
 
     // Create transport
     let transport = RaftTransport::new(node.clone(), tx, &transport_config)
@@ -190,7 +186,7 @@ fn bench_send_messages(c: &mut Criterion) {
         BenchmarkScenario::mixed(),
     ];
 
-    let transports = vec!["grpc", "iroh"];
+    let transports = vec!["iroh"]; // Only Iroh transport is supported now
 
     let mut group = c.benchmark_group("raft_transport_send");
     group.measurement_time(Duration::from_secs(10));
@@ -201,16 +197,18 @@ fn bench_send_messages(c: &mut Criterion) {
                 BenchmarkId::new(scenario.name, transport_type),
                 &(scenario, transport_type),
                 |b, (scenario, transport_type)| {
-                    b.to_async(&runtime).iter(|| async {
-                        let (_node, transport, _rx) = setup_transport(transport_type).await;
+                    b.iter(|| {
+                        runtime.block_on(async {
+                            let (_node, transport, _rx) = setup_transport(transport_type).await;
 
-                        // Send all messages
-                        for msg in &scenario.messages {
-                            let _ = transport.send_message(msg.to, msg.clone()).await;
-                        }
+                            // Send all messages
+                            for msg in &scenario.messages {
+                                let _ = transport.send_message(msg.to, msg.clone()).await;
+                            }
 
-                        // Cleanup
-                        transport.shutdown().await;
+                            // Cleanup
+                            transport.shutdown().await;
+                        })
                     });
                 },
             );
@@ -227,26 +225,28 @@ fn bench_throughput(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(10));
     group.throughput(criterion::Throughput::Elements(1000)); // Messages per iteration
 
-    for transport_type in &["grpc", "iroh"] {
+    for transport_type in &["iroh"] { // Only Iroh transport is supported now
         group.bench_with_input(
             BenchmarkId::from_parameter(transport_type),
             transport_type,
             |b, transport_type| {
-                b.to_async(&runtime).iter(|| async {
-                    let (_node, transport, _rx) = setup_transport(transport_type).await;
+                b.iter(|| {
+                    runtime.block_on(async {
+                        let (_node, transport, _rx) = setup_transport(transport_type).await;
 
-                    // Create 1000 small messages
-                    for i in 0..1000 {
-                        let mut msg = Message::default();
-                        msg.set_msg_type(MessageType::MsgHeartbeat);
-                        msg.set_from(1);
-                        msg.set_to(2);
-                        msg.set_term(i as u64);
+                        // Create 1000 small messages
+                        for i in 0..1000 {
+                            let mut msg = Message::default();
+                            msg.set_msg_type(MessageType::MsgHeartbeat);
+                            msg.set_from(1);
+                            msg.set_to(2);
+                            msg.set_term(i as u64);
 
-                        let _ = transport.send_message(2, msg).await;
-                    }
+                            let _ = transport.send_message(2, msg).await;
+                        }
 
-                    transport.shutdown().await;
+                        transport.shutdown().await;
+                    })
                 });
             },
         );
@@ -268,28 +268,30 @@ fn bench_large_messages(c: &mut Criterion) {
     ];
 
     for (size_name, size) in sizes {
-        for transport_type in &["grpc", "iroh"] {
+        for transport_type in &["iroh"] { // Only Iroh transport is supported now
             group.bench_with_input(
                 BenchmarkId::new(size_name, transport_type),
                 &(size, transport_type),
                 |b, (size, transport_type)| {
-                    b.to_async(&runtime).iter(|| async {
-                        let (_node, transport, _rx) = setup_transport(transport_type).await;
+                    b.iter(|| {
+                        runtime.block_on(async {
+                            let (_node, transport, _rx) = setup_transport(transport_type).await;
 
-                        // Create snapshot message
-                        let mut msg = Message::default();
-                        msg.set_msg_type(MessageType::MsgSnapshot);
-                        msg.set_from(1);
-                        msg.set_to(2);
-                        msg.set_term(10);
+                            // Create snapshot message
+                            let mut msg = Message::default();
+                            msg.set_msg_type(MessageType::MsgSnapshot);
+                            msg.set_from(1);
+                            msg.set_to(2);
+                            msg.set_term(10);
 
-                        let mut snapshot = Snapshot::default();
-                        snapshot.set_data(vec![0u8; *size]);
-                        msg.set_snapshot(snapshot);
+                            let mut snapshot = Snapshot::default();
+                            snapshot.set_data(vec![0u8; *size]);
+                            msg.set_snapshot(snapshot);
 
-                        let _ = transport.send_message(2, msg).await;
+                            let _ = transport.send_message(2, msg).await;
 
-                        transport.shutdown().await;
+                            transport.shutdown().await;
+                        })
                     });
                 },
             );
@@ -306,36 +308,38 @@ fn bench_prioritization(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(10));
 
     group.bench_function("iroh_priority", |b| {
-        b.to_async(&runtime).iter(|| async {
-            let (_node, transport, _rx) = setup_transport("iroh").await;
+        b.iter(|| {
+            runtime.block_on(async {
+                let (_node, transport, _rx) = setup_transport("iroh").await;
 
-            // Send mixed priority messages
-            let mut messages = Vec::new();
+                // Send mixed priority messages
+                let mut messages = Vec::new();
 
-            // Low priority (log append)
-            for i in 0..10 {
-                let mut msg = Message::default();
-                msg.set_msg_type(MessageType::MsgAppend);
-                msg.set_from(1);
-                msg.set_to(2);
-                msg.set_index(i);
-                messages.push(msg);
-            }
+                // Low priority (log append)
+                for i in 0..10 {
+                    let mut msg = Message::default();
+                    msg.set_msg_type(MessageType::MsgAppend);
+                    msg.set_from(1);
+                    msg.set_to(2);
+                    msg.set_index(i);
+                    messages.push(msg);
+                }
 
-            // High priority (election)
-            let mut vote_msg = Message::default();
-            vote_msg.set_msg_type(MessageType::MsgRequestVote);
-            vote_msg.set_from(1);
-            vote_msg.set_to(2);
-            vote_msg.set_term(100);
-            messages.push(vote_msg);
+                // High priority (election)
+                let mut vote_msg = Message::default();
+                vote_msg.set_msg_type(MessageType::MsgRequestVote);
+                vote_msg.set_from(1);
+                vote_msg.set_to(2);
+                vote_msg.set_term(100);
+                messages.push(vote_msg);
 
-            // Send all messages
-            for msg in messages {
-                let _ = transport.send_message(2, msg).await;
-            }
+                // Send all messages
+                for msg in messages {
+                    let _ = transport.send_message(2, msg).await;
+                }
 
-            transport.shutdown().await;
+                transport.shutdown().await;
+            })
         });
     });
 

@@ -5,7 +5,7 @@ use blixard_core::{
     vm_backend::{MockVmBackend, VmBackend},
     vm_health_monitor::VmHealthMonitor,
     vm_health_types::{
-        HealthCheckType, HealthState, VmHealthCheck, VmHealthCheckConfig, VmHealthStatus,
+        HealthCheckType, HealthState, HealthCheck, VmHealthCheckConfig, VmHealthStatus,
     },
 };
 use std::sync::Arc;
@@ -231,7 +231,7 @@ async fn test_vm_health_monitor_lifecycle() {
 
     let node_state = Arc::new(SharedNodeState::new(config));
     let database = Arc::new(redb::Database::create(temp_dir.path().join("test.db")).unwrap());
-    node_state.set_database(database.clone()).await;
+    node_state.set_database(Some(database.clone())).await;
 
     let vm_backend = Arc::new(MockVmBackend::new(database.clone()));
     let vm_manager = Arc::new(blixard_core::vm_backend::VmManager::new(

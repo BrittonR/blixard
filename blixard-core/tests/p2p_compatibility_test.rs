@@ -5,7 +5,7 @@
 
 use blixard_core::{
     error::BlixardResult,
-    p2p_manager::{P2pConfig, P2pManager, ResourceType},
+    p2p_manager::{P2pConfig, P2pManager, ResourceType, TransferPriority},
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -127,7 +127,7 @@ async fn test_p2p_manager_multi_node() {
             ResourceType::Configuration,
             "test-data",
             "1.0",
-            Some(addr1.node_id.to_string()),
+            TransferPriority::Normal,
         )
         .await
         .unwrap();
@@ -150,7 +150,7 @@ async fn test_p2p_with_discovery() {
     // Create discovery manager
     use blixard_core::discovery::{DiscoveryConfig, DiscoveryManager};
     let discovery_config = DiscoveryConfig::default();
-    let discovery_manager = Arc::new(DiscoveryManager::new(discovery_config).await.unwrap());
+    let discovery_manager = Arc::new(DiscoveryManager::new(discovery_config));
 
     // Create P2P manager with discovery
     let config = P2pConfig::default();

@@ -11,7 +11,7 @@ use blixard_core::{
     vm_auto_recovery::RecoveryPolicy,
     vm_backend::{MockVmBackend, VmManager},
     vm_health_monitor::VmHealthMonitor,
-    vm_health_types::{HealthCheckType, VmHealthCheck, VmHealthCheckConfig},
+    vm_health_types::{HealthCheckType, HealthCheck, HealthCheckPriority, VmHealthCheckConfig},
 };
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -45,8 +45,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize node state
     let node_state = Arc::new(SharedNodeState::new(node_config));
-    node_state.set_database(database.clone()).await;
-    node_state.initialize().await?;
+    node_state.set_database(Some(database.clone())).await;
+    node_state.set_initialized(true);
 
     // Create VM backend and manager
     let vm_backend = Arc::new(MockVmBackend::new(database.clone()));
@@ -58,12 +58,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create a VM with comprehensive health checks
     let health_config = VmHealthCheckConfig {
-        enabled: true,
-        interval_seconds: 10, // Check every 10 seconds
-        timeout_seconds: 5,   // Overall timeout for all checks
+        check_interval_secs: 10, // Check every 10 seconds
+        failure_threshold: 3,     // Number of consecutive failures
+        success_threshold: 2,     // Number of consecutive successes
+        initial_delay_secs: 5,    // Delay before starting checks
         checks: vec![
             // HTTP health endpoint check
-            VmHealthCheck {
+            HealthCheck {
                 name: "web_health".to_string(),
                 check_type: HealthCheckType::Http {
                     url: "http://localhost:8080/health".to_string(),
@@ -76,9 +77,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 weight: 1.0,
                 critical: true, // Web service is critical
+                priority: HealthCheckPriority::Deep,
+                recovery_escalation: None,
+                failure_threshold: 2,
             },
             // SSH connectivity check
-            VmHealthCheck {
+            HealthCheck {
                 name: "ssh_port".to_string(),
                 check_type: HealthCheckType::Tcp {
                     address: "localhost:22".to_string(),
@@ -86,9 +90,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 weight: 0.5,
                 critical: false, // SSH is nice to have but not critical
+                priority: HealthCheckPriority::Quick,
+                recovery_escalation: None,
+                failure_threshold: 3,
             },
             // Database process check
-            VmHealthCheck {
+            HealthCheck {
                 name: "database_process".to_string(),
                 check_type: HealthCheckType::Process {
                     process_name: "postgres".to_string(),
@@ -96,9 +103,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 weight: 1.0,
                 critical: true, // Database is critical
+                priority: HealthCheckPriority::Deep,
+                recovery_escalation: None,
+                failure_threshold: 2,
             },
             // Custom script check
-            VmHealthCheck {
+            HealthCheck {
                 name: "disk_space".to_string(),
                 check_type: HealthCheckType::Script {
                     command: "df".to_string(),
@@ -108,9 +118,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 weight: 0.3,
                 critical: false, // Low disk space is a warning
+                priority: HealthCheckPriority::Quick,
+                recovery_escalation: None,
+                failure_threshold: 5,
             },
             // Console pattern check
-            VmHealthCheck {
+            HealthCheck {
                 name: "kernel_errors".to_string(),
                 check_type: HealthCheckType::Console {
                     healthy_pattern: "systemd.*Started".to_string(),
@@ -119,6 +132,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 weight: 0.8,
                 critical: false,
+                priority: HealthCheckPriority::Quick,
+                recovery_escalation: None,
+                failure_threshold: 3,
             },
         ],
     };
@@ -134,23 +150,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Creating VM with health monitoring: {}", vm_config.name);
 
-    // Create VM through Raft consensus
-    node_state.propose_vm_creation(vm_config.clone(), 1).await?;
+    // Create and start VM through node state
+    node_state.create_vm(vm_config.clone()).await?;
 
     // Wait for VM to be created
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Start the VM
-    node_state.propose_vm_start(vm_config.name.clone()).await?;
+    node_state.start_vm(&vm_config.name).await?;
 
     info!("VM started, initializing health monitoring");
 
     // Configure auto-recovery policy
     let recovery_policy = RecoveryPolicy {
-        enabled: true,
-        max_retries: 3,
-        retry_delay: Duration::from_secs(30),
-        failure_threshold: 2, // Trigger recovery after 2 consecutive failures
+        max_restart_attempts: 3,
+        restart_delay: Duration::from_secs(30),
+        enable_migration: true,
+        backoff_multiplier: 2.0,
+        max_backoff_delay: Duration::from_secs(300),
     };
 
     // Create and start health monitor
@@ -168,22 +185,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Monitoring VM health for 30 seconds...");
     tokio::time::sleep(Duration::from_secs(30)).await;
 
-    // Check VM health status
-    if let Ok(Some((config, status))) = vm_manager.get_vm_status(&vm_config.name).await {
-        info!("VM {} status: {:?}", config.name, status);
+    // Check VM status (simplified - direct backend call)
+    if let Ok(Some(status)) = vm_manager.backend().get_vm_status(&vm_config.name).await {
+        info!("VM {} status: {:?}", vm_config.name, status);
     }
 
     // Simulate VM failure by stopping it
     info!("Simulating VM failure...");
-    node_state.propose_vm_stop(vm_config.name.clone()).await?;
+    node_state.stop_vm(&vm_config.name).await?;
 
     // Wait for health monitor to detect failure and trigger recovery
     info!("Waiting for auto-recovery to kick in...");
     tokio::time::sleep(Duration::from_secs(15)).await;
 
     // Check if VM was recovered
-    if let Ok(Some((config, status))) = vm_manager.get_vm_status(&vm_config.name).await {
-        info!("VM {} status after recovery: {:?}", config.name, status);
+    if let Ok(Some(status)) = vm_manager.backend().get_vm_status(&vm_config.name).await {
+        info!("VM {} status after recovery: {:?}", vm_config.name, status);
     }
 
     // Stop health monitoring
@@ -191,10 +208,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Health monitoring stopped");
 
     // Clean up
-    node_state
-        .propose_vm_deletion(vm_config.name.clone())
-        .await?;
-    node_state.stop().await?;
+    node_state.delete_vm(&vm_config.name).await?;
+    node_state.shutdown_components().await?;
 
     info!("Demo completed successfully");
     Ok(())

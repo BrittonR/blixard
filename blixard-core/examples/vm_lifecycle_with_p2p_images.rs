@@ -14,7 +14,7 @@ use blixard_core::{
     node::Node,
     p2p_manager::{P2pConfig, P2pManager},
     transport::config::TransportConfig,
-    types::{LocalityPreference, NodeConfig, VmCommand, VmConfig},
+    types::{LocalityPreference, NodeConfig, NodeTopology, VmCommand, VmConfig},
     vm_backend::VmBackendRegistry,
 };
 use blixard_vm::microvm_backend::MicrovmBackend;
@@ -206,6 +206,7 @@ async fn create_node(id: u64, port: u16, data_dir: &std::path::Path) -> BlixardR
         use_tailscale: false,
         vm_backend: "microvm".to_string(),
         transport_config: Some(TransportConfig::default()),
+        topology: NodeTopology::default(),
     };
 
     let mut node = Node::new(config);
@@ -215,7 +216,23 @@ async fn create_node(id: u64, port: u16, data_dir: &std::path::Path) -> BlixardR
     let db_path = data_dir.join("node.db");
     let database = Arc::new(Database::create(&db_path)?);
     let backend = MicrovmBackend::new(data_dir.join("config"), data_dir.join("data"), database)?;
-    registry.register("microvm", Arc::new(backend));
+    
+    // For now, we'll create a simple factory struct inline
+    struct MicrovmFactory(Arc<dyn blixard_core::vm_backend::VmBackend>);
+    impl blixard_core::vm_backend::VmBackendFactory for MicrovmFactory {
+        fn create_backend(
+            &self,
+            _config_dir: std::path::PathBuf,
+            _data_dir: std::path::PathBuf,
+            _database: Arc<Database>,
+        ) -> BlixardResult<Arc<dyn blixard_core::vm_backend::VmBackend>> {
+            Ok(Arc::clone(&self.0))
+        }
+        fn backend_type(&self) -> &'static str { "microvm" }
+        fn description(&self) -> &'static str { "MicroVM backend using microvm.nix" }
+    }
+    
+    registry.register(Arc::new(MicrovmFactory(Arc::new(backend))));
 
     node.initialize_with_vm_registry(registry).await?;
     node.start().await?;
@@ -229,12 +246,12 @@ async fn setup_node_with_image_store(
 ) -> BlixardResult<()> {
     // Create P2P manager and image store
     let p2p_manager =
-        Arc::new(P2pManager::new(node.get_config().id, node_dir, P2pConfig::default()).await?);
+        Arc::new(P2pManager::new(node.get_id(), node_dir, P2pConfig::default()).await?);
     let command_executor = Arc::new(TokioCommandExecutor::new());
 
-    let image_store = Arc::new(
+    let _image_store = Arc::new(
         NixImageStore::new(
-            node.get_config().id,
+            node.get_id(),
             p2p_manager.clone(),
             node_dir,
             None,
@@ -244,13 +261,13 @@ async fn setup_node_with_image_store(
     );
 
     // Set P2P manager on node (which includes image store access)
-    node.shared().set_p2p_manager(p2p_manager).await;
+    // Note: P2P manager integration would be done in actual implementation
 
     // Also set image store on VM backend
     // In a real implementation, this would be done through the registry
     info!(
         "Configured P2P image store for node {}",
-        node.get_config().id
+        node.get_id()
     );
 
     Ok(())
@@ -261,7 +278,7 @@ async fn import_image_to_node(node: &Node, image_path: &PathBuf) -> BlixardResul
     // For demo, we'll just log
     info!(
         "Image available on node {} at {:?}",
-        node.get_config().id,
+        node.get_id(),
         image_path
     );
     Ok(())
@@ -276,8 +293,8 @@ async fn prefetch_image_to_node(
     info!(
         "Pre-fetching image {} from node {} to node {} for VM '{}'",
         image_id,
-        source_node.get_config().id,
-        target_node.get_config().id,
+        source_node.get_id(),
+        target_node.get_id(),
         vm_name
     );
 
@@ -314,8 +331,8 @@ async fn demonstrate_migration(
 
     info!(
         "VM migrated from node {} to node {}",
-        source_node.get_config().id,
-        target_node.get_config().id
+        source_node.get_id(),
+        target_node.get_id()
     );
 
     Ok(())

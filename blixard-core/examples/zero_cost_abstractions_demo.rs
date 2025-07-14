@@ -5,16 +5,14 @@
 
 use blixard_core::zero_cost::{
     type_state::{vm_lifecycle::*, node_lifecycle::*},
-    const_generics::{ConstBuffer, FixedCapacityVec, ConstString},
-    phantom_types::{units::*, database::*},
-    validated_types::{Positive, BoundedInt, ValidatedString, validators::*},
+    phantom_types::units::*,
+    validated_types::{Positive, BoundedInt, ValidatedString, Validator},
     static_dispatch::{vm_backend::*, database::*},
-    compile_time_validation::*,
+    compile_time_validation::{ValidatedConfig, is_valid_identifier, is_valid_semver, is_in_range_i64},
     zero_alloc_patterns::{StackString, InlineVec, StaticPool},
     const_collections::*,
 };
 use blixard_core::types::VmConfig;
-use blixard_core::validated_newtype;
 use std::time::Instant;
 
 /// Example: VM resource requirements with validated types
@@ -39,9 +37,9 @@ impl VmResourceRequirements {
         network_percent: i64,
     ) -> Result<Self, &'static str> {
         Ok(Self {
-            cpu_cores: Positive::new(cpu_cores)?,
+            cpu_cores: Positive::<u32>::new(cpu_cores)?,
             memory_mb: BoundedInt::new(memory_mb)?,
-            storage_gb: Positive::new(storage_gb)?,
+            storage_gb: Positive::<u64>::new(storage_gb)?,
             network_percent: BoundedInt::new(network_percent)?,
         })
     }
@@ -49,10 +47,10 @@ impl VmResourceRequirements {
     /// Get resource usage as measurements with units
     pub fn as_measurements(&self) -> ResourceMeasurements {
         ResourceMeasurements {
-            memory: Measurement::new(*self.memory_mb.get() as u64),
-            storage: Measurement::new(*self.storage_gb.get()),
-            cpu_cores: *self.cpu_cores.get(),
-            network_percent: *self.network_percent.get(),
+            memory: Measurement::new(self.memory_mb.get() as u64),
+            storage: Measurement::new(self.storage_gb.get()),
+            cpu_cores: self.cpu_cores.get(),
+            network_percent: self.network_percent.get(),
         }
     }
 }
@@ -60,42 +58,45 @@ impl VmResourceRequirements {
 /// Resource measurements with phantom types for unit safety
 #[derive(Debug)]
 pub struct ResourceMeasurements {
-    pub memory: Measurement<u64, blixard_core::zero_cost::phantom_types::units::Megabytes>,
-    pub storage: Measurement<u64, blixard_core::zero_cost::phantom_types::units::Gigabytes>,
+    pub memory: Measurement<u64, Megabytes>,
+    pub storage: Measurement<u64, Gigabytes>,
     pub cpu_cores: u32,
     pub network_percent: i64,
 }
 
 impl ResourceMeasurements {
     /// Convert memory to bytes
-    pub fn memory_bytes(&self) -> Measurement<u64, blixard_core::zero_cost::phantom_types::units::Bytes> {
+    pub fn memory_bytes(&self) -> Measurement<u64, Bytes> {
         self.memory.to_bytes()
     }
 
     /// Convert storage to bytes
-    pub fn storage_bytes(&self) -> Measurement<u64, blixard_core::zero_cost::phantom_types::units::Bytes> {
+    pub fn storage_bytes(&self) -> Measurement<u64, Bytes> {
         self.storage.to_bytes()
     }
 }
 
-/// Example: Validated VM identifier
-validated_newtype!(
-    /// VM identifier that ensures valid format
-    #[derive(serde::Serialize, serde::Deserialize)]
-    pub struct VmIdentifier(String) where |id| {
-        !id.is_empty() && 
-        id.len() <= 64 && 
-        id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
-    };
-    "VM identifier must be non-empty, alphanumeric with dashes/underscores, and max 64 chars"
-);
+/// Example: Validated VM identifier using ValidatedString
+pub type VmIdentifier = ValidatedString<VmIdentifierValidator>;
+
+pub struct VmIdentifierValidator;
+impl Validator for VmIdentifierValidator {
+    fn validate(s: &str) -> bool {
+        !s.is_empty() && 
+        s.len() <= 64 && 
+        s.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    }
+
+    fn error_message() -> &'static str {
+        "VM identifier must be non-empty, alphanumeric with dashes/underscores, and max 64 chars"
+    }
+}
 
 /// Example: Node priority level
 pub type NodePriority = BoundedInt<0, 10>;
 
 /// Example: Configuration with compile-time validation
-const VM_CONFIG_VERSION: &str = "1.2.0";
-pub type VmConfigData = ValidatedConfig<VM_CONFIG_VERSION, 4096>;
+pub type VmConfigData = ValidatedConfig<4096>;
 
 /// Example: VM state machine with type safety
 pub fn demonstrate_vm_lifecycle() {
@@ -172,14 +173,14 @@ pub fn demonstrate_validated_types() {
 
     // VM identifier validation
     let vm_id = VmIdentifier::new("my-test-vm-001".to_string()).unwrap();
-    println!("Valid VM ID: {}", vm_id.as_inner());
+    println!("Valid VM ID: {}", vm_id.as_str());
 
     // This would fail:
     // let invalid_id = VmIdentifier::new("".to_string()); // Error: VM identifier must be non-empty
 
     // Node priority
     let priority = NodePriority::new(8).unwrap();
-    println!("Node priority: {}", priority.get());
+    println!("Node priority: {}", *priority);
 
     println!();
 }
@@ -249,8 +250,8 @@ pub fn demonstrate_zero_allocation() {
 pub fn demonstrate_const_collections() {
     println!("=== Compile-Time Collections Demo ===");
 
-    // Const map for VM states
-    const VM_STATE_DESCRIPTIONS: ConstMap<&str, &str, 6> = ConstMap::from_unsorted([
+    // Const map for VM states - use runtime creation since const functions aren't available
+    let vm_state_descriptions = ConstMap::<&str, &str, 6>::from_unsorted([
         ("created", "VM has been created but not configured"),
         ("configured", "VM is configured and ready to start"),
         ("starting", "VM is in the process of starting"),
@@ -259,58 +260,66 @@ pub fn demonstrate_const_collections() {
         ("stopped", "VM has been stopped"),
     ]);
 
-    println!("VM state 'running': {}", VM_STATE_DESCRIPTIONS.get("running").unwrap());
-    println!("VM state 'invalid': {:?}", VM_STATE_DESCRIPTIONS.get("invalid"));
+    println!("VM state 'running': {}", vm_state_descriptions.get("running").unwrap());
+    println!("VM state 'invalid': {:?}", vm_state_descriptions.get("invalid"));
 
     // Const set for supported hypervisors
-    const SUPPORTED_HYPERVISORS: ConstSet<&str, 3> = ConstSet::from_unsorted([
+    let supported_hypervisors = ConstSet::<&str, 3>::from_unsorted([
         "firecracker",
         "cloud-hypervisor", 
         "qemu",
     ]);
 
-    println!("Supports firecracker: {}", SUPPORTED_HYPERVISORS.contains("firecracker"));
-    println!("Supports docker: {}", SUPPORTED_HYPERVISORS.contains("docker"));
+    println!("Supports firecracker: {}", supported_hypervisors.contains("firecracker"));
+    println!("Supports docker: {}", supported_hypervisors.contains("docker"));
 
-    // Static lookup for resource limits
-    const RESOURCE_LIMITS: StaticLookup<u64, 10> = StaticLookup::with_entries([
+    // Static lookup for resource limits - fix size to match entries
+    let resource_limits = StaticLookup::<u64, 10>::with_entries([
         (0, 1024),    // Small: 1GB RAM
         (1, 2048),    // Medium: 2GB RAM
         (2, 4096),    // Large: 4GB RAM
         (3, 8192),    // XLarge: 8GB RAM
+        (4, 0), (5, 0), (6, 0), (7, 0), (8, 0), (9, 0), // Padding to match size
     ]);
 
-    println!("Medium VM memory limit: {}MB", RESOURCE_LIMITS.get(1).unwrap());
+    println!("Medium VM memory limit: {}MB", resource_limits.get(1).unwrap());
 
     println!();
 }
 
-/// Example: Const validation and compile-time checks
+/// Example: Const validation and compile-time checks  
 pub fn demonstrate_compile_time_validation() {
     println!("=== Compile-Time Validation Demo ===");
 
-    // These are validated at compile time
-    validate_const_str!("valid_identifier", identifier);
-    validate_const_str!("2.1.0", semver);
-    validate_range!(50, 0, 100);
+    // Use the available validation functions directly
+    const _: () = assert!(is_valid_identifier("valid_identifier"), "Invalid identifier");
+    const _: () = assert!(is_valid_semver("2.1.0"), "Invalid semver");
+    const _: () = assert!(is_in_range_i64(50, 0, 100), "Value out of range");
 
     // Validated configuration
-    const CONFIG: ValidatedConfig<"1.0.0", 512> = ValidatedConfig::new()
+    const CONFIG: ValidatedConfig<512> = ValidatedConfig::new("1.0.0")
         .with_data(b"max_vms=100\ntimeout=30s\nretries=3");
 
     println!("Config version: {}", CONFIG.version());
     println!("Config size: {} bytes", CONFIG.size());
 
-    // Const lookup table
-    const_lookup!(
-        VmSizes: [&'static str; (u32, u32)] = [
+    // Define VM sizes lookup manually since const_lookup has issues
+    struct VmSizes;
+    impl VmSizes {
+        const ENTRIES: &'static [(&'static str, (u32, u32))] = &[
             ("nano", (1, 512)),
             ("micro", (1, 1024)),
             ("small", (2, 2048)),
             ("medium", (4, 4096)),
             ("large", (8, 8192)),
-        ]
-    );
+        ];
+
+        fn lookup(key: &str) -> Option<(u32, u32)> {
+            Self::ENTRIES.iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| *v)
+        }
+    }
 
     let (cpu, mem) = VmSizes::lookup("medium").unwrap();
     println!("Medium VM: {} CPU, {}MB RAM", cpu, mem);
@@ -357,7 +366,7 @@ pub fn performance_comparison() {
     println!("Static dispatch: {:?}", static_dispatch_time);
 
     // Test 3: Const collections vs HashMap
-    const STATUS_MAP: ConstMap<u32, &str, 5> = ConstMap::from_unsorted([
+    let status_map = ConstMap::<u32, &str, 5>::from_unsorted([
         (200, "OK"),
         (400, "Bad Request"),
         (401, "Unauthorized"),
@@ -375,7 +384,7 @@ pub fn performance_comparison() {
 
     let start = Instant::now();
     for _ in 0..ITERATIONS {
-        let _result = STATUS_MAP.get(404);
+        let _result = status_map.get(404);
     }
     let const_map_time = start.elapsed();
 

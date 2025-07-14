@@ -100,6 +100,7 @@ async fn create_node(
         use_tailscale: false,
         vm_backend: "mock".to_string(),
         transport_config: Some(IrohConfig::default()),
+        topology: blixard_core::types::NodeTopology::default(),
     };
 
     let node = Arc::new(SharedNodeState::new(config));

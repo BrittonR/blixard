@@ -190,7 +190,12 @@ impl HistoryRecorder {
     }
 
     pub async fn get_history(&self) -> History {
-        self.history.lock().await.clone()
+        let guard = self.history.lock().await;
+        // Create a new History with cloned entries since History doesn't implement Clone
+        History {
+            entries: guard.entries.clone(),
+            next_process_id: AtomicU64::new(guard.next_process_id.load(Ordering::SeqCst)),
+        }
     }
 }
 

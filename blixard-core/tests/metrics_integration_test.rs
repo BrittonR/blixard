@@ -1,13 +1,13 @@
 //! Integration test for OpenTelemetry metrics
 
-use blixard_core::metrics_otel::{self, attributes, metrics, Timer};
+use blixard_core::metrics_otel::{self, attributes, safe_metrics, Timer};
 
 #[tokio::test]
 async fn test_metrics_recording() {
     // Initialize metrics (or skip if already initialized)
     let _ = metrics_otel::init_prometheus();
 
-    let metrics = metrics();
+    let metrics = safe_metrics().unwrap();
 
     // Record some metrics
     metrics

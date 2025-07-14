@@ -10,11 +10,10 @@ use blixard_core::{
     transport::{
         iroh_health_service::IrohHealthService,
         iroh_service::{IrohRpcClient, IrohRpcServer},
-        iroh_service_runner::start_iroh_services,
     },
     types::NodeConfig,
 };
-use iroh::{Endpoint, NodeAddr};
+use iroh::{Endpoint, NodeAddr, SecretKey};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
@@ -47,9 +46,10 @@ async fn main() -> BlixardResult<()> {
     let shared_state = Arc::new(SharedNodeState::new(config.clone()));
 
     // Create Iroh endpoint directly
+    let secret = SecretKey::generate(rand::thread_rng());
     let endpoint = Endpoint::builder()
-        .discovery(Box::new(iroh::discovery::dns::DnsDiscovery::n0_dns()))
-        .bind(0)
+        .secret_key(secret)
+        .bind()
         .await
         .map_err(|e| blixard_core::error::BlixardError::Internal {
             message: format!("Failed to create Iroh endpoint: {}", e),
@@ -103,9 +103,13 @@ async fn main() -> BlixardResult<()> {
     {
         Ok(response) => {
             println!("✓ Health check successful!");
-            println!("  Status: {}", response.status);
+            if let Some(status) = &response.status {
+                println!("  Status: {}", status);
+            }
             println!("  Message: {}", response.message);
-            println!("  Node ID: {}", response.node_id);
+            if let Some(node_id) = &response.node_id {
+                println!("  Node ID: {}", node_id);
+            }
         }
         Err(e) => {
             println!("✗ Health check failed: {}", e);
@@ -124,7 +128,7 @@ async fn main() -> BlixardResult<()> {
 
     // Cleanup
     server_handle.abort();
-    endpoint.close().await?;
+    endpoint.close().await;
 
     println!("✅ Shutdown complete");
 

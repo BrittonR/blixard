@@ -87,8 +87,7 @@ async fn test_conservative_overcommit_policy() {
     // Add a node with 8 CPU, 16GB RAM, 100GB disk
     add_worker_node(&database, 1, 8, 16384, 100).await;
 
-    // Sync resource manager to pick up the worker we just added
-    scheduler.sync_resource_manager().await.unwrap();
+    // Note: Resource manager sync is now automatic
 
     // Try to allocate exactly what's available (minus system reserve)
     let mut vm1 = common::test_vm_config("vm1");
@@ -147,8 +146,7 @@ async fn test_moderate_overcommit_policy() {
     // Add a node with 8 CPU, 16GB RAM, 100GB disk
     add_worker_node(&database, 1, 8, 16384, 100).await;
 
-    // Sync resource manager to pick up the worker we just added
-    scheduler.sync_resource_manager().await.unwrap();
+    // Note: Resource manager sync is now automatic
 
     // With moderate policy: 2x CPU, 1.2x memory, 1.1x disk, 15% reserve
     // Effective capacity: CPU = 8 * 2 * 0.85 = 13.6
@@ -184,7 +182,7 @@ async fn test_resource_reservations() {
 
     // Add a node
     add_worker_node(&database, 1, 10, 16384, 100).await;
-    scheduler.sync_resource_manager().await.unwrap();
+    // Resource manager sync is now automatic
 
     // Create a system reservation
     scheduler
@@ -247,7 +245,7 @@ async fn test_overcommit_capable_nodes() {
     // Add nodes
     add_worker_node(&database, 1, 8, 16384, 100).await;
     add_worker_node(&database, 2, 8, 16384, 100).await;
-    scheduler.sync_resource_manager().await.unwrap();
+    // Resource manager sync is now automatic
 
     // Update node 2 to use aggressive overcommit
     scheduler
@@ -267,7 +265,7 @@ async fn test_resource_utilization_tracking() {
 
     // Add a node
     add_worker_node(&database, 1, 8, 16384, 100).await;
-    scheduler.sync_resource_manager().await.unwrap();
+    // Resource manager sync is now automatic
 
     // Get initial utilization (should be 0%)
     let utilization = scheduler
