@@ -8,8 +8,7 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::raft_manager::WorkerCapabilities;
 use crate::resource_management::{ClusterResourceManager, OvercommitPolicy};
 use crate::try_into_bytes;
-// Hypervisor type is used for resource admission validation
-use crate::types::{Hypervisor, VmConfig, VmState, VmStatus};
+use crate::types::{VmConfig, VmState, VmStatus};
 use redb::{Database, ReadableTable};
 use std::sync::Arc;
 use tracing::{debug, info, warn};

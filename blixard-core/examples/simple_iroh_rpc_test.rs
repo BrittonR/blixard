@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use blixard_core::error::{BlixardError, BlixardResult};
 use blixard_core::transport::iroh_protocol::*;
 use blixard_core::transport::iroh_service::{
-    IrohRpcClient, IrohRpcServer, IrohService, ServiceRegistry,
+    IrohRpcClient, IrohRpcServer, IrohService,
 };
 use bytes::Bytes;
 use iroh::{Endpoint, NodeAddr};

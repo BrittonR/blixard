@@ -212,12 +212,12 @@ impl NixImageStore {
             NixArtifactType::Closure { .. } => "closure",
         };
         #[cfg(feature = "observability")]
-        record_p2p_image_import(artifact_type_str, true, total_size);
+        let _ = record_p2p_image_import(artifact_type_str, true, total_size);
 
         // Record deduplication metrics
         #[cfg(feature = "observability")]
         for _ in 0..dedup_count {
-            record_p2p_chunk_transfer(0, true);
+            let _ = record_p2p_chunk_transfer(0, true);
         }
 
         info!(
@@ -295,10 +295,10 @@ impl NixImageStore {
 
         // Record cache hits/misses
         #[cfg(feature = "observability")]
-        record_p2p_cache_access(false, "chunk"); // For chunks we need
+        let _ = record_p2p_cache_access(false, "chunk"); // For chunks we need
         #[cfg(feature = "observability")]
         for _ in &chunks_have {
-            record_p2p_cache_access(true, "chunk"); // For chunks we already have
+            let _ = record_p2p_cache_access(true, "chunk"); // For chunks we already have
         }
 
         let start_time = std::time::Instant::now();
@@ -312,7 +312,7 @@ impl NixImageStore {
 
             // Record chunk transfer
             #[cfg(feature = "observability")]
-            record_p2p_chunk_transfer(chunk_data.len() as u64, false);
+            let _ = record_p2p_chunk_transfer(chunk_data.len() as u64, false);
 
             // Store chunk for future deduplication
             self.store_chunk(&chunk.hash, &chunk_data).await?;
@@ -323,7 +323,7 @@ impl NixImageStore {
             bytes_deduplicated += chunk.size;
             // Record deduplicated chunks
             #[cfg(feature = "observability")]
-            record_p2p_chunk_transfer(chunk.size, true);
+            let _ = record_p2p_chunk_transfer(chunk.size, true);
         }
 
         // Reassemble the image from chunks
@@ -334,11 +334,11 @@ impl NixImageStore {
             match self.verify_nix_image(&metadata, &target_path).await {
                 Ok(_) => {
                     #[cfg(feature = "observability")]
-                    record_p2p_verification(true, "nar_hash");
+                    let _ = record_p2p_verification(true, "nar_hash");
                 }
                 Err(e) => {
                     #[cfg(feature = "observability")]
-                    record_p2p_verification(false, "nar_hash");
+                    let _ = record_p2p_verification(false, "nar_hash");
                     return Err(e);
                 }
             }
@@ -362,7 +362,7 @@ impl NixImageStore {
 
         // Record download metrics
         #[cfg(feature = "observability")]
-        record_p2p_image_download(image_id, true, stats.duration.as_secs_f64());
+        let _ = record_p2p_image_download(image_id, true, stats.duration.as_secs_f64());
 
         Ok((target_path, stats))
     }

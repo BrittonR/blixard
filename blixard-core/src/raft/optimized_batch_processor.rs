@@ -345,7 +345,7 @@ pub struct OptimizedRaftBatchProcessor {
     
     /// Adaptive batching
     performance_metrics: Arc<RwLock<BatchPerformanceMetrics>>,
-    adaptive_controller: AdaptiveConcurrencyController,
+    _adaptive_controller: AdaptiveConcurrencyController,
     
     /// Resource management
     pending_proposals: AtomicCounter,
@@ -384,7 +384,7 @@ impl OptimizedRaftBatchProcessor {
             raft_tx,
             priority_batches: Arc::new(RwLock::new(Vec::new())),
             performance_metrics: Arc::new(RwLock::new(BatchPerformanceMetrics::new())),
-            adaptive_controller,
+            _adaptive_controller: adaptive_controller,
             pending_proposals: AtomicCounter::new(0),
             processing_semaphore,
             circuit_breaker,

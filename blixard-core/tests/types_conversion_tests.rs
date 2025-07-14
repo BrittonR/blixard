@@ -2,7 +2,6 @@
 
 use blixard_core::types::{NodeId, NodeState, OptionExt, SocketAddrExt, VmId, VmStatus};
 use blixard_core::error::BlixardError;
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use uuid::Uuid;
 

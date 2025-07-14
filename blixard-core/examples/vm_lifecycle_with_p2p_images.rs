@@ -15,7 +15,7 @@ use blixard_core::{
     p2p_manager::{P2pConfig, P2pManager},
     transport::config::TransportConfig,
     types::{LocalityPreference, NodeConfig, VmCommand, VmConfig},
-    vm_backend::{VmBackend, VmBackendRegistry},
+    vm_backend::VmBackendRegistry,
 };
 use blixard_vm::microvm_backend::MicrovmBackend;
 use redb::Database;

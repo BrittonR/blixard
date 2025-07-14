@@ -1,4 +1,4 @@
-use blixard_core::error::{BlixardError, BlixardResult};
+use blixard_core::error::BlixardResult;
 #[cfg(feature = "test-helpers")]
 use blixard_core::test_helpers::{timing, TestCluster, TestNode};
 use std::time::Duration;

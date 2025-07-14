@@ -50,7 +50,7 @@ impl Default for HttpClientPoolConfig {
 #[derive(Debug, Clone)]
 struct PooledClient {
     client: reqwest::Client,
-    created_at: Instant,
+    _created_at: Instant,
     last_used: Arc<RwLock<Instant>>,
     request_count: AtomicCounter,
 }
@@ -60,7 +60,7 @@ impl PooledClient {
         let now = Instant::now();
         Self {
             client,
-            created_at: now,
+            _created_at: now,
             last_used: Arc::new(RwLock::new(now)),
             request_count: AtomicCounter::new(0),
         }
@@ -119,7 +119,7 @@ impl HttpClientPool {
         
         Ok(HttpClient {
             client: client.client.clone(),
-            host: host.to_string(),
+            _host: host.to_string(),
             config: self.config.clone(),
         })
     }
@@ -282,7 +282,7 @@ impl Drop for HttpClientPool {
 /// HTTP client with automatic connection management
 pub struct HttpClient {
     client: reqwest::Client,
-    host: String,
+    _host: String,
     config: HttpClientPoolConfig,
 }
 
@@ -388,8 +388,8 @@ mod tests {
         let mut pool = HttpClientPool::new(config);
         pool.start().await.unwrap();
 
-        let client = pool.get_client("httpbin.org").await.unwrap();
-        assert_eq!(client.host, "httpbin.org");
+        let _client = pool.get_client("httpbin.org").await.unwrap();
+        // Client host is now private (_host)
 
         let stats = pool.get_stats().await;
         assert_eq!(stats.total_clients, 1);

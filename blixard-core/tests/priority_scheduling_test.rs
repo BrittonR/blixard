@@ -2,7 +2,7 @@ use blixard_core::raft_manager::WorkerCapabilities;
 use blixard_core::storage::{VM_STATE_TABLE, WORKER_STATUS_TABLE, WORKER_TABLE};
 use blixard_core::types::{VmConfig, VmState, VmStatus};
 use blixard_core::vm_scheduler::{
-    PlacementStrategy, PreemptionConfig, PreemptionPolicy, VmResourceRequirements, VmScheduler,
+    PlacementStrategy, PreemptionConfig, PreemptionPolicy, VmScheduler,
 };
 use redb::Database;
 use std::sync::Arc;

@@ -19,14 +19,14 @@ pub struct OptimizedProposalBuilder {
     /// Pre-allocated buffer for ID generation
     id_buffer: Vec<u8>,
     /// Cached interned strings
-    node_prefix: crate::memory_optimization::string_pool::InternedString,
+    _node_prefix: crate::memory_optimization::string_pool::InternedString,
 }
 
 impl OptimizedProposalBuilder {
     pub fn new(node_id: u64) -> Self {
         Self {
             id_buffer: Vec::with_capacity(16), // UUID size
-            node_prefix: intern(&format!("node-{}", node_id)),
+            _node_prefix: intern(&format!("node-{}", node_id)),
         }
     }
     
@@ -84,7 +84,7 @@ pub struct OptimizedProposalProcessor {
     /// Reusable serialization buffer
     serialize_buffer: Vec<u8>,
     /// Cache of VM names to IDs for fast lookup
-    vm_name_cache: FlatMap<Arc<str>, crate::types::VmId>,
+    _vm_name_cache: FlatMap<Arc<str>, crate::types::VmId>,
     /// Small vector for temporary collections
     temp_proposals: SmallVec<ProposalData>,
 }
@@ -93,7 +93,7 @@ impl OptimizedProposalProcessor {
     pub fn new() -> Self {
         Self {
             serialize_buffer: Vec::with_capacity(4096),
-            vm_name_cache: FlatMap::default(),
+            _vm_name_cache: FlatMap::default(),
             temp_proposals: SmallVec::new(),
         }
     }

@@ -237,7 +237,6 @@ impl VmAutoRecovery {
 
         // Check if we've exhausted restart attempts
         if state.restart_attempts >= self.policy.max_restart_attempts {
-            drop(states); // Release lock before potentially long operation
             return self.handle_restart_exhausted(vm_name, vm_config).await;
         }
 

@@ -495,10 +495,6 @@ impl VmProcessManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use blixard_core::abstractions::command::CommandOutput;
-    use std::time::Duration;
-
     // TODO: Update this test to use the unified MockCommandExecutor properly
     // The test logic is complex and needs proper expectation setup
 

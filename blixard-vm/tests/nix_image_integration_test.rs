@@ -11,7 +11,7 @@ use blixard_core::{
     error::BlixardResult,
     nix_image_store::NixImageStore,
     p2p_manager::{P2pConfig, P2pManager},
-    types::{VmConfig as CoreVmConfig, VmStatus},
+    types::{VmConfig as CoreVmConfig},
     vm_backend::VmBackend,
 };
 use blixard_vm::microvm_backend::MicrovmBackend;

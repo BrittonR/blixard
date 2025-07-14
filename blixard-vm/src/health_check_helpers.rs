@@ -90,7 +90,7 @@ pub fn health_check_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration, SystemTime, Instant};
+    use std::time::{SystemTime, Instant};
 
     #[test]
     fn test_success_result() {

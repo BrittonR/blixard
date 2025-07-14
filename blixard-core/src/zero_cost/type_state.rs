@@ -4,7 +4,6 @@
 //! transitions are caught at compile time.
 
 use std::marker::PhantomData;
-use crate::types::VmConfig;
 
 /// Trait for type-state pattern
 pub trait TypeState: private::Sealed {

@@ -170,7 +170,7 @@ pub struct PeerConnectionPool {
     connections: Vec<Arc<EnhancedConnectionInfo>>,
     next_connection_index: AtomicCounter,
     total_requests: AtomicCounter,
-    last_health_check: Arc<RwLock<Instant>>,
+    _last_health_check: Arc<RwLock<Instant>>,
 }
 
 impl PeerConnectionPool {
@@ -180,7 +180,7 @@ impl PeerConnectionPool {
             connections: Vec::new(),
             next_connection_index: AtomicCounter::new(0),
             total_requests: AtomicCounter::new(0),
-            last_health_check: Arc::new(RwLock::new(Instant::now())),
+            _last_health_check: Arc::new(RwLock::new(Instant::now())),
         }
     }
 
