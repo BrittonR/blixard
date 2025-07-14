@@ -93,8 +93,8 @@ async fn main() -> BlixardResult<()> {
 
         // Try to establish P2P connection manually
         if let (Some(p2p_manager1), Some(p2p_manager2)) = (
-            node1_shared.get_p2p_manager().await,
-            node2_shared.get_p2p_manager().await,
+            node1_shared.get_p2p_manager(),
+            node2_shared.get_p2p_manager(),
         ) {
             info!("Both nodes have P2P managers");
 
@@ -116,13 +116,13 @@ async fn main() -> BlixardResult<()> {
     let node1_peers = node1_shared.get_peers().await;
     info!("Node 1 sees {} peers", node1_peers.len());
     for peer in &node1_peers {
-        info!("  Peer {}: P2P={:?}", peer.id, peer.p2p_node_id);
+        info!("  Peer {}: P2P={:?}", peer.node_id, peer.p2p_node_id);
     }
 
     let node2_peers = node2_shared.get_peers().await;
     info!("Node 2 sees {} peers", node2_peers.len());
     for peer in &node2_peers {
-        info!("  Peer {}: P2P={:?}", peer.id, peer.p2p_node_id);
+        info!("  Peer {}: P2P={:?}", peer.node_id, peer.p2p_node_id);
     }
 
     // Cleanup

@@ -580,11 +580,12 @@ mod tests {
     async fn test_legacy_quota_conversion() {
         let quota = TenantQuota {
             tenant_id: "test-tenant".to_string(),
-            vm_limits: crate::types::VmConfig {
+            vm_limits: crate::resource_quotas::VmResourceLimits {
+                max_vms: 10,
+                max_vcpus: 40,
                 max_memory_mb: 8192,
-                max_vcpus: 4,
                 max_disk_gb: 100,
-                overcommit_ratio: 1.5,
+                max_vms_per_node: 5,
                 ..Default::default()
             },
             ..TenantQuota::new("test-tenant".to_string())

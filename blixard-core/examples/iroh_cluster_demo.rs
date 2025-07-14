@@ -8,18 +8,21 @@
 
 use blixard_core::error::BlixardResult;
 use blixard_core::node_shared::SharedNodeState;
-use blixard_core::transport::config::{IrohConfig, TransportConfig};
+use blixard_core::p2p_manager::{PeerInfo, ConnectionQuality};
+use blixard_core::transport::config::IrohConfig;
 use blixard_core::transport::iroh_health_service::IrohHealthService;
 use blixard_core::transport::iroh_service::{IrohRpcClient, IrohRpcServer};
 use blixard_core::transport::iroh_status_service::IrohStatusService;
-use blixard_core::transport::services::health::{HealthService, HealthServiceImpl};
-use blixard_core::transport::services::status::{StatusService, StatusServiceImpl};
+use blixard_core::transport::iroh_health_service::HealthCheckResponse;
+use blixard_core::transport::iroh_status_service::ClusterStatusResponse;
 use blixard_core::types::NodeConfig;
 use iroh::{Endpoint, NodeAddr, SecretKey};
 use rand;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
+use serde_json;
+use std::collections::HashMap;
 
 #[tokio::main]
 async fn main() -> BlixardResult<()> {
@@ -39,9 +42,9 @@ async fn main() -> BlixardResult<()> {
     test_message_performance(&nodes).await?;
 
     // Cleanup
-    for (_, endpoint, server) in nodes {
-        server.shutdown().await;
+    for (_, endpoint, _server_handle) in nodes {
         endpoint.close().await;
+        // Server tasks will be cancelled when endpoints close
     }
 
     println!("\n✅ Demo completed successfully!");
@@ -50,7 +53,7 @@ async fn main() -> BlixardResult<()> {
 
 async fn create_cluster_nodes(
     count: usize,
-) -> BlixardResult<Vec<(Arc<SharedNodeState>, Endpoint, IrohRpcServer)>> {
+) -> BlixardResult<Vec<(Arc<SharedNodeState>, Endpoint, JoinHandle<BlixardResult<()>>)>> {
     println!("Creating {}-node cluster with Iroh transport...\n", count);
 
     let mut nodes = Vec::new();
@@ -97,19 +100,22 @@ async fn create_cluster_nodes(
         println!("  Iroh NodeId: {}", node_id);
 
         // Create RPC server
-        let server = IrohRpcServer::new(endpoint.clone());
+        let server = Arc::new(IrohRpcServer::new(endpoint.clone()));
 
         // Register services
-        let health_service = IrohHealthService::new(HealthServiceImpl::new(node.clone()));
-        server.register_service("health", Arc::new(health_service));
+        let health_service = IrohHealthService::new(node.clone());
+        server.register_service(health_service).await;
 
-        let status_service = IrohStatusService::new(StatusServiceImpl::new(node.clone()));
-        server.register_service("status", Arc::new(status_service));
+        let status_service = IrohStatusService::new(node.clone());
+        server.register_service(status_service).await;
 
-        // Start accepting connections
-        server.start().await?;
+        // Start accepting connections in background
+        let server_handle = {
+            let server = server.clone();
+            tokio::spawn(async move { server.serve().await })
+        };
 
-        nodes.push((node.clone(), endpoint, server));
+        nodes.push((node.clone(), endpoint, server_handle));
     }
 
     // Share node addresses among all nodes
@@ -117,9 +123,24 @@ async fn create_cluster_nodes(
     for (i, (node, _, _)) in nodes.iter().enumerate() {
         for (peer_id, peer_addr) in &node_addrs {
             if *peer_id != (i + 1) as u64 {
-                node.add_peer(*peer_id, format!("127.0.0.1:{}", 7000 + peer_id))
-                    .await;
-                // In a real scenario, we'd also share the Iroh NodeAddr
+                let peer_info = PeerInfo {
+                    node_id: peer_id.to_string(),
+                    address: format!("127.0.0.1:{}", 7000 + peer_id),
+                    last_seen: chrono::Utc::now(),
+                    capabilities: vec!["health".to_string(), "status".to_string()],
+                    shared_resources: HashMap::new(),
+                    connection_quality: ConnectionQuality {
+                        latency_ms: 10,
+                        bandwidth_mbps: 100.0,
+                        packet_loss: 0.0,
+                        reliability_score: 1.0,
+                    },
+                    p2p_node_id: Some(peer_addr.node_id.to_string()),
+                    p2p_addresses: peer_addr.direct_addresses.iter().map(|a| a.to_string()).collect(),
+                    p2p_relay_url: peer_addr.relay_url.as_ref().map(|u| u.to_string()),
+                    is_connected: false,
+                };
+                node.add_peer(*peer_id, peer_info).await;
             }
         }
     }
@@ -129,7 +150,7 @@ async fn create_cluster_nodes(
 }
 
 async fn test_health_checks(
-    nodes: &[(Arc<SharedNodeState>, Endpoint, IrohRpcServer)],
+    nodes: &[(Arc<SharedNodeState>, Endpoint, JoinHandle<BlixardResult<()>>)],
 ) -> BlixardResult<()> {
     println!("\n--- Testing Health Checks ---");
 
@@ -145,23 +166,26 @@ async fn test_health_checks(
 
         // Measure health check latency
         let start = Instant::now();
+        let request = serde_json::json!({});
         match client
-            .connect_to_service::<dyn HealthService>(target_addr)
+            .call::<serde_json::Value, HealthCheckResponse>(
+                target_addr, 
+                "health", 
+                "check", 
+                request
+            )
             .await
         {
-            Ok(mut health_client) => match health_client.check().await {
-                Ok(response) => {
-                    let latency = start.elapsed();
-                    println!(
-                        "  Node 1 → Node {}: Healthy={}, Latency={:?}",
-                        i + 1,
-                        response.healthy,
-                        latency
-                    );
-                }
-                Err(e) => println!("  Health check failed: {}", e),
-            },
-            Err(e) => println!("  Failed to connect: {}", e),
+            Ok(response) => {
+                let latency = start.elapsed();
+                println!(
+                    "  Node 1 → Node {}: Healthy={}, Latency={:?}",
+                    i + 1,
+                    response.healthy,
+                    latency
+                );
+            }
+            Err(e) => println!("  Health check failed: {}", e),
         }
     }
 
@@ -169,7 +193,7 @@ async fn test_health_checks(
 }
 
 async fn test_status_queries(
-    nodes: &[(Arc<SharedNodeState>, Endpoint, IrohRpcServer)],
+    nodes: &[(Arc<SharedNodeState>, Endpoint, JoinHandle<BlixardResult<()>>)],
 ) -> BlixardResult<()> {
     println!("\n--- Testing Status Queries ---");
 
@@ -182,21 +206,24 @@ async fn test_status_queries(
 
         let client = IrohRpcClient::new(endpoint.clone());
 
+        let request = serde_json::json!({});
         match client
-            .connect_to_service::<dyn StatusService>(target_addr)
+            .call::<serde_json::Value, ClusterStatusResponse>(
+                target_addr,
+                "status",
+                "get_cluster_status",
+                request,
+            )
             .await
         {
-            Ok(mut status_client) => match status_client.get_cluster_status().await {
-                Ok(status) => {
-                    println!(
-                        "  Node {} sees {} cluster members",
-                        i + 1,
-                        status.nodes.len()
-                    );
-                }
-                Err(e) => println!("  Status query failed: {}", e),
-            },
-            Err(e) => println!("  Failed to connect: {}", e),
+            Ok(status) => {
+                println!(
+                    "  Node {} sees {} cluster members",
+                    i + 1,
+                    status.member_ids.len()
+                );
+            }
+            Err(e) => println!("  Status query failed: {}", e),
         }
     }
 
@@ -204,7 +231,7 @@ async fn test_status_queries(
 }
 
 async fn test_message_performance(
-    nodes: &[(Arc<SharedNodeState>, Endpoint, IrohRpcServer)],
+    nodes: &[(Arc<SharedNodeState>, Endpoint, JoinHandle<BlixardResult<()>>)],
 ) -> BlixardResult<()> {
     println!("\n--- Testing Message Performance ---");
 
@@ -221,12 +248,15 @@ async fn test_message_performance(
     let client = IrohRpcClient::new(endpoint1.clone());
 
     // Warm up connection
-    if let Ok(mut health_client) = client
-        .connect_to_service::<dyn HealthService>(target_addr.clone())
-        .await
-    {
-        let _ = health_client.check().await;
-    }
+    let request = serde_json::json!({});
+    let _ = client
+        .call::<serde_json::Value, HealthCheckResponse>(
+            target_addr.clone(),
+            "health",
+            "check",
+            request.clone(),
+        )
+        .await;
 
     // Measure multiple health checks
     let mut latencies = Vec::new();
@@ -234,13 +264,16 @@ async fn test_message_performance(
     for _ in 0..100 {
         let start = Instant::now();
 
-        if let Ok(mut health_client) = client
-            .connect_to_service::<dyn HealthService>(target_addr.clone())
+        if let Ok(_) = client
+            .call::<serde_json::Value, HealthCheckResponse>(
+                target_addr.clone(),
+                "health",
+                "check",
+                request.clone(),
+            )
             .await
         {
-            if let Ok(_) = health_client.check().await {
-                latencies.push(start.elapsed());
-            }
+            latencies.push(start.elapsed());
         }
     }
 

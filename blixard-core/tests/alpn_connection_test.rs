@@ -96,8 +96,7 @@ async fn test_alpn_basic_connection() {
     receiver_task.abort();
     let _ = receiver_task.await;
 
-    transport1.shutdown().await.unwrap();
-    transport2.shutdown().await.unwrap();
+    // Arc transports are cleaned up automatically when they go out of scope
 }
 
 #[tokio::test]
@@ -150,8 +149,7 @@ async fn test_alpn_health_check() {
     health_check_task.abort();
     let _ = health_check_task.await;
 
-    transport1.shutdown().await.unwrap();
-    transport2.shutdown().await.unwrap();
+    // Arc transports are cleaned up automatically when they go out of scope
 }
 
 #[tokio::test]
@@ -237,6 +235,6 @@ async fn test_multiple_alpn_connections() {
         let _ = handle.await;
     }
 
-    transport.shutdown().await.unwrap();
+    // Arc transport is cleaned up automatically when it goes out of scope
     info!("Multiple connections test completed");
 }

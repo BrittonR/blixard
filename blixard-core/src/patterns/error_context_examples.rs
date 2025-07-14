@@ -202,7 +202,7 @@ pub fn validate_cluster_config(config: &ClusterConfig) -> BlixardResult<()> {
 
     // Validate replication factor
     if config.replication_factor > config.nodes.len() {
-        return Err(BlixardError::ValidationError {
+        return Err(BlixardError::ConfigurationError {
             field: "replication_factor".to_string(),
             message: format!("Cannot exceed node count ({}), got {}", config.nodes.len(), config.replication_factor),
         })
