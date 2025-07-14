@@ -1,7 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc c950d4d22cc1663609d6737d1e4d3eab9a04c0f61cd175d29b501ced216921e9 # shrinks to config = NodeConfig { id: 1, data_dir: "੦", bind_addr: 0.0.0.0:1000, join_addr: None, use_tailscale: false }, peer_ids = [], raft_status = RaftStatus { is_leader: false, node_id: 1, leader_id: None, term: 0, state: "a" }
