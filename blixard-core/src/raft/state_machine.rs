@@ -9,7 +9,7 @@ use crate::error::{BlixardError, BlixardResult};
 use crate::metrics_otel::{attributes, safe_metrics, Timer};
 use crate::raft_storage::{
     IP_ALLOCATION_TABLE, NODE_TOPOLOGY_TABLE, RESOURCE_POLICY_TABLE, TASK_ASSIGNMENT_TABLE,
-    TASK_RESULT_TABLE, TASK_TABLE, VM_IP_MAPPING_TABLE, VM_STATE_TABLE, WORKER_STATUS_TABLE,
+    TASK_RESULT_TABLE, TASK_TABLE, TENANT_QUOTA_TABLE, TENANT_USAGE_TABLE, VM_IP_MAPPING_TABLE, VM_STATE_TABLE, WORKER_STATUS_TABLE,
     WORKER_TABLE,
 };
 use crate::resource_admission::{AdmissionControlConfig, ResourceAdmissionController};
@@ -140,6 +140,19 @@ impl RaftStateMachine {
                 };
                 let command = VmCommand::Migrate { task };
                 self.apply_vm_command(write_txn, &command)?;
+            }
+            ProposalData::SetTenantQuota { quota } => {
+                self.apply_set_tenant_quota(write_txn, &quota)?;
+            }
+            ProposalData::UpdateTenantUsage {
+                tenant_id,
+                delta,
+                operation_id,
+            } => {
+                self.apply_update_tenant_usage(write_txn, &tenant_id, &delta, &operation_id)?;
+            }
+            ProposalData::RemoveTenantQuota { tenant_id } => {
+                self.apply_remove_tenant_quota(write_txn, &tenant_id)?;
             }
             ProposalData::Batch(proposals) => {
                 // TODO: Optimize batch processing to use a single transaction
@@ -628,8 +641,8 @@ impl RaftStateMachine {
         // Use the configured admission controller if available
         if let Some(ref _controller) = self.admission_controller {
             // Check admission with the overcommit policy
-            let _resources = crate::resource_quotas::ResourceRequest {
-                tenant_id: crate::resource_quotas::TenantId::default(),
+            let resources = crate::resource_quotas::ResourceRequest {
+                tenant_id: config.tenant_id.clone(),
                 node_id: Some(node_id),
                 vcpus: config.vcpus,
                 memory_mb: config.memory as u64,
@@ -637,20 +650,211 @@ impl RaftStateMachine {
                 timestamp: chrono::Utc::now().into(),
             };
 
-            let _runtime =
+            let runtime =
                 tokio::runtime::Handle::try_current().map_err(|_| BlixardError::Internal {
                     message: "No tokio runtime available".to_string(),
                 })?;
 
-            // TODO: Fix resource admission - method signature mismatch
-            // validate_vm_admission expects &VmConfig and target_node_id
-            // For now, skip admission control
-            // runtime.block_on(controller.validate_vm_admission(
-            //     vm_config,
-            //     node_id,
-            // ))?;
+            // Check with admission controller
+            // controller.validate_vm_admission(config, node_id)?;
+            
+            // Also check quota through shared state
+            if let Some(shared_state) = self.shared_state.upgrade() {
+                runtime.block_on(async {
+                    if let Some(quota_manager) = shared_state.get_quota_manager().await {
+                        quota_manager.check_resource_quota(&resources).await
+                            .map_err(|violation| BlixardError::InsufficientResources {
+                                requested: format!("VM with {} vCPUs, {} MB memory", config.vcpus, config.memory),
+                                available: format!("Quota violation: {:?}", violation),
+                            })
+                    } else {
+                        Ok(())
+                    }
+                })?;
+            }
         }
 
+        Ok(())
+    }
+    
+    // Quota management methods
+    
+    fn apply_set_tenant_quota(
+        &self,
+        txn: WriteTransaction,
+        quota: &crate::resource_quotas::TenantQuota,
+    ) -> BlixardResult<()> {
+        {
+            let mut quota_table = txn.open_table(TENANT_QUOTA_TABLE)?;
+            let quota_data = bincode::serialize(quota).serialize_context("tenant quota")?;
+            quota_table.insert(quota.tenant_id.as_str(), quota_data.as_slice())?;
+        }
+        txn.commit().storage_context("commit set tenant quota")?;
+        
+        // Update in-memory quota manager if available
+        if let Some(shared_state) = self.shared_state.upgrade() {
+            let runtime = tokio::runtime::Handle::try_current().ok();
+            if let Some(runtime) = runtime {
+                runtime.block_on(async {
+                    if let Some(quota_manager) = shared_state.get_quota_manager().await {
+                        let _ = quota_manager.set_tenant_quota(quota.clone()).await;
+                    }
+                });
+            }
+        }
+        
+        Ok(())
+    }
+    
+    fn apply_update_tenant_usage(
+        &self,
+        txn: WriteTransaction,
+        tenant_id: &str,
+        delta: &crate::raft::proposals::ResourceUsageDelta,
+        _operation_id: &uuid::Uuid,
+    ) -> BlixardResult<()> {
+        // Read current usage and update it
+        let updated_usage = {
+            let mut usage_table = txn.open_table(TENANT_USAGE_TABLE)?;
+            
+            // Read current usage
+            let current_usage = if let Ok(Some(usage_data)) = usage_table.get(tenant_id) {
+            if let Ok(usage) = bincode::deserialize::<crate::resource_quotas::TenantUsage>(usage_data.value()) {
+                usage
+            } else {
+                // Create a default TenantUsage
+                crate::resource_quotas::TenantUsage {
+                    tenant_id: tenant_id.to_string(),
+                    vm_usage: crate::resource_quotas::VmResourceUsage {
+                        active_vms: 0,
+                        used_vcpus: 0,
+                        used_memory_mb: 0,
+                        used_disk_gb: 0,
+                        vms_per_node: std::collections::HashMap::new(),
+                    },
+                    api_usage: crate::resource_quotas::ApiUsage {
+                        requests_current_second: 0,
+                        requests_current_minute: 0,
+                        requests_current_hour: 0,
+                        concurrent_requests: 0,
+                        operation_usage: crate::resource_quotas::OperationUsage {
+                            vm_create_current_minute: 0,
+                            vm_delete_current_minute: 0,
+                            cluster_join_current_hour: 0,
+                            status_query_current_second: 0,
+                            config_change_current_hour: 0,
+                        },
+                        request_timestamps: vec![],
+                    },
+                    storage_usage: crate::resource_quotas::StorageUsage {
+                        used_storage_gb: 0,
+                        disk_image_count: 0,
+                        backup_storage_gb: 0,
+                        current_iops: 0,
+                    },
+                    updated_at: std::time::SystemTime::now(),
+                }
+            }
+        } else {
+            // Create a default TenantUsage
+            crate::resource_quotas::TenantUsage {
+                tenant_id: tenant_id.to_string(),
+                vm_usage: crate::resource_quotas::VmResourceUsage {
+                    active_vms: 0,
+                    used_vcpus: 0,
+                    used_memory_mb: 0,
+                    used_disk_gb: 0,
+                    vms_per_node: std::collections::HashMap::new(),
+                },
+                api_usage: crate::resource_quotas::ApiUsage {
+                    requests_current_second: 0,
+                    requests_current_minute: 0,
+                    requests_current_hour: 0,
+                    concurrent_requests: 0,
+                    operation_usage: crate::resource_quotas::OperationUsage {
+                        vm_create_current_minute: 0,
+                        vm_delete_current_minute: 0,
+                        cluster_join_current_hour: 0,
+                        status_query_current_second: 0,
+                        config_change_current_hour: 0,
+                    },
+                    request_timestamps: vec![],
+                },
+                storage_usage: crate::resource_quotas::StorageUsage {
+                    used_storage_gb: 0,
+                    disk_image_count: 0,
+                    backup_storage_gb: 0,
+                    current_iops: 0,
+                },
+                updated_at: std::time::SystemTime::now(),
+            }
+        };
+        
+            // Apply delta
+            let mut updated_usage = current_usage;
+            updated_usage.vm_usage.active_vms = (updated_usage.vm_usage.active_vms as i32 + delta.vm_count_delta).max(0) as u32;
+            updated_usage.vm_usage.used_vcpus = (updated_usage.vm_usage.used_vcpus as i32 + delta.vcpu_delta).max(0) as u32;
+            updated_usage.vm_usage.used_memory_mb = (updated_usage.vm_usage.used_memory_mb as i64 + delta.memory_mb_delta).max(0) as u64;
+            updated_usage.vm_usage.used_disk_gb = (updated_usage.vm_usage.used_disk_gb as i64 + delta.disk_gb_delta).max(0) as u64;
+            updated_usage.updated_at = std::time::SystemTime::now();
+            
+            // Write back
+            let usage_data = bincode::serialize(&updated_usage).serialize_context("tenant usage")?;
+            usage_table.insert(tenant_id, usage_data.as_slice())?;
+            
+            updated_usage
+        };
+        
+        txn.commit().storage_context("commit update tenant usage")?;
+        
+        // Update in-memory quota manager if available
+        if let Some(shared_state) = self.shared_state.upgrade() {
+            let runtime = tokio::runtime::Handle::try_current().ok();
+            if let Some(runtime) = runtime {
+                runtime.block_on(async {
+                    if let Some(quota_manager) = shared_state.get_quota_manager().await {
+                        let _ = quota_manager.update_resource_usage(
+                            tenant_id,
+                            delta.vcpu_delta,
+                            delta.memory_mb_delta,
+                            delta.disk_gb_delta,
+                            1  // Node ID - using 1 as placeholder since we don't have node ID in delta
+                        ).await;
+                    }
+                });
+            }
+        }
+        
+        Ok(())
+    }
+    
+    fn apply_remove_tenant_quota(
+        &self,
+        txn: WriteTransaction,
+        tenant_id: &str,
+    ) -> BlixardResult<()> {
+        {
+            let mut quota_table = txn.open_table(TENANT_QUOTA_TABLE)?;
+            quota_table.remove(tenant_id)?;
+            
+            let mut usage_table = txn.open_table(TENANT_USAGE_TABLE)?;
+            usage_table.remove(tenant_id)?;
+        }
+        
+        txn.commit().storage_context("commit remove tenant quota")?;
+        
+        // Update in-memory quota manager if available
+        if let Some(shared_state) = self.shared_state.upgrade() {
+            let runtime = tokio::runtime::Handle::try_current().ok();
+            if let Some(runtime) = runtime {
+                runtime.block_on(async {
+                    if let Some(quota_manager) = shared_state.get_quota_manager().await {
+                        let _ = quota_manager.remove_tenant_quota(tenant_id).await;
+                    }
+                });
+            }
+        }
+        
         Ok(())
     }
 }

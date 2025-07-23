@@ -68,6 +68,10 @@ impl IrohServiceRunner {
         let cluster_service = Arc::new(IrohClusterService::new(cluster_operations));
         self.register_service(cluster_service)?;
 
+        // Register quota service
+        let quota_service = Arc::new(crate::transport::iroh_quota_service::IrohQuotaService::new(self.shared_state.clone()));
+        self.register_service(quota_service)?;
+
         info!("Registered {} Iroh services", self.services.len());
 
         Ok(())

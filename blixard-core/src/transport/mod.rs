@@ -353,6 +353,7 @@ pub mod iroh_health_service;
 pub mod iroh_identity_enrollment;
 pub mod iroh_peer_connector;
 pub mod iroh_protocol;
+pub mod iroh_quota_service;
 pub mod iroh_raft_transport;
 pub mod iroh_service;
 pub mod iroh_service_runner;

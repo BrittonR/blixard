@@ -71,6 +71,12 @@ pub struct SharedNodeState {
     
     /// VM backend for managing virtual machines
     vm_manager: Arc<Mutex<Option<Arc<dyn crate::vm_backend::VmBackend>>>>,
+    
+    /// Quota manager for resource limits and tenant quotas
+    quota_manager: Arc<Mutex<Option<Arc<crate::quota_manager::QuotaManager>>>>,
+    
+    /// Raft manager for consensus operations
+    raft_manager: Arc<Mutex<Option<Arc<crate::raft_manager::RaftManager>>>>,
 }
 
 impl SharedNodeState {
@@ -87,6 +93,8 @@ impl SharedNodeState {
             iroh_node_addr: Arc::new(Mutex::new(None)),
             peer_connector: Arc::new(Mutex::new(None)),
             vm_manager: Arc::new(Mutex::new(None)),
+            quota_manager: Arc::new(Mutex::new(None)),
+            raft_manager: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -453,11 +461,18 @@ impl SharedNodeState {
 
     pub async fn send_raft_proposal(
         &self,
-        _proposal: crate::raft::messages::RaftProposal,
+        proposal: crate::raft::messages::RaftProposal,
     ) -> BlixardResult<String> {
-        Err(BlixardError::NotImplemented {
-            feature: "send_raft_proposal in SharedNodeState".to_string(),
-        })
+        match self.get_raft_manager().await {
+            Some(raft_manager) => {
+                raft_manager.propose(proposal).await?;
+                Ok("Proposal submitted".to_string())
+            }
+            None => Err(BlixardError::NotInitialized {
+                component: "RaftManager".to_string(),
+                operation: "send_raft_proposal".to_string(),
+            }),
+        }
     }
 
     pub async fn remove_peer(&self, node_id: u64) {
@@ -564,8 +579,22 @@ impl SharedNodeState {
         *self.vm_manager.lock().await = Some(vm_manager);
     }
 
-    pub fn set_quota_manager(&self, _quota_manager: Arc<crate::quota_manager::QuotaManager>) {
-        // TODO: Store quota manager reference
+    pub async fn set_quota_manager(&self, quota_manager: Arc<crate::quota_manager::QuotaManager>) {
+        let mut guard = self.quota_manager.lock().await;
+        *guard = Some(quota_manager);
+    }
+    
+    pub async fn get_quota_manager(&self) -> Option<Arc<crate::quota_manager::QuotaManager>> {
+        self.quota_manager.lock().await.clone()
+    }
+    
+    pub async fn set_raft_manager(&self, raft_manager: Arc<crate::raft_manager::RaftManager>) {
+        let mut guard = self.raft_manager.lock().await;
+        *guard = Some(raft_manager);
+    }
+    
+    pub async fn get_raft_manager(&self) -> Option<Arc<crate::raft_manager::RaftManager>> {
+        self.raft_manager.lock().await.clone()
     }
 
     pub fn set_ip_pool_manager(&self, _ip_manager: Arc<crate::ip_pool_manager::IpPoolManager>) {

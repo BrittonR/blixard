@@ -66,8 +66,66 @@ pub enum ProposalData {
         vm_id: VmId,
     },
 
+    // Quota management
+    SetTenantQuota {
+        quota: crate::resource_quotas::TenantQuota,
+    },
+    UpdateTenantUsage {
+        tenant_id: String,
+        delta: ResourceUsageDelta,
+        operation_id: uuid::Uuid,
+    },
+    RemoveTenantQuota {
+        tenant_id: String,
+    },
+
     // Batch processing
     Batch(Vec<ProposalData>),
+}
+
+/// Resource usage delta for quota tracking
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceUsageDelta {
+    pub vm_count_delta: i32,
+    pub vcpu_delta: i32,
+    pub memory_mb_delta: i64,
+    pub disk_gb_delta: i64,
+    pub operation: ResourceOperation,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+/// Resource operation type
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ResourceOperation {
+    Create,
+    Update,
+    Delete,
+}
+
+impl ResourceUsageDelta {
+    /// Create a delta for VM creation
+    pub fn from_vm_create(config: &crate::types::VmConfig) -> Self {
+        Self {
+            vm_count_delta: 1,
+            vcpu_delta: config.vcpus as i32,
+            memory_mb_delta: config.memory as i64,
+            disk_gb_delta: 0, // TODO: Add disk to VmConfig
+            operation: ResourceOperation::Create,
+            timestamp: chrono::Utc::now(),
+        }
+    }
+    
+    /// Create a delta for VM deletion
+    pub fn from_vm_delete(config: &crate::types::VmConfig) -> Self {
+        Self {
+            vm_count_delta: -1,
+            vcpu_delta: -(config.vcpus as i32),
+            memory_mb_delta: -(config.memory as i64),
+            disk_gb_delta: 0, // TODO: Add disk to VmConfig
+            operation: ResourceOperation::Delete,
+            timestamp: chrono::Utc::now(),
+        }
+    }
 }
 
 /// Task specification for distributed task execution
@@ -148,6 +206,9 @@ impl ProposalData {
             ProposalData::IpPoolCommand(_) => "ip_pool_command",
             ProposalData::AllocateIp { .. } => "allocate_ip",
             ProposalData::ReleaseVmIps { .. } => "release_vm_ips",
+            ProposalData::SetTenantQuota { .. } => "set_tenant_quota",
+            ProposalData::UpdateTenantUsage { .. } => "update_tenant_usage",
+            ProposalData::RemoveTenantQuota { .. } => "remove_tenant_quota",
             ProposalData::Batch(_) => "batch",
         }
     }
@@ -167,7 +228,10 @@ impl ProposalData {
             | ProposalData::ReassignTask { .. }
             | ProposalData::UpdateWorkerStatus { .. }
             | ProposalData::UpdateVmStatus { .. }
-            | ProposalData::IpPoolCommand(_) => false,
+            | ProposalData::IpPoolCommand(_)
+            | ProposalData::SetTenantQuota { .. }
+            | ProposalData::UpdateTenantUsage { .. }
+            | ProposalData::RemoveTenantQuota { .. } => false,
 
             ProposalData::Batch(proposals) => proposals.iter().any(|p| p.modifies_resources()),
         }

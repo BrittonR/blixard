@@ -89,6 +89,11 @@ enum Commands {
         #[command(subcommand)]
         command: IpPoolCommands,
     },
+    /// Quota management operations
+    Quota {
+        #[command(subcommand)]
+        command: QuotaCommands,
+    },
     /// Reset all data and VMs (clean slate)
     Reset {
         /// Data directory to clean
@@ -465,6 +470,80 @@ enum IpPoolCommands {
 }
 
 #[derive(clap::Subcommand)]
+enum QuotaCommands {
+    /// Set quota for a tenant
+    Set {
+        /// Tenant ID
+        #[arg(long)]
+        tenant_id: String,
+        
+        /// Maximum number of VMs
+        #[arg(long)]
+        max_vms: Option<u32>,
+        
+        /// Maximum total vCPUs
+        #[arg(long)]
+        max_vcpus: Option<u32>,
+        
+        /// Maximum total memory in MB
+        #[arg(long)]
+        max_memory_mb: Option<u64>,
+        
+        /// Maximum total disk in GB
+        #[arg(long)]
+        max_disk_gb: Option<u64>,
+        
+        /// Maximum VMs per node
+        #[arg(long)]
+        max_vms_per_node: Option<u32>,
+        
+        /// Priority (0-255, higher is better)
+        #[arg(long, default_value = "100")]
+        priority: u8,
+        
+        /// Node address to connect to
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        addr: String,
+    },
+    /// Get quota for a tenant
+    Get {
+        /// Tenant ID
+        #[arg(long)]
+        tenant_id: String,
+        
+        /// Node address to connect to
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        addr: String,
+    },
+    /// List all tenant quotas
+    List {
+        /// Node address to connect to
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        addr: String,
+    },
+    /// Get current usage for a tenant
+    Usage {
+        /// Tenant ID (optional, show all if not specified)
+        #[arg(long)]
+        tenant_id: Option<String>,
+        
+        /// Node address to connect to
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        addr: String,
+    },
+    /// Remove quota for a tenant
+    Remove {
+        /// Tenant ID
+        #[arg(long)]
+        tenant_id: String,
+        
+        /// Node address to connect to
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        addr: String,
+    },
+}
+
+#[derive(clap::Subcommand)]
 enum MonitorCommands {
     /// Show monitoring status and configuration
     Status {
@@ -735,6 +814,9 @@ async fn main() -> BlixardResult<()> {
         }
         Commands::IpPool { command } => {
             handle_ip_pool_command(command).await?;
+        }
+        Commands::Quota { command } => {
+            handle_quota_command(command).await?;
         }
     }
 
@@ -1707,6 +1789,176 @@ async fn handle_cluster_command(command: ClusterCommands) -> BlixardResult<()> {
 async fn handle_cluster_command(_command: ClusterCommands) -> BlixardResult<()> {
     Err(BlixardError::NotImplemented {
         feature: "Cluster commands in simulation mode".to_string(),
+    })
+}
+
+#[cfg(not(madsim))]
+async fn handle_quota_command(command: QuotaCommands) -> BlixardResult<()> {
+    use crate::client::UnifiedClient;
+    use blixard_core::iroh_types::{SetTenantQuotaRequest};
+    
+    // Get node address from command or environment variable
+    let node_addr = std::env::var("BLIXARD_NODE_ADDR").unwrap_or_else(|_| match &command {
+        QuotaCommands::Set { addr, .. } |
+        QuotaCommands::Get { addr, .. } |
+        QuotaCommands::List { addr } |
+        QuotaCommands::Usage { addr, .. } |
+        QuotaCommands::Remove { addr, .. } => addr.clone(),
+    });
+    
+    // Connect to the node
+    let mut client = UnifiedClient::new(&node_addr)
+        .await
+        .map_err(|e| BlixardError::Internal {
+            message: format!("Failed to connect to node at {}: {}", node_addr, e),
+        })?;
+    
+    match command {
+        QuotaCommands::Set {
+            tenant_id,
+            max_vms,
+            max_vcpus,
+            max_memory_mb,
+            max_disk_gb,
+            max_vms_per_node,
+            priority,
+            ..
+        } => {
+            let request = SetTenantQuotaRequest {
+                tenant_id: tenant_id.clone(),
+                max_vms,
+                max_vcpus,
+                max_memory_mb,
+                max_disk_gb,
+                max_vms_per_node,
+                priority,
+            };
+            
+            let response = client.set_tenant_quota(request).await?;
+            
+            if response.success {
+                println!("✅ {}", response.message);
+            } else {
+                return Err(BlixardError::Internal { 
+                    message: response.message 
+                });
+            }
+        }
+        
+        QuotaCommands::Get { tenant_id, .. } => {
+            let response = client.get_tenant_quota(tenant_id.clone()).await?;
+            
+            if let Some(quota) = response.quota {
+                println!("Tenant: {}", quota.tenant_id);
+                println!("Limits:");
+                println!("  Max VMs: {}", quota.max_vms);
+                println!("  Max vCPUs: {}", quota.max_vcpus);
+                println!("  Max Memory: {} MB", quota.max_memory_mb);
+                println!("  Max Disk: {} GB", quota.max_disk_gb);
+                println!("  Max VMs per Node: {}", quota.max_vms_per_node);
+                println!("  Priority: {}", quota.priority);
+            } else {
+                println!("No quota found for tenant: {}", tenant_id);
+            }
+        }
+        
+        QuotaCommands::List { .. } => {
+            let response = client.list_tenant_quotas().await?;
+            
+            if response.quotas.is_empty() {
+                println!("No quotas configured");
+            } else {
+                println!("{:<20} {:<10} {:<10} {:<15} {:<15} {:<10}", 
+                    "Tenant ID", "Max VMs", "Max vCPUs", "Max Memory (MB)", "Max Disk (GB)", "Priority");
+                println!("{:-<90}", "");
+                
+                for quota in response.quotas {
+                    println!("{:<20} {:<10} {:<10} {:<15} {:<15} {:<10}",
+                        quota.tenant_id,
+                        quota.max_vms,
+                        quota.max_vcpus,
+                        quota.max_memory_mb,
+                        quota.max_disk_gb,
+                        quota.priority
+                    );
+                }
+            }
+        }
+        
+        QuotaCommands::Usage { tenant_id, .. } => {
+            if let Some(tenant_id) = tenant_id {
+                let response = client.get_tenant_usage(tenant_id.clone()).await?;
+                
+                if let Some(usage) = response.usage {
+                    println!("Tenant: {}", usage.tenant_id);
+                    println!("VM Usage:");
+                    println!("  Active VMs: {}", usage.active_vms);
+                    println!("  Used vCPUs: {}", usage.used_vcpus);
+                    println!("  Used Memory: {} MB", usage.used_memory_mb);
+                    println!("  Used Disk: {} GB", usage.used_disk_gb);
+                    if !usage.vms_per_node.is_empty() {
+                        println!("  VMs per Node:");
+                        for (node_id, count) in &usage.vms_per_node {
+                            println!("    Node {}: {} VMs", node_id, count);
+                        }
+                    }
+                } else {
+                    println!("No usage data found for tenant: {}", tenant_id);
+                }
+            } else {
+                // Show usage for all tenants
+                let response = client.list_tenant_quotas().await?;
+                
+                if response.quotas.is_empty() {
+                    println!("No tenants configured");
+                } else {
+                    println!("{:<20} {:<10} {:<10} {:<15} {:<15}", 
+                        "Tenant ID", "VMs", "vCPUs", "Memory (MB)", "Disk (GB)");
+                    println!("{:-<80}", "");
+                    
+                    for quota in response.quotas {
+                        // Get usage for each tenant
+                        let usage_response = client.get_tenant_usage(quota.tenant_id.clone()).await?;
+                        
+                        if let Some(usage) = usage_response.usage {
+                            println!("{:<20} {:<10} {:<10} {:<15} {:<15}",
+                                usage.tenant_id,
+                                usage.active_vms,
+                                usage.used_vcpus,
+                                usage.used_memory_mb,
+                                usage.used_disk_gb
+                            );
+                        } else {
+                            println!("{:<20} {:<10} {:<10} {:<15} {:<15}",
+                                quota.tenant_id,
+                                "0", "0", "0", "0"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        
+        QuotaCommands::Remove { tenant_id, .. } => {
+            let response = client.remove_tenant_quota(tenant_id.clone()).await?;
+            
+            if response.success {
+                println!("✅ {}", response.message);
+            } else {
+                return Err(BlixardError::Internal { 
+                    message: response.message 
+                });
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+#[cfg(madsim)]
+async fn handle_quota_command(_command: QuotaCommands) -> BlixardResult<()> {
+    Err(BlixardError::NotImplemented {
+        feature: "Quota commands in simulation mode".to_string(),
     })
 }
 

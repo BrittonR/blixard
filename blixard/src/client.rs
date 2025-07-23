@@ -246,6 +246,42 @@ impl IrohClient {
             .configure_vm_recovery_policy(vm_name, policy)
             .await
     }
+
+    // Quota management operations
+
+    pub async fn set_tenant_quota(
+        &mut self,
+        request: blixard_core::iroh_types::SetTenantQuotaRequest,
+    ) -> BlixardResult<blixard_core::iroh_types::SetTenantQuotaResponse> {
+        self.client.set_tenant_quota(request).await
+    }
+
+    pub async fn get_tenant_quota(
+        &mut self,
+        tenant_id: String,
+    ) -> BlixardResult<blixard_core::iroh_types::GetTenantQuotaResponse> {
+        self.client.get_tenant_quota(tenant_id).await
+    }
+
+    pub async fn list_tenant_quotas(
+        &mut self,
+    ) -> BlixardResult<blixard_core::iroh_types::ListTenantQuotasResponse> {
+        self.client.list_tenant_quotas().await
+    }
+
+    pub async fn get_tenant_usage(
+        &mut self,
+        tenant_id: String,
+    ) -> BlixardResult<blixard_core::iroh_types::GetTenantUsageResponse> {
+        self.client.get_tenant_usage(tenant_id).await
+    }
+
+    pub async fn remove_tenant_quota(
+        &mut self,
+        tenant_id: String,
+    ) -> BlixardResult<blixard_core::iroh_types::RemoveTenantQuotaResponse> {
+        self.client.remove_tenant_quota(tenant_id).await
+    }
 }
 
 // For backward compatibility, export as UnifiedClient

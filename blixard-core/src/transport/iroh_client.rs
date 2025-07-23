@@ -284,6 +284,94 @@ impl IrohClient {
         }
     }
 
+    // Quota operations
+
+    pub async fn set_tenant_quota(
+        &self,
+        request: crate::iroh_types::SetTenantQuotaRequest,
+    ) -> BlixardResult<crate::iroh_types::SetTenantQuotaResponse> {
+        let quota_request = crate::transport::services::quota::QuotaOperationRequest::SetQuota(request);
+        
+        let response: crate::transport::services::quota::QuotaOperationResponse = 
+            self.call_service("quota", "set_quota", quota_request).await?;
+        
+        match response {
+            crate::transport::services::quota::QuotaOperationResponse::SetQuota(resp) => Ok(resp),
+            _ => Err(BlixardError::Internal {
+                message: "Unexpected response type".to_string(),
+            }),
+        }
+    }
+
+    pub async fn get_tenant_quota(
+        &self,
+        tenant_id: String,
+    ) -> BlixardResult<crate::iroh_types::GetTenantQuotaResponse> {
+        let request = crate::iroh_types::GetTenantQuotaRequest { tenant_id };
+        let quota_request = crate::transport::services::quota::QuotaOperationRequest::GetQuota(request);
+        
+        let response: crate::transport::services::quota::QuotaOperationResponse = 
+            self.call_service("quota", "get_quota", quota_request).await?;
+        
+        match response {
+            crate::transport::services::quota::QuotaOperationResponse::GetQuota(resp) => Ok(resp),
+            _ => Err(BlixardError::Internal {
+                message: "Unexpected response type".to_string(),
+            }),
+        }
+    }
+
+    pub async fn list_tenant_quotas(&self) -> BlixardResult<crate::iroh_types::ListTenantQuotasResponse> {
+        let request = crate::iroh_types::ListTenantQuotasRequest {};
+        let quota_request = crate::transport::services::quota::QuotaOperationRequest::ListQuotas(request);
+        
+        let response: crate::transport::services::quota::QuotaOperationResponse = 
+            self.call_service("quota", "list_quotas", quota_request).await?;
+        
+        match response {
+            crate::transport::services::quota::QuotaOperationResponse::ListQuotas(resp) => Ok(resp),
+            _ => Err(BlixardError::Internal {
+                message: "Unexpected response type".to_string(),
+            }),
+        }
+    }
+
+    pub async fn get_tenant_usage(
+        &self,
+        tenant_id: String,
+    ) -> BlixardResult<crate::iroh_types::GetTenantUsageResponse> {
+        let request = crate::iroh_types::GetTenantUsageRequest { tenant_id };
+        let quota_request = crate::transport::services::quota::QuotaOperationRequest::GetUsage(request);
+        
+        let response: crate::transport::services::quota::QuotaOperationResponse = 
+            self.call_service("quota", "get_usage", quota_request).await?;
+        
+        match response {
+            crate::transport::services::quota::QuotaOperationResponse::GetUsage(resp) => Ok(resp),
+            _ => Err(BlixardError::Internal {
+                message: "Unexpected response type".to_string(),
+            }),
+        }
+    }
+
+    pub async fn remove_tenant_quota(
+        &self,
+        tenant_id: String,
+    ) -> BlixardResult<crate::iroh_types::RemoveTenantQuotaResponse> {
+        let request = crate::iroh_types::RemoveTenantQuotaRequest { tenant_id };
+        let quota_request = crate::transport::services::quota::QuotaOperationRequest::RemoveQuota(request);
+        
+        let response: crate::transport::services::quota::QuotaOperationResponse = 
+            self.call_service("quota", "remove_quota", quota_request).await?;
+        
+        match response {
+            crate::transport::services::quota::QuotaOperationResponse::RemoveQuota(resp) => Ok(resp),
+            _ => Err(BlixardError::Internal {
+                message: "Unexpected response type".to_string(),
+            }),
+        }
+    }
+
     // VM operations
 
     pub async fn create_vm(
@@ -686,5 +774,44 @@ impl IrohClusterServiceClient {
             placement_score: 100.0,
         };
         Ok(Response::new(response))
+    }
+
+    // Quota operations wrappers
+
+    /// Set tenant quota
+    pub async fn set_tenant_quota(
+        &self,
+        request: crate::iroh_types::SetTenantQuotaRequest,
+    ) -> BlixardResult<crate::iroh_types::SetTenantQuotaResponse> {
+        self.client.set_tenant_quota(request).await
+    }
+
+    /// Get tenant quota
+    pub async fn get_tenant_quota(
+        &self,
+        tenant_id: String,
+    ) -> BlixardResult<crate::iroh_types::GetTenantQuotaResponse> {
+        self.client.get_tenant_quota(tenant_id).await
+    }
+
+    /// List tenant quotas
+    pub async fn list_tenant_quotas(&self) -> BlixardResult<crate::iroh_types::ListTenantQuotasResponse> {
+        self.client.list_tenant_quotas().await
+    }
+
+    /// Get tenant usage
+    pub async fn get_tenant_usage(
+        &self,
+        tenant_id: String,
+    ) -> BlixardResult<crate::iroh_types::GetTenantUsageResponse> {
+        self.client.get_tenant_usage(tenant_id).await
+    }
+
+    /// Remove tenant quota
+    pub async fn remove_tenant_quota(
+        &self,
+        tenant_id: String,
+    ) -> BlixardResult<crate::iroh_types::RemoveTenantQuotaResponse> {
+        self.client.remove_tenant_quota(tenant_id).await
     }
 }

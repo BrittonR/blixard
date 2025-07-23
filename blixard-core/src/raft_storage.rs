@@ -65,6 +65,7 @@ pub const NODE_TOPOLOGY_TABLE: TableDefinition<&[u8], &[u8]> =
 
 // Quota management tables
 pub const TENANT_QUOTA_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("tenant_quotas");
+pub const TENANT_USAGE_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("tenant_usage");
 
 // IP pool management tables
 pub const IP_POOL_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("ip_pools");
@@ -939,6 +940,7 @@ pub fn init_database_tables(database: &Arc<Database>) -> BlixardResult<()> {
     let _ = write_txn.open_table(WORKER_STATUS_TABLE)?;
     let _ = write_txn.open_table(NODE_TOPOLOGY_TABLE)?;
     let _ = write_txn.open_table(TENANT_QUOTA_TABLE)?;
+    let _ = write_txn.open_table(TENANT_USAGE_TABLE)?;
 
     write_txn.commit()?;
     Ok(())

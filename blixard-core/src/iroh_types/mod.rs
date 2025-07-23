@@ -13,6 +13,7 @@ pub use task::*;
 pub use health::*;
 pub use ip_pool::*;
 pub use p2p::*;
+pub use quota::*;
 
 pub mod common;
 pub mod cluster;
@@ -22,3 +23,4 @@ pub mod task;
 pub mod health;
 pub mod ip_pool;
 pub mod p2p;
+pub mod quota;

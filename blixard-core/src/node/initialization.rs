@@ -53,6 +53,9 @@ impl Node {
         let (raft_manager, _message_rx, _, proposal_tx, conf_change_tx) =
             self.initialize_raft(db.clone()).await?;
 
+        // Store raft_manager in shared state
+        self.shared.set_raft_manager(raft_manager.clone()).await;
+
         // Phase 7: Transport setup
         let (message_tx, _unused_rx) = mpsc::unbounded_channel();
 

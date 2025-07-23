@@ -304,16 +304,53 @@ impl VmService for VmServiceImpl {
             ..Default::default()
         };
 
-        // Send command through Raft consensus
+        // Pre-flight quota check
+        if let Some(quota_manager) = self.node.get_quota_manager().await {
+            use crate::resource_quotas::{ResourceRequest, ApiOperation};
+            
+            let request = ResourceRequest {
+                tenant_id: vm_config.tenant_id.clone(),
+                node_id: Some(self.node.get_id()),
+                vcpus,
+                memory_mb: memory_mb as u64,
+                disk_gb: 0, // TODO: Add disk parameter
+                timestamp: std::time::SystemTime::now(),
+            };
+            
+            quota_manager.check_resource_quota(&request).await.map_err(|violation| {
+                crate::error::BlixardError::InsufficientResources {
+                    requested: format!("VM with {} vCPUs, {} MB memory", vcpus, memory_mb),
+                    available: format!("Quota violation: {:?}", violation),
+                }
+            })?;
+            quota_manager.record_api_request(&vm_config.tenant_id, &ApiOperation::VmCreate).await;
+        }
+
+        // Send command through Raft consensus with usage tracking
         let command = VmCommand::Create {
-            config: vm_config,
+            config: vm_config.clone(),
             node_id: self.node.get_id(),
         };
-        let command_str =
-            serde_json::to_string(&command).map_err(|e| crate::error::BlixardError::Internal {
-                message: format!("Failed to serialize VM command: {}", e),
-            })?;
-        self.node.send_vm_command(&name, command_str).await?;
+        
+        // Create batch proposal with VM creation and usage update
+        use crate::raft::proposals::{ProposalData, ResourceUsageDelta};
+        let batch_proposal = ProposalData::Batch(vec![
+            ProposalData::CreateVm(command),
+            ProposalData::UpdateTenantUsage {
+                tenant_id: vm_config.tenant_id.clone(),
+                delta: ResourceUsageDelta::from_vm_create(&vm_config),
+                operation_id: uuid::Uuid::new_v4(),
+            },
+        ]);
+        
+        // Send proposal through Raft
+        let proposal = crate::raft_manager::RaftProposal {
+            id: uuid::Uuid::new_v4().as_bytes().to_vec(),
+            data: batch_proposal,
+            response_tx: None,
+        };
+        
+        self.node.send_raft_proposal(proposal).await?;
 
         Ok(name)
     }
@@ -347,17 +384,41 @@ impl VmService for VmServiceImpl {
     }
 
     async fn delete_vm(&self, name: &str) -> BlixardResult<()> {
+        // First get the VM config to calculate usage delta
+        let vm_states = self.node.list_vms().await?;
+        let vm_config = vm_states
+            .iter()
+            .find(|state| state.config.name == name)
+            .map(|state| state.config.clone())
+            .ok_or_else(|| crate::error::BlixardError::VmOperationError {
+                operation: "delete".to_string(),
+                vm_name: name.to_string(),
+                message: format!("VM '{}' not found", name),
+            })?;
+        
         let command = VmCommand::Delete {
             name: name.to_string(),
         };
-        let command_str =
-            serde_json::to_string(&command).map_err(|e| crate::error::BlixardError::Internal {
-                message: format!("Failed to serialize VM command: {}", e),
-            })?;
-        self.node
-            .send_vm_command(name, command_str)
-            .await
-            .map(|_| ())
+        
+        // Create batch proposal with VM deletion and usage update
+        use crate::raft::proposals::{ProposalData, ResourceUsageDelta};
+        let batch_proposal = ProposalData::Batch(vec![
+            ProposalData::CreateVm(command), // CreateVm handles all VM operations
+            ProposalData::UpdateTenantUsage {
+                tenant_id: vm_config.tenant_id.clone(),
+                delta: ResourceUsageDelta::from_vm_delete(&vm_config),
+                operation_id: uuid::Uuid::new_v4(),
+            },
+        ]);
+        
+        // Send proposal through Raft
+        let proposal = crate::raft_manager::RaftProposal {
+            id: uuid::Uuid::new_v4().as_bytes().to_vec(),
+            data: batch_proposal,
+            response_tx: None,
+        };
+        
+        self.node.send_raft_proposal(proposal).await.map(|_| ())
     }
 
     async fn list_vms(&self) -> BlixardResult<Vec<(VmConfig, InternalVmStatus)>> {
@@ -396,6 +457,28 @@ impl VmService for VmServiceImpl {
             priority: params.priority.unwrap_or(100),
             ..Default::default()
         };
+
+        // Pre-flight quota check
+        if let Some(quota_manager) = self.node.get_quota_manager().await {
+            use crate::resource_quotas::{ResourceRequest, ApiOperation};
+            
+            let request = ResourceRequest {
+                tenant_id: vm_config.tenant_id.clone(),
+                node_id: None, // No specific node for scheduling requests
+                vcpus: params.vcpus,
+                memory_mb: params.memory_mb as u64,
+                disk_gb: 0, // TODO: Add disk parameter
+                timestamp: std::time::SystemTime::now(),
+            };
+            
+            quota_manager.check_resource_quota(&request).await.map_err(|violation| {
+                crate::error::BlixardError::InsufficientResources {
+                    requested: format!("VM with {} vCPUs, {} MB memory", params.vcpus, params.memory_mb),
+                    available: format!("Quota violation: {:?}", violation),
+                }
+            })?;
+            quota_manager.record_api_request(&vm_config.tenant_id, &ApiOperation::VmCreate).await;
+        }
 
         // Convert constraints to anti-affinity rules
         if let Some(constraints) = params.constraints {
