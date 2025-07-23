@@ -108,8 +108,10 @@ tera = { workspace = true }
 # P2P networking
 iroh = { workspace = true }
 iroh-blobs = { workspace = true }
-# iroh-docs = { git = "https://github.com/n0-computer/iroh-docs", branch = "Frando/iroh-0.90" }  # Temporarily disabled due to compatibility issue
-iroh-gossip = { git = "https://github.com/n0-computer/iroh-gossip", branch = "main" }
+# TODO: Re-enable iroh-docs when version compatibility is resolved
+# iroh-docs = { workspace = true }
+iroh-gossip = { workspace = true }
+iroh-base = { workspace = true }
 
 # Compression
 flate2 = { workspace = true }

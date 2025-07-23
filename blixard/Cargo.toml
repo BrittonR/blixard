@@ -39,7 +39,7 @@ tonic = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
-chrono = { workspace = true }
+chrono.workspace = true
 
 # File operations
 glob = { workspace = true }
@@ -65,6 +65,7 @@ base64 = { workspace = true }
 
 # Network utilities
 ipnet = "2.9"
+reqwest = { workspace = true, features = ["json"] }
 
 [features]
 default = []

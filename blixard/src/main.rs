@@ -109,6 +109,11 @@ enum Commands {
     },
     /// Launch TUI (Terminal User Interface) for VM management
     Tui {},
+    /// View monitoring status and metrics
+    Monitor {
+        #[command(subcommand)]
+        command: MonitorCommands,
+    },
 }
 
 #[derive(clap::Subcommand)]
@@ -459,6 +464,49 @@ enum IpPoolCommands {
     },
 }
 
+#[derive(clap::Subcommand)]
+enum MonitorCommands {
+    /// Show monitoring status and configuration
+    Status {
+        /// Node address to connect to
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        addr: String,
+    },
+    /// Display key metrics in a readable format
+    Metrics {
+        /// Node address to connect to
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        addr: String,
+        /// Filter metrics by pattern (e.g., "raft", "vm", "peer")
+        #[arg(long)]
+        filter: Option<String>,
+        /// Output format: text, json, or csv
+        #[arg(long, default_value = "text")]
+        format: String,
+    },
+    /// Check health of monitoring components
+    Health {
+        /// Node address to connect to
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        addr: String,
+    },
+    /// Show monitoring endpoints and URLs
+    Endpoints {
+        /// Node address to connect to
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        addr: String,
+    },
+    /// Get a concise summary of cluster health (LLM-friendly)
+    Summary {
+        /// Node address to connect to
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        addr: String,
+        /// Output format: text or json
+        #[arg(long, default_value = "text")]
+        format: String,
+    },
+}
+
 #[tokio::main]
 async fn main() -> BlixardResult<()> {
     // Initialize logging
@@ -681,6 +729,9 @@ async fn main() -> BlixardResult<()> {
         }
         Commands::Tui {} => {
             handle_tui_command().await?;
+        }
+        Commands::Monitor { command } => {
+            handle_monitor_command(command).await?;
         }
         Commands::IpPool { command } => {
             handle_ip_pool_command(command).await?;
@@ -1948,6 +1999,409 @@ async fn handle_reset_command(
     println!("💡 You can now start fresh with: cargo run -- node --id 1 --bind 127.0.0.1:7001");
 
     Ok(())
+}
+
+#[cfg(not(madsim))]
+async fn handle_monitor_command(command: MonitorCommands) -> BlixardResult<()> {
+    let node_addr = match &command {
+        MonitorCommands::Status { addr } => addr.clone(),
+        MonitorCommands::Metrics { addr, .. } => addr.clone(),
+        MonitorCommands::Health { addr } => addr.clone(),
+        MonitorCommands::Endpoints { addr } => addr.clone(),
+        MonitorCommands::Summary { addr, .. } => addr.clone(),
+    };
+    
+    match command {
+        MonitorCommands::Status { addr } => {
+            // For now, show basic monitoring info based on default configuration
+            println!("🔍 Monitoring Status");
+            println!("──────────────────────────────────");
+            println!("📊 Metrics: ✅ Available (if enabled in config)");
+            println!("🌐 HTTP Server: Default port 9090");
+            println!("   - Metrics: http://{}/metrics", addr.replace("7001", "9090"));
+            println!("   - Health: http://{}/health", addr.replace("7001", "9090"));
+            println!();
+            println!("💡 To enable monitoring, add to your config:");
+            println!("[observability.metrics]");
+            println!("enabled = true");
+            println!("[observability.metrics.http_server]");
+            println!("enabled = true");
+            println!("bind = \"0.0.0.0:9090\"")
+        }
+        MonitorCommands::Metrics { filter, format, addr: _ } => {
+            // Fetch metrics from the HTTP endpoint
+            let metrics_url = format!("http://{}/metrics", node_addr.replace("7001", "9090"));
+            
+            println!("📊 Fetching metrics from {}", metrics_url);
+            
+            match reqwest::get(&metrics_url).await {
+                Ok(response) => {
+                    if !response.status().is_success() {
+                        return Err(BlixardError::Internal {
+                            message: format!("Metrics endpoint returned status: {}", response.status()),
+                        });
+                    }
+                    
+                    let text = response.text().await.map_err(|e| BlixardError::Internal {
+                        message: format!("Failed to read metrics response: {}", e),
+                    })?;
+                    
+                    // Parse and display key metrics
+                    let lines: Vec<&str> = text.lines().collect();
+                    let mut metrics: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+                    let mut parse_errors = 0;
+                    
+                    for line in lines {
+                        if line.starts_with('#') || line.is_empty() {
+                            continue;
+                        }
+                        
+                        // Handle potential malformed lines
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 2 {
+                            let name = parts[0];
+                            let value_str = parts[1];
+                            
+                            // Apply filter if specified
+                            if let Some(pattern) = &filter {
+                                if !name.contains(pattern) {
+                                    continue;
+                                }
+                            }
+                            
+                            // Parse value, handling scientific notation and special values
+                            match value_str.parse::<f64>() {
+                                Ok(val) if val.is_finite() => {
+                                    metrics.insert(name.to_string(), val);
+                                }
+                                Ok(_) => {
+                                    // Skip NaN or infinite values
+                                    parse_errors += 1;
+                                }
+                                Err(_) => {
+                                    // Try parsing special Prometheus values
+                                    if value_str == "+Inf" {
+                                        metrics.insert(name.to_string(), f64::INFINITY);
+                                    } else if value_str == "-Inf" {
+                                        metrics.insert(name.to_string(), f64::NEG_INFINITY);
+                                    } else if value_str == "NaN" {
+                                        // Skip NaN values
+                                        parse_errors += 1;
+                                    } else {
+                                        parse_errors += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    if metrics.is_empty() && parse_errors == 0 {
+                        println!("⚠️  No metrics found matching filter: {:?}", filter.as_deref().unwrap_or(""));
+                    } else if parse_errors > 0 {
+                        eprintln!("⚠️  Warning: {} metrics could not be parsed", parse_errors);
+                    }
+                    
+                    match format.as_str() {
+                        "json" => {
+                            // JSON output for LLM consumption
+                            let mut json_output = serde_json::json!({
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                                "node_address": node_addr,
+                                "metrics": {}
+                            });
+                            
+                            if let Some(metrics_obj) = json_output.get_mut("metrics").and_then(|v| v.as_object_mut()) {
+                                for (name, value) in &metrics {
+                                    metrics_obj.insert(name.clone(), serde_json::json!(value));
+                                }
+                            }
+                            
+                            println!("{}", serde_json::to_string_pretty(&json_output).unwrap());
+                        }
+                        "csv" => {
+                            // CSV output for easy parsing
+                            println!("metric,value");
+                            for (name, value) in &metrics {
+                                println!("{},{}", name, value);
+                            }
+                        }
+                        _ => {
+                            // Default text output
+                            println!("\n🎯 Key Metrics:");
+                            println!("──────────────────────────────────");
+                            
+                            // Raft metrics
+                            if let Some(leader) = metrics.get("blixard_raft_is_leader") {
+                                println!("👑 Raft Leader: {}", if *leader > 0.0 { "Yes" } else { "No" });
+                            }
+                            if let Some(term) = metrics.get("blixard_raft_term") {
+                                println!("📅 Raft Term: {}", term);
+                            }
+                            
+                            // VM metrics
+                            if let Some(vm_count) = metrics.get("blixard_vm_total_count") {
+                                println!("🖥️  Total VMs: {}", vm_count);
+                            }
+                            if let Some(running) = metrics.get("blixard_vm_running_count") {
+                                println!("▶️  Running VMs: {}", running);
+                            }
+                            
+                            // Node metrics
+                            if let Some(cpu) = metrics.get("blixard_node_cpu_usage_percent") {
+                                println!("💻 CPU Usage: {:.1}%", cpu);
+                            }
+                            if let Some(mem) = metrics.get("blixard_node_memory_usage_percent") {
+                                println!("🧠 Memory Usage: {:.1}%", mem);
+                            }
+                            
+                            // P2P metrics
+                            if let Some(peers) = metrics.get("blixard_peer_active_connections") {
+                                println!("🔗 Active Peers: {}", peers);
+                            }
+                            
+                            if filter.is_some() {
+                                println!("\n📝 All matching metrics:");
+                                for (name, value) in &metrics {
+                                    println!("  {}: {}", name, value);
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    return Err(BlixardError::Internal {
+                        message: format!("Failed to fetch metrics: {}. Make sure metrics HTTP server is enabled.", e),
+                    });
+                }
+            }
+        }
+        MonitorCommands::Health { .. } => {
+            // Check health endpoint
+            let health_url = format!("http://{}/health", node_addr.replace("7001", "9090"));
+            
+            println!("🏥 Checking health at {}", health_url);
+            
+            match reqwest::get(&health_url).await {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        let health_data: serde_json::Value = response.json().await.map_err(|e| BlixardError::Internal {
+                            message: format!("Failed to parse health response: {}", e),
+                        })?;
+                        
+                        println!("\n✅ Node is healthy!");
+                        println!("──────────────────────────────────");
+                        
+                        if let Some(status) = health_data.get("status").and_then(|v| v.as_str()) {
+                            println!("Status: {}", status);
+                        }
+                        if let Some(node_id) = health_data.get("node_id") {
+                            println!("Node ID: {}", node_id);
+                        }
+                        if let Some(uptime) = health_data.get("uptime_seconds") {
+                            println!("Uptime: {} seconds", uptime);
+                        }
+                        
+                        // Check monitoring component health
+                        println!("\n📊 Monitoring Components:");
+                        println!("  - Metrics Server: ✅ Running");
+                        println!("  - Health Endpoint: ✅ Responding");
+                        
+                        // Check if we can reach Prometheus metrics
+                        let metrics_check = reqwest::get(&format!("http://{}/metrics", node_addr.replace("7001", "9090")))
+                            .await
+                            .is_ok();
+                        println!("  - Prometheus Metrics: {}", if metrics_check { "✅ Available" } else { "❌ Unavailable" });
+                    } else {
+                        println!("❌ Node health check failed: {}", response.status());
+                    }
+                }
+                Err(e) => {
+                    println!("❌ Health check failed: {}", e);
+                    println!("Make sure the metrics HTTP server is enabled.");
+                }
+            }
+        }
+        MonitorCommands::Endpoints { .. } => {
+            println!("🔗 Monitoring Endpoints");
+            println!("──────────────────────────────────");
+            
+            let metrics_port = "9090"; // Default metrics port
+            let api_port = "8080"; // Default API port
+            let base_url = node_addr.replace("7001", metrics_port);
+            let api_url = node_addr.replace("7001", api_port);
+            
+            println!("📊 Prometheus Metrics (OpenMetrics format):");
+            println!("   curl http://{}/metrics", base_url);
+            println!();
+            
+            println!("🏥 Health Checks:");
+            println!("   curl http://{}/health", base_url);
+            println!("   curl http://{}/api/v1/health", api_url);
+            println!("   curl http://{}/api/v1/health/ready", api_url);
+            println!("   curl http://{}/api/v1/health/live", api_url);
+            println!();
+            
+            println!("📖 OpenAPI Documentation:");
+            println!("   Browser: http://{}/docs", api_url);
+            println!("   Schema: curl http://{}/openapi.json", api_url);
+            println!();
+            
+            println!("🔌 REST API Endpoints:");
+            println!("   GET    /api/v1/cluster/status");
+            println!("   GET    /api/v1/vms");
+            println!("   POST   /api/v1/vms");
+            println!("   GET    /api/v1/vms/{{id}}");
+            println!("   DELETE /api/v1/vms/{{id}}");
+            println!("   POST   /api/v1/vms/{{id}}/start");
+            println!("   POST   /api/v1/vms/{{id}}/stop");
+            println!();
+            
+            println!("🔐 Authentication:");
+            println!("   POST   /api/v1/auth/login");
+            println!("   POST   /api/v1/auth/refresh");
+            println!();
+            
+            println!("📈 OpenTelemetry Integration:");
+            println!("   - Metrics: Prometheus format at /metrics");
+            println!("   - Traces: Configure OTLP endpoint in config");
+            println!("   - Exemplars: Supported for trace correlation");
+            println!();
+            
+            println!("📚 Quick Commands:");
+            println!("   # Get cluster status via REST");
+            println!("   curl http://{}/api/v1/cluster/status", api_url);
+            println!();
+            println!("   # Watch metrics (Prometheus format)");
+            println!("   watch -n 1 'curl -s http://{}/metrics | grep -E \"(raft_is_leader|vm_total)\"'", base_url);
+            println!();
+            println!("   # Check OpenAPI schema");
+            println!("   curl -s http://{}/openapi.json | jq '.info'", api_url);
+        }
+        MonitorCommands::Summary { format, addr: _ } => {
+            // Fetch metrics for summary
+            let metrics_url = format!("http://{}/metrics", node_addr.replace("7001", "9090"));
+            let health_url = format!("http://{}/health", node_addr.replace("7001", "9090"));
+            
+            // Try to fetch metrics
+            let metrics_response = reqwest::get(&metrics_url).await;
+            let health_response = reqwest::get(&health_url).await;
+            
+            // Build summary
+            let mut summary = serde_json::Map::new();
+            
+            // Basic connectivity
+            let metrics_available = metrics_response.is_ok();
+            let health_available = health_response.is_ok();
+            
+            summary.insert("metrics_available".to_string(), serde_json::json!(metrics_available));
+            summary.insert("health_available".to_string(), serde_json::json!(health_available));
+            
+            // Parse metrics if available
+            if let Ok(response) = metrics_response {
+                if response.status().is_success() {
+                    if let Ok(text) = response.text().await {
+                        let lines: Vec<&str> = text.lines().collect();
+                        for line in lines {
+                            if line.starts_with('#') || line.is_empty() {
+                                continue;
+                            }
+                            
+                            // More robust parsing
+                            let parts: Vec<&str> = line.split_whitespace().collect();
+                            if parts.len() >= 2 {
+                                let name = parts[0];
+                                let value_str = parts[1];
+                                
+                                if let Ok(val) = value_str.parse::<f64>() {
+                                    if val.is_finite() {
+                                        match name {
+                                    "blixard_raft_is_leader" => {
+                                        summary.insert("is_leader".to_string(), serde_json::json!(val > 0.0));
+                                    }
+                                    "blixard_raft_term" => {
+                                        summary.insert("raft_term".to_string(), serde_json::json!(val as i64));
+                                    }
+                                    "blixard_vm_total_count" => {
+                                        summary.insert("total_vms".to_string(), serde_json::json!(val as i64));
+                                    }
+                                    "blixard_vm_running_count" => {
+                                        summary.insert("running_vms".to_string(), serde_json::json!(val as i64));
+                                    }
+                                    "blixard_node_cpu_usage_percent" => {
+                                        summary.insert("cpu_percent".to_string(), serde_json::json!(val));
+                                    }
+                                    "blixard_node_memory_usage_percent" => {
+                                        summary.insert("memory_percent".to_string(), serde_json::json!(val));
+                                    }
+                                    "blixard_peer_active_connections" => {
+                                        summary.insert("active_peers".to_string(), serde_json::json!(val as i64));
+                                    }
+                                    _ => {}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Output based on format
+            match format.as_str() {
+                "json" => {
+                    let json_summary = serde_json::json!({
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                        "node": node_addr,
+                        "status": if metrics_available { "healthy" } else { "unhealthy" },
+                        "summary": summary
+                    });
+                    println!("{}", serde_json::to_string_pretty(&json_summary).unwrap());
+                }
+                _ => {
+                    // Concise text format for LLM parsing
+                    println!("BLIXARD STATUS @ {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"));
+                    println!("Node: {}", node_addr);
+                    
+                    if metrics_available {
+                        println!("Status: HEALTHY");
+                        
+                        if let Some(is_leader) = summary.get("is_leader").and_then(|v| v.as_bool()) {
+                            println!("Leader: {}", if is_leader { "YES" } else { "NO" });
+                        }
+                        if let Some(term) = summary.get("raft_term").and_then(|v| v.as_i64()) {
+                            println!("Term: {}", term);
+                        }
+                        if let Some(vms) = summary.get("total_vms").and_then(|v| v.as_i64()) {
+                            if let Some(running) = summary.get("running_vms").and_then(|v| v.as_i64()) {
+                                println!("VMs: {}/{} running", running, vms);
+                            }
+                        }
+                        if let Some(cpu) = summary.get("cpu_percent").and_then(|v| v.as_f64()) {
+                            println!("CPU: {:.1}%", cpu);
+                        }
+                        if let Some(mem) = summary.get("memory_percent").and_then(|v| v.as_f64()) {
+                            println!("Memory: {:.1}%", mem);
+                        }
+                        if let Some(peers) = summary.get("active_peers").and_then(|v| v.as_i64()) {
+                            println!("Peers: {}", peers);
+                        }
+                    } else {
+                        println!("Status: UNREACHABLE");
+                        println!("Note: Ensure metrics are enabled in node config");
+                    }
+                }
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+#[cfg(madsim)]
+async fn handle_monitor_command(_command: MonitorCommands) -> BlixardResult<()> {
+    Err(BlixardError::NotImplemented {
+        feature: "Monitor commands in simulation mode".to_string(),
+    })
 }
 
 #[cfg(not(madsim))]

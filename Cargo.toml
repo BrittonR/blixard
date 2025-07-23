@@ -131,6 +131,10 @@ tera = "1.19"
 # P2P networking
 iroh = "0.90"
 iroh-blobs = "0.91"
+# TODO: Re-enable when version compatibility with patched iroh-blobs is resolved
+# iroh-docs = { git = "https://github.com/n0-computer/iroh-docs", branch = "Frando/iroh-0.90" }
+iroh-gossip = "0.90"
+iroh-base = "0.90"
 
 # Test utilities
 proptest = "1.4"
