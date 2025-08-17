@@ -1,8 +1,6 @@
 # Rust build artifacts
 /target
-/Cargo.lock
 target/
-Cargo.lock
 
 # Database files
 *.db
