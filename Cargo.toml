@@ -54,7 +54,7 @@ raft = { version = "0.7", default-features = false, features = ["prost-codec"] }
 raft-proto = { version = "0.7", default-features = false, features = ["prost-codec"] }
 
 # Storage
-redb = "2.0"
+redb = "2.4"
 
 # Utilities - standardize on latest versions
 uuid = { version = "1.6", features = ["v4", "serde"] }
@@ -121,20 +121,20 @@ x509-parser = "0.16"
 pem = "3.0"
 
 # Cedar Policy Engine
-cedar-policy = "3.0"
-cedar-policy-core = "3.0"
-cedar-policy-validator = "3.0"
+cedar-policy = "4.4"
+cedar-policy-core = "4.4"
+cedar-policy-validator = "4.4"
 
 # Template engine
 tera = "1.19"
 
 # P2P networking
-iroh = "0.90"
-iroh-blobs = "0.91"
+iroh = "0.91"
+iroh-blobs = "0.93"
 # TODO: Re-enable when version compatibility with patched iroh-blobs is resolved
 # iroh-docs = { git = "https://github.com/n0-computer/iroh-docs", branch = "Frando/iroh-0.90" }
-iroh-gossip = "0.90"
-iroh-base = "0.90"
+iroh-gossip = "0.91"
+iroh-base = "0.91"
 
 # Test utilities
 proptest = "1.4"
