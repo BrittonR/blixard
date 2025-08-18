@@ -32,13 +32,24 @@ impl IrohEndpointManager {
         
         // Get the node_addr from the watcher
         let mut node_addr_watcher = endpoint.node_addr();
-        let node_addr = if let Some(addr) = node_addr_watcher.get() {
+        let mut node_addr = if let Some(addr) = node_addr_watcher.get() {
             addr
         } else {
             // Fallback: construct a basic NodeAddr with just the node ID
             let node_id = endpoint.node_id();
             iroh::NodeAddr::new(node_id)
         };
+        
+        // Add direct addresses if not present
+        if node_addr.direct_addresses().next().is_none() {
+            // Add the bind address as a direct address
+            let socket_addr: std::net::SocketAddr = format!("127.0.0.1:{}", port)
+                .parse()
+                .map_err(|e| BlixardError::Internal {
+                    message: format!("Failed to parse socket address: {}", e),
+                })?;
+            node_addr = node_addr.with_direct_addresses([socket_addr]);
+        }
         
         Ok(Self {
             endpoint,
@@ -58,7 +69,8 @@ impl IrohEndpointManager {
     
     /// Get the node ticket
     pub fn node_ticket(&self) -> String {
-        // NodeAddr has node_id field, not a method
-        format!("{}", self.node_addr.node_id)
+        // Create a proper NodeTicket from NodeAddr
+        let ticket = iroh_base::ticket::NodeTicket::new(self.node_addr.clone());
+        ticket.to_string()
     }
 }
