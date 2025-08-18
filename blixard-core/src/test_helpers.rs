@@ -199,7 +199,7 @@ impl TestNode {
         let data_dir = TempDir::new()?;
         let config = NodeConfig {
             id: node_id,
-            bind_addr: addr,
+            bind_addr: Some(addr),
             data_dir: data_dir.path().to_string_lossy().to_string(),
             ..Default::default()
         };
@@ -291,7 +291,7 @@ impl TestCluster {
         let data_dir = TempDir::new()?;
         let config = NodeConfig {
             id: node_id,
-            bind_addr: addr,
+            bind_addr: Some(addr),
             data_dir: data_dir.path().to_string_lossy().to_string(),
             ..Default::default()
         };

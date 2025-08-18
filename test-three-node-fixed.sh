@@ -18,8 +18,8 @@ echo "Node 1 PID: $NODE1_PID"
 # Wait for node 1 to start
 sleep 5
 
-# Get node 1 ticket
-NODE1_TICKET=$(grep "Node ticket created:" node1.log | awk '{print $NF}')
+# Get node 1 ticket (look for either format)
+NODE1_TICKET=$(grep -E "Node ticket (created|for discovery):" node1.log | awk '{print $NF}')
 if [ -z "$NODE1_TICKET" ]; then
     echo "ERROR: Failed to get Node 1 ticket"
     tail -20 node1.log

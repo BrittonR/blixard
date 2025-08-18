@@ -12,6 +12,13 @@ default-run = "blixard"
 blixard-core = { path = "../blixard-core" }
 blixard-vm = { path = "../blixard-vm" }
 
+# Iroh P2P
+iroh = { workspace = true }
+iroh-base = { workspace = true }
+
+# Encoding
+base64 = { workspace = true }
+
 # CLI
 clap = { workspace = true }
 dialoguer = { workspace = true }
@@ -56,12 +63,6 @@ rand = { workspace = true }
 
 # Database for cluster state
 redb = { workspace = true }
-
-# P2P networking
-iroh = { workspace = true }
-
-# Encoding
-base64 = { workspace = true }
 
 # Network utilities
 ipnet = "2.9"

@@ -33,6 +33,11 @@ impl IrohClient {
         // Create Iroh NodeAddr
         let node_addr = discovery.create_node_addr(&node_info)?;
 
+        Self::new_with_node_addr(node_addr).await
+    }
+
+    /// Create a new Iroh client directly from a NodeAddr
+    pub async fn new_with_node_addr(node_addr: iroh::NodeAddr) -> BlixardResult<Self> {
         // Create Iroh endpoint for client with BLIXARD_ALPN protocol
         let endpoint = iroh::Endpoint::builder()
             .discovery_n0()
@@ -47,6 +52,16 @@ impl IrohClient {
         let client = IrohClusterServiceClient::new(Arc::new(endpoint), node_addr);
 
         Ok(Self { client })
+    }
+
+    /// Create a new Iroh client from a NodeTicket string
+    pub async fn new_from_ticket(ticket: &str) -> BlixardResult<Self> {
+        // Parse the ticket using discovery logic
+        let mut discovery = NodeDiscovery::new();
+        let node_info = discovery.discover_node(ticket).await?;
+        let node_addr = discovery.create_node_addr(&node_info)?;
+
+        Self::new_with_node_addr(node_addr).await
     }
 
     // VM operations

@@ -23,6 +23,8 @@ pub struct Node {
     /// Non-sync runtime handles
     pub(super) handle: Option<JoinHandle<BlixardResult<()>>>,
     pub(super) raft_handle: Option<JoinHandle<BlixardResult<()>>>,
+    /// Iroh service runner handle
+    pub(super) iroh_service_handle: Option<JoinHandle<()>>,
     /// VM health monitor
     pub(super) health_monitor: Option<VmHealthMonitor>,
     /// Raft transport adapter
@@ -36,6 +38,7 @@ impl Node {
             shared: Arc::new(SharedNodeState::new(config)),
             handle: None,
             raft_handle: None,
+            iroh_service_handle: None,
             health_monitor: None,
             raft_transport: None,
         }

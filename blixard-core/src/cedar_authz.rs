@@ -125,9 +125,9 @@ impl CedarAuthz {
 
         // Create authorization request with optional context
         let request = Request::new(
-            Some(principal_uid),
-            Some(action_uid),
-            Some(resource_uid),
+            principal_uid,
+            action_uid,
+            resource_uid,
             cedar_context,
             schema_ref,
         )

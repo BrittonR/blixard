@@ -180,6 +180,7 @@ pub mod ip_pool;
 pub mod ip_pool_manager;
 pub mod network_isolated_backend;
 pub mod node;
+pub mod node_registry;
 pub mod node_shared;
 pub mod performance_helpers;
 pub mod raft;

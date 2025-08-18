@@ -51,6 +51,8 @@ generated-flakes/
 
 # Test data
 test-data/
+test_node*/
+data-debug*/
 
 # Shell scripts (if they're generated or temporary)
 interactive-vm.sh

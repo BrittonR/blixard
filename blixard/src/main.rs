@@ -10,12 +10,30 @@ mod client;
 mod node_discovery;
 mod tui;
 
-#[cfg(not(madsim))]
-use blixard_core::transport::iroh_service_runner::start_iroh_services;
+// Iroh services are now started automatically during node initialization
 
 #[derive(Parser)]
 #[command(name = "blixard")]
-#[command(about = "Distributed microVM orchestration platform", long_about = None)]
+#[command(about = "Distributed microVM orchestration platform", long_about = "Distributed microVM orchestration platform
+
+EXAMPLES:
+    # Start a standalone node
+    blixard node --id 1 --bind 127.0.0.1:7001
+
+    # Join cluster using traditional address
+    blixard node --id 2 --bind 127.0.0.1:7002 --join-address http://127.0.0.1:8081
+
+    # Join cluster using node ticket (bind address auto-generated)
+    blixard node --id 2 --join-ticket nodeticket:AbCdEf123...xyz
+
+    # Join cluster using node ticket with custom bind address
+    blixard node --id 2 --bind 127.0.0.1:7002 --join-ticket nodeticket:AbCdEf123...xyz
+
+    # Create and manage VMs
+    blixard vm create --name my-vm --vcpus 2 --memory 1024
+    blixard vm start --name my-vm
+    blixard vm list
+    blixard vm stop --name my-vm")]
 struct Cli {
     /// Path to configuration file (TOML format)
     #[arg(short, long, global = true)]
@@ -33,9 +51,9 @@ enum Commands {
         #[arg(long)]
         id: u64,
 
-        /// Bind address for gRPC server (e.g., 127.0.0.1:7001)
+        /// Bind address for gRPC server (e.g., 127.0.0.1:7001). Optional when using join-ticket.
         #[arg(long)]
-        bind: String,
+        bind: Option<String>,
 
         /// Data directory for node storage
         #[arg(long, default_value = "./data")]
@@ -64,6 +82,11 @@ enum Commands {
         /// HTTP bootstrap address to join cluster (e.g., http://127.0.0.1:8081)
         #[arg(long)]
         join_address: Option<String>,
+
+        /// Node ticket to join cluster. Alternative to join-address for P2P connections.
+        /// Obtainable from an existing node's endpoint info. Format: nodeticket:NodeId@[direct_addr1,direct_addr2]
+        #[arg(long)]
+        join_ticket: Option<String>,
 
         /// Run node in background as daemon
         #[arg(long)]
@@ -613,6 +636,7 @@ async fn main() -> BlixardResult<()> {
             vm_backend,
             peers,
             join_address,
+            join_ticket,
             daemon,
         } => {
             // Load configuration from file or create from CLI args
@@ -622,8 +646,11 @@ async fn main() -> BlixardResult<()> {
                 Config::from_file(path)?
             } else {
                 // Create from CLI arguments
-                // Prefer join_address over peers for backward compatibility
-                let join_addr = if let Some(addr) = join_address {
+                // Determine join method: ticket, address, or peers (in order of preference)
+                let join_addr = if let Some(ref ticket) = join_ticket {
+                    // When using a ticket, store it as the join address for processing later
+                    Some(ticket.clone())
+                } else if let Some(addr) = join_address {
                     Some(addr)
                 } else if let Some(peers_str) = peers {
                     let peer_addrs: Vec<&str> = peers_str.split(',').collect();
@@ -646,6 +673,16 @@ async fn main() -> BlixardResult<()> {
                     None
                 };
 
+                // With Iroh P2P, bind address is optional - Iroh will bind to a random port
+                // We keep it for backward compatibility but it's not required
+                let bind_addr = if let Some(bind) = bind {
+                    bind
+                } else {
+                    // Generate a default bind address for backward compatibility
+                    // This will be ignored by Iroh which uses random ports
+                    format!("127.0.0.1:{}", 7000 + id)
+                };
+
                 // Determine VM backend type (mock_vm flag overrides explicit backend selection)
                 let vm_backend_type = if mock_vm {
                     "mock".to_string()
@@ -655,7 +692,7 @@ async fn main() -> BlixardResult<()> {
 
                 let mut builder = ConfigBuilder::new()
                     .node_id(id)
-                    .bind_address(bind)
+                    .bind_address(bind_addr)
                     .data_dir(data_dir)
                     .vm_backend(vm_backend_type);
 
@@ -690,13 +727,15 @@ async fn main() -> BlixardResult<()> {
 
             let node_config = NodeConfig {
                 id: config.node.id.unwrap_or(id),
-                bind_addr: bind_address,
+                bind_addr: Some(bind_address), // Now optional for Iroh compatibility
                 data_dir: config.node.data_dir.to_string_lossy().to_string(),
                 join_addr: config.cluster.join_address.clone(),
                 use_tailscale: false,
                 vm_backend: config.node.vm_backend.clone(),
                 transport_config: config.transport.clone(),
                 topology: Default::default(),
+                iroh_relay_url: None, // Use default relay
+                metrics_port: Some(8000 + config.node.id.unwrap_or(id) as u16),
             };
 
             // Create orchestrator configuration
@@ -765,13 +804,13 @@ async fn main() -> BlixardResult<()> {
                 // Keep orchestrator alive while running server
                 let _orchestrator = orchestrator;
 
-                // Start Iroh services
-                let handle = start_iroh_services(shared_state, actual_bind_address).await?;
-
-                // Wait for the service to complete
-                match handle.await {
-                    Ok(()) => tracing::info!("Services shut down gracefully"),
-                    Err(e) => tracing::error!("Service error: {}", e),
+                // Iroh services are now started automatically during node initialization
+                // Just wait indefinitely since the services are running in the background
+                tracing::info!("Node {} running with Iroh P2P services", id);
+                
+                // Wait indefinitely (services are running in background)
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
                 }
             }
 

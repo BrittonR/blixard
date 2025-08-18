@@ -6,8 +6,8 @@ use crate::{
     error::BlixardResult,
     node_shared::SharedNodeState,
     transport::{
-        iroh_protocol::IrohService,
-        services::quota::{QuotaProtocolHandler, QuotaOperationRequest, QuotaOperationResponse},
+        iroh_service::IrohService,
+        services::quota::{QuotaProtocolHandler, QuotaOperationRequest},
     },
 };
 use async_trait::async_trait;
@@ -33,7 +33,7 @@ impl IrohService for IrohQuotaService {
         "quota"
     }
 
-    async fn handle_call(&self, method: &str, payload: Vec<u8>) -> BlixardResult<Vec<u8>> {
+    async fn handle_call(&self, method: &str, payload: bytes::Bytes) -> BlixardResult<bytes::Bytes> {
         // Deserialize the request based on method
         let request: QuotaOperationRequest = match method {
             "set_quota" | "get_quota" | "list_quotas" | "get_usage" | "remove_quota" => {
@@ -55,7 +55,7 @@ impl IrohService for IrohQuotaService {
                 message: format!("Failed to create endpoint: {}", e),
             })?;
 
-        let node_id = iroh::key::PublicKey::from_bytes(&[0u8; 32]).expect("valid key");
+        let node_id = iroh::PublicKey::from_bytes(&[0u8; 32]).expect("valid key");
         let addr = iroh::NodeAddr::new(node_id);
         
         let connection = endpoint

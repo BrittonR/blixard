@@ -133,10 +133,9 @@ impl BlixardOrchestrator {
         tracing::info!("Starting Blixard node services");
         self.node.start().await?;
 
-        // Write node discovery information
-        if let Err(e) = self.write_node_registry().await {
-            tracing::warn!("Failed to write node registry: {}", e);
-        }
+        // Note: Node registry is already written by IrohEndpointManager during transport initialization
+        // This ensures we have the complete NodeAddr with relay URL information
+        tracing::info!("Node registry written by IrohEndpointManager during transport initialization");
 
         // Start metrics server if enabled
         if let Ok(config) = config_global::get() {
@@ -203,56 +202,8 @@ impl BlixardOrchestrator {
             .unwrap_or_else(|_| "127.0.0.1:7001".parse().unwrap())
     }
 
-    /// Write node registry information for discovery
-    async fn write_node_registry(&self) -> BlixardResult<()> {
-        let shared = self.node.shared();
-        let node_id = shared.config.id;
-        let bind_addr = shared.get_bind_addr();
-
-        // Get P2P information from Iroh transport
-        let (iroh_node_id, direct_addresses, relay_url) =
-            if let Some(node_addr) = shared.get_p2p_node_addr().await {
-                // Extract components from NodeAddr
-                let node_id_base64 = base64::prelude::BASE64_STANDARD.encode(
-                    node_addr.node_id.as_bytes(),
-                );
-                let addresses: Vec<String> = node_addr.direct_addresses()
-                    .map(|addr| addr.to_string())
-                    .collect();
-                let relay = node_addr.relay_url().map(|url| url.to_string());
-                (node_id_base64, addresses, relay)
-            } else {
-                tracing::warn!("P2P node address not available, using placeholder values");
-                (
-                    "placeholder_node_id".to_string(),
-                    vec![bind_addr.to_string()],
-                    None,
-                )
-            };
-
-        // Create registry entry
-        let entry = crate::node_discovery::NodeRegistryEntry {
-            cluster_node_id: node_id,
-            iroh_node_id,
-            direct_addresses,
-            relay_url,
-            address: bind_addr.to_string(),
-        };
-
-        // Write to data directory
-        let data_dir = std::path::Path::new(&self.node_config.data_dir);
-        let registry_path = data_dir.join(format!("node-{}-registry.json", node_id));
-
-        let registry_path_str = registry_path.to_str()
-            .ok_or_else(|| blixard_core::error::BlixardError::ConfigurationError {
-                component: "orchestrator".to_string(),
-                message: format!("Registry path contains invalid Unicode characters: {}", registry_path.display()),
-            })?;
-        crate::node_discovery::save_node_registry(registry_path_str, &entry).await?;
-
-        tracing::info!("Node registry written to: {}", registry_path.display());
-        Ok(())
-    }
+    // Removed write_node_registry() method - registry is now written by IrohEndpointManager
+    // This prevents overwriting the proper registry that includes complete NodeAddr with relay URL
 }
 
 impl Drop for BlixardOrchestrator {

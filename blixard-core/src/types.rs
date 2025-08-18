@@ -123,13 +123,18 @@ impl Default for NodeTopology {
 pub struct NodeConfig {
     pub id: u64,
     pub data_dir: String,
-    pub bind_addr: SocketAddr,
-    pub join_addr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bind_addr: Option<SocketAddr>, // Deprecated: kept for backward compatibility
+    pub join_addr: Option<String>, // Can be a node ticket or registry URL
     pub use_tailscale: bool,
     pub vm_backend: String, // Backend type: "mock", "microvm", "docker", etc.
     pub transport_config: Option<crate::transport::config::TransportConfig>,
     #[serde(default)]
     pub topology: NodeTopology, // Datacenter/zone/rack topology information
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub iroh_relay_url: Option<String>, // Custom relay server URL
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metrics_port: Option<u16>, // Fixed port for metrics (default: 8000 + node_id)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -422,12 +427,14 @@ impl Default for NodeConfig {
         Self {
             id: 1,
             data_dir: "./data".to_string(),
-            bind_addr: SocketAddr::from(([127, 0, 0, 1], 7001)),
+            bind_addr: Some(SocketAddr::from(([127, 0, 0, 1], 7001))),
             join_addr: None,
             use_tailscale: false,
             vm_backend: "mock".to_string(),
             transport_config: None,
             topology: NodeTopology::default(),
+            iroh_relay_url: None,
+            metrics_port: None,
         }
     }
 }

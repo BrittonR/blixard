@@ -40,12 +40,18 @@ impl NodeDiscovery {
     /// Discover node information from an address string
     ///
     /// Supports formats:
+    /// - NodeTicket string (e.g., "nodeticket:...")
     /// - File path to node registry JSON
     /// - Address in format host:port (will look for registry file in default locations)
     pub async fn discover_node(&mut self, address: &str) -> BlixardResult<NodeRegistryEntry> {
         // Check cache first
         if let Some(entry) = self.cache.get(address) {
             return Ok(entry.clone());
+        }
+
+        // Try to parse as NodeTicket first
+        if address.starts_with("nodeticket:") || self.is_node_addr_format(address) {
+            return self.parse_node_ticket(address).await;
         }
 
         // Try to parse as file path
@@ -178,6 +184,67 @@ impl NodeDiscovery {
         }
 
         Ok(builder)
+    }
+
+    /// Check if a string looks like a NodeAddr format (base64 node ID, possibly with addresses)
+    fn is_node_addr_format(&self, address: &str) -> bool {
+        // Basic heuristic: if it's a long base64-looking string, it might be a NodeAddr
+        address.len() > 40 && address.chars().all(|c| c.is_alphanumeric() || c == '+' || c == '/' || c == '=' || c == ':' || c == '.')
+    }
+
+    /// Parse a NodeTicket string into a NodeRegistryEntry
+    async fn parse_node_ticket(&mut self, ticket: &str) -> BlixardResult<NodeRegistryEntry> {
+        // Remove the "nodeticket:" prefix if present
+        let ticket_data = if ticket.starts_with("nodeticket:") {
+            &ticket[11..]
+        } else {
+            ticket
+        };
+
+        // Try to parse as Iroh NodeTicket first, then extract NodeAddr
+        let node_ticket: iroh_base::ticket::NodeTicket = ticket_data.parse().map_err(|e| {
+            BlixardError::Internal {
+                message: format!("Failed to parse NodeTicket: {}", e),
+            }
+        })?;
+        
+        // Extract NodeAddr from the ticket
+        let node_addr = node_ticket.node_addr().clone();
+
+        // Extract information from NodeAddr
+        let iroh_node_id = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            node_addr.node_id.as_bytes()
+        );
+
+        // Collect direct addresses
+        let direct_addresses: Vec<String> = node_addr
+            .direct_addresses()
+            .map(|addr| addr.to_string())
+            .collect();
+
+        // Get relay URL
+        let relay_url = node_addr.relay_url().map(|url| url.to_string());
+
+        // Use first direct address as the main address, or generate a placeholder
+        let main_address = direct_addresses
+            .first()
+            .cloned()
+            .unwrap_or_else(|| format!("{}:0", node_addr.node_id));
+
+        // Create registry entry
+        let entry = NodeRegistryEntry {
+            cluster_node_id: 0, // Will be determined during join
+            iroh_node_id,
+            direct_addresses,
+            relay_url,
+            address: main_address,
+        };
+
+        // Cache the entry
+        self.cache.insert(ticket.to_string(), entry.clone());
+
+        Ok(entry)
     }
 }
 

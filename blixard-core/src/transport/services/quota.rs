@@ -11,7 +11,7 @@ use crate::{
         SetTenantQuotaResponse, TenantQuotaInfo, TenantUsageInfo,
     },
     node_shared::SharedNodeState,
-    raft::proposals::{ProposalData, RaftProposal},
+    raft::{messages::RaftProposal, proposals::ProposalData},
     resource_quotas::{ResourceRequest, TenantQuota, TenantUsage},
 };
 use serde::{Deserialize, Serialize};
@@ -57,12 +57,20 @@ impl QuotaServiceImpl {
         // Create TenantQuota from request
         let quota = TenantQuota {
             tenant_id: request.tenant_id.clone(),
-            max_vms: request.max_vms.unwrap_or(u32::MAX),
-            max_vcpus: request.max_vcpus.unwrap_or(u32::MAX),
-            max_memory_mb: request.max_memory_mb.unwrap_or(u64::MAX),
-            max_disk_gb: request.max_disk_gb.unwrap_or(u64::MAX),
-            max_vms_per_node: request.max_vms_per_node.unwrap_or(u32::MAX),
-            priority: request.priority,
+            vm_limits: crate::resource_quotas::VmResourceLimits {
+                max_vms: request.max_vms.unwrap_or(u32::MAX),
+                max_vcpus: request.max_vcpus.unwrap_or(u32::MAX),
+                max_memory_mb: request.max_memory_mb.unwrap_or(u64::MAX),
+                max_disk_gb: request.max_disk_gb.unwrap_or(u64::MAX),
+                max_vms_per_node: request.max_vms_per_node.unwrap_or(u32::MAX),
+                overcommit_ratio: 1.0,
+                priority: request.priority,
+            },
+            api_limits: crate::resource_quotas::ApiRateLimits::default(),
+            storage_limits: crate::resource_quotas::StorageLimits::default(),
+            enabled: true,
+            created_at: std::time::SystemTime::now(),
+            updated_at: std::time::SystemTime::now(),
         };
 
         // Send through Raft consensus
@@ -90,16 +98,16 @@ impl QuotaServiceImpl {
         request: GetTenantQuotaRequest,
     ) -> BlixardResult<GetTenantQuotaResponse> {
         if let Some(quota_manager) = self.node.get_quota_manager().await {
-            let quota = quota_manager.get_tenant_quota(&request.tenant_id).await?;
+            let quota = quota_manager.get_tenant_quota(&request.tenant_id).await;
             Ok(GetTenantQuotaResponse {
-                quota: quota.map(|q| TenantQuotaInfo {
-                    tenant_id: q.tenant_id,
-                    max_vms: q.max_vms,
-                    max_vcpus: q.max_vcpus,
-                    max_memory_mb: q.max_memory_mb,
-                    max_disk_gb: q.max_disk_gb,
-                    max_vms_per_node: q.max_vms_per_node,
-                    priority: q.priority,
+                quota: Some(TenantQuotaInfo {
+                    tenant_id: quota.tenant_id,
+                    max_vms: quota.vm_limits.max_vms,
+                    max_vcpus: quota.vm_limits.max_vcpus,
+                    max_memory_mb: quota.vm_limits.max_memory_mb,
+                    max_disk_gb: quota.vm_limits.max_disk_gb,
+                    max_vms_per_node: quota.vm_limits.max_vms_per_node,
+                    priority: quota.vm_limits.priority,
                 }),
             })
         } else {
@@ -113,17 +121,17 @@ impl QuotaServiceImpl {
         _request: ListTenantQuotasRequest,
     ) -> BlixardResult<ListTenantQuotasResponse> {
         if let Some(quota_manager) = self.node.get_quota_manager().await {
-            let quotas = quota_manager.list_tenant_quotas().await?;
+            let quotas = quota_manager.get_all_quotas().await;
             let quota_infos = quotas
                 .into_iter()
-                .map(|q| TenantQuotaInfo {
-                    tenant_id: q.tenant_id,
-                    max_vms: q.max_vms,
-                    max_vcpus: q.max_vcpus,
-                    max_memory_mb: q.max_memory_mb,
-                    max_disk_gb: q.max_disk_gb,
-                    max_vms_per_node: q.max_vms_per_node,
-                    priority: q.priority,
+                .map(|(tenant_id, q)| TenantQuotaInfo {
+                    tenant_id,
+                    max_vms: q.vm_limits.max_vms,
+                    max_vcpus: q.vm_limits.max_vcpus,
+                    max_memory_mb: q.vm_limits.max_memory_mb,
+                    max_disk_gb: q.vm_limits.max_disk_gb,
+                    max_vms_per_node: q.vm_limits.max_vms_per_node,
+                    priority: q.vm_limits.priority,
                 })
                 .collect();
             Ok(ListTenantQuotasResponse {
@@ -140,15 +148,15 @@ impl QuotaServiceImpl {
         request: GetTenantUsageRequest,
     ) -> BlixardResult<GetTenantUsageResponse> {
         if let Some(quota_manager) = self.node.get_quota_manager().await {
-            let usage = quota_manager.get_resource_usage(&request.tenant_id).await?;
+            let usage = quota_manager.get_tenant_usage(&request.tenant_id).await;
             Ok(GetTenantUsageResponse {
-                usage: usage.map(|u| TenantUsageInfo {
-                    tenant_id: u.tenant_id,
-                    active_vms: u.vm_usage.active_vms,
-                    used_vcpus: u.vm_usage.used_vcpus,
-                    used_memory_mb: u.vm_usage.used_memory_mb,
-                    used_disk_gb: u.vm_usage.used_disk_gb,
-                    vms_per_node: u.vm_usage.vms_per_node,
+                usage: Some(TenantUsageInfo {
+                    tenant_id: usage.tenant_id,
+                    active_vms: usage.vm_usage.active_vms,
+                    used_vcpus: usage.vm_usage.used_vcpus,
+                    used_memory_mb: usage.vm_usage.used_memory_mb,
+                    used_disk_gb: usage.vm_usage.used_disk_gb,
+                    vms_per_node: usage.vm_usage.vms_per_node,
                 }),
             })
         } else {
