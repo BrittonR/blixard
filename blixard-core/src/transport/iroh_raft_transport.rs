@@ -251,26 +251,59 @@ impl IrohRaftTransport {
 
     /// Send a Raft message to a peer
     pub async fn send_message(&self, to: u64, message: Message) -> BlixardResult<()> {
+        tracing::info!(
+            "RAFT_SEND: Attempting to send {:?} message to node {}", 
+            message.msg_type(), to
+        );
+        
         // Check if we know about this peer first
-        if self.node.get_peer(to).await.is_none() {
+        let peer_info = self.node.get_peer(to).await;
+        if peer_info.is_none() {
             // Peer is not in our cluster, silently drop the message
-            tracing::debug!("Dropping message to unknown peer {}", to);
+            tracing::warn!(
+                "RAFT_SEND: Dropping message to unknown peer {} - not in peer list", 
+                to
+            );
             return Ok(());
         }
+        
+        tracing::info!(
+            "RAFT_SEND: Found peer {} in peer list with P2P info: node_id={:?}, addresses={:?}",
+            to,
+            peer_info.as_ref().unwrap().p2p_node_id,
+            peer_info.as_ref().unwrap().p2p_addresses
+        );
 
         let priority = RaftMessagePriority::from_raft_message(&message);
 
-        // For high-priority messages, try to send immediately
+        // For high-priority messages AND MsgAppend (critical for config changes), try to send immediately
         if matches!(
             priority,
-            RaftMessagePriority::Election | RaftMessagePriority::Heartbeat
+            RaftMessagePriority::Election | RaftMessagePriority::Heartbeat | RaftMessagePriority::LogAppend
         ) {
+            tracing::debug!(
+                "RAFT_SEND: High-priority message {:?} to {}, attempting immediate send",
+                message.msg_type(), to
+            );
+            tracing::info!("RAFT_SEND: Attempting immediate send to node {}", to);
             if let Err(e) = self.try_send_immediate(to, &message, priority).await {
-                tracing::debug!("Immediate send failed for node {}: {}, buffering", to, e);
+                tracing::warn!(
+                    "RAFT_SEND: Immediate send failed for node {}: {}, buffering", 
+                    to, e
+                );
                 self.buffer_message(to, message, priority).await?;
+            } else {
+                tracing::info!(
+                    "RAFT_SEND: Successfully sent {:?} message immediately to node {}",
+                    message.msg_type(), to
+                );
             }
         } else {
             // For lower priority messages, always buffer for batching
+            tracing::debug!(
+                "RAFT_SEND: Buffering {:?} message to node {} for batch sending",
+                message.msg_type(), to
+            );
             self.buffer_message(to, message, priority).await?;
         }
 
@@ -284,27 +317,95 @@ impl IrohRaftTransport {
         message: &Message,
         priority: RaftMessagePriority,
     ) -> BlixardResult<()> {
+        tracing::info!(
+            "RAFT_SEND_IMMEDIATE: Starting immediate send of {:?} to node {}",
+            message.msg_type(), to
+        );
+        
         #[cfg(feature = "observability")]
         let _timer = safe_metrics().ok().map(|m| Timer::new(m.raft_proposal_duration.clone()));
 
         // Get or create connection
-        let mut conn = self.get_or_create_connection(to).await?;
+        tracing::info!("RAFT_SEND_IMMEDIATE: Getting or creating connection to node {}", to);
+        let mut conn = match self.get_or_create_connection(to).await {
+            Ok(conn) => {
+                tracing::info!(
+                    "RAFT_SEND_IMMEDIATE: Successfully got connection to node {} (Iroh ID: {})",
+                    to, conn.iroh_node_id
+                );
+                conn
+            }
+            Err(e) => {
+                tracing::error!(
+                    "RAFT_SEND_IMMEDIATE: Failed to get/create connection to node {}: {}",
+                    to, e
+                );
+                return Err(e);
+            }
+        };
 
-        // Serialize message
-        let payload = crate::raft_codec::serialize_message(message)?;
+        // Serialize Raft message
+        tracing::debug!(
+            "RAFT_SEND_IMMEDIATE: Serializing {:?} message for node {}",
+            message.msg_type(), to
+        );
+        let msg_data = crate::raft_codec::serialize_message(message)?;
+        tracing::debug!(
+            "RAFT_SEND_IMMEDIATE: Serialized message has {} bytes",
+            msg_data.len()
+        );
 
-        // Get appropriate stream
-        let stream = conn.get_stream(priority).await?;
-
-        // Send message
+        // Create RPC request for the raft service
         let request_id = generate_request_id();
-        write_message(stream, ProtocolMessageType::Request, request_id, &payload).await?;
+        let request = crate::transport::iroh_protocol::RpcRequest {
+            service: "raft".to_string(),
+            method: "raft.message".to_string(),
+            payload: bytes::Bytes::from(msg_data),
+        };
+        
+        // Serialize RPC request
+        let request_bytes = crate::transport::iroh_protocol::serialize_payload(&request)?;
+
+        // Open bidirectional stream for RPC
+        tracing::debug!(
+            "RAFT_SEND_IMMEDIATE: Opening bi stream for priority {:?} to node {}",
+            priority, to
+        );
+        let (mut send, mut recv) = conn.connection.open_bi().await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to open bi stream: {}", e),
+            })?;
+
+        // Send RPC request
+        tracing::debug!(
+            "RAFT_SEND_IMMEDIATE: Writing RPC message to stream for node {} (request_id: {:?})",
+            to, request_id
+        );
+        write_message(&mut send, ProtocolMessageType::Request, request_id, &request_bytes).await?;
+        
+        // Close the send stream to signal we're done sending
+        send.finish().map_err(|e| BlixardError::Internal {
+            message: format!("Failed to finish send stream: {}", e),
+        })?;
+        
+        // Wait for response (just to confirm delivery) 
+        let _ = read_message(&mut recv).await;
+        
+        tracing::debug!(
+            "RAFT_SEND_IMMEDIATE: Successfully sent {:?} message to node {}",
+            message.msg_type(), to
+        );
 
         // Update metrics
         self.record_message_sent(message.msg_type());
 
         // Update last activity
         conn.last_activity = Instant::now();
+        
+        tracing::info!(
+            "RAFT_SEND_IMMEDIATE: Successfully sent {:?} message to node {}",
+            message.msg_type(), to
+        );
 
         Ok(())
     }
@@ -316,8 +417,15 @@ impl IrohRaftTransport {
         message: Message,
         priority: RaftMessagePriority,
     ) -> BlixardResult<()> {
+        tracing::debug!(
+            "RAFT_BUFFER: Buffering {:?} message (priority {:?}) for node {}",
+            message.msg_type(), priority, to
+        );
+        
         let mut buffer = self.message_buffer.lock().await;
         let queue = buffer.entry(to).or_insert_with(VecDeque::new);
+        
+        let initial_size = queue.len();
 
         // Add message to queue based on priority
         let buffered = BufferedRaftMessage {
@@ -339,16 +447,27 @@ impl IrohRaftTransport {
         while queue.len() > max_buffered {
             queue.pop_back();
         }
+        
+        tracing::debug!(
+            "RAFT_BUFFER: Buffered message for node {} (queue size: {} -> {}, max: {})",
+            to, initial_size, queue.len(), max_buffered
+        );
 
         Ok(())
     }
 
     /// Get or create a connection to a peer
     async fn get_or_create_connection(&self, peer_id: u64) -> BlixardResult<PeerConnection> {
+        tracing::debug!("RAFT_CONNECT: Getting or creating connection to peer {}", peer_id);
+        
         // Check existing connections
         {
             let connections = self.connections.read().await;
             if let Some(conn) = connections.get(&peer_id) {
+                tracing::debug!(
+                    "RAFT_CONNECT: Found existing connection to peer {} (Iroh ID: {})",
+                    peer_id, conn.iroh_node_id
+                );
                 return Ok(PeerConnection {
                     node_id: conn.node_id,
                     iroh_node_id: conn.iroh_node_id,
@@ -361,51 +480,171 @@ impl IrohRaftTransport {
                 });
             }
         }
+        
+        tracing::debug!("RAFT_CONNECT: No existing connection, creating new one for peer {}", peer_id);
 
-        // Create new connection
-        let peer_info = self
-            .node
-            .get_peer(peer_id)
-            .await
-            .ok_or_else(|| BlixardError::ClusterError(format!("Unknown peer {}", peer_id)))?;
-
-        // Use the regular node_id as P2P node ID (temporary mapping)
-        let p2p_node_id = peer_info.node_id.clone();
-        let iroh_node_id = p2p_node_id
-            .parse::<NodeId>()
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Invalid Iroh node ID: {}", e),
-            })?;
-
-        // Create NodeAddr with the peer's P2P addresses
-        let mut node_addr = iroh::NodeAddr::new(iroh_node_id);
-
-        // Add relay URL if available
-        if let Some(ref relay_url) = peer_info.p2p_relay_url {
-            if !relay_url.is_empty() {
-                if let Ok(relay) = relay_url.parse() {
-                    node_addr = node_addr.with_relay_url(relay);
+        // Create new connection using NodeRegistry
+        let node_registry = self.node.node_registry();
+        
+        tracing::debug!(
+            "RAFT_CONNECT: Looking up peer {} in node registry",
+            peer_id
+        );
+        
+        // First check what's in the registry
+        let registry_entries = node_registry.list_nodes().await;
+        tracing::debug!(
+            "RAFT_CONNECT: Node registry contains {} entries: {:?}",
+            registry_entries.len(),
+            registry_entries.iter().map(|e| (e.cluster_node_id, &e.iroh_node_id)).collect::<Vec<_>>()
+        );
+        
+        // Get the complete NodeAddr from the registry
+        let node_addr = match node_registry.get_node_addr(peer_id).await {
+            Ok(addr) => {
+                tracing::debug!(
+                    "RAFT_CONNECT: Found peer {} in registry with Iroh ID {}, {} direct addresses, relay: {:?}",
+                    peer_id,
+                    addr.node_id,
+                    addr.direct_addresses().count(),
+                    addr.relay_url()
+                );
+                addr
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "RAFT_CONNECT: Peer {} not found in node registry: {}. Trying cluster members fallback. Available peers: {:?}",
+                    peer_id, e,
+                    registry_entries.iter().map(|e| e.cluster_node_id).collect::<Vec<_>>()
+                );
+                
+                // Fallback: try to get P2P info from cluster members
+                if let Some(peer_info) = self.node.get_peer(peer_id).await {
+                    if let Some(p2p_node_id_str) = &peer_info.p2p_node_id {
+                        if let Ok(iroh_node_id) = p2p_node_id_str.parse::<iroh::NodeId>() {
+                            tracing::info!(
+                                "RAFT_CONNECT: Found peer {} in cluster members, creating NodeAddr from P2P info",
+                                peer_id
+                            );
+                            
+                            // Create NodeAddr from cluster member P2P info
+                            let mut node_addr = iroh::NodeAddr::new(iroh_node_id);
+                            
+                            // Add addresses if available
+                            let addrs: Vec<std::net::SocketAddr> = peer_info.p2p_addresses
+                                .iter()
+                                .filter_map(|a| a.parse().ok())
+                                .collect();
+                            if !addrs.is_empty() {
+                                node_addr = node_addr.with_direct_addresses(addrs);
+                            }
+                            
+                            // Add relay URL if available
+                            if let Some(relay) = &peer_info.p2p_relay_url {
+                                if let Ok(relay_url) = relay.parse() {
+                                    node_addr = node_addr.with_relay_url(relay_url);
+                                }
+                            }
+                            
+                            // Also register in node registry for future lookups
+                            if let Err(reg_err) = node_registry.register_node(
+                                peer_id,
+                                iroh_node_id,
+                                node_addr.clone(),
+                                Some(peer_info.address.clone())
+                            ).await {
+                                tracing::warn!(
+                                    "RAFT_CONNECT: Failed to register peer {} in node registry during fallback: {}",
+                                    peer_id, reg_err
+                                );
+                            } else {
+                                tracing::info!(
+                                    "RAFT_CONNECT: Successfully registered peer {} in node registry during fallback",
+                                    peer_id
+                                );
+                            }
+                            
+                            node_addr
+                        } else {
+                            tracing::error!(
+                                "RAFT_CONNECT: Invalid Iroh node ID for peer {} in cluster members: {}",
+                                peer_id, p2p_node_id_str
+                            );
+                            return Err(BlixardError::ClusterError(
+                                format!("Peer {} has invalid Iroh node ID: {}", peer_id, p2p_node_id_str)
+                            ));
+                        }
+                    } else {
+                        tracing::error!(
+                            "RAFT_CONNECT: Peer {} found in cluster members but has no P2P node ID",
+                            peer_id
+                        );
+                        return Err(BlixardError::ClusterError(
+                            format!("Peer {} has no P2P node ID", peer_id)
+                        ));
+                    }
+                } else {
+                    tracing::error!(
+                        "RAFT_CONNECT: Peer {} not found in node registry or cluster members",
+                        peer_id
+                    );
+                    return Err(BlixardError::ClusterError(
+                        format!("Peer {} not found in node registry or cluster members", peer_id)
+                    ));
                 }
             }
-        }
-
-        // Add direct P2P addresses
-        let addrs: Vec<std::net::SocketAddr> = peer_info.p2p_addresses
-            .iter()
-            .filter_map(|addr_str| addr_str.parse().ok())
-            .collect();
-        if !addrs.is_empty() {
-            node_addr = node_addr.with_direct_addresses(addrs);
-        }
+        };
+        
+        let iroh_node_id = node_addr.node_id;
+        
+        tracing::info!(
+            "RAFT_CONNECT: Attempting to connect to peer {} with Iroh node ID {} using {} direct addresses and relay: {:?}",
+            peer_id,
+            iroh_node_id,
+            node_addr.direct_addresses().count(),
+            node_addr.relay_url()
+        );
 
         // Connect to peer using standard BLIXARD_ALPN
-        let connection = self
-            .endpoint
-            .connect(node_addr, crate::transport::BLIXARD_ALPN)
-            .await
-            .map_err(|e| BlixardError::Internal {
-                message: format!("Connection error: {}", e),
-            })?;
+        tracing::debug!(
+            "RAFT_CONNECT: Calling endpoint.connect() for peer {} with ALPN {:?}",
+            peer_id, 
+            std::str::from_utf8(crate::transport::BLIXARD_ALPN).unwrap_or("invalid-utf8")
+        );
+        
+        // Add timeout to connection attempt (10 seconds)
+        let connection_timeout = Duration::from_secs(10);
+        let connection = match tokio::time::timeout(
+            connection_timeout,
+            self.endpoint.connect(node_addr, crate::transport::BLIXARD_ALPN)
+        ).await {
+            Ok(Ok(conn)) => {
+                tracing::info!(
+                    "RAFT_CONNECT: Successfully connected to peer {} (Iroh ID: {})",
+                    peer_id, iroh_node_id
+                );
+                conn
+            }
+            Ok(Err(e)) => {
+                tracing::error!(
+                    "RAFT_CONNECT: Failed to connect to peer {} (Iroh ID: {}): {}",
+                    peer_id, iroh_node_id, e
+                );
+                return Err(BlixardError::Internal {
+                    message: format!("Connection error to peer {}: {}", peer_id, e),
+                });
+            }
+            Err(_) => {
+                tracing::error!(
+                    "RAFT_CONNECT: Connection timeout to peer {} (Iroh ID: {}) after {:?}",
+                    peer_id, iroh_node_id, connection_timeout
+                );
+                return Err(BlixardError::Timeout {
+                    operation: format!("connect to peer {}", peer_id),
+                    duration: connection_timeout,
+                });
+            }
+        };
 
         // Store connection
         let peer_conn = PeerConnection {
@@ -422,6 +661,10 @@ impl IrohRaftTransport {
         {
             let mut connections = self.connections.write().await;
             connections.insert(peer_id, peer_conn);
+            tracing::debug!(
+                "RAFT_CONNECT: Stored connection to peer {} in connection cache",
+                peer_id
+            );
         }
 
         Ok(PeerConnection {
@@ -550,9 +793,12 @@ impl IrohRaftTransport {
 
     /// Record sent message metrics
     fn record_message_sent(&self, msg_type: MessageType) {
-        let mut sent = self.messages_sent.blocking_lock();
-        let key = format!("{:?}", msg_type);
-        *sent.entry(key).or_insert(0) += 1;
+        // Use try_lock to avoid blocking in async context
+        if let Ok(mut sent) = self.messages_sent.try_lock() {
+            let key = format!("{:?}", msg_type);
+            *sent.entry(key).or_insert(0) += 1;
+        }
+        // If we can't get the lock, skip metrics recording rather than panic
 
         #[cfg(feature = "observability")]
         RAFT_MESSAGES_SENT.add(
@@ -722,11 +968,27 @@ async fn process_message_batches(
     endpoint: &Endpoint,
 ) {
     let mut buffer = message_buffer.lock().await;
+    
+    // Log buffer status
+    let total_messages: usize = buffer.values().map(|q| q.len()).sum();
+    if total_messages > 0 {
+        tracing::debug!(
+            "RAFT_BATCH: Processing {} total buffered messages across {} peers",
+            total_messages,
+            buffer.len()
+        );
+    }
 
     for (peer_id, messages) in buffer.iter_mut() {
         if messages.is_empty() {
             continue;
         }
+        
+        tracing::debug!(
+            "RAFT_BATCH: Processing {} buffered messages for peer {}",
+            messages.len(),
+            peer_id
+        );
 
         // Try to get connection
         let conn_result = {
@@ -735,8 +997,18 @@ async fn process_message_batches(
         };
 
         let connection = match conn_result {
-            Some(conn) => conn,
+            Some(conn) => {
+                tracing::debug!(
+                    "RAFT_BATCH: Using existing connection for peer {}",
+                    peer_id
+                );
+                conn
+            }
             None => {
+                tracing::debug!(
+                    "RAFT_BATCH: No existing connection for peer {}, creating new one",
+                    peer_id
+                );
                 // Try to create connection
                 match create_connection_for_peer(*peer_id, node, endpoint).await {
                     Ok(conn) => {
@@ -744,10 +1016,17 @@ async fn process_message_batches(
                         // Store new connection
                         let mut connections = connections.write().await;
                         connections.insert(*peer_id, conn);
+                        tracing::debug!(
+                            "RAFT_BATCH: Created new connection for peer {}",
+                            peer_id
+                        );
                         connection
                     }
                     Err(e) => {
-                        tracing::debug!("Failed to connect to peer {}: {}", peer_id, e);
+                        tracing::warn!(
+                            "RAFT_BATCH: Failed to connect to peer {}: {}",
+                            peer_id, e
+                        );
                         continue;
                     }
                 }
@@ -761,6 +1040,11 @@ async fn process_message_batches(
         while let Some(buffered) = messages.pop_front() {
             // Skip old messages
             if buffered.timestamp.elapsed() > Duration::from_secs(30) {
+                tracing::debug!(
+                    "RAFT_BATCH: Skipping old message to peer {} (age: {:?})",
+                    peer_id,
+                    buffered.timestamp.elapsed()
+                );
                 continue;
             }
 
@@ -772,45 +1056,84 @@ async fn process_message_batches(
             sent_count += 1;
             if sent_count >= 100 {
                 // Batch size limit
+                tracing::debug!(
+                    "RAFT_BATCH: Hit batch size limit of 100 for peer {}",
+                    peer_id
+                );
                 break;
             }
         }
 
         // Send batches by priority
         for (priority, batch) in by_priority {
+            tracing::debug!(
+                "RAFT_BATCH: Sending batch of {} {:?} messages to peer {}",
+                batch.len(),
+                priority,
+                peer_id
+            );
             if let Err(e) = send_message_batch(&connection, priority, batch, messages_sent).await {
-                tracing::warn!("Failed to send batch to {}: {}", peer_id, e);
+                tracing::warn!(
+                    "RAFT_BATCH: Failed to send batch to peer {}: {}",
+                    peer_id, e
+                );
+            } else {
+                tracing::debug!(
+                    "RAFT_BATCH: Successfully sent batch to peer {}",
+                    peer_id
+                );
             }
         }
     }
 }
 
-/// Send a batch of messages on a single stream
+/// Send a batch of messages using RPC to the raft service
 async fn send_message_batch(
     connection: &Connection,
     _priority: RaftMessagePriority,
     messages: Vec<Message>,
     messages_sent: &Arc<Mutex<HashMap<String, u64>>>,
 ) -> BlixardResult<()> {
-    let mut stream = connection
-        .open_uni()
-        .await
-        .map_err(|e| BlixardError::Internal {
-            message: format!("Failed to open uni stream: {}", e),
-        })?;
-
+    // Send each message as an RPC call to the raft service
     for message in messages {
-        let payload = crate::raft_codec::serialize_message(&message)?;
-        let request_id = generate_request_id();
-
-        write_message(
-            &mut stream,
-            ProtocolMessageType::Request,
+        // Serialize the Raft message
+        let msg_data = crate::raft_codec::serialize_message(&message)?;
+        
+        // Create RPC request for the raft service
+        let request_id = crate::transport::iroh_protocol::generate_request_id();
+        let request = crate::transport::iroh_protocol::RpcRequest {
+            service: "raft".to_string(),
+            method: "raft.message".to_string(),
+            payload: bytes::Bytes::from(msg_data),
+        };
+        
+        // Open bidirectional stream for RPC
+        let (mut send, mut recv) = connection
+            .open_bi()
+            .await
+            .map_err(|e| BlixardError::Internal {
+                message: format!("Failed to open bi stream: {}", e),
+            })?;
+        
+        // Serialize and send the RPC request
+        let request_bytes = crate::transport::iroh_protocol::serialize_payload(&request)?;
+            
+        crate::transport::iroh_protocol::write_message(
+            &mut send,
+            crate::transport::iroh_protocol::MessageType::Request,
             request_id,
-            &payload,
+            &request_bytes,
         )
         .await?;
-
+        
+        // Close the send stream to signal we're done sending
+        send.finish().map_err(|e| BlixardError::Internal {
+            message: format!("Failed to finish send stream: {}", e),
+        })?;
+        
+        // Wait for response (just to confirm delivery)
+        let _ = crate::transport::iroh_protocol::read_message(&mut recv).await;
+        
         // Record metrics
         {
             let mut sent = messages_sent.lock().await;
@@ -827,11 +1150,6 @@ async fn send_message_batch(
             );
         }
     }
-
-    // Close stream
-    stream.finish().map_err(|e| BlixardError::Internal {
-        message: format!("Failed to finish stream: {}", e),
-    })?;
 
     Ok(())
 }
@@ -858,12 +1176,25 @@ async fn create_connection_for_peer(
             message: format!("Invalid Iroh node ID: {}", e),
         })?;
 
-    let connection = endpoint
-        .connect(iroh_node_id, super::BLIXARD_ALPN)
-        .await
-        .map_err(|e| BlixardError::Internal {
-            message: format!("Failed to open uni stream: {}", e),
-        })?;
+    // Add timeout to connection attempt (10 seconds)
+    let connection_timeout = Duration::from_secs(10);
+    let connection = match tokio::time::timeout(
+        connection_timeout,
+        endpoint.connect(iroh_node_id, super::BLIXARD_ALPN)
+    ).await {
+        Ok(Ok(conn)) => conn,
+        Ok(Err(e)) => {
+            return Err(BlixardError::Internal {
+                message: format!("Failed to connect to peer {}: {}", peer_id, e),
+            });
+        }
+        Err(_) => {
+            return Err(BlixardError::Timeout {
+                operation: format!("connect to peer {}", peer_id),
+                duration: connection_timeout,
+            });
+        }
+    };
 
     Ok(PeerConnection {
         node_id: peer_id,

@@ -203,6 +203,36 @@ impl RaftManager {
         Ok(proposal_tx.clone())
     }
 
+    /// Apply initial configuration state for joining nodes
+    pub async fn apply_initial_conf_state(&self, conf_state: raft::prelude::ConfState) -> BlixardResult<()> {
+        info!(
+            self.logger,
+            "[P2P-FIX] Applying initial conf state with voters: {:?}",
+            conf_state.voters
+        );
+        
+        let mut raft_node = self.raft_node.write().await;
+        
+        // Apply the configuration state to make this node aware it's part of the cluster
+        raft_node.mut_store().apply_snapshot(&raft::prelude::Snapshot {
+            data: vec![],
+            metadata: Some(raft::prelude::SnapshotMetadata {
+                conf_state: Some(conf_state.clone()),
+                index: 0,
+                term: 0,
+            }),
+        })?;
+        
+        info!(
+            self.logger,
+            "[P2P-FIX] Applied conf state, node {} now knows it's part of cluster with voters: {:?}",
+            self.node_id,
+            conf_state.voters
+        );
+        
+        Ok(())
+    }
+
     /// Bootstrap a single-node cluster
     #[instrument(skip(self))]
     pub async fn bootstrap_single_node(&self) -> BlixardResult<()> {
@@ -398,6 +428,23 @@ impl RaftManager {
         // Process any ready state that results from the tick
         let processed_ready = self.on_ready().await?;
 
+        // Check if we need to trigger replication after configuration changes
+        let needs_replication = self.config_manager.needs_replication_trigger().await;
+        
+        // Force heartbeats to newly added nodes
+        if needs_replication {
+            let mut node = self.raft_node.write().await;
+            if node.raft.state == StateRole::Leader {
+                info!(self.logger, "[RAFT-TICK] Triggering replication for newly added nodes");
+                // Force a ready state by calling tick again
+                // This ensures heartbeats are sent to newly added nodes
+                node.tick();
+                drop(node); // Release the lock before calling on_ready
+                // Process the ready state again to send any generated heartbeats
+                self.on_ready().await?;
+            }
+        }
+
         // Check if we need to send snapshots to lagging followers
         if processed_ready {
             let mut node = self.raft_node.write().await;
@@ -468,7 +515,7 @@ impl RaftManager {
     async fn handle_raft_message(
         &self,
         from: u64,
-        msg: raft::prelude::Message,
+        mut msg: raft::prelude::Message,
     ) -> BlixardResult<()> {
         #[cfg(feature = "observability")]
         let _timer = safe_metrics().ok().map(|m| Timer::with_attributes(
@@ -477,6 +524,14 @@ impl RaftManager {
         ));
 
         tracing::Span::current().record("from", from);
+
+        // FIX: Ensure the 'from' field in the message is set correctly
+        // Some messages come with from: 0 which is invalid
+        if msg.from == 0 || msg.from != from {
+            info!(self.logger, "[RAFT-MESSAGE] Fixing message 'from' field";
+                "was" => msg.from, "now" => from);
+            msg.from = from;
+        }
 
         info!(self.logger, "[RAFT-MESSAGE] Handling message"; 
             "from" => from, "type" => ?msg.msg_type());
@@ -490,9 +545,104 @@ impl RaftManager {
                     source: Box::new(e),
                 });
             }
+            
+            // CRITICAL FIX: Process ready immediately and fix from: 0
+            // The Raft library creates responses with from: 0 which need fixing
+            if node.has_ready() {
+                info!(self.logger, "[RAFT-FIX] Processing ready immediately after step");
+                let mut ready = node.ready();
+                
+                // CRITICAL FIX: Save entries FIRST before anything else
+                if !ready.entries().is_empty() {
+                    info!(self.logger, "[RAFT-FIX] Saving {} entries to storage immediately!", ready.entries().len());
+                    for (i, entry) in ready.entries().iter().enumerate() {
+                        info!(self.logger, "[RAFT-FIX] Entry {}", i;
+                            "index" => entry.index,
+                            "term" => entry.term,
+                            "type" => ?entry.entry_type(),
+                            "data_len" => entry.data.len()
+                        );
+                    }
+                    node.mut_store().append(&ready.entries())?;
+                    info!(self.logger, "[RAFT-FIX] Entries saved successfully");
+                }
+                
+                // Save hard state if changed
+                if let Some(hs) = ready.hs() {
+                    info!(self.logger, "[RAFT-FIX] Saving hard state";
+                        "term" => hs.term,
+                        "vote" => hs.vote,
+                        "commit" => hs.commit
+                    );
+                    node.mut_store().save_hard_state(&hs)?;
+                }
+                
+                // Check persisted messages (messages that should be saved)
+                let persisted = ready.persisted_messages();
+                if !persisted.is_empty() {
+                    info!(self.logger, "[RAFT-FIX] Found {} persisted messages!", persisted.len());
+                    for msg in persisted {
+                        info!(self.logger, "[RAFT-FIX] Persisted message";
+                            "to" => msg.to,
+                            "from" => msg.from,
+                            "type" => ?msg.msg_type()
+                        );
+                    }
+                }
+                
+                // Fix and send any messages with from: 0
+                if !ready.messages().is_empty() {
+                    info!(self.logger, "[RAFT-FIX] Found {} messages in ready", ready.messages().len());
+                    for mut msg in ready.take_messages() {
+                        if msg.from == 0 {
+                            info!(self.logger, "[RAFT-FIX] Fixing from: 0 to from: {}", self.node_id);
+                            msg.from = self.node_id;
+                        }
+                        self.send_raft_message(msg).await?;
+                    }
+                } else {
+                    info!(self.logger, "[RAFT-FIX] No messages in ready.messages()");
+                }
+                
+                // Take persisted messages and send them
+                let persisted = ready.take_persisted_messages();
+                if !persisted.is_empty() {
+                    info!(self.logger, "[RAFT-FIX] Sending {} persisted messages", persisted.len());
+                    for mut msg in persisted {
+                        if msg.from == 0 {
+                            info!(self.logger, "[RAFT-FIX] Fixing persisted from: 0 to from: {}", self.node_id);
+                            msg.from = self.node_id;
+                        }
+                        self.send_raft_message(msg).await?;
+                    }
+                }
+                
+                // Process committed entries if any
+                let committed_entries = ready.take_committed_entries();
+                if !committed_entries.is_empty() {
+                    info!(self.logger, "[RAFT-FIX] Processing {} committed entries", committed_entries.len());
+                    for entry in &committed_entries {
+                        info!(self.logger, "[RAFT-FIX] Committed entry";
+                            "index" => entry.index,
+                            "term" => entry.term,
+                            "type" => ?entry.entry_type()
+                        );
+                        if entry.entry_type() == raft::prelude::EntryType::EntryConfChange {
+                            self.process_conf_change_entry(entry, &mut node).await?;
+                        }
+                    }
+                }
+                
+                // Advance to complete the ready processing
+                let _ = node.advance(ready);
+                
+                // CRITICAL: Update shared state with leader info
+                // This is normally done in on_ready() but we're processing inline
+                self.update_shared_state_status(&node).await;
+            }
         }
 
-        // Process ready state after stepping the message
+        // Process any remaining ready state
         self.on_ready().await?;
 
         Ok(())
@@ -537,6 +687,11 @@ impl RaftManager {
             node.mut_store().save_hard_state(&hs)?;
         }
 
+        // CRITICAL: Check for messages BEFORE taking them
+        info!(self.logger, "[RAFT-READY] Messages in ready state before send";
+            "count" => ready.messages().len()
+        );
+        
         // Send messages to peers
         self.send_messages_to_peers(&mut ready).await?;
 
@@ -844,7 +999,22 @@ impl RaftManager {
                 // Process these entries
                 for entry in entries.iter() {
                     last_applied_index = entry.index;
-                    self.process_normal_entry(entry).await?;
+                    
+                    // Check entry type and process accordingly
+                    match entry.entry_type() {
+                        raft::prelude::EntryType::EntryNormal => {
+                            self.process_normal_entry(entry).await?;
+                        }
+                        raft::prelude::EntryType::EntryConfChange => {
+                            self.process_conf_change_entry(entry, node).await?;
+                        }
+                        _ => {
+                            warn!(self.logger, "[RAFT-READY] Unknown entry type in newly committed"; 
+                                "type" => ?entry.entry_type(),
+                                "index" => entry.index
+                            );
+                        }
+                    }
                 }
 
                 // Update applied index for the newly processed entries
@@ -862,7 +1032,17 @@ impl RaftManager {
     }
 
     /// Send a Raft message to another node
-    async fn send_raft_message(&self, msg: raft::prelude::Message) -> BlixardResult<()> {
+    async fn send_raft_message(&self, mut msg: raft::prelude::Message) -> BlixardResult<()> {
+        // FIX: Ensure the 'from' field is set correctly
+        // The Raft library doesn't always set this field properly
+        if msg.from == 0 {
+            msg.from = self.node_id;
+            debug!(
+                "Fixed message 'from' field: was 0, now {}",
+                self.node_id
+            );
+        }
+        
         let to = msg.to;
         let from = msg.from;
         let msg_type = msg.msg_type();
@@ -876,6 +1056,10 @@ impl RaftManager {
         if let Err(_) = self.outgoing_messages.send((to, msg)) {
             warn!(self.logger, "[RAFT-MESSAGE] Failed to send message - channel closed"; 
                 "to" => to, "type" => ?msg_type);
+            // Double-check if the channel is really closed
+            if self.outgoing_messages.is_closed() {
+                error!(self.logger, "[RAFT-MESSAGE] Outgoing channel is definitively closed!");
+            }
         }
 
         Ok(())
@@ -898,6 +1082,15 @@ impl RaftManager {
             } else {
                 Some(node.raft.leader_id)
             };
+            
+            // Log the leader detection
+            info!(self.logger, "[LEADER-DETECT] Raft leader detection";
+                "node_id" => self.node_id,
+                "is_leader" => is_leader,
+                "raft.leader_id" => node.raft.leader_id,
+                "detected_leader_id" => ?leader_id,
+                "state" => ?node.raft.state
+            );
 
             let status = crate::node_shared::RaftStatus {
                 is_leader,

@@ -6,13 +6,12 @@
 use raft::prelude::Message;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use base64::prelude::*;
 
 use crate::error::BlixardResult;
 use crate::node_shared::SharedNodeState;
 use crate::transport::config::TransportConfig;
 use crate::transport::iroh_raft_transport::{IrohRaftTransport, IrohRaftMetrics};
-use iroh::{Endpoint, SecretKey};
-use rand;
 
 /// Unified Raft transport using Iroh P2P
 #[derive(Clone)]
@@ -30,26 +29,37 @@ impl RaftTransport {
         raft_rx_tx: mpsc::UnboundedSender<(u64, Message)>,
         _transport_config: &TransportConfig,
     ) -> BlixardResult<Self> {
-        // Create Iroh endpoint for Raft communication
-        let secret_key = SecretKey::generate(rand::thread_rng());
+        // Use the IrohEndpointManager for proper endpoint initialization
+        use crate::transport::iroh_endpoint_manager::IrohEndpointManager;
         
-        // Use Raft-specific ALPN
-        let raft_alpn = b"blixard-raft".to_vec();
+        // Define ALPNs for both Raft and regular services
+        let alpns = vec![
+            b"blixard-raft".to_vec(),
+            crate::transport::BLIXARD_ALPN.to_vec(),
+        ];
         
-        let endpoint = Endpoint::builder()
-            .secret_key(secret_key)
-            .alpns(vec![raft_alpn])
-            .bind()
-            .await
-            .map_err(|e| crate::error::BlixardError::Internal {
-                message: format!("Failed to create Raft endpoint: {}", e),
-            })?;
-
+        // Create endpoint manager with node ID-based port for predictable addressing
+        // Use port 50000 + node_id to ensure each node gets a unique, predictable port
+        let port = 50000 + (node.config.id as u16);
+        let endpoint_manager = IrohEndpointManager::new_with_port(alpns, port).await?;
+        let endpoint = endpoint_manager.endpoint().clone();
         let local_node_id = endpoint.node_id();
-        tracing::info!("Created Raft transport with Iroh node ID: {}", local_node_id);
+        
+        tracing::info!(
+            "Created Raft transport with Iroh node ID: {}",
+            local_node_id
+        );
+        tracing::info!(
+            "Node ticket for discovery: {}",
+            endpoint_manager.node_ticket()
+        );
         
         // Store the endpoint in SharedNodeState for other components to access
         node.set_iroh_endpoint(Some(endpoint.clone())).await;
+        
+        // Save node information to registry file in proper NodeRegistryEntry format
+        let registry_path = format!("{}/node-{}-registry.json", node.config.data_dir, node.config.id);
+        Self::save_node_registry(&endpoint_manager, &node, &registry_path).await?;
         
         // Create the IrohRaftTransport
         let iroh_transport = Arc::new(IrohRaftTransport::new(
@@ -92,6 +102,45 @@ impl RaftTransport {
     /// Get the Iroh endpoint
     pub fn endpoint(&self) -> &Arc<iroh::endpoint::Endpoint> {
         &self.endpoint
+    }
+
+    /// Save node registry in the proper NodeRegistryEntry format
+    async fn save_node_registry(
+        endpoint_manager: &crate::transport::iroh_endpoint_manager::IrohEndpointManager,
+        node: &Arc<SharedNodeState>,
+        registry_path: &str,
+    ) -> BlixardResult<()> {
+        use tokio::fs;
+        
+        let node_addr = endpoint_manager.node_addr();
+        let cluster_node_id = node.config.id;
+        let bind_addr = node.get_bind_addr();
+        
+        // Create proper NodeRegistryEntry format
+        let registry_entry = serde_json::json!({
+            "cluster_node_id": cluster_node_id,
+            "iroh_node_id": BASE64_STANDARD.encode(node_addr.node_id.as_bytes()),
+            "direct_addresses": node_addr.direct_addresses()
+                .map(|addr| addr.to_string())
+                .collect::<Vec<_>>(),
+            "relay_url": node_addr.relay_url().map(|url| url.to_string()),
+            "address": bind_addr,
+        });
+        
+        let content = serde_json::to_string_pretty(&registry_entry)
+            .map_err(|e| crate::error::BlixardError::Serialization {
+                operation: "serialize registry entry".to_string(),
+                source: Box::new(e),
+            })?;
+        
+        fs::write(registry_path, content).await
+            .map_err(|e| crate::error::BlixardError::Storage {
+                operation: format!("write node registry to {}", registry_path),
+                source: Box::new(e),
+            })?;
+        
+        tracing::info!("Node registry (NodeRegistryEntry format) saved to: {}", registry_path);
+        Ok(())
     }
 }
 

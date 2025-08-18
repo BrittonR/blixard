@@ -292,7 +292,7 @@ impl RaftConfigManager {
     async fn update_local_peers_after_conf_change(&self, cc: &ConfChange) -> BlixardResult<()> {
         match cc.change_type {
             change_type if change_type == RaftConfChangeType::AddNode as i32 => {
-                // Parse the context to get the address
+                // Parse the context to get the address and P2P info
                 if !cc.context.is_empty() {
                     match bincode::deserialize::<ConfChangeContext>(&cc.context) {
                         Ok(context) => {
@@ -305,6 +305,77 @@ impl RaftConfigManager {
                                 cc.node_id,
                                 address
                             );
+                            
+                            // CRITICAL FIX: Store P2P info in SharedNodeState for ALL nodes
+                            // This ensures every node in the cluster can communicate with the new node
+                            if let Some(shared) = self.shared_state.upgrade() {
+                                if context.p2p_node_id.is_some() || !context.p2p_addresses.is_empty() {
+                                    info!(
+                                        self.logger,
+                                        "[P2P-FIX] Storing P2P info for node {} - ID: {:?}, addresses: {:?}",
+                                        cc.node_id,
+                                        context.p2p_node_id,
+                                        context.p2p_addresses
+                                    );
+                                    
+                                    let peer_info = crate::p2p_manager::PeerInfo {
+                                        node_id: context.p2p_node_id.clone().unwrap_or_else(|| cc.node_id.to_string()),
+                                        address: context.address.clone(),
+                                        last_seen: chrono::Utc::now(),
+                                        capabilities: vec![],
+                                        shared_resources: std::collections::HashMap::new(),
+                                        connection_quality: crate::p2p_manager::ConnectionQuality {
+                                            latency_ms: 0,
+                                            bandwidth_mbps: 100.0,
+                                            packet_loss: 0.0,
+                                            reliability_score: 1.0,
+                                        },
+                                        p2p_node_id: context.p2p_node_id.clone(),
+                                        p2p_addresses: context.p2p_addresses.clone(),
+                                        p2p_relay_url: context.p2p_relay_url.clone(),
+                                        is_connected: false,
+                                    };
+                                    
+                                    shared.add_peer_with_p2p(cc.node_id, peer_info).await;
+                                    
+                                    // Try to establish P2P connection if we're not the new node
+                                    if cc.node_id != self.node_id {
+                                        if let Some(ref p2p_node_id) = context.p2p_node_id {
+                                            if let Ok(node_id_parsed) = p2p_node_id.parse::<iroh::NodeId>() {
+                                                let mut node_addr = iroh::NodeAddr::new(node_id_parsed);
+                                                
+                                                // Add relay URL if available
+                                                if let Some(ref relay_url) = context.p2p_relay_url {
+                                                    if let Ok(relay) = relay_url.parse() {
+                                                        node_addr = node_addr.with_relay_url(relay);
+                                                    }
+                                                }
+                                                
+                                                // Add direct addresses
+                                                let addrs: Vec<std::net::SocketAddr> = context.p2p_addresses
+                                                    .iter()
+                                                    .filter_map(|addr_str| addr_str.parse().ok())
+                                                    .collect();
+                                                if !addrs.is_empty() {
+                                                    node_addr = node_addr.with_direct_addresses(addrs);
+                                                }
+                                                
+                                                info!(
+                                                    self.logger,
+                                                    "[P2P-FIX] Stored P2P connection info for node {} - will connect on-demand",
+                                                    cc.node_id
+                                                );
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    warn!(
+                                        self.logger,
+                                        "[P2P-FIX] No P2P info in conf change for node {}",
+                                        cc.node_id
+                                    );
+                                }
+                            }
                         }
                         Err(e) => {
                             warn!(
