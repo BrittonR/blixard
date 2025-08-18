@@ -23,7 +23,6 @@ use iroh::{
     Endpoint,
 };
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::task::JoinHandle;
@@ -71,6 +70,10 @@ impl IrohServiceRunner {
         // Register quota service
         let quota_service = Arc::new(crate::transport::iroh_quota_service::IrohQuotaService::new(self.shared_state.clone()));
         self.register_service(quota_service)?;
+
+        // Register Raft service for receiving consensus messages
+        let raft_service = Arc::new(crate::transport::iroh_raft_service::IrohRaftService::new(self.shared_state.clone()));
+        self.register_service(raft_service)?;
 
         info!("Registered {} Iroh services", self.services.len());
 
@@ -224,7 +227,6 @@ impl ProtocolHandler for IrohProtocolHandler {
 /// Start the Iroh service runner
 pub async fn start_iroh_services(
     shared_state: Arc<SharedNodeState>,
-    bind_addr: SocketAddr,
 ) -> BlixardResult<JoinHandle<()>> {
     // Get the Iroh endpoint directly from SharedNodeState
     let endpoint = if let Some(endpoint) = shared_state.get_iroh_endpoint().await {
@@ -236,10 +238,18 @@ pub async fn start_iroh_services(
         });
     };
 
+    // Get the actual bound addresses from the endpoint
+    let bound_sockets = endpoint.bound_sockets();
+    let local_addrs = if !bound_sockets.is_empty() {
+        bound_sockets.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", ")
+    } else {
+        "unknown".to_string()
+    };
+
     info!(
-        "Starting Iroh services on {} with node ID {}",
-        bind_addr,
-        endpoint.node_id()
+        "Starting Iroh services with node ID {} on addresses: [{}]",
+        endpoint.node_id(),
+        local_addrs
     );
 
     // We need Arc for the runner

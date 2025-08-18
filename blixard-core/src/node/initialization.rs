@@ -50,30 +50,52 @@ impl Node {
         self.setup_p2p_infrastructure().await?;
 
         // Phase 6: Raft initialization
-        let (raft_manager, _message_rx, _, proposal_tx, conf_change_tx) =
+        let (raft_manager, outgoing_message_rx, message_tx, proposal_tx, conf_change_tx) =
             self.initialize_raft(db.clone()).await?;
 
-        // Store raft_manager in shared state
-        self.shared.set_raft_manager(raft_manager.clone()).await;
+        // Phase 7: Transport setup - removed, we'll use the channel from RaftManager
+        
+        // Set the proposal_tx in shared state so it can be used for proposals
+        self.shared.set_raft_proposal_tx(proposal_tx.clone());
+        
+        // Set the conf_change_tx in shared state so it can be used for configuration changes
+        self.shared.set_raft_conf_change_tx(conf_change_tx.clone());
 
-        // Phase 7: Transport setup
-        let (message_tx, _unused_rx) = mpsc::unbounded_channel();
-
-        // Set the message tx in shared state
-        self.shared.set_raft_message_tx(message_tx.clone());
-
-        let (raft_transport, outgoing_rx) = self
+        let raft_transport = self
             .setup_transport(message_tx.clone(), conf_change_tx, proposal_tx)
             .await?;
 
-        // Phase 8: Spawn Raft message handler
-        self.spawn_raft_message_handler(raft_transport, outgoing_rx);
+        // Store the raft_transport for use in join_cluster operations
+        self.raft_transport = Some(raft_transport.clone());
+
+        // Phase 8: Spawn Raft message handler with the ACTUAL outgoing message receiver from Raft
+        self.spawn_raft_message_handler(raft_transport, outgoing_message_rx);
 
         // Phase 9: Spawn Raft manager with automatic recovery
         let raft_handle = self.spawn_raft_manager_with_recovery(raft_manager);
         self.raft_handle = Some(raft_handle);
 
-        // Phase 10: Perform cluster join if configured
+        // Phase 10: Start Iroh services (Router for accepting P2P connections)
+        // This MUST be done BEFORE cluster join so the Router is ready
+        // to accept incoming connections during the join process
+        if let Some(endpoint) = self.shared.get_iroh_endpoint().await {
+            tracing::info!("Starting Iroh P2P service router for incoming connections");
+            
+            // Start the Iroh services (Router) to accept incoming connections
+            let service_handle = crate::transport::iroh_service_runner::start_iroh_services(
+                self.shared.clone()
+            ).await?;
+            
+            // Store the handle so we can clean it up on shutdown if needed
+            // For now, we just spawn it and let it run
+            self.iroh_service_handle = Some(service_handle);
+            
+            tracing::info!("Iroh P2P service router started successfully");
+        } else {
+            tracing::warn!("Iroh endpoint not available, P2P services not started");
+        }
+
+        // Phase 11: Perform cluster join if configured (AFTER Router is running)
         self.join_cluster_if_configured().await?;
 
         // Mark node as initialized
@@ -308,8 +330,8 @@ impl Node {
         db: Arc<Database>,
     ) -> BlixardResult<(
         RaftManager,
-        mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>,
-        mpsc::UnboundedReceiver<RaftConfChange>,
+        mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>,  // outgoing_message_rx
+        mpsc::UnboundedSender<(u64, raft::prelude::Message)>,    // message_tx for incoming
         mpsc::UnboundedSender<RaftProposal>,
         mpsc::UnboundedSender<RaftConfChange>,
     )> {
@@ -335,13 +357,17 @@ impl Node {
         }
 
         // Create Raft manager
-        let (raft_manager, proposal_tx, _message_tx, conf_change_tx, message_rx) =
+        // Returns: (manager, proposal_tx, message_tx, conf_change_tx, outgoing_rx)
+        let (raft_manager, proposal_tx, message_tx, conf_change_tx, outgoing_message_rx) =
             RaftManager::new(
                 self.shared.config.id,
                 db.clone(),
                 vec![], // No initial peers for bootstrap/join
                 Arc::downgrade(&self.shared),
             )?;
+        
+        // Set the message_tx in shared state so incoming P2P messages can be forwarded to Raft
+        self.shared.set_raft_message_tx(message_tx.clone()).await;
 
         // Set up batch processing if enabled
         let final_proposal_tx = self.setup_batch_processing(proposal_tx.clone())?;
@@ -349,13 +375,11 @@ impl Node {
         // Store the proposal tx in shared state
         self.shared.set_raft_proposal_tx(final_proposal_tx.clone());
 
-        // Create a conf_change_rx for the return value (not used in this refactored version)
-        let (_, conf_change_rx) = mpsc::unbounded_channel();
 
         Ok((
             raft_manager,
-            message_rx,
-            conf_change_rx,
+            outgoing_message_rx,  // This is the receiver for messages FROM Raft TO other nodes
+            message_tx,           // This is the sender for messages TO Raft FROM other nodes
             final_proposal_tx,
             conf_change_tx,
         ))

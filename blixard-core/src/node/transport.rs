@@ -15,10 +15,7 @@ impl Node {
         message_tx: mpsc::UnboundedSender<(u64, raft::prelude::Message)>,
         _conf_change_tx: mpsc::UnboundedSender<RaftConfChange>,
         proposal_tx: mpsc::UnboundedSender<RaftProposal>,
-    ) -> BlixardResult<(
-        Arc<crate::transport::raft_transport_adapter::RaftTransport>,
-        mpsc::UnboundedReceiver<(u64, raft::prelude::Message)>,
-    )> {
+    ) -> BlixardResult<Arc<crate::transport::raft_transport_adapter::RaftTransport>> {
         // Get transport configuration - using default TransportConfig (Iroh-only now)
         let transport_config = crate::transport::config::TransportConfig::default();
 
@@ -56,8 +53,6 @@ impl Node {
 
         self.shared.set_peer_connector(peer_connector);
 
-        // Create message channel for outgoing messages
-        let (_outgoing_tx, outgoing_rx) = mpsc::unbounded_channel();
         // Set individual Raft channels
         self.shared.set_raft_proposal_tx(proposal_tx);
         self.shared.set_raft_message_tx(message_tx.clone());
@@ -65,7 +60,7 @@ impl Node {
         // Initialize discovery if configured
         self.setup_discovery_if_configured().await?;
 
-        Ok((raft_transport, outgoing_rx))
+        Ok(raft_transport)
     }
 
     /// Set up discovery manager if configured
@@ -83,30 +78,43 @@ impl Node {
     ) {
         let shared_weak = Arc::downgrade(&self.shared);
 
+        tracing::info!("Starting Raft message handler for outgoing messages");
+        
         tokio::spawn(async move {
-            while let Some((target, msg)) = outgoing_rx.recv().await {
-                if let Some(_shared) = shared_weak.upgrade() {
-                    let result = transport.send_message(target, msg).await;
+            tracing::info!("Raft message handler task started, waiting for messages...");
+            loop {
+                match outgoing_rx.recv().await {
+                    Some((target, msg)) => {
+                        tracing::info!("Raft message handler received message for target {}", target);
+                        if let Some(_shared) = shared_weak.upgrade() {
+                            let result = transport.send_message(target, msg).await;
 
-                    if let Err(e) = result {
-                        match &e {
-                            BlixardError::NodeNotFound { .. } => {
-                                // Node removed from cluster, this is expected
-                                tracing::debug!(
-                                    "Cannot send message to removed node {}: {}",
-                                    target,
-                                    e
-                                );
+                            if let Err(e) = result {
+                                match &e {
+                                    BlixardError::NodeNotFound { .. } => {
+                                        // Node removed from cluster, this is expected
+                                        tracing::debug!(
+                                            "Cannot send message to removed node {}: {}",
+                                            target,
+                                            e
+                                        );
+                                    }
+                                    _ => {
+                                        tracing::warn!("Failed to send Raft message to {}: {}", target, e);
+                                        // Could implement retry logic here
+                                    }
+                                }
                             }
-                            _ => {
-                                tracing::warn!("Failed to send Raft message to {}: {}", target, e);
-                                // Could implement retry logic here
-                            }
+                        } else {
+                            // Node is shutting down
+                            tracing::info!("Node shutting down, stopping message handler");
+                            break;
                         }
                     }
-                } else {
-                    // Node is shutting down
-                    break;
+                    None => {
+                        tracing::warn!("Raft message channel closed, handler exiting");
+                        break;
+                    }
                 }
             }
             tracing::info!("Raft message handler stopped");
