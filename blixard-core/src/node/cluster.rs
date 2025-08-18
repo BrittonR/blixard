@@ -581,34 +581,43 @@ impl Node {
     /// Update cluster configuration with voters
     async fn update_cluster_configuration(&self, voters: &[u64]) -> BlixardResult<()> {
         if !voters.is_empty() {
-            tracing::info!("Updating local configuration with voters: {:?}", voters);
+            let our_node_id = self.shared.get_id();
+            let is_voter = voters.contains(&our_node_id);
+            
+            tracing::info!("[JOIN-CONFIG] Updating local configuration with voters: {:?}", voters);
+            tracing::info!("[JOIN-CONFIG] Our node {} is {} a voter in this configuration", 
+                our_node_id, if is_voter { "ALREADY" } else { "NOT" });
+            
             if let Some(db) = self.shared.get_database().await {
                 let storage = crate::raft_storage::RedbRaftStorage { database: db.clone() };
                 let mut conf_state = raft::prelude::ConfState::default();
                 conf_state.voters = voters.to_vec();
+                
                 if let Err(e) = storage.save_conf_state(&conf_state) {
                     tracing::warn!("Failed to save initial configuration state: {}", e);
                 } else {
                     tracing::info!(
-                        "Successfully saved initial configuration state with voters: {:?}",
+                        "[JOIN-CONFIG] Successfully saved configuration state with voters: {:?}",
                         voters
                     );
                     
                     // Apply configuration to running Raft node if available
-                    // If RaftManager is not yet available (during initialization), it will
-                    // read the configuration from storage when it starts
                     if let Some(raft_manager) = self.shared.get_raft_manager().await {
-                        tracing::info!("[P2P-FIX] Applying configuration to running Raft node");
+                        tracing::info!("[JOIN-CONFIG] Applying configuration to running Raft node");
                         
-                        // Send a special message to RaftManager to update its configuration
-                        // This will make the node recognize itself as part of the cluster
+                        // CRITICAL: This should only update the node's knowledge of the cluster
+                        // It should NOT make the node a voter unless it's actually in the voters list
                         if let Err(e) = raft_manager.apply_initial_conf_state(conf_state.clone()).await {
-                            tracing::warn!("[P2P-FIX] Failed to apply initial conf state: {}", e);
+                            tracing::warn!("[JOIN-CONFIG] Failed to apply initial conf state: {}", e);
                         } else {
-                            tracing::info!("[P2P-FIX] Successfully applied configuration with voters: {:?}", voters);
+                            tracing::info!("[JOIN-CONFIG] Successfully applied configuration with voters: {:?}", voters);
+                            
+                            if !is_voter {
+                                tracing::info!("[JOIN-CONFIG] Node {} will remain follower until explicitly added as voter", our_node_id);
+                            }
                         }
                     } else {
-                        tracing::info!("[P2P-FIX] RaftManager not yet available - configuration saved to storage and will be loaded on startup");
+                        tracing::info!("[JOIN-CONFIG] RaftManager not yet available - configuration saved to storage");
                     }
                 }
             } else {

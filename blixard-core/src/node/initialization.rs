@@ -352,8 +352,9 @@ impl Node {
             // Register as worker in bootstrap mode
             self.register_bootstrap_worker(db.clone()).await?;
         } else {
-            // Join mode - storage will be initialized during join
-            tracing::info!("Preparing to join existing cluster");
+            // Join mode - CRITICAL FIX: Reset Raft state for joining nodes
+            tracing::info!("Preparing to join existing cluster - resetting Raft state");
+            storage.initialize_joining_node()?;
         }
 
         // Create Raft manager

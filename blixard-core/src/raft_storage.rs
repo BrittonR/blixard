@@ -451,31 +451,27 @@ impl RedbRaftStorage {
 
     /// Initialize storage for a node joining an existing cluster
     pub fn initialize_joining_node(&self) -> BlixardResult<()> {
-        // Check if already initialized
-        let read_txn = self.database.begin_read()?;
-        if let Ok(table) = read_txn.open_table(RAFT_CONF_STATE_TABLE) {
-            if let Ok(Some(_)) = table.get("conf_state") {
-                // Already initialized
-                return Ok(());
-            }
-        }
-        drop(read_txn);
-
+        // CRITICAL FIX: Always reset state for joining nodes, even if they have previous state
+        // This ensures restarting nodes become followers, not candidates
+        tracing::info!("[STORAGE] Initializing joining node - resetting Raft state to follower mode");
+        
         // Create empty ConfState for a joining node
         let conf_state = raft::prelude::ConfState::default();
-        // No voters - this node isn't a voter yet
+        // No voters - this node isn't a voter yet and must wait to be added via AddNode
 
-        // Create initial hard state with term 0, no vote
+        // CRITICAL: Reset hard state to ensure node starts as follower
+        // Don't preserve previous term/vote as it may cause the node to become candidate
         let hard_state = raft::prelude::HardState {
             term: 0,
-            vote: 0,
+            vote: 0,    // No vote - node can't vote until added to cluster
             commit: 0,
         };
 
-        // Save both states
+        // Always save both states, overwriting any previous configuration
         self.save_conf_state(&conf_state)?;
         self.save_hard_state(&hard_state)?;
-
+        
+        tracing::info!("[STORAGE] Successfully reset Raft state for joining node");
         Ok(())
     }
 

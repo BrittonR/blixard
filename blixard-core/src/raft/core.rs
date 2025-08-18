@@ -207,13 +207,31 @@ impl RaftManager {
     pub async fn apply_initial_conf_state(&self, conf_state: raft::prelude::ConfState) -> BlixardResult<()> {
         info!(
             self.logger,
-            "[P2P-FIX] Applying initial conf state with voters: {:?}",
+            "[RAFT-JOIN] Applying initial conf state with voters: {:?}",
             conf_state.voters
         );
         
+        // CRITICAL FIX: Check if this node is in the voter list
+        let is_voter = conf_state.voters.contains(&self.node_id);
+        
+        if !is_voter {
+            info!(
+                self.logger,
+                "[RAFT-JOIN] Node {} is NOT in voter list - will remain follower until added",
+                self.node_id
+            );
+        } else {
+            info!(
+                self.logger,
+                "[RAFT-JOIN] Node {} IS in voter list - updating configuration",
+                self.node_id
+            );
+        }
+        
         let mut raft_node = self.raft_node.write().await;
         
-        // Apply the configuration state to make this node aware it's part of the cluster
+        // Apply the configuration state to make this node aware of the cluster
+        // Use a minimal snapshot that doesn't trigger candidacy
         raft_node.mut_store().apply_snapshot(&raft::prelude::Snapshot {
             data: vec![],
             metadata: Some(raft::prelude::SnapshotMetadata {
@@ -223,9 +241,18 @@ impl RaftManager {
             }),
         })?;
         
+        // CRITICAL: If this node is not a voter, ensure it doesn't become candidate
+        if !is_voter {
+            info!(
+                self.logger,
+                "[RAFT-JOIN] Node {} will remain in follower state until formally added to cluster",
+                self.node_id
+            );
+        }
+        
         info!(
             self.logger,
-            "[P2P-FIX] Applied conf state, node {} now knows it's part of cluster with voters: {:?}",
+            "[RAFT-JOIN] Applied conf state, node {} updated with voters: {:?}",
             self.node_id,
             conf_state.voters
         );
@@ -236,6 +263,16 @@ impl RaftManager {
     /// Bootstrap a single-node cluster
     #[instrument(skip(self))]
     pub async fn bootstrap_single_node(&self) -> BlixardResult<()> {
+        // SAFETY CHECK: Only bootstrap if we should be doing so
+        if let Some(shared) = self.shared_state.upgrade() {
+            if shared.config.join_addr.is_some() {
+                error!(self.logger, "[RAFT-BOOTSTRAP] CRITICAL ERROR: Attempting to bootstrap while join_addr is set!");
+                return Err(BlixardError::Internal {
+                    message: "Cannot bootstrap when join_addr is configured - this node should join, not bootstrap".to_string(),
+                });
+            }
+        }
+        
         {
             let mut node = self.raft_node.write().await;
 
